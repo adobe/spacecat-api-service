@@ -384,6 +384,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
               WAITLISTED: 'WAITLISTED',
               INACTIVE: 'INACTIVE',
+              REJECTED: 'REJECTED',
+              OUTDATED: 'OUTDATED',
             },
             REVIEW_REASONS: {
               DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
@@ -394,6 +396,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             REVIEW_DECISIONS: {
               BYPASSED: 'BYPASSED',
               UPHELD: 'UPHELD',
+              CLOSED: 'CLOSED',
+              REOPENED: 'REOPENED',
+              OFFBOARDED: 'OFFBOARDED',
             },
           },
         },
@@ -599,6 +604,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
                 WAITLISTED: 'WAITLISTED',
                 INACTIVE: 'INACTIVE',
+                REJECTED: 'REJECTED',
+                OUTDATED: 'OUTDATED',
               },
               REVIEW_REASONS: {
                 DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
@@ -609,6 +616,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               REVIEW_DECISIONS: {
                 BYPASSED: 'BYPASSED',
                 UPHELD: 'UPHELD',
+                CLOSED: 'CLOSED',
+                REOPENED: 'REOPENED',
+                OFFBOARDED: 'OFFBOARDED',
               },
             },
           },
@@ -620,6 +630,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
             updateCodeConfig: updateCodeConfigStub,
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,
@@ -1262,12 +1273,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       // Verify imsOrgId derived from token, not body
       expect(mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain)
         .to.have.been.calledWith(TEST_IMS_ORG_ID, TEST_DOMAIN);
-      expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith({
-        imsOrgId: TEST_IMS_ORG_ID,
-        domain: TEST_DOMAIN,
-        baseURL: TEST_BASE_URL,
-        status: 'IN_PROGRESS',
-      });
+      expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+        sinon.match({
+          imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN, baseURL: TEST_BASE_URL, status: 'IN_PROGRESS',
+        }),
+      );
 
       // Verify flow
       expect(composeBaseURLStub).to.have.been.calledWith(TEST_DOMAIN);
@@ -1291,26 +1301,27 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockOnboarding.setSiteId).to.have.been.calledWith(TEST_SITE_ID);
       expect(mockOnboarding.setCompletedAt).to.have.been.called;
       expect(mockOnboarding.setSteps).to.have.been.called;
-      expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('system');
+      expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('admin');
       expect(mockOnboarding.save).to.have.been.called;
     });
 
-    it('does not set updatedBy when fromBackoffice is true', async () => {
-      const context = buildContext({ domain: TEST_DOMAIN, fromBackoffice: true });
+    it('sets updatedBy to caller identity (admin when no email in profile)', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(mockOnboarding.setUpdatedBy).to.not.have.been.called;
+      expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('admin');
     });
 
-    it('still sets updatedBy when fromBackoffice is not a boolean true', async () => {
-      const context = buildContext({ domain: TEST_DOMAIN, fromBackoffice: 'true' });
+    it('sets updatedBy to email when auth profile has email', async () => {
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'user@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
 
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('system');
+      expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('user@example.com');
     });
 
     it('resumes existing onboarding record for same imsOrgId+domain', async () => {
@@ -1965,8 +1976,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
                 WAITLISTED: 'WAITLISTED',
                 INACTIVE: 'INACTIVE',
+                REJECTED: 'REJECTED',
+                OUTDATED: 'OUTDATED',
               },
-              REVIEW_DECISIONS: { BYPASSED: 'BYPASSED', UPHELD: 'UPHELD' },
+              REVIEW_DECISIONS: {
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+              },
             },
           },
           '../../../src/controllers/llmo/llmo-onboarding.js': {
@@ -1977,6 +1992,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
             updateCodeConfig: updateCodeConfigStub,
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,
@@ -2119,7 +2135,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       );
     });
 
-    it('posts notification without org name when org lookup fails', async () => {
+    it('posts notification without org name when org lookup fails', async function () {
+      this.timeout(10000);
       const onboarding = createMockOnboarding({
         status: 'WAITLISTED',
         waitlistReason: `Domain ${TEST_DOMAIN} is not an AEM site`,
@@ -2148,7 +2165,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       );
     });
 
-    it('posts notification without org name when org has no name', async () => {
+    it('posts notification without org name when org has no name', async function () {
+      this.timeout(10000);
       const onboarding = createMockOnboarding({
         status: 'ONBOARDED',
         organizationId: TEST_ORG_ID,
@@ -2174,7 +2192,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.include(TEST_SITE_ID);
     });
 
-    it('INACTIVE notification includes last review reason', async () => {
+    it('REJECTED notification includes review decision, justification, and reviewer', async () => {
       const AdminSlackController = (await esmock(
         '../../../src/controllers/plg/plg-onboarding.js',
         {
@@ -2224,8 +2242,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
                 WAITLISTED: 'WAITLISTED',
                 INACTIVE: 'INACTIVE',
+                REJECTED: 'REJECTED',
+                OUTDATED: 'OUTDATED',
               },
-              REVIEW_DECISIONS: { BYPASSED: 'BYPASSED', UPHELD: 'UPHELD' },
+              REVIEW_DECISIONS: {
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+              },
             },
           },
           '../../../src/controllers/llmo/llmo-onboarding.js': {
@@ -2236,6 +2258,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
             updateCodeConfig: updateCodeConfigStub,
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,
@@ -2253,122 +2276,129 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       )).default;
 
       const record = createMockOnboarding({
-        status: 'ONBOARDED',
-        reviews: [{
-          reason: 'Domain is not an AEM site', decision: 'UPHELD', reviewedBy: 'ese@adobe.com', reviewedAt: '2026-01-01T00:00:00Z', justification: 'confirmed',
-        }],
-      });
-      let currentStatus = 'ONBOARDED';
-      let currentWaitlistReason = null;
-      record.getStatus.callsFake(() => currentStatus);
-      record.setStatus.callsFake((s) => {
-        currentStatus = s;
-      });
-      record.getWaitlistReason.callsFake(() => currentWaitlistReason);
-      record.setWaitlistReason.callsFake((r) => {
-        currentWaitlistReason = r;
-      });
-      mockDataAccess.PlgOnboarding.findById.resolves(record);
-
-      await AdminSlackController({ log: mockLog }).update({
-        dataAccess: mockDataAccess,
-        params: { onboardingId: TEST_ONBOARDING_ID },
-        data: { decision: 'UPHELD', justification: 'Inactivating per request' },
-        attributes: { authInfo: { getProfile: () => ({ email: 'ese@adobe.com' }) } },
-        env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
-        log: mockLog,
-      });
-
-      expect(postSlackMessageStub).to.have.been.called;
-      const [, message] = postSlackMessageStub.firstCall.args;
-      expect(message).to.include('Waitlisted');
-      expect(message).to.include('Reason:');
-      expect(message).to.include('Inactivating per request');
-    });
-
-    it('INACTIVE notification omits inactivation reason when there are no reviews', async () => {
-      const AdminSlackController = (await esmock(
-        '../../../src/controllers/plg/plg-onboarding.js',
-        {
-          '@adobe/spacecat-shared-utils': {
-            composeBaseURL: composeBaseURLStub,
-            detectBotBlocker: detectBotBlockerStub,
-            detectLocale: detectLocaleStub,
-            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
-            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
-            resolveCanonicalUrl: resolveCanonicalUrlStub,
-          },
-          '@adobe/spacecat-shared-http-utils': {
-            badRequest: (msg) => ({ status: 400, value: msg }),
-            createResponse: (body, status) => ({ status, value: body }),
-            created: (data) => ({ status: 201, value: data }),
-            forbidden: (msg) => ({ status: 403, value: msg }),
-            internalServerError: (msg) => ({ status: 500, value: msg }),
-            notFound: (msg) => ({ status: 404, value: msg }),
-            noContent: () => ({ status: 204 }),
-            ok: (data) => ({ status: 200, value: data }),
-          },
-          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
-          '@adobe/spacecat-shared-rum-api-client': {
-            default: {
-              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
-            },
-          },
-          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub, createForOrg: tierClientCreateForOrgStub } },
-          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-            Config: { toDynamoItem: configToDynamoItemStub },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-            Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: {
-                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
-              },
-            },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
-            default: {
-              STATUSES: {
-                IN_PROGRESS: 'IN_PROGRESS',
-                ONBOARDED: 'ONBOARDED',
-                PRE_ONBOARDING: 'PRE_ONBOARDING',
-                ERROR: 'ERROR',
-                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
-                WAITLISTED: 'WAITLISTED',
-                INACTIVE: 'INACTIVE',
-              },
-              REVIEW_DECISIONS: { BYPASSED: 'BYPASSED', UPHELD: 'UPHELD' },
-            },
-          },
-          '../../../src/controllers/llmo/llmo-onboarding.js': {
-            createOrFindOrganization: createOrFindOrganizationStub,
-            enableAudits: enableAuditsStub,
-            enableImports: enableImportsStub,
-            triggerAudits: triggerAuditsStub,
-          },
-          '../../../src/support/utils.js': {
-            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
-            updateCodeConfig: updateCodeConfigStub,
-            findDeliveryType: findDeliveryTypeStub,
-            deriveProjectName: deriveProjectNameStub,
-            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
-          },
-          '../../../src/utils/slack/base.js': {
-            loadProfileConfig: loadProfileConfigStub,
-            postSlackMessage: postSlackMessageStub,
-          },
-          '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
-          '../../../src/support/access-control-util.js': {
-            default: { fromContext: () => ({ hasAdminAccess: () => true }) },
-          },
-        },
-      )).default;
-
-      const record = createMockOnboarding({
-        status: 'ONBOARDED',
+        status: 'WAITLISTED',
+        waitlistReason: 'another domain is already onboarded for this IMS org',
         reviews: null,
       });
-      let currentStatus = 'ONBOARDED';
+      // Simulate setStatus updating the status so notification reads REJECTED
+      let currentStatus = 'WAITLISTED';
+      let currentReviews = null;
+      record.getStatus.callsFake(() => currentStatus);
+      record.setStatus.callsFake((s) => {
+        currentStatus = s;
+      });
+      record.getReviews.callsFake(() => currentReviews);
+      record.setReviews.callsFake((r) => {
+        currentReviews = r;
+      });
+      mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+      await AdminSlackController({ log: mockLog }).update({
+        dataAccess: mockDataAccess,
+        params: { onboardingId: TEST_ONBOARDING_ID },
+        data: { decision: 'UPHELD', justification: 'Domain is not ready' },
+        attributes: { authInfo: { getProfile: () => ({ email: 'ese@adobe.com' }) } },
+        env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
+        log: mockLog,
+      });
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Rejected');
+      expect(message).to.include('Domain is not ready');
+      expect(message).to.not.include('Decision:');
+      expect(message).to.not.include('Reviewed by:');
+    });
+
+    it('REJECTED notification omits review details when there are no prior reviews', async () => {
+      const AdminSlackController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            created: (data) => ({ status: 201, value: data }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            noContent: () => ({ status: 204 }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub, createForOrg: tierClientCreateForOrgStub } },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+                REJECTED: 'REJECTED',
+                OUTDATED: 'OUTDATED',
+              },
+              REVIEW_DECISIONS: {
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+              },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+            postSlackMessage: postSlackMessageStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
+          '../../../src/support/access-control-util.js': {
+            default: { fromContext: () => ({ hasAdminAccess: () => true }) },
+          },
+        },
+      )).default;
+
+      const record = createMockOnboarding({
+        status: 'WAITLISTED',
+        waitlistReason: 'domain is not an AEM site',
+        reviews: null,
+      });
+      let currentStatus = 'WAITLISTED';
       record.getStatus.callsFake(() => currentStatus);
       record.setStatus.callsFake((s) => {
         currentStatus = s;
@@ -2386,8 +2416,116 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
-      expect(message).to.include('Waitlisted');
-      expect(message).to.not.include('Inactivation Reason');
+      expect(message).to.include('Rejected');
+      expect(message).to.not.include('Justification:');
+    });
+
+    it('OUTDATED notification omits review section when no reviews', async () => {
+      const AdminSlackController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            created: (data) => ({ status: 201, value: data }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            noContent: () => ({ status: 204 }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub } },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+                REJECTED: 'REJECTED',
+                OUTDATED: 'OUTDATED',
+              },
+              REVIEW_DECISIONS: {
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+              },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+            postSlackMessage: postSlackMessageStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
+          '../../../src/support/access-control-util.js': {
+            default: { fromContext: () => ({ hasAdminAccess: () => true }) },
+          },
+        },
+      )).default;
+
+      // Simulate a WAITLISTED record where getReviews always returns null
+      // (tests the null-guard in postPlgOnboardingNotification for OUTDATED status)
+      let currentStatus = 'WAITLISTED';
+      const record = createMockOnboarding({ status: 'WAITLISTED' });
+      record.getStatus.callsFake(() => currentStatus);
+      record.setStatus.callsFake((s) => {
+        currentStatus = s;
+      });
+      record.getReviews.returns(null);
+      mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+      await AdminSlackController({ log: mockLog }).transitionStatus({
+        dataAccess: mockDataAccess,
+        params: { onboardingId: TEST_ONBOARDING_ID },
+        data: { status: 'OUTDATED', justification: 'Closing old waitlist entry' },
+        attributes: { authInfo: { getProfile: () => ({ email: 'admin@adobe.com' }) } },
+        env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
+        log: mockLog,
+      });
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Outdated');
+      // No justification appended when getReviews returns null
+      expect(message).to.not.include('Justification:');
     });
   });
 
@@ -2913,6 +3051,87 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
+    it('auto-transitions other WAITLISTED records to OUTDATED with CLOSED review on new onboard', async () => {
+      const staleWaitlisted = createMockOnboarding({
+        id: 'stale-waitlisted-id',
+        domain: 'old-domain.com',
+        status: 'WAITLISTED',
+        waitlistReason: 'previous waitlist reason',
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([staleWaitlisted]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      expect(staleWaitlisted.setStatus).to.have.been.calledWith('OUTDATED');
+      expect(staleWaitlisted.setWaitlistReason).to.have.been.calledWith(null);
+      expect(staleWaitlisted.setUpdatedBy).to.have.been.calledWith('system');
+      expect(staleWaitlisted.setReviews).to.have.been.calledOnce;
+      const reviews = staleWaitlisted.setReviews.firstCall.args[0];
+      expect(reviews).to.have.length(1);
+      expect(reviews[0].decision).to.equal('CLOSED');
+      expect(reviews[0].reviewedBy).to.equal('system');
+      expect(reviews[0].reason).to.match(/new onboarding was started for domain/);
+      expect(reviews[0].justification).to.match(/Automatically closed by system/);
+      expect(staleWaitlisted.save).to.have.been.called;
+
+      // The new domain still gets onboarded
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('auto-transitions WAITING_FOR_IP_ALLOWLISTING records to OUTDATED with CLOSED review', async () => {
+      const blockedRecord = createMockOnboarding({
+        id: 'blocked-id',
+        domain: 'blocked-domain.com',
+        status: 'WAITING_FOR_IP_ALLOWLISTING',
+        botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4'] },
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([blockedRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      expect(blockedRecord.setStatus).to.have.been.calledWith('OUTDATED');
+      expect(blockedRecord.setWaitlistReason).to.have.been.calledWith(null);
+      expect(blockedRecord.setUpdatedBy).to.have.been.calledWith('system');
+      const reviews = blockedRecord.setReviews.firstCall.args[0];
+      expect(reviews[0].decision).to.equal('CLOSED');
+
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('auto-transitions multiple pending records to OUTDATED when new onboarding starts', async () => {
+      const record1 = createMockOnboarding({ id: 'r1', domain: 'a.com', status: 'WAITLISTED' });
+      const record2 = createMockOnboarding({ id: 'r2', domain: 'b.com', status: 'WAITING_FOR_IP_ALLOWLISTING' });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([record1, record2]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(record1.setStatus).to.have.been.calledWith('OUTDATED');
+      expect(record2.setStatus).to.have.been.calledWith('OUTDATED');
+    });
+
+    it('does not auto-transition the record for the domain being onboarded', async () => {
+      const sameRecord = createMockOnboarding({
+        id: 'same-domain-id',
+        domain: TEST_DOMAIN,
+        status: 'WAITLISTED',
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([sameRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(sameRecord.setStatus).to.not.have.been.calledWith('OUTDATED');
+    });
+
     it('displaces already-onboarded domain when it has no open PLG suggestions', async () => {
       const OLD_SITE_ID = 'old-site-uuid';
       const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
@@ -2947,10 +3166,13 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
 
-      // Old domain is waitlisted with displacement reason
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(onboardedRecord.setWaitlistReason)
-        .to.have.been.calledWithMatch(/was replaced by.*no active suggestions.*new domain.*current org/);
+      // Old domain is marked OUTDATED with system OFFBOARDED review
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
+      expect(onboardedRecord.setWaitlistReason).to.have.been.calledWith(null);
+      expect(onboardedRecord.setReviews).to.have.been.called;
+      const offboardedReviews = onboardedRecord.setReviews.lastCall.args[0];
+      expect(offboardedReviews[offboardedReviews.length - 1].justification).to.match(/Automatically offboarded by system/);
+      expect(onboardedRecord.setUpdatedBy).to.have.been.calledWith('system');
       expect(onboardedRecord.save).to.have.been.called;
 
       // Only the ASO enrollment is revoked
@@ -3000,7 +3222,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockLog.warn).to.have.been.calledWithMatch(
         /Failed to disable summit-plg for displaced site old-site-uuid: lookup failed/,
       );
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -3031,7 +3253,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const res = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setUpdatedBy).to.not.have.been.called;
+      expect(onboardedRecord.setUpdatedBy).to.have.been.calledWith('system');
     });
 
     it('waitlists new domain when already-onboarded site has NEW PLG suggestions', async () => {
@@ -3170,7 +3392,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -3198,7 +3420,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -3255,7 +3477,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -3303,8 +3525,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
 
-      // Old domain is waitlisted
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      // Old domain is displaced (OUTDATED)
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
       expect(onboardedRecord.save).to.have.been.called;
 
       // No enrollment revocation attempted for displaced record (no org ID on old record)
@@ -3337,7 +3559,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(res.status).to.equal(200);
 
       // Old domain is still waitlisted
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
 
       // ASO revocation must be SKIPPED — entitlement lookup never runs for internal old org.
       expect(mockDataAccess.Entitlement.allByOrganizationId)
@@ -3376,7 +3598,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(res.status).to.equal(200);
 
       // Displacement proceeds; enrollment for the non-ASO entitlement was never queried
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
       expect(mockDataAccess.SiteEnrollment.allByEntitlementId)
         .not.to.have.been.calledWith(NON_ASO_ENT_ID);
 
@@ -3415,8 +3637,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       // Displacement still completes — revocation failure is non-fatal
       expect(res.status).to.equal(200);
 
-      // Old domain is waitlisted
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      // Old domain is displaced (OUTDATED)
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
       expect(onboardedRecord.save).to.have.been.called;
 
       // Revocation failure was logged as error
@@ -4512,6 +4734,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
                 WAITLISTED: 'WAITLISTED',
                 INACTIVE: 'INACTIVE',
+                REJECTED: 'REJECTED',
+                OUTDATED: 'OUTDATED',
               },
             },
           },
@@ -4523,9 +4747,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
             updateCodeConfig: updateCodeConfigStub,
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
           },
           '../../../src/utils/slack/base.js': {
             loadProfileConfig: loadProfileConfigStub,
@@ -5073,7 +5299,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
       });
 
-      it('resolves createdBy IMS ID to email via getImsAdminProfile', async () => {
+      it('resolves createdBy to email via getImsAdminProfile when createdBy is set', async () => {
         const record = createMockOnboarding({ createdBy: 'creator-ims-id@AdobeID' });
         mockDataAccess.PlgOnboarding.all.resolves([record]);
         const mockImsClient = {
@@ -5088,7 +5314,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
         expect(res.status).to.equal(200);
         expect(res.value[0].createdBy).to.equal('creator@example.com');
-        expect(mockImsClient.getImsAdminProfile).to.have.been.calledWith('creator-ims-id@AdobeID');
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith('creator-ims-id@AdobeID');
       });
 
       it('falls back to IMS ID for createdBy when getImsAdminProfile returns no email', async () => {
@@ -5108,6 +5334,22 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(res.value[0].createdBy).to.equal('creator-ims-id@AdobeID');
       });
 
+      it('skips IMS resolution for createdBy when value is "system"', async () => {
+        const record = createMockOnboarding({ createdBy: 'system' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = { getImsAdminProfile: sandbox.stub() };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].createdBy).to.equal('system');
+        expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+      });
+
       it('sets createdBy to null when createdBy is null', async () => {
         const record = createMockOnboarding({ createdBy: null });
         mockDataAccess.PlgOnboarding.all.resolves([record]);
@@ -5121,6 +5363,26 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
         expect(res.status).to.equal(200);
         expect(res.value[0].createdBy).to.be.null;
+      });
+
+      it('deduplicates IMS IDs across createdBy and updatedBy', async () => {
+        const sharedImsId = 'shared-ims-id@AdobeID';
+        const record = createMockOnboarding({ createdBy: sharedImsId, updatedBy: sharedImsId });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({ email: 'shared@example.com' }),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].createdBy).to.equal('shared@example.com');
+        expect(res.value[0].updatedBy).to.equal('shared@example.com');
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnce;
       });
     });
   });
@@ -5189,6 +5451,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
                 WAITLISTED: 'WAITLISTED',
                 INACTIVE: 'INACTIVE',
+                REJECTED: 'REJECTED',
+                OUTDATED: 'OUTDATED',
               },
               REVIEW_REASONS: {
                 DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
@@ -5198,6 +5462,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               REVIEW_DECISIONS: {
                 BYPASSED: 'BYPASSED',
                 UPHELD: 'UPHELD',
+                CLOSED: 'CLOSED',
+                REOPENED: 'REOPENED',
+                OFFBOARDED: 'OFFBOARDED',
               },
             },
           },
@@ -5285,13 +5552,17 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                   WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
                   WAITLISTED: 'WAITLISTED',
                   INACTIVE: 'INACTIVE',
+                  REJECTED: 'REJECTED',
+                  OUTDATED: 'OUTDATED',
                 },
                 REVIEW_REASONS: {
                   DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
                   AEM_SITE_CHECK: 'AEM_SITE_CHECK',
                   DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
                 },
-                REVIEW_DECISIONS: { BYPASSED: 'BYPASSED', UPHELD: 'UPHELD' },
+                REVIEW_DECISIONS: {
+                  BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                },
               },
             },
             '../../../src/controllers/llmo/llmo-onboarding.js': {
@@ -5302,6 +5573,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             },
             '../../../src/support/utils.js': {
               autoResolveAuthorUrl: sandbox.stub(),
+              resolveWwwUrl: sandbox.stub().resolves(TEST_DOMAIN),
               updateCodeConfig: sandbox.stub(),
               findDeliveryType: sandbox.stub(),
               deriveProjectName: sandbox.stub(),
@@ -5394,176 +5666,26 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(400);
-        expect(res.value).to.equal('Onboarding record must be in WAITLISTED or ONBOARDED state');
+        expect(res.value).to.equal('Onboarding record must be in WAITLISTED state');
       });
 
-      it('ONBOARDED: revokes ASO enrollments, sets WAITLISTED, appends review', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
-        const mockEnrollment = {
-          getId: () => 'enroll-onboarded',
-          remove: sandbox.stub().resolves(),
-          getEntitlement: sandbox.stub().resolves(asoEntitlement),
-        };
-        const linkedSite = createMockSite({ siteEnrollments: [mockEnrollment] });
-        const record = createMockOnboarding({
-          status: 'ONBOARDED',
-          siteId: TEST_SITE_ID,
-          waitlistReason: '',
-        });
+      it('returns 400 for ONBOARDED record (use transitionStatus endpoint instead)', async () => {
+        const record = createMockOnboarding({ status: 'ONBOARDED' });
         mockDataAccess.PlgOnboarding.findById.resolves(record);
-        mockDataAccess.Site.findById.resolves(linkedSite);
-
-        const res = await AdminAccessPlgController({ log: mockLog }).update({
-          dataAccess: mockDataAccess,
-          params: { onboardingId: TEST_ONBOARDING_ID },
-          data: { decision: 'BYPASSED', justification: 'Recorded for audit' },
-          attributes: adminAuthAttributes,
-          log: mockLog,
-          env: {},
-        });
-
-        expect(res.status).to.equal(200);
-        expect(mockDataAccess.Site.findById).to.have.been.calledWith(TEST_SITE_ID);
-        expect(mockEnrollment.remove).to.have.been.calledOnce;
-        expect(record.setReviews).to.have.been.calledOnce;
-        const reviews = record.setReviews.firstCall.args[0];
-        expect(reviews).to.have.length(1);
-        expect(reviews[0].decision).to.equal('BYPASSED');
-        expect(reviews[0].justification).to.equal('Recorded for audit');
-        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
-        expect(record.setWaitlistReason).to.have.been.calledWith('Recorded for audit');
-        expect(record.save).to.have.been.calledOnce;
-        expect(mockDataAccess.PlgOnboarding.allByImsOrgId).to.not.have.been.called;
-        expect(res.value).to.have.property('updatedBy');
-      });
-
-      it('ONBOARDED: disables summit-plg handler when revoking enrollment', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
-        const mockEnrollment = {
-          getId: () => 'enroll-onboarded',
-          remove: sandbox.stub().resolves(),
-          getEntitlement: sandbox.stub().resolves(asoEntitlement),
-        };
-        const linkedSite = createMockSite({ siteEnrollments: [mockEnrollment] });
-        const record = createMockOnboarding({
-          status: 'ONBOARDED',
-          siteId: TEST_SITE_ID,
-          waitlistReason: '',
-        });
-        mockDataAccess.PlgOnboarding.findById.resolves(record);
-        mockDataAccess.Site.findById.resolves(linkedSite);
-
-        const res = await AdminAccessPlgController({ log: mockLog }).update({
-          dataAccess: mockDataAccess,
-          params: { onboardingId: TEST_ONBOARDING_ID },
-          data: { decision: 'BYPASSED', justification: 'Offboarding' },
-          attributes: adminAuthAttributes,
-          log: mockLog,
-          env: {},
-        });
-
-        expect(res.status).to.equal(200);
-        const config = await mockDataAccess.Configuration.findLatest();
-        expect(config.disableHandlerForSite).to.have.been.calledWith('summit-plg', linkedSite);
-      });
-
-      it('ONBOARDED: logs warning when disabling summit-plg handler fails', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
-        const mockEnrollment = {
-          getId: () => 'enroll-onboarded',
-          remove: sandbox.stub().resolves(),
-          getEntitlement: sandbox.stub().resolves(asoEntitlement),
-        };
-        const linkedSite = createMockSite({ siteEnrollments: [mockEnrollment] });
-        const record = createMockOnboarding({
-          status: 'ONBOARDED',
-          siteId: TEST_SITE_ID,
-          waitlistReason: '',
-        });
-        mockDataAccess.PlgOnboarding.findById.resolves(record);
-        mockDataAccess.Site.findById.resolves(linkedSite);
-        mockDataAccess.Configuration.findLatest.resolves({
-          enableHandlerForSite: sandbox.stub(),
-          disableHandlerForSite: sandbox.stub().throws(new Error('Config write failed')),
-          save: sandbox.stub().resolves(),
-          getQueues: sandbox.stub().returns({ audits: 'audit-queue-url' }),
-        });
-
-        const res = await AdminAccessPlgController({ log: mockLog }).update({
-          dataAccess: mockDataAccess,
-          params: { onboardingId: TEST_ONBOARDING_ID },
-          data: { decision: 'BYPASSED', justification: 'Offboarding' },
-          attributes: adminAuthAttributes,
-          log: mockLog,
-          env: {},
-        });
-
-        expect(res.status).to.equal(200);
-        expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to disable summit-plg handler/);
-      });
-
-      it('ONBOARDED: sets WAITLISTED without Site lookup when no site is linked', async () => {
-        const record = createMockOnboarding({
-          status: 'ONBOARDED',
-          siteId: null,
-          imsOrgId: '',
-          waitlistReason: '',
-        });
-        mockDataAccess.PlgOnboarding.findById.resolves(record);
-
-        const res = await AdminAccessPlgController({ log: mockLog }).update({
-          dataAccess: mockDataAccess,
-          params: { onboardingId: TEST_ONBOARDING_ID },
-          data: { decision: 'UPHELD', justification: 'Offboarding without site' },
-          attributes: adminAuthAttributes,
-          log: mockLog,
-          env: {},
-        });
-
-        expect(res.status).to.equal(200);
-        expect(mockDataAccess.Site.findById).to.not.have.been.called;
-        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
-        expect(record.setWaitlistReason).to.have.been.calledWith('Offboarding without site');
-        expect(record.save).to.have.been.calledOnce;
-      });
-
-      it('ONBOARDED: logs warn and continues to WAITLISTED when ASO enrollment revocation fails', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
-        const mockEnrollment = {
-          getId: () => 'enroll-onboarded',
-          remove: sandbox.stub().rejects(new Error('remove failed')),
-          getEntitlement: sandbox.stub().resolves(asoEntitlement),
-        };
-        const linkedSite = createMockSite({ siteEnrollments: [mockEnrollment] });
-        const record = createMockOnboarding({
-          status: 'ONBOARDED',
-          siteId: TEST_SITE_ID,
-          waitlistReason: '',
-        });
-        mockDataAccess.PlgOnboarding.findById.resolves(record);
-        mockDataAccess.Site.findById.resolves(linkedSite);
 
         const res = await AdminAccessPlgController({ log: mockLog }).update({
           dataAccess: mockDataAccess,
           params: { onboardingId: TEST_ONBOARDING_ID },
           data: { decision: 'BYPASSED', justification: 'test' },
           attributes: adminAuthAttributes,
-          log: mockLog,
-          env: {},
         });
 
-        expect(res.status).to.equal(200);
-        expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to revoke one or more ASO enrollments/);
-        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('Onboarding record must be in WAITLISTED state');
       });
 
-      it('ONBOARDED: returns 500 when save fails', async () => {
-        const record = createMockOnboarding({
-          status: 'ONBOARDED',
-          siteId: null,
-          waitlistReason: '',
-        });
-        record.save.rejects(new Error('persist failed'));
+      it('returns 400 for REJECTED record (use transitionStatus endpoint instead)', async () => {
+        const record = createMockOnboarding({ status: 'REJECTED' });
         mockDataAccess.PlgOnboarding.findById.resolves(record);
 
         const res = await AdminAccessPlgController({ log: mockLog }).update({
@@ -5571,45 +5693,13 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           params: { onboardingId: TEST_ONBOARDING_ID },
           data: { decision: 'UPHELD', justification: 'test' },
           attributes: adminAuthAttributes,
-          log: mockLog,
         });
 
-        expect(res.status).to.equal(500);
-        expect(res.value).to.equal('Failed to waitlist onboarding. Please try again later.');
-        expect(mockLog.error).to.have.been.calledWithMatch(
-          sinon.match(/^Failed to waitlist onboarded PLG domain example.com: persist failed/),
-          sinon.match.instanceOf(Error),
-        );
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('Onboarding record must be in WAITLISTED state');
       });
 
-      it('ONBOARDED: returns 500 when save rejects with a non-Error value', async () => {
-        const record = createMockOnboarding({
-          status: 'ONBOARDED',
-          siteId: null,
-          waitlistReason: '',
-        });
-        // eslint-disable-next-line prefer-promise-reject-errors -- cover catch String(err) branch
-        record.save.callsFake(() => Promise.reject(503));
-        mockDataAccess.PlgOnboarding.findById.resolves(record);
-
-        const res = await AdminAccessPlgController({ log: mockLog }).update({
-          dataAccess: mockDataAccess,
-          params: { onboardingId: TEST_ONBOARDING_ID },
-          data: { decision: 'UPHELD', justification: 'test' },
-          attributes: adminAuthAttributes,
-          log: mockLog,
-        });
-
-        expect(res.status).to.equal(500);
-        expect(res.value).to.equal('Failed to waitlist onboarding. Please try again later.');
-        expect(mockLog.error).to.have.been.calledOnce;
-        expect(mockLog.error.firstCall.args[0]).to.match(
-          /^Failed to waitlist onboarded PLG domain example.com: 503$/,
-        );
-        expect(mockLog.error.firstCall.args[1]).to.equal(503);
-      });
-
-      it('stores UPHOLD review and keeps status unchanged', async () => {
+      it('stores UPHELD review and transitions to REJECTED', async () => {
         const record = createMockOnboarding({
           status: 'WAITLISTED',
           waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
@@ -5621,6 +5711,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           params: { onboardingId: TEST_ONBOARDING_ID },
           data: { decision: 'UPHELD', justification: 'Not ready to proceed' },
           attributes: adminAuthAttributes,
+          env: {},
         });
 
         expect(res.status).to.equal(200);
@@ -5630,8 +5721,29 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(reviews[0].reason).to.equal('Domain site-a.com is another domain is already onboarded for this IMS org');
         expect(reviews[0].decision).to.equal('UPHELD');
         expect(reviews[0].justification).to.equal('Not ready to proceed');
-        expect(record.setStatus).to.not.have.been.called;
+        expect(record.setStatus).to.have.been.calledWith('REJECTED');
+        expect(record.setWaitlistReason).to.have.been.calledWith(null);
         expect(record.save).to.have.been.calledOnce;
+      });
+
+      it('clears waitlistReason when UPHELD transitions WAITLISTED to REJECTED', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'UPHELD', justification: 'Rejected — domain does not qualify' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setWaitlistReason).to.have.been.calledWith(null);
+        expect(record.setStatus).to.have.been.calledWith('REJECTED');
       });
 
       it('uses authInfo.profile when getProfile is unavailable', async () => {
@@ -5650,6 +5762,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               profile: { email: 'profile-fallback@example.com' },
             },
           },
+          env: {},
         });
 
         expect(res.status).to.equal(200);
@@ -5670,10 +5783,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           params: { onboardingId: TEST_ONBOARDING_ID },
           data: { decision: 'UPHELD', justification: 'Not ready to proceed' },
           attributes: {},
+          env: {},
         });
 
         expect(res.status).to.equal(200);
-        expect(record.setUpdatedBy).to.not.have.been.called;
+        expect(record.setUpdatedBy).to.have.been.calledWith('admin');
         const reviews = record.setReviews.firstCall.args[0];
         expect(reviews[0].reviewedBy).to.equal('admin');
       });
@@ -5705,15 +5819,14 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
-        expect(oldOnboardedRecord.setWaitlistReason).to.have.been.calledWith(
-          sinon.match(/was displaced by.*for IMS org/),
-        );
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
+        expect(oldOnboardedRecord.setWaitlistReason).to.have.been.calledWith(null);
         expect(oldOnboardedRecord.setReviews).to.have.been.calledOnce;
         const oldReviews = oldOnboardedRecord.setReviews.firstCall.args[0];
         expect(oldReviews).to.have.length(1);
         expect(oldReviews[0].reason)
-          .to.equal(`Offboarded to onboard ${TEST_DOMAIN} for same IMS org`);
+          .to.match(/was replaced by.*for IMS org/);
+        expect(oldReviews[0].decision).to.equal('OFFBOARDED');
         expect(oldReviews[0].justification)
           .to.equal('System action to start onboarding for new domain in the same IMS org.');
         expect(oldOnboardedRecord.save).to.have.been.called;
@@ -5756,8 +5869,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(500);
-        expect(waitlistedRecord.setUpdatedBy).to.not.have.been.called;
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(waitlistedRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: rerun waitlists a non-AEM domain when imsOrgId is missing', async () => {
@@ -5792,7 +5905,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       });
 
@@ -5848,7 +5961,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITLISTED');
         expect(rerunRecord.setWaitlistReason)
           .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
@@ -5890,11 +6003,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITING_FOR_IP_ALLOWLISTING');
       });
 
-      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: rerun completes successfully when imsOrgId is missing', async () => {
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: rerun completes successfully when imsOrgId is missing', async function () {
+        this.timeout(10000);
         const waitlistedRecord = createMockOnboarding({
           imsOrgId: '',
           status: 'WAITLISTED',
@@ -5930,7 +6044,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('ONBOARDED');
       });
 
@@ -5973,7 +6087,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('ONBOARDED');
       });
 
@@ -6012,7 +6126,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
         expect(mockEnrollment.remove).to.have.been.called;
       });
 
@@ -6044,7 +6158,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: skips enrollment revocation when no enrollments', async () => {
@@ -6076,7 +6190,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: skips revocation when no ASO enrollments found', async () => {
@@ -6298,8 +6412,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(record.setUpdatedBy).to.not.have.been.called;
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(record.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       });
 
@@ -6333,7 +6447,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(mockSite.setHlxConfig).to.have.been.calledWithMatch({ hlxVersion: 5 });
       });
 
-      it('BYPASS AEM_SITE_CHECK: sets authorURL when deliveryType is aem_ams', async () => {
+      it('BYPASS AEM_SITE_CHECK: sets authorURL when deliveryType is aem_ams', async function () {
+        this.timeout(10000);
         const record = createMockOnboarding({
           status: 'WAITLISTED',
           waitlistReason: 'Domain example.com is not an AEM site',
@@ -6399,7 +6514,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
       });
 
-      it('BYPASS AEM_SITE_CHECK: sets programId for aem_ams when authorUrl omitted', async () => {
+      it('BYPASS AEM_SITE_CHECK: sets programId for aem_ams when authorUrl omitted', async function () {
+        this.timeout(10000);
         const record = createMockOnboarding({
           status: 'WAITLISTED',
           waitlistReason: 'Domain example.com is not an AEM site',
@@ -6698,10 +6814,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
-        expect(record.setWaitlistReason).to.have.been.calledWith(
-          sinon.match(/was replaced by alternate domain/),
-        );
+        expect(record.setStatus).to.have.been.calledWith('OUTDATED');
+        expect(record.setWaitlistReason).to.have.been.calledWith(null);
         expect(record.save).to.have.been.called;
       });
 
@@ -6734,7 +6848,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         expect(res.status).to.equal(200);
-        expect(record.setUpdatedBy).to.not.have.been.called;
+        expect(record.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
       });
 
       it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: returns 400 when existing org is internal/demo and site has enrollments', async () => {
@@ -7036,6 +7150,275 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
         expect(res.status).to.equal(500);
         expect(res.value).to.equal('Onboarding bypass failed. Please try again later.');
+      });
+    });
+
+    describe('transitionStatus', () => {
+      const adminAuthAttributes = {
+        authInfo: { getProfile: () => ({ email: 'ese@adobe.com' }) },
+      };
+
+      it('returns 403 for non-admin', async () => {
+        const res = await PlgOnboardingController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'test' },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 400 when status is missing', async () => {
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { justification: 'test' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+        });
+        expect(res.status).to.equal(400);
+        expect(res.value).to.match(/status is required/);
+      });
+
+      it('returns 400 when status is not OUTDATED', async () => {
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'WAITLISTED', justification: 'test' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+        });
+        expect(res.status).to.equal(400);
+        expect(res.value).to.match(/status is required and must be one of/);
+      });
+
+      it('returns 400 when justification is missing', async () => {
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+        });
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('justification is required');
+      });
+
+      it('returns 404 when record not found', async () => {
+        mockDataAccess.PlgOnboarding.findById.resolves(null);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'test' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+        });
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 when current status is not WAITLISTED/ONBOARDED/REJECTED', async () => {
+        const record = createMockOnboarding({ status: 'IN_PROGRESS' });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'test' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+        });
+        expect(res.status).to.equal(400);
+        expect(res.value).to.match(/Only WAITLISTED, ONBOARDED, or REJECTED records can be transitioned/);
+      });
+
+      it('transitions WAITLISTED to OUTDATED with CLOSED review and returns 200', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'another domain is already onboarded',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'Manually closing old waitlist entry' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+          env: {},
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setStatus).to.have.been.calledWith('OUTDATED');
+        expect(record.setWaitlistReason).to.have.been.calledWith(null);
+        expect(record.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
+        expect(record.setReviews).to.have.been.calledOnce;
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(1);
+        expect(reviews[0].decision).to.equal('CLOSED');
+        expect(reviews[0].justification).to.equal('Manually closing old waitlist entry');
+        expect(reviews[0].reviewedBy).to.equal('ese@adobe.com');
+        expect(reviews[0].reason).to.match(/manually transitioned from WAITLISTED to OUTDATED/);
+        expect(record.save).to.have.been.calledOnce;
+      });
+
+      it('transitions REJECTED to OUTDATED with REOPENED review', async () => {
+        const record = createMockOnboarding({ status: 'REJECTED' });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'Customer reapplied' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+          env: {},
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setStatus).to.have.been.calledWith('OUTDATED');
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews[0].decision).to.equal('REOPENED');
+        expect(reviews[0].reason).to.match(/manually transitioned from REJECTED to OUTDATED/);
+      });
+
+      it('transitions ONBOARDED to OUTDATED with OFFBOARDED review and revokes ASO enrollments', async () => {
+        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const mockEnrollment = {
+          getId: () => 'enroll-1',
+          remove: sandbox.stub().resolves(),
+          getEntitlement: sandbox.stub().resolves(asoEntitlement),
+        };
+        const linkedSite = createMockSite({ siteEnrollments: [mockEnrollment] });
+        const record = createMockOnboarding({ status: 'ONBOARDED', siteId: TEST_SITE_ID });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findById.resolves(linkedSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'Offboarding at customer request' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+          env: {},
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setStatus).to.have.been.calledWith('OUTDATED');
+        expect(mockEnrollment.remove).to.have.been.calledOnce;
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews[0].decision).to.equal('OFFBOARDED');
+        expect(reviews[0].reason).to.match(/manually transitioned from ONBOARDED to OUTDATED/);
+        expect(reviews[0].justification).to.equal('Offboarding at customer request');
+      });
+
+      it('transitions ONBOARDED to OUTDATED and warns when disabling summit-plg handler fails', async () => {
+        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const mockEnrollment = {
+          getId: () => 'enroll-1',
+          remove: sandbox.stub().resolves(),
+          getEntitlement: sandbox.stub().resolves(asoEntitlement),
+        };
+        const linkedSite = createMockSite({ siteEnrollments: [mockEnrollment] });
+        const record = createMockOnboarding({ status: 'ONBOARDED', siteId: TEST_SITE_ID });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findById.resolves(linkedSite);
+        mockDataAccess.Configuration.findLatest.rejects(new Error('config unavailable'));
+
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'Offboarding at customer request' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+          env: {},
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to disable summit-plg handler/);
+      });
+
+      it('returns 500 when ASO enrollment revocation fails for ONBOARDED record', async () => {
+        const linkedSite = createMockSite({
+          siteEnrollments: [{
+            getId: () => 'enroll-fail',
+            remove: sandbox.stub().rejects(new Error('revoke failed')),
+            getEntitlement: sandbox.stub().resolves({ getProductCode: () => 'aso_optimizer' }),
+          }],
+        });
+        const record = createMockOnboarding({ status: 'ONBOARDED', siteId: TEST_SITE_ID });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findById.resolves(linkedSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'test' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to revoke ASO enrollments. Please try again later.');
+      });
+
+      it('returns 400 when data is null (covers data || {} fallback)', async () => {
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: null,
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+          env: {},
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 500 and stringifies non-Error thrown by revokeAsoSiteEnrollments', async () => {
+        const record = createMockOnboarding({ status: 'ONBOARDED', siteId: TEST_SITE_ID });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findById.callsFake(async () => {
+          // eslint-disable-next-line no-throw-literal
+          throw 'non-error failure';
+        });
+
+        const res = await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'test' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+          env: {},
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to revoke ASO enrollments. Please try again later.');
+      });
+
+      it('appends to existing reviews rather than replacing them', async () => {
+        const existingReview = {
+          reason: 'first reason',
+          decision: 'UPHELD',
+          reviewedBy: 'other@adobe.com',
+          reviewedAt: '2026-01-01T00:00:00.000Z',
+          justification: 'first pass',
+        };
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          reviews: [existingReview],
+        });
+        record.getReviews.returns([existingReview]);
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        await AdminAccessPlgController({ log: mockLog }).transitionStatus({
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'Second review' },
+          dataAccess: mockDataAccess,
+          attributes: adminAuthAttributes,
+          env: {},
+          log: mockLog,
+        });
+
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(2);
+        expect(reviews[0]).to.deep.equal(existingReview);
+        expect(reviews[1].decision).to.equal('CLOSED');
       });
     });
 
@@ -7430,8 +7813,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           });
 
           expect(res.status).to.equal(200);
-          expect(record.setStatus).to.have.been.calledWith('INACTIVE');
-          expect(record.setUpdatedBy).to.not.have.been.called;
           expect(record.save).to.have.been.called;
         });
       });

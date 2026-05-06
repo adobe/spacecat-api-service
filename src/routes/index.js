@@ -528,6 +528,7 @@ export default function getRouteHandlers(
     'PATCH /plg/onboard/:onboardingId': plgOnboardingController.update,
     'POST /plg/records': plgOnboardingController.createOnboarding,
     'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboarding,
+    'PATCH /plg/onboard/:onboardingId/status': plgOnboardingController.transitionStatus,
     'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
 
     // Tier Specific Routes
