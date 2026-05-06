@@ -165,6 +165,7 @@ describe('Sites Controller', () => {
         all: sandbox.stub().resolves(sites),
         allByDeliveryType: sandbox.stub().resolves(sites),
         allWithLatestAudit: sandbox.stub().resolves(sites),
+        allByOrganizationId: sandbox.stub().resolves(sites),
         create: sandbox.stub().resolves(sites[0]),
         // NOTE: findByBaseURL defaults to returning sites[0] (existing site).
         // eslint-disable-next-line max-len
@@ -4869,14 +4870,76 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('isSummitPlgEnabled', false);
     });
 
-    it('should return not found for non-existent imsOrg', async () => {
+    it('should return 404 with no_entitlement_for_product resolveStatus for non-existent imsOrg (external caller)', async () => {
       context.data = { imsOrg: 'nonexistent@AdobeOrg' };
       mockDataAccess.Organization.findByImsOrgId.resolves(null);
 
       const response = await sitesController.resolveSite(context);
 
       expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('no_entitlement_for_product');
       expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('nonexistent@AdobeOrg');
+    });
+
+    it('should return 404 with site_not_enrolled when imsOrg not in DB and caller is internal', async () => {
+      const internalUuid = '9033554c-de8a-44ac-a356-09b51af8cc28';
+      const internalIms = '1234567890ABCDEF12345678@AdobeOrg';
+      context.data = { imsOrg: 'unknown@AdobeOrg', callerImsOrg: internalIms };
+      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: internalUuid };
+      const internalOrg = { getId: () => internalUuid };
+      mockDataAccess.Organization.findByImsOrgId.withArgs(internalIms).resolves(internalOrg);
+      mockDataAccess.Organization.findByImsOrgId.withArgs('unknown@AdobeOrg').resolves(null);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('site_not_enrolled');
+    });
+
+    it('should treat callerImsOrg as non-internal when its org lookup throws', async () => {
+      context.data = { imsOrg: 'customer@AdobeOrg', callerImsOrg: 'caller@AdobeOrg' };
+      mockDataAccess.Organization.findByImsOrgId.withArgs('caller@AdobeOrg').rejects(new Error('DB error'));
+      mockDataAccess.Organization.findByImsOrgId.withArgs('customer@AdobeOrg').resolves(null);
+
+      const response = await sitesController.resolveSite(context);
+
+      // callerIsInternal stays false (fail-open) → external-caller path
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+    });
+
+    it('should return 404 with site_not_enrolled when imsOrg has visible entitlement but no enrolled site', async () => {
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getTier: () => 'FREE_TRIAL' },
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('site_not_enrolled');
+    });
+
+    it('should return 200 via imsOrg path when non-admin has visible entitlement and enrolled site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getTier: () => 'FREE_TRIAL' },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('site');
     });
 
     it('should call proper methods for valid imsOrg', async () => {
@@ -5068,7 +5131,7 @@ describe('Sites Controller', () => {
       expect(body.data.organization.imsOrgId).to.equal('9876567890ABCDEF12345678@AdobeOrg');
     });
 
-    it('should return 404 for PRE_ONBOARD-tier site via siteId path', async () => {
+    it('should return 404 with aso_pre_onboard resolveStatus for PRE_ONBOARD-tier site via siteId path', async () => {
       const validSiteId = SITE_IDS[1];
 
       context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
@@ -5094,9 +5157,60 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+      expect(body.resolveStatus).to.equal('aso_pre_onboard');
+      expect(body.details).to.deep.include({ productCode: 'ASO' });
+      expect(body.details).to.not.have.property('tier');
     });
 
-    it('should return 404 for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
+    it('should return 404 with no_entitlement_for_product resolveStatus when product has no entitlement', async () => {
+      const validSiteId = SITE_IDS[1];
+
+      context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: null,
+        enrollments: [],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      expect(body.details).to.deep.include({ productCode: 'ASO' });
+    });
+
+    it('should return 404 with site_not_enrolled resolveStatus when entitlement is visible but site has no enrollment', async () => {
+      const validSiteId = SITE_IDS[1];
+
+      context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-visible',
+          getProductCode: () => 'ASO',
+          getTier: () => 'FREE_TRIAL',
+        },
+        enrollments: [],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('site_not_enrolled');
+      expect(body.details).to.deep.include({ productCode: 'ASO' });
+    });
+
+    it('should return 404 with aso_pre_onboard for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -5115,6 +5229,7 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+      expect(body.resolveStatus).to.equal('aso_pre_onboard');
     });
 
     it('should return 200 for PRE_ONBOARD-tier site via organizationId path for admin', async () => {
@@ -5190,7 +5305,7 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('site');
     });
 
-    it('should return 404 for admin when organizationId path has no enrolled site', async () => {
+    it('should return 404 with no_entitlement_for_product for admin when organizationId path has no entitlement', async () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -5206,6 +5321,7 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+      expect(body.resolveStatus).to.equal('no_entitlement_for_product');
     });
 
     it('should return 404 for admin when imsOrg path has no enrolled site', async () => {
@@ -5227,6 +5343,328 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 with no_entitlement_for_product for non-existent organizationId (external caller)', async () => {
+      context.data = { organizationId: '00000000-0000-0000-0000-000000000000' };
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+      expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+    });
+
+    it('should return 404 with site_not_enrolled for non-existent organizationId when caller is internal', async () => {
+      const internalUuid = '9033554c-de8a-44ac-a356-09b51af8cc28';
+      const internalIms = '1234567890ABCDEF12345678@AdobeOrg';
+      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: internalUuid };
+      context.data = {
+        organizationId: '00000000-0000-0000-0000-000000000000',
+        callerImsOrg: internalIms,
+      };
+      mockDataAccess.Organization.findByImsOrgId
+        .withArgs(internalIms).resolves({ getId: () => internalUuid });
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('site_not_enrolled');
+    });
+
+    it('should return 404 with site_not_enrolled when organizationId has visible entitlement but no enrolled site', async () => {
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-free-trial', getTier: () => 'FREE_TRIAL' },
+        enrollment: null,
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+      expect(body.resolveStatus).to.equal('site_not_enrolled');
+    });
+
+    describe('ASO_PLG_EXCLUDED_ORGS — internal/demo caller remapping (siteId path)', () => {
+      // testOrganizations[0]: Spacecat UUID '9033554c-...', imsOrgId '1234567890...@AdobeOrg'
+      // testSites[0] belongs to testOrganizations[0] (the internal org)
+      const INTERNAL_ORG_SPACECAT_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
+      const INTERNAL_ORG_IMS_ID = '1234567890ABCDEF12345678@AdobeOrg';
+      const CUSTOMER_ORG_IMS_ID = '1176567890ABCDEF12345678@AdobeOrg'; // testOrganizations[3]
+
+      beforeEach(() => {
+        context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: INTERNAL_ORG_SPACECAT_ID };
+        // Top-level callerImsOrg lookup
+        mockDataAccess.Organization.findByImsOrgId.withArgs(INTERNAL_ORG_IMS_ID)
+          .resolves(testOrganizations[0]);
+        mockDataAccess.Organization.findByImsOrgId.withArgs(CUSTOMER_ORG_IMS_ID)
+          .resolves(testOrganizations[3]);
+      });
+
+      // ────────────────────────────────────────────────────────────────────────────
+      // Internal caller (callerImsOrg → org in ASO_PLG_EXCLUDED_ORGS)
+      // PLG-wizard triggers are remapped to site_not_enrolled
+      // ────────────────────────────────────────────────────────────────────────────
+
+      it('internal caller, PRE_ONBOARD + not enrolled → 404 site_not_enrolled (tier check skipped, enrollment decides)', async () => {
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, PRE_ONBOARD + enrolled → 200 (tier check skipped, site shown)', async () => {
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enr-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+      });
+
+      it('internal caller, no entitlement → 404 site_not_enrolled (remapped from no_entitlement_for_product)', async () => {
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, visible tier but no enrollment → 404 site_not_enrolled (unchanged)', async () => {
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, visible tier + enrollment → 200 (normal success path, no remap)', async () => {
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'enr-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+      });
+
+      it('internal caller accessing CUSTOMER site (admin) with PRE_ONBOARD + not enrolled → 404 site_not_enrolled', async () => {
+        // Caller-based check: bypass fires even when the site lives in a customer org.
+        // PRE_ONBOARD tier check skipped for internal caller; no enrollment → site_not_enrolled.
+        sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+        context.data = {
+          siteId: SITE_IDS[1],
+          imsOrg: CUSTOMER_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller accessing CUSTOMER site (admin) with PRE_ONBOARD + enrolled → 200', async () => {
+        sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+        context.data = {
+          siteId: SITE_IDS[1],
+          imsOrg: CUSTOMER_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enr-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+      });
+
+      // ────────────────────────────────────────────────────────────────────────────
+      // Customer caller: existing resolveStatus values are preserved (NO remap)
+      // ────────────────────────────────────────────────────────────────────────────
+
+      it('customer caller, PRE_ONBOARD → 404 aso_pre_onboard (unchanged, NOT remapped)', async () => {
+        context.data = {
+          siteId: SITE_IDS[1],
+          imsOrg: CUSTOMER_ORG_IMS_ID,
+          callerImsOrg: CUSTOMER_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('aso_pre_onboard');
+      });
+
+      it('customer caller, no entitlement → 404 no_entitlement_for_product (unchanged, NOT remapped)', async () => {
+        context.data = {
+          siteId: SITE_IDS[1],
+          imsOrg: CUSTOMER_ORG_IMS_ID,
+          callerImsOrg: CUSTOMER_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      });
+
+      // ────────────────────────────────────────────────────────────────────────────
+      // No callerImsOrg: backwards-compat — behaves exactly like before this PR
+      // ────────────────────────────────────────────────────────────────────────────
+
+      it('no callerImsOrg, PRE_ONBOARD → 404 aso_pre_onboard (no remap, original behavior)', async () => {
+        context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('aso_pre_onboard');
+      });
+
+      it('callerImsOrg points to org not found in DB → no remap (treated as not internal)', async () => {
+        const unknownIms = 'unknown-ims@AdobeOrg';
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: unknownIms,
+        };
+        mockDataAccess.Organization.findByImsOrgId.withArgs(unknownIms).resolves(null);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('aso_pre_onboard');
+      });
+
+      // ────────────────────────────────────────────────────────────────────────────
+      // organizationId / imsOrg paths: no special handling (original flow preserved)
+      // ────────────────────────────────────────────────────────────────────────────
+
+      it('internal caller, organizationId path: no entitlement → 404 site_not_enrolled', async () => {
+        context.data = {
+          organizationId: INTERNAL_ORG_SPACECAT_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, imsOrg path (no siteId): no entitlement → 404 site_not_enrolled', async () => {
+        context.data = {
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
     });
   });
 
