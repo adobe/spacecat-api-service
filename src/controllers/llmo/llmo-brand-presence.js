@@ -1608,6 +1608,10 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
+
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
       const model = resolveModelFromRequest(params.model);

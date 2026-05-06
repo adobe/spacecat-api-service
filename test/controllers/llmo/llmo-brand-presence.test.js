@@ -2315,6 +2315,19 @@ describe('llmo-brand-presence', () => {
       );
     });
 
+    it('returns badRequest when multiple categoryIds are provided', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+      mockContext.data = {
+        categoryIds: '0178a3f0-1234-7000-8000-000000000001,0178a3f0-1234-7000-8000-000000000002',
+      };
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
+    });
+
     it('returns ok with weeklyTrends for valid data', async () => {
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
         { data: [], error: null },
@@ -2601,42 +2614,15 @@ describe('llmo-brand-presence', () => {
       );
     });
 
-    it('passes first category UUID to RPC when multiple UUID categories provided', async () => {
-      const u1 = '0178a3f0-1234-7000-8000-000000000091';
-      const u2 = '0178a3f0-1234-7000-8000-000000000092';
-      const chainMock = createChainableMock(
-        { data: [], error: null },
-        null,
-        makeRpcResult(),
-      );
-      mockContext.data = { categoryIds: `${u1},${u2}` };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.rpc).to.have.been.calledWith(
-        RPC_NAME,
-        sinon.match({ p_category_id: u1 }),
-      );
-    });
-
-    it('passes first region code to RPC when multiple region codes provided', async () => {
-      const chainMock = createChainableMock(
-        { data: [], error: null },
-        null,
-        makeRpcResult(),
-      );
+    it('returns badRequest when multiple region codes are provided', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
       mockContext.data = { regionCodes: 'US,DE' };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
+      const result = await handler(mockContext);
 
-      expect(chainMock.rpc).to.have.been.calledWith(
-        RPC_NAME,
-        sinon.match({ p_region_code: 'US' }),
-      );
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
     });
   });
 
