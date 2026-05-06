@@ -39,6 +39,7 @@ describe('PlgOnboardingDto', () => {
     getCreatedAt: () => '2026-03-09T12:00:00.000Z',
     getUpdatedAt: () => '2026-03-09T15:00:00.000Z',
     getUpdatedBy: () => 'user@example.com',
+    getCreatedBy: () => 'creator@example.com',
   };
 
   describe('toJSON (public)', () => {
