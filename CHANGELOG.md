@@ -1,3 +1,10 @@
+# [1.479.0](https://github.com/adobe/spacecat-api-service/compare/v1.478.3...v1.479.0) (2026-05-06)
+
+
+### Features
+
+* forward referralSource + map referralHits/referralHitsTrend on owned-urls handler | LLMO-4729 ([#2346](https://github.com/adobe/spacecat-api-service/issues/2346)) ([04c446d](https://github.com/adobe/spacecat-api-service/commit/04c446d45386cf4b836bb9eba4c4ad7b005fcbfa))
+
 ## [1.478.3](https://github.com/adobe/spacecat-api-service/compare/v1.478.2...v1.478.3) (2026-05-06)
 
 
