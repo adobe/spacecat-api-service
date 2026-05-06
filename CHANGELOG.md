@@ -1,3 +1,57 @@
+# [1.477.0](https://github.com/adobe/spacecat-api-service/compare/v1.476.2...v1.477.0) (2026-05-06)
+
+
+### Features
+
+* add has-data endpoint for referral traffic | LLMO-4261 ([#2339](https://github.com/adobe/spacecat-api-service/issues/2339)) ([69fddf2](https://github.com/adobe/spacecat-api-service/commit/69fddf2381ac67dc85d65afb905496f8dc7db919))
+
+## [1.476.2](https://github.com/adobe/spacecat-api-service/compare/v1.476.1...v1.476.2) (2026-05-06)
+
+
+### Bug Fixes
+
+* sites resolve PLG gating ([#2309](https://github.com/adobe/spacecat-api-service/issues/2309)) ([a0ad339](https://github.com/adobe/spacecat-api-service/commit/a0ad3391721851fa171523ca23f8e4d5b1795604))
+
+## [1.476.1](https://github.com/adobe/spacecat-api-service/compare/v1.476.0...v1.476.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* **prompts-v2:** expose category.uuid and topic.uuid on V2Prompt ([#2338](https://github.com/adobe/spacecat-api-service/issues/2338)) ([38e9b73](https://github.com/adobe/spacecat-api-service/commit/38e9b735ea2ff92ec8772f6d9b08a98e02c05753))
+
+# [1.476.0](https://github.com/adobe/spacecat-api-service/compare/v1.475.1...v1.476.0) (2026-05-06)
+
+
+### Features
+
+* add URL trend endpoint for referral traffic | LLMO-4261 ([#2336](https://github.com/adobe/spacecat-api-service/issues/2336)) ([cfaa49e](https://github.com/adobe/spacecat-api-service/commit/cfaa49e56b67e40bd730b51839fa404d92515a78))
+
+## [1.475.1](https://github.com/adobe/spacecat-api-service/compare/v1.475.0...v1.475.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* update the plg onboarding update function ([#2333](https://github.com/adobe/spacecat-api-service/issues/2333)) ([1a79290](https://github.com/adobe/spacecat-api-service/commit/1a79290910f7831cb542b2b62fb051662f01b23c))
+
+# [1.475.0](https://github.com/adobe/spacecat-api-service/compare/v1.474.1...v1.475.0) (2026-05-05)
+
+
+### Bug Fixes
+
+* **LLMO-4683:** forward operator-supplied region to V1 prompt generation ([#2312](https://github.com/adobe/spacecat-api-service/issues/2312)) ([54294c3](https://github.com/adobe/spacecat-api-service/commit/54294c358ac65f5ec596fb77e70edc801e09583c)), closes [adobe-rnd/llmo-data-retrieval-service#1426](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1426) [adobe-rnd/llmo-data-retrieval-service#1223](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1223) [adobe-rnd/llmo-data-retrieval-service#1426](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1426)
+
+
+### Features
+
+* **brands:** add (org, site) → brand resolver endpoint (LLMO-4716) ([#2334](https://github.com/adobe/spacecat-api-service/issues/2334)) ([ac212e8](https://github.com/adobe/spacecat-api-service/commit/ac212e82afe77bd5cc524b8fb8aa3e33a9785efa)), closes [hi#traffic](https://github.com/hi/issues/traffic)
+
+## [1.474.1](https://github.com/adobe/spacecat-api-service/compare/v1.474.0...v1.474.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.7.0 ([#2335](https://github.com/adobe/spacecat-api-service/issues/2335)) ([39d24a4](https://github.com/adobe/spacecat-api-service/commit/39d24a43f6adccd653f9a977edd3339e3a04d9b1))
+
 # [1.474.0](https://github.com/adobe/spacecat-api-service/compare/v1.473.1...v1.474.0) (2026-05-05)
 
 

@@ -13,6 +13,7 @@
 import {
   ok, badRequest, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
+import { cachedOk } from '../../support/cached-response.js';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 
 /**
@@ -630,6 +631,59 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
  */
 const VALID_BUSINESS_IMPACT_SOURCES = new Set(['ga4', 'adobe_analytics']);
 
+// ============================================================================
+// /by-url-trend
+// ============================================================================
+
+/**
+ * GET /sites/:siteId/referral-traffic/by-url-trend
+ *
+ * Weekly pageview totals for a single URL path.
+ * Required query param: urlPath (exact path, e.g. /blog/my-post).
+ * Returns: { trend: [{ weekStart: "YYYY-MM-DD", pageviews: N }, ...] }
+ */
+export function createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess) {
+  return async function getReferralTrafficUrlTrend(context) {
+    return withReferralTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'by-url-trend',
+      async (ctx, client, siteId) => {
+        const q = ctx.data || {};
+        const urlPath = (q.urlPath || '').trim() || null;
+
+        if (!urlPath) {
+          return badRequest('urlPath query parameter is required');
+        }
+
+        const parsed = parseParams(ctx);
+
+        const { data, error } = await client.rpc('rpc_referral_traffic_url_trend', {
+          ...commonRpcParams(siteId, parsed),
+          p_url_path: urlPath,
+        });
+
+        if (error) {
+          ctx.log.error(`Referral traffic by-url-trend PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch referral traffic URL trend');
+        }
+
+        /* c8 ignore next 2 — same null-safety pattern as sibling handlers */
+        return ok({
+          trend: (data ?? []).map((row) => ({
+            weekStart: row.week_start,
+            pageviews: Number(row.total_pageviews),
+          })),
+        });
+      },
+    );
+  };
+}
+
+// ============================================================================
+// /business-impact
+// ============================================================================
+
 export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficBusinessImpact(context) {
     return withReferralTrafficAuth(
@@ -672,6 +726,62 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
             revenue: Number(row?.revenue ?? 0),
           },
         });
+      },
+    );
+  };
+}
+
+/**
+ * Traffic Insights sources — the only tables that feed the Traffic Insights tab.
+ * Business Impact (adobe_analytics, ga4) has its own DRS provider check and is
+ * intentionally excluded here.
+ */
+const TRAFFIC_INSIGHTS_TABLES = [
+  SOURCE_TO_TABLE.optel,
+  SOURCE_TO_TABLE.cdn,
+];
+
+/**
+ * GET /sites/:siteId/referral-traffic/has-data
+ *
+ * Fast existence check — returns { hasData: boolean } indicating whether any
+ * Traffic Insights data (optel or cdn) exists for the site. Used by the PG
+ * dashboard to decide whether to show the onboarding overlay without waiting
+ * for all parallel data queries to settle.
+ *
+ * Only optel and cdn are checked because those are the sole sources for the
+ * Traffic Insights tab. Business Impact sources (adobe_analytics, ga4) are
+ * gated separately via the DRS analytics-provider endpoint.
+ *
+ * Both tables are checked in parallel with limit(1) — no RPC required.
+ * Returns true if either result set is non-empty; fails closed if any query errors.
+ */
+export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
+  return async function getReferralTrafficHasData(context) {
+    return withReferralTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'has-data',
+      async (ctx, client, siteId) => {
+        let results;
+        try {
+          results = await Promise.all(
+            TRAFFIC_INSIGHTS_TABLES.map((table) => client.from(table).select('traffic_date').eq('site_id', siteId).limit(1)),
+          );
+        } catch (err) {
+          ctx.log.error(`Referral traffic has-data PostgREST error: ${err.message} (siteId=${siteId})`);
+          return internalServerError('Failed to check referral traffic data');
+        }
+
+        for (const [i, result] of results.entries()) {
+          if (result.error) {
+            ctx.log.error(`Referral traffic has-data ${TRAFFIC_INSIGHTS_TABLES[i]} PostgREST error: ${result.error.message} (siteId=${siteId})`);
+            return internalServerError('Failed to check referral traffic data');
+          }
+        }
+
+        const hasData = results.some((r) => (r.data || []).length > 0);
+        return cachedOk({ hasData });
       },
     );
   };

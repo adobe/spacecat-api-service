@@ -195,3 +195,75 @@ v2-brand-for-org:
         $ref: './responses.yaml#/500'
       '503':
         description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
+v2-brand-for-org-site:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: siteId
+      in: path
+      required: true
+      description: Site ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - brands
+      - customer-config
+    summary: Resolve the active brand for an (org, site) pair (v2)
+    description: |
+      Returns the single active brand row that maps to the given site within
+      the given organization. Used by downstream brand-presence pipelines
+      (DRS scheduler, audit-worker geo-brand-presence) to discover the v2
+      `brand_id` to thread onto Job records.
+
+      Gating: returns 404 unless the organization is v2-eligible — meaning
+      `brandalf=true` OR `brandalf_migration=true`. The migration flag
+      surfaces brands during the dual-publish window (BP DB sync is on,
+      v2 brand records exist) so the BP runner can enter the v2 path
+      before brandalf flips fully. Pure-v1 organizations receive 404,
+      which callers interpret as "no v2 brand — fall back to v1 path."
+
+      Lookup: `brands.site_id == siteId` AND `status == 'active'` AND
+      `organization_id == orgId`. `brands.site_id` is the authoritative
+      mapping from a brand to its primary site (set during v2 onboarding).
+      `brand_sites` is intentionally not consulted — that join table also
+      stores citation entries, so a `brand_sites` match does not imply a
+      brand IS the brand for that site.
+
+      LLMO-4592 invariant: ACTIVE brands have a unique `(organization_id,
+      site_id)` pair. If the data violates that invariant, the first row
+      (deterministic by name) is returned and a warning logged.
+    operationId: getBrandForOrgSite
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: Active brand for site resolved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: |
+          User does not have access to this organization, OR the site does not
+          belong to the organization (tenant isolation — matches the same
+          check on `POST /v2/orgs/{spaceCatId}/sites/{siteId}/sync-config`).
+      '404':
+        description: |
+          Organization not found, site not found, organization is not in v2
+          mode, or no active brand for this site.
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
