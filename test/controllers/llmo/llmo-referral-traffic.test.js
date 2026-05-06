@@ -24,6 +24,7 @@ import {
   createReferralTrafficUrlTrendHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
+  createReferralTrafficHasDataHandler,
 } from '../../../src/controllers/llmo/llmo-referral-traffic.js';
 
 use(sinonChai);
@@ -52,6 +53,19 @@ function makeWeeksChainClient(
       .onFirstCall().resolves(minResult)
       .onSecondCall()
       .resolves(maxResult),
+  };
+  return { from: sinon.stub().returns(chain), chain };
+}
+
+/**
+ * Chain-based client — used by the /has-data handler which queries the table
+ * directly via .from().select().eq().limit() (single call).
+ */
+function makeHasDataChainClient(result = { data: [], error: null }) {
+  const chain = {
+    select: sinon.stub().returnsThis(),
+    eq: sinon.stub().returnsThis(),
+    limit: sinon.stub().resolves(result),
   };
   return { from: sinon.stub().returns(chain), chain };
 }
@@ -961,6 +975,76 @@ describe('llmo-referral-traffic', () => {
       const handler = createReferralTrafficWeeksHandler(stubbedValidateAccess);
       await handler(makeContext({ client }));
       expect(client.from.calledWith('referral_traffic_optel')).to.be.true;
+    });
+  });
+
+  // ── /has-data ─────────────────────────────────────────────────────────────
+
+  describe('has-data', () => {
+    it('returns { hasData: true } when records exist for the site', async () => {
+      const client = makeHasDataChainClient({ data: [{ traffic_date: '2026-01-05' }], error: null });
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+    });
+
+    it('returns { hasData: false } when no records exist for the site', async () => {
+      const client = makeHasDataChainClient({ data: [], error: null });
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(false);
+    });
+
+    it('returns { hasData: false } when data is null', async () => {
+      const client = makeHasDataChainClient({ data: null, error: null });
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(false);
+    });
+
+    it('returns 500 on PostgREST error', async () => {
+      const client = makeHasDataChainClient({ data: null, error: { message: 'has-data-fail' } });
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      expect(res.status).to.equal(500);
+    });
+
+    it('logs the PostgREST error message on failure', async () => {
+      const client = makeHasDataChainClient({ data: null, error: { message: 'has-data-fail' } });
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      const ctx = makeContext({ client });
+      await handler(ctx);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/has-data-fail/);
+    });
+
+    it('queries referral_traffic_optel table with the site id', async () => {
+      const client = makeHasDataChainClient({ data: [], error: null });
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      await handler(makeContext({ client }));
+      expect(client.from).to.have.been.calledWith('referral_traffic_optel');
+      expect(client.chain.eq).to.have.been.calledWith('site_id', SITE_ID);
+      expect(client.chain.limit).to.have.been.calledWith(1);
+    });
+
+    it('returns 400 when Site.postgrestService is missing', async () => {
+      const ctx = makeContext({ client: makeHasDataChainClient() });
+      ctx.dataAccess.Site.postgrestService = null;
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 403 when access validation denies the request', async () => {
+      const deny = sinon.stub().rejects(new Error('Only users belonging to the organization'));
+      const handler = createReferralTrafficHasDataHandler(deny);
+      const res = await handler(makeContext({ client: makeHasDataChainClient() }));
+      expect(res.status).to.equal(403);
     });
   });
 

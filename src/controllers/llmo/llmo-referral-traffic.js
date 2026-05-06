@@ -13,6 +13,7 @@
 import {
   ok, badRequest, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
+import { cachedOk } from '../../support/cached-response.js';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 
 /**
@@ -725,6 +726,41 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
             revenue: Number(row?.revenue ?? 0),
           },
         });
+      },
+    );
+  };
+}
+
+/**
+ * GET /sites/:siteId/referral-traffic/has-data
+ *
+ * Fast existence check — returns { hasData: boolean } indicating whether any
+ * referral traffic records exist for the site (across all sources). Used by
+ * the PG dashboard to decide whether to show the no-data overlay without
+ * waiting for all parallel data queries to settle.
+ *
+ * Runs a single PostgREST table query with limit(1) — no RPC required.
+ */
+export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
+  return async function getReferralTrafficHasData(context) {
+    return withReferralTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'has-data',
+      async (ctx, client, siteId) => {
+        const { data, error } = await client
+          .from('referral_traffic_optel')
+          .select('traffic_date')
+          .eq('site_id', siteId)
+          .limit(1);
+
+        if (error) {
+          ctx.log.error(`Referral traffic has-data PostgREST error: ${error.message}`);
+          return internalServerError('Failed to check referral traffic data');
+        }
+
+        /* c8 ignore next */
+        return cachedOk({ hasData: (data || []).length > 0 });
       },
     );
   };
