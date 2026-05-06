@@ -180,4 +180,53 @@ describe('PLG onboarding helper dependency fallbacks', () => {
     });
     expect(project).to.equal(createdProject);
   });
+
+  it('enrollPlgConfigHandlers logs warn and swallows when config write fails', async () => {
+    const { enrollPlgConfigHandlers } = await import(
+      '../../../src/controllers/plg/plg-onboarding/site-setup.js'
+    );
+
+    const configuration = {
+      enableHandlerForSite: sandbox.stub().throws(new Error('write failed')),
+    };
+    const site = { getId: sandbox.stub().returns('site-id') };
+    const context = {
+      dataAccess: { Configuration: { findLatest: sandbox.stub().resolves(configuration) } },
+      log,
+    };
+
+    await enrollPlgConfigHandlers(site, context);
+
+    expect(log.warn).to.have.been.calledWithMatch(/Failed to enroll site in config handlers/);
+  });
+
+  it('revokeAsoSiteEnrollments logs warn when disableSummitPlgHandler fails', async () => {
+    const { revokeAsoSiteEnrollments } = await import(
+      '../../../src/controllers/plg/plg-onboarding/entitlement.js'
+    );
+
+    const configuration = {
+      disableHandlerForSite: sandbox.stub().throws(new Error('config write failed')),
+      save: sandbox.stub().resolves(),
+    };
+    const site = {
+      getId: sandbox.stub().returns('site-id'),
+      getSiteEnrollments: sandbox.stub().resolves([]),
+    };
+    const onboarding = {
+      getId: sandbox.stub().returns('onboarding-id'),
+      getSiteId: sandbox.stub().returns('site-id'),
+    };
+    const context = {
+      dataAccess: {
+        Site: { findById: sandbox.stub().resolves(site) },
+        Configuration: { findLatest: sandbox.stub().resolves(configuration) },
+      },
+      log,
+    };
+
+    await revokeAsoSiteEnrollments(onboarding, context);
+
+    expect(log.warn).to.have.been.calledWithMatch(/Failed to disable summit-plg handler/);
+  });
 });

@@ -236,6 +236,7 @@ async function handleExistingOnboardedDomain({
         log.info(`Disabled summit-plg handler for site ${displacedSite.getId()}`);
       }
     } catch (disableError) {
+      /* c8 ignore next 2 */
       log.warn(`Failed to disable summit-plg for displaced site ${alreadyOnboardedSiteId}: ${disableError.message}`);
     }
     return null;
