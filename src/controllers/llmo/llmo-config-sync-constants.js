@@ -12,13 +12,10 @@
 
 export const LLMO_CONFIG_DB_SYNC_TYPE = 'llmo-config-db-sync';
 
-// Temporary: hardcoded site IDs for which the S3-to-DB config sync is enabled.
-// TODO: replace with actual site UUIDs per environment.
+// Sync is disabled: ALLOWED_SITE_IDS contains only placeholder IDs that never match real sites.
 export const ALLOWED_SITE_IDS = [
-  '00000000-0000-0000-0000-000000000001', // dev
-  '00000000-0000-0000-0000-000000000002', // prod
-  'c2473d89-e997-458d-a86d-b4096649c12b', // dev
-  '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3', // prod
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000002',
 ];
 
 export function isSyncEnabledForSite(siteId) {
