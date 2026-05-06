@@ -52,5 +52,6 @@ export const PlgOnboardingDto = {
     ...PlgOnboardingDto.toJSON(onboarding),
     reviews: onboarding.getReviews() || [],
     updatedBy: onboarding.getUpdatedBy(),
+    createdBy: onboarding.getCreatedBy(),
   }),
 };

@@ -108,6 +108,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/has-data',
 
   // Referral traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/referral-traffic/has-data',
   'GET /sites/:siteId/referral-traffic/filter-dimensions',
   'GET /sites/:siteId/referral-traffic/kpis',
   'GET /sites/:siteId/referral-traffic/trend',
@@ -115,6 +116,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/referral-traffic/by-region',
   'GET /sites/:siteId/referral-traffic/by-page-intent',
   'GET /sites/:siteId/referral-traffic/by-url',
+  'GET /sites/:siteId/referral-traffic/by-url-trend',
   'GET /sites/:siteId/referral-traffic/by-device',
   'GET /sites/:siteId/referral-traffic/business-impact',
   'GET /sites/:siteId/referral-traffic/weeks',
@@ -267,6 +269,7 @@ const routeRequiredCapabilities = {
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
   'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
