@@ -284,6 +284,18 @@ describe('getRouteHandlers', () => {
     getAgenticTrafficMovers: () => null,
     getAgenticTrafficUrlBrandPresence: () => null,
     getAgenticTrafficHasData: () => null,
+    getReferralTrafficHasData: () => null,
+    getReferralTrafficFilterDimensions: () => null,
+    getReferralTrafficKpis: () => null,
+    getReferralTrafficTrend: () => null,
+    getReferralTrafficByPlatform: () => null,
+    getReferralTrafficByRegion: () => null,
+    getReferralTrafficByDevice: () => null,
+    getReferralTrafficByPageIntent: () => null,
+    getReferralTrafficByUrl: () => null,
+    getReferralTrafficUrlTrend: () => null,
+    getReferralTrafficBusinessImpact: () => null,
+    getReferralTrafficWeeks: () => null,
   };
 
   const mockLlmoOpportunitiesController = {
@@ -931,6 +943,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/agentic-traffic/movers',
       'GET /sites/:siteId/agentic-traffic/url-brand-presence',
       'GET /sites/:siteId/agentic-traffic/has-data',
+      'GET /sites/:siteId/referral-traffic/has-data',
       'GET /sites/:siteId/referral-traffic/filter-dimensions',
       'GET /sites/:siteId/referral-traffic/kpis',
       'GET /sites/:siteId/referral-traffic/trend',

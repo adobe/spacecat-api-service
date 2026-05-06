@@ -108,6 +108,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/has-data',
 
   // Referral traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/referral-traffic/has-data',
   'GET /sites/:siteId/referral-traffic/filter-dimensions',
   'GET /sites/:siteId/referral-traffic/kpis',
   'GET /sites/:siteId/referral-traffic/trend',
