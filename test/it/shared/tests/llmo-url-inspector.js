@@ -20,30 +20,40 @@ import {
 /**
  * Shared LLMO URL Inspector endpoint tests.
  *
- * Covers the owned-urls handler modified in LLMO-4526:
+ * Covers the owned-urls handler modified in LLMO-4526 and LLMO-4729:
  *   GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/owned-urls
  *
- * This handler now (a) accepts an additive `agentTypes` query param that it
- * forwards as `p_agent_types` to `rpc_url_inspector_owned_urls`, and
- * (b) maps two new RPC return columns (`agentic_hits`,
- * `agentic_hits_trend`) onto camelCase response fields (`agenticHits`,
- * `agenticHitsTrend`).
+ * LLMO-4526 added (a) an additive `agentTypes` query param the handler
+ * forwards as `p_agent_types`, and (b) two new RPC return columns
+ * (`agentic_hits`, `agentic_hits_trend`) mapped to `agenticHits` /
+ * `agenticHitsTrend`.
+ *
+ * LLMO-4729 (Decision A pull-in) added a symmetric `referralSource` query
+ * param the handler forwards as `p_referral_source`, and two more RPC
+ * return columns (`referral_hits`, `referral_hits_trend`) mapped to
+ * `referralHits` / `referralHitsTrend`.
  *
  * NOTE on the data-service image:
  *   The IT docker-compose currently pins `mysticat-data-service` to a
- *   version that pre-dates the LLMO-4526 migrations. The full
- *   `?agentTypes=...` exercise (last `it.skip` below) will fail against
- *   that image because PostgREST's schema cache does not know about the
- *   new 10-arg `rpc_url_inspector_owned_urls` signature. Enable the
- *   skipped case once the data-service image tag in
+ *   version that pre-dates BOTH the LLMO-4526 and LLMO-4729 migrations.
+ *   The skipped exercises below (`?agentTypes=...` and
+ *   `?referralSource=...`) will fail against that image because
+ *   PostgREST's schema cache does not know about the additional
+ *   parameters on `rpc_url_inspector_owned_urls`. Enable the skipped
+ *   cases once the data-service image tag in
  *   `test/it/postgres/docker-compose.yml` is bumped to a release that
- *   contains the LLMO-4526 migrations.
+ *   contains both sets of migrations.
  *
- *   The non-skipped tests below intentionally use the existing 9-arg
- *   signature (no `agentTypes` query param), but still pin the new
- *   response-shape contract — the controller maps `agenticHits` and
- *   `agenticHitsTrend` with `?? 0` / `?? []` fallbacks, so they appear
+ *   The non-skipped tests below intentionally use the existing 8-arg
+ *   signature (no `agentTypes` and no `referralSource` query param), but
+ *   still pin the new response-shape contract — the controller maps
+ *   `agenticHits` / `agenticHitsTrend` and `referralHits` /
+ *   `referralHitsTrend` with `?? 0` / `?? []` fallbacks, so they appear
  *   on every row regardless of which RPC signature served the request.
+ *   The LLMO-4729 handler also makes `p_referral_source` conditional on
+ *   the caller supplying `referralSource` — it is intentionally omitted
+ *   on the non-skipped happy-path test below so the older RPC continues
+ *   to serve the call.
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
@@ -86,8 +96,8 @@ export default function llmoUrlInspectorTests(getHttpClient, resetData) {
       });
     });
 
-    describe('response shape (existing 9-arg RPC signature)', () => {
-      it('returns the new agentic fields on every owned-URL row, defaulted when the RPC has none', async () => {
+    describe('response shape (existing 8-arg RPC signature)', () => {
+      it('returns the new agentic + referral fields on every owned-URL row, defaulted when the RPC has none', async () => {
         const http = getHttpClient();
         const res = await http.admin.get(ownedUrlsPath({
           siteId: SITE_1_ID,
@@ -113,9 +123,9 @@ export default function llmoUrlInspectorTests(getHttpClient, resetData) {
         expect(res.body).to.have.property('totalCount').that.is.a('number');
 
         for (const row of res.body.urls) {
-          // Two new fields added by LLMO-4526; defaulted to 0 / [] by the
-          // controller when the RPC does not return them. This pins the
-          // public contract regardless of which mysticat image is running.
+          // LLMO-4526 fields — defaulted to 0 / [] by the controller when
+          // the RPC does not return them. This pins the public contract
+          // regardless of which mysticat image is running.
           expect(row).to.have.property('agenticHits').that.is.a('number');
           expect(row).to.have.property('agenticHitsTrend').that.is.an('array');
           for (const point of row.agenticHitsTrend) {
@@ -124,19 +134,37 @@ export default function llmoUrlInspectorTests(getHttpClient, resetData) {
             // when the upstream RPC payload contains a point without
             // week_start; covered by the existing unit tests too).
           }
+
+          // LLMO-4729 fields — same defaulting strategy. The non-skipped
+          // path here intentionally does NOT supply `referralSource`, so
+          // the handler omits `p_referral_source` from the RPC call (back-
+          // compat with the IT-pinned mysticat image). The post-LLMO-4729
+          // RPC has DEFAULT 'optel' and would populate these from
+          // `referral_traffic_optel` server-side; the pre-LLMO-4729 image
+          // returns rows without these columns and the controller's
+          // `?? 0` / `?? []` fallbacks keep the response shape stable.
+          expect(row).to.have.property('referralHits').that.is.a('number');
+          expect(row).to.have.property('referralHitsTrend').that.is.an('array');
+          for (const point of row.referralHitsTrend) {
+            expect(point).to.have.property('value').that.is.a('number');
+          }
         }
       });
     });
 
-    // ── Pending: full agentTypes exercise (requires data-service v1.68+) ──
+    // ── Pending: full agentTypes / referralSource exercise (requires    ──
+    // ── data-service image bump to a tag containing both the LLMO-4526 ──
+    // ── and LLMO-4729 migrations).                                     ──
     //
     // Enable once `test/it/postgres/docker-compose.yml` pins a
-    // mysticat-data-service tag that contains the LLMO-4526 migrations
-    // (additive `p_agent_types TEXT[]` parameter on
-    // `rpc_url_inspector_owned_urls`). Until then PostgREST's schema cache
-    // does not know about the 10-arg signature and the call would 404 with
-    // PGRST202.
-    describe('agentTypes forwarding (skipped pending data-service v1.68+)', () => {
+    // mysticat-data-service tag that contains the additive
+    // `p_agent_types TEXT[]` parameter (LLMO-4526) AND the additive
+    // `p_referral_source TEXT DEFAULT 'optel'` parameter + the new
+    // `referral_hits` / `referral_hits_trend` output columns (LLMO-4729)
+    // on `rpc_url_inspector_owned_urls`. Until then PostgREST's schema
+    // cache does not know about the 10-arg signature and the call would
+    // 404 with PGRST202.
+    describe('agentTypes + referralSource forwarding (skipped pending data-service bump)', () => {
       it.skip('forwards agentTypes=Chatbots,Research as p_agent_types', async () => {
         const http = getHttpClient();
         const res = await http.admin.get(ownedUrlsPath({
@@ -165,6 +193,38 @@ export default function llmoUrlInspectorTests(getHttpClient, resetData) {
         // With the unknown-only path, the handler silently drops the
         // value and omits p_agent_types entirely, so the response should
         // match the no-agentTypes baseline.
+      });
+
+      it.skip('forwards referralSource=cdn as p_referral_source', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(ownedUrlsPath({
+          siteId: SITE_1_ID,
+          startDate: '2026-02-02',
+          endDate: '2026-02-23',
+          referralSource: 'cdn',
+        }));
+        expect(res.status).to.equal(200);
+        expect(res.body).to.have.property('urls').that.is.an('array');
+        // Once seeded with referral_traffic_cdn rows, assert that
+        // referralHits reflects the CDN feed (vs the default optel feed)
+        // and that referralHitsTrend has at least one point per matching
+        // week. Pair with a sister test that supplies `referralSource=ga4`
+        // and asserts the totals diverge from the CDN run.
+      });
+
+      it.skip('falls back to optel when referralSource is unknown', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(ownedUrlsPath({
+          siteId: SITE_1_ID,
+          startDate: '2026-02-02',
+          endDate: '2026-02-23',
+          referralSource: 'NotAFeed',
+        }));
+        expect(res.status).to.equal(200);
+        // The handler whitelists referralSource and falls back to 'optel'
+        // for unknown values, so the response should match the
+        // referralSource=optel baseline (and equivalently, the no-
+        // referralSource baseline once the data-service image is bumped).
       });
     });
   });

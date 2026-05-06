@@ -710,10 +710,14 @@ describe('URL Inspector Handlers', () => {
       // p_agent_types to the RPC payload — keeps the contract compatible
       // with internal tooling that still calls the older 9-arg signature.
       expect(rpcCall.args[1]).to.not.have.property('p_agent_types');
-      // Without `referralSource` in the query string the handler defaults
-      // to 'optel' (LLMO-4729 Decision A pull-in — mirrors the controller
-      // default in llmo-referral-traffic.js).
-      expect(rpcCall.args[1].p_referral_source).to.equal('optel');
+      // Same back-compat guarantee for `p_referral_source` (LLMO-4729
+      // Decision A pull-in): when the caller does not supply
+      // `referralSource`, the handler MUST omit the parameter entirely so
+      // the call still works against mysticat builds that pre-date the
+      // LLMO-4729 migration. The new RPC has DEFAULT 'optel', so the
+      // omitted-param path still reads from referral_traffic_optel
+      // server-side without any wire-shape coupling here.
+      expect(rpcCall.args[1]).to.not.have.property('p_referral_source');
     });
 
     it('forwards comma-separated agentTypes as p_agent_types array', async () => {
@@ -852,6 +856,25 @@ describe('URL Inspector Handlers', () => {
           `whitelist member '${source}' should round-trip`,
         ).to.equal(source);
       }
+    });
+
+    it('omits p_referral_source when referralSource is an empty string', async () => {
+      // Mirrors the agentTypes "drops unknown values and omits the param
+      // when empty" test (LLMO-4526). The parser treats an empty string as
+      // "no value supplied" so the handler MUST omit p_referral_source
+      // from the RPC payload — keeps the call compatible with mysticat
+      // builds that pre-date the LLMO-4729 migration. The post-LLMO-4729
+      // RPC has DEFAULT 'optel' so the omitted-param path still reads
+      // from referral_traffic_optel server-side.
+      const { context, rpcStub } = createContext(
+        {},
+        { referralSource: '' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      expect(rpcStub.firstCall.args[1]).to.not.have.property('p_referral_source');
     });
   });
 

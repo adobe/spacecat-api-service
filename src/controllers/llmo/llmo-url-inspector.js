@@ -50,13 +50,23 @@ import { cachedOk } from '../../support/cached-response.js';
 
 // Mirror the referral controller's source whitelist (LLMO-4261).
 // Used by the owned-urls handler to forward `p_referral_source` to
-// `rpc_url_inspector_owned_urls` (LLMO-4729 Decision A pull-in). Unknown /
-// missing values fall back to 'optel' for parity with /url-inspector.
+// `rpc_url_inspector_owned_urls` (LLMO-4729 Decision A pull-in). When the
+// caller supplies an unknown value we collapse it to `'optel'` for parity
+// with /url-inspector. When the caller does not supply a value at all we
+// return `undefined` so the handler can OMIT the parameter entirely — this
+// keeps the RPC contract back-compat with mysticat builds that pre-date
+// LLMO-4729 (the older 8/9-arg signature would 404 with PGRST202 on an
+// unknown 10th positional parameter), and PostgREST then applies the
+// function's own `DEFAULT 'optel'` on the new build. Mirrors the same
+// "omit when absent" pattern used for `p_agent_types` (LLMO-4526).
 const VALID_REFERRAL_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4']);
 const DEFAULT_REFERRAL_SOURCE = 'optel';
 
 function parseReferralSource(q) {
   const raw = q.referralSource ?? q.referral_source;
+  if (!raw) {
+    return undefined;
+  }
   return VALID_REFERRAL_SOURCES.has(raw) ? raw : DEFAULT_REFERRAL_SOURCE;
 }
 
@@ -254,16 +264,15 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
       const offset = pagination.page * pagination.pageSize;
       const agentTypes = parseAgentTypes(q.agentTypes ?? q.agent_types);
-      // Always forward p_referral_source so the RPC reads from a deterministic
-      // source table — unknown / missing values collapse to 'optel' (mirrors
-      // /url-inspector and the controller default in llmo-referral-traffic.js).
-      // The RPC also has DEFAULT 'optel', but forwarding makes the wire shape
-      // explicit and lets the handler tests pin down the routing.
       const referralSource = parseReferralSource(q);
 
-      // Only forward p_agent_types when the caller actually supplied a value.
-      // Omitting the param keeps the RPC contract compatible with internal
-      // tooling that pre-dates the additive parameter (LLMO-4526).
+      // Only forward p_agent_types and p_referral_source when the caller
+      // actually supplied a value. Omitting them keeps the RPC contract
+      // compatible with internal tooling (and the integration-test image)
+      // that pre-dates the additive parameters (LLMO-4526 added
+      // p_agent_types; LLMO-4729 added p_referral_source). The new RPC has
+      // DEFAULT 'optel' on p_referral_source, so the omitted-param path
+      // still reads from referral_traffic_optel server-side.
       const rpcParams = {
         p_site_id: params.siteId,
         p_start_date: params.startDate || defaults.startDate,
@@ -274,10 +283,12 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
         p_brand_id: filterByBrandId,
         p_limit: pagination.pageSize,
         p_offset: offset,
-        p_referral_source: referralSource,
       };
       if (agentTypes) {
         rpcParams.p_agent_types = agentTypes;
+      }
+      if (referralSource !== undefined) {
+        rpcParams.p_referral_source = referralSource;
       }
 
       const { data, error } = await client.rpc('rpc_url_inspector_owned_urls', rpcParams);
