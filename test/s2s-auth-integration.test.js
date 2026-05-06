@@ -101,6 +101,8 @@ describe('s2sAuthWrapper integration', () => {
 
   it('succeeds with s2sConsumer populated when valid S2S JWT hits mapped route with matching capability', async () => {
     const token = await createS2sToken();
+    // GET /sites is now mapped to site:readAll (cross-tenant list endpoint).
+    // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
     const request = new Request('https://example.com/sites', {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
@@ -113,7 +115,7 @@ describe('s2sAuthWrapper integration', () => {
     const mockConsumer = {
       isRevoked: () => false,
       getStatus: () => 'ACTIVE',
-      getCapabilities: () => ['site:read'],
+      getCapabilities: () => ['site:readAll'],
     };
     context.dataAccess.Consumer.findByClientIdAndImsOrgId.resolves(mockConsumer);
 

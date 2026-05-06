@@ -16,7 +16,13 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import {
-  listBrands, getBrandById, upsertBrand, updateBrand, deleteBrand, listRegions,
+  listBrands,
+  getBrandById,
+  getBrandBySite,
+  upsertBrand,
+  updateBrand,
+  deleteBrand,
+  listRegions,
 } from '../../src/support/brands-storage.js';
 
 use(sinonChai);
@@ -308,6 +314,78 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(getBrandById(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to get brand');
+    });
+  });
+
+  describe('getBrandBySite', () => {
+    const SITE_ID = '33333333-3333-4333-8333-333333333333';
+
+    it('returns null when postgrestClient is missing', async () => {
+      expect(await getBrandBySite(ORG_ID, SITE_ID, null)).to.be.null;
+    });
+
+    it('returns null when postgrestClient has no from method', async () => {
+      expect(await getBrandBySite(ORG_ID, SITE_ID, {})).to.be.null;
+    });
+
+    it('returns null when organizationId is missing', async () => {
+      expect(await getBrandBySite('', SITE_ID, { from: () => {} })).to.be.null;
+    });
+
+    it('returns null when siteId is missing', async () => {
+      expect(await getBrandBySite(ORG_ID, '', { from: () => {} })).to.be.null;
+    });
+
+    it('returns brand from primary site_id match', async () => {
+      const dbRow = makeBrandRow({
+        site_id: SITE_ID,
+        brand_sites: [{ site_id: SITE_ID, paths: [], sites: { base_url: 'https://site.com' } }],
+      });
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient);
+      expect(result).to.include({ id: BRAND_ID, name: 'TestBrand', status: 'active' });
+    });
+
+    it('returns null when no brand has site_id matching the site', async () => {
+      // brand_sites is intentionally NOT used as a fallback (it stores
+      // citation entries too), so a brand with site_id=NULL never matches.
+      const query = createChainableQuery({ data: [], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      expect(await getBrandBySite(ORG_ID, SITE_ID, postgrestClient)).to.be.null;
+    });
+
+    it('returns the first row deterministically and warns when multiple matches violate LLMO-4592', async () => {
+      const r1 = makeBrandRow({ id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', name: 'A-Brand' });
+      const r2 = makeBrandRow({ id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'B-Brand' });
+      const query = createChainableQuery({ data: [r1, r2], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      const log = { warn: sinon.stub() };
+
+      const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient, log);
+      expect(result.id).to.equal('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa');
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.match(/LLMO-4592/);
+    });
+
+    it('logs nothing when log has no warn method (single match)', async () => {
+      const dbRow = makeBrandRow({ site_id: SITE_ID });
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      // No log argument at all — must not throw.
+      const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient);
+      expect(result.id).to.equal(BRAND_ID);
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      await expect(getBrandBySite(ORG_ID, SITE_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to resolve brand for site');
     });
   });
 

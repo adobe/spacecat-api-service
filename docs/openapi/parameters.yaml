@@ -454,3 +454,30 @@ suggestionStatus:
     multiple:
       value: NEW,APPROVED,IN_PROGRESS
       summary: Filter by multiple statuses (comma-separated)
+
+agentTypes:
+  name: agentTypes
+  description: |
+    Additive inclusion list of agent types — comma-separated string (or
+    a repeated/array query value). Accepted canonical values: `Chatbots`,
+    `Research`, `Training bots` (case-insensitive on the wire). Unknown
+    values are silently dropped (defence-in-depth; matches the existing
+    `agentType` scalar behaviour and the DB allowlist). Omit to receive
+    the unfiltered baseline. Used by the URL Inspector PG page to enforce
+    `Agent Type ∈ {Chatbots, Research}`.
+
+    NOTE: do not combine with the scalar `agentType` parameter — the
+    server AND-intersects them, which silently returns zero rows when
+    they disagree. Use exactly one.
+  in: query
+  required: false
+  schema:
+    type: string
+    description: Comma-separated canonical agent-type values
+  examples:
+    single:
+      value: Chatbots
+      summary: Filter to a single agent type
+    multiple:
+      value: Chatbots,Research
+      summary: URL Inspector PG inclusion list

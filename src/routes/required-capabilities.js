@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { CAP_ORG_READ_ALL, CAP_SITE_READ_ALL } from './capability-constants.js';
+
 /**
  * Routes that are intentionally excluded from S2S consumer access.
  *
@@ -33,6 +35,8 @@ export const INTERNAL_ROUTES = [
   // Hooks - use hookSecret in path for auth, not JWT
   'POST /hooks/site-detection/cdn/:hookSecret',
   'POST /hooks/site-detection/rum/:hookSecret',
+  // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
+  'POST /webhooks/github',
 
   // Preflight - CS/preflight flow not exposed to S2S consumers; end-user UI only
   'POST /preflight/jobs',
@@ -103,6 +107,20 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/movers',
   'GET /sites/:siteId/agentic-traffic/has-data',
 
+  // Referral traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/referral-traffic/has-data',
+  'GET /sites/:siteId/referral-traffic/filter-dimensions',
+  'GET /sites/:siteId/referral-traffic/kpis',
+  'GET /sites/:siteId/referral-traffic/trend',
+  'GET /sites/:siteId/referral-traffic/by-platform',
+  'GET /sites/:siteId/referral-traffic/by-region',
+  'GET /sites/:siteId/referral-traffic/by-page-intent',
+  'GET /sites/:siteId/referral-traffic/by-url',
+  'GET /sites/:siteId/referral-traffic/by-url-trend',
+  'GET /sites/:siteId/referral-traffic/by-device',
+  'GET /sites/:siteId/referral-traffic/business-impact',
+  'GET /sites/:siteId/referral-traffic/weeks',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
@@ -164,6 +182,10 @@ export const INTERNAL_ROUTES = [
   'PATCH /consumers/:consumerId',
   'POST /consumers/:consumerId/revoke',
 
+  // API Keys - scoped API key management; end-user/admin flow, not exposed to S2S consumers
+  'POST /tools/api-keys',
+  'DELETE /tools/api-keys/:id',
+  'GET /tools/api-keys',
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
@@ -218,7 +240,7 @@ const routeRequiredCapabilities = {
   'PATCH /configurations/sites/audits': 'configuration:write',
 
   // Organizations
-  'GET /organizations': 'organization:read',
+  'GET /organizations': CAP_ORG_READ_ALL,
   'POST /organizations': 'organization:write',
   'GET /organizations/:organizationId': 'organization:read',
   'GET /organizations/by-ims-org-id/:imsOrgId': 'organization:read',
@@ -247,6 +269,7 @@ const routeRequiredCapabilities = {
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
   'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
@@ -261,12 +284,16 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/prompt-execution-status': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompt-execution-status': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/search': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/search': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/prompts/:promptId/detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompts/:promptId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': 'brand:read',
@@ -288,7 +315,9 @@ const routeRequiredCapabilities = {
   'GET /projects/by-project-name/:projectName/sites': 'site:read',
 
   // Sites
-  'GET /sites': 'site:read',
+  // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
+  // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
+  'GET /sites': CAP_SITE_READ_ALL,
   'POST /sites': 'site:write',
   'GET /sites.csv': 'site:read',
   'GET /sites.xlsx': 'site:read',
@@ -433,11 +462,6 @@ const routeRequiredCapabilities = {
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',
 
-  // API Keys
-  'POST /tools/api-keys': 'apiKey:write',
-  'DELETE /tools/api-keys/:id': 'apiKey:write',
-  'GET /tools/api-keys': 'apiKey:read',
-
   // Import Jobs
   'POST /tools/import/jobs': 'importJob:write',
   'GET /tools/import/jobs/:jobId': 'importJob:read',
@@ -477,9 +501,13 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:read',
-  'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'site:write',
-  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:write',
-  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:write',
+  // These POST sheet-data routes use POST only to accommodate complex query payloads that exceed
+  // URL length limits. They are non-mutating (no side effects) and intentionally require
+  // only site:read, which also allows read-only admins and S2S consumers with read-only tokens
+  // to query sheet data.
+  'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
+  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:read',
+  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data': 'site:read',
   'GET /sites/:siteId/llmo/data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': 'site:read',
@@ -503,6 +531,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/strategy': 'site:read',
   'PUT /sites/:siteId/llmo/strategy': 'site:write',
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
+  'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',
   'POST /llmo/agentic-traffic/global': 'report:write',
 
