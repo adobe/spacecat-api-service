@@ -437,6 +437,26 @@ describe('llmo-query-handler', () => {
       expect(nullOrUndefinedCount).to.equal(4);
     });
 
+    it('should sort null-last array correctly (aValue == null branch)', async () => {
+      // Non-null first, null second: V8 insertion sort calls compare(arr[1], arr[0]),
+      // i.e. compare(null_item, non-null_item), exercising the aValue==null branch.
+      const rawData = {
+        ':type': 'sheet',
+        data: [
+          { score: '50' },
+          { score: null },
+        ],
+      };
+
+      tracingFetchStub.resolves(createMockResponse(rawData));
+      mockContext.data = { sort: 'score:asc' };
+
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
+
+      expect(result.data.data[0].score).to.equal('50');
+      expect(result.data.data[1].score).to.be.null;
+    });
+
     it('should handle offset parameter', async () => {
       const rawData = createSheetData([
         { id: 1, name: 'Item 1' },
