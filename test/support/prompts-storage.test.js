@@ -522,6 +522,10 @@ describe('prompts-storage', () => {
       expect(result.items[0].topic).to.deep.include({
         id: 'topic-uuid', name: 'Editing',
       });
+      // FK uuids: DRS reads category.uuid / topic.uuid to populate
+      // brand_presence_executions.category_id / .topic_id.
+      expect(result.items[0].category.uuid).to.equal('cat-uuid');
+      expect(result.items[0].topic.uuid).to.equal('topic-uuid');
     });
 
     it('throws on query error', async () => {
@@ -624,11 +628,13 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result).to.not.be.null;
+      // `uuid` is the UUID PK consumers (DRS) use for FK linkage; `id` is
+      // preserved with its historical UUID value for backward compat.
       expect(result.category).to.deep.equal({
-        id: 'cat-uuid', name: 'Photoshop', origin: 'human',
+        id: 'cat-uuid', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
       });
       expect(result.topic).to.deep.equal({
-        id: 'topic-uuid', name: 'Editing',
+        id: 'topic-uuid', uuid: 'topic-uuid', name: 'Editing',
       });
     });
 
