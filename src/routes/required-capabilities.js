@@ -319,6 +319,8 @@ const routeRequiredCapabilities = {
   // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
   'GET /sites': CAP_SITE_READ_ALL,
   'POST /sites': 'site:write',
+  'POST /sites/detect/jobs': 'site:write',
+  'GET /sites/detect/jobs/:jobId': 'site:read',
   'GET /sites.csv': 'site:read',
   'GET /sites.xlsx': 'site:read',
   'GET /sites/:siteId': 'site:read',

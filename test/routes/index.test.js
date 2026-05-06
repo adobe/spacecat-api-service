@@ -441,6 +441,11 @@ describe('getRouteHandlers', () => {
     runChecks: sinon.stub(),
   };
 
+  const mockSiteDetectionController = {
+    createSiteDetectionJob: sinon.stub(),
+    getSiteDetectionJobStatus: sinon.stub(),
+  };
+
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
     getAllOnboardings: sinon.stub(),
@@ -509,6 +514,7 @@ describe('getRouteHandlers', () => {
       mockPageRelationshipsController,
       mockEphemeralRunController,
       mockAutofixChecksController,
+      mockSiteDetectionController,
       mockPlgOnboardingController,
       mockDrsBpPgAuditController,
       mockWebhooksController,
@@ -529,6 +535,7 @@ describe('getRouteHandlers', () => {
       'POST /projects',
       'POST /preflight/jobs',
       'POST /preflight/beta/jobs',
+      'POST /sites/detect/jobs',
       'GET /sites',
       'POST /sites',
       'GET /sites.csv',
@@ -687,6 +694,7 @@ describe('getRouteHandlers', () => {
       'GET /projects/by-project-name/:projectName/sites',
       'GET /preflight/jobs/:jobId',
       'GET /preflight/beta/jobs/:jobId',
+      'GET /sites/detect/jobs/:jobId',
       'GET /sites/:siteId',
       'PATCH /sites/:siteId',
       'PATCH /sites/:siteId/config/cdn-logs',
