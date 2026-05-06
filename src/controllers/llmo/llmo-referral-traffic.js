@@ -735,11 +735,12 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
  * GET /sites/:siteId/referral-traffic/has-data
  *
  * Fast existence check — returns { hasData: boolean } indicating whether any
- * referral traffic records exist for the site (across all sources). Used by
- * the PG dashboard to decide whether to show the no-data overlay without
- * waiting for all parallel data queries to settle.
+ * Traffic Insights data exists for the site (optel OR cdn). Used by the PG
+ * dashboard to decide whether to show the onboarding overlay without waiting
+ * for all parallel data queries to settle.
  *
- * Runs a single PostgREST table query with limit(1) — no RPC required.
+ * Both tables are checked in parallel with limit(1) — no RPC required.
+ * Returns true as soon as either source has at least one row.
  */
 export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficHasData(context) {
@@ -748,19 +749,23 @@ export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
       getSiteAndValidateAccess,
       'has-data',
       async (ctx, client, siteId) => {
-        const { data, error } = await client
-          .from('referral_traffic_optel')
-          .select('traffic_date')
-          .eq('site_id', siteId)
-          .limit(1);
+        const [optelResult, cdnResult] = await Promise.all([
+          client.from('referral_traffic_optel').select('traffic_date').eq('site_id', siteId).limit(1),
+          client.from('referral_traffic_cdn').select('traffic_date').eq('site_id', siteId).limit(1),
+        ]);
 
-        if (error) {
-          ctx.log.error(`Referral traffic has-data PostgREST error: ${error.message}`);
+        if (optelResult.error) {
+          ctx.log.error(`Referral traffic has-data optel error: ${optelResult.error.message}`);
+          return internalServerError('Failed to check referral traffic data');
+        }
+        if (cdnResult.error) {
+          ctx.log.error(`Referral traffic has-data cdn error: ${cdnResult.error.message}`);
           return internalServerError('Failed to check referral traffic data');
         }
 
+        const hasData = (optelResult.data || []).length > 0 || (cdnResult.data || []).length > 0;
         /* c8 ignore next */
-        return cachedOk({ hasData: (data || []).length > 0 });
+        return cachedOk({ hasData });
       },
     );
   };
