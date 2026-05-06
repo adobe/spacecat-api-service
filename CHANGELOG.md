@@ -1,3 +1,16 @@
+# [1.480.0](https://github.com/adobe/spacecat-api-service/compare/v1.479.0...v1.480.0) (2026-05-06)
+
+
+### Bug Fixes
+
+* **paid:** update CPC calculator S3 path from ahrefs to seo ([#2350](https://github.com/adobe/spacecat-api-service/issues/2350)) ([6dcdafb](https://github.com/adobe/spacecat-api-service/commit/6dcdafba150045b8e895fa1c8dd0fbb54fbcca87))
+
+
+### Features
+
+* add externally-triggered site detection API (SITES-42916) ([#2203](https://github.com/adobe/spacecat-api-service/issues/2203)) ([178d4f7](https://github.com/adobe/spacecat-api-service/commit/178d4f7a9c56218490bf54df41709b920967467b))
+* update ALLOWED_SITE_IDS for LLMO s3 config updater |  LLMO-4587 ([#2354](https://github.com/adobe/spacecat-api-service/issues/2354)) ([6736fbe](https://github.com/adobe/spacecat-api-service/commit/6736fbe20727422bb4f4642f74a9972371be79c3))
+
 # [1.479.0](https://github.com/adobe/spacecat-api-service/compare/v1.478.3...v1.479.0) (2026-05-06)
 
 
