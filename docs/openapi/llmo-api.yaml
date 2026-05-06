@@ -3327,3 +3327,82 @@ brand-presence-prompt-execution-status:
       - api_key: []
       - ims_key: []
       - scoped_api_key: []
+
+strategy-experiment-tracking:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: strategyId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Strategy identifier
+  post:
+    tags:
+      - llmo
+    summary: Enable Experiment Tracking on a completed strategy
+    description: |
+      Optionally enables Experiment Tracking on a completed (locked) Evolving
+      strategy by linking it to an external GeoExperiment and storing the
+      resulting `experimentId`. Uses a narrow lock-exception save path that
+      only allows mutating the `experimentId` field.
+
+      The GeoExperiment integration is currently a stub — see
+      `TODO(experiment-team)` in `src/support/strategy/geo-experiment-stub.js`.
+    operationId: enableExperimentTracking
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - experimentId
+              - provider
+            properties:
+              experimentId:
+                type: string
+                format: uuid
+                description: GeoExperiment UUID to link to this strategy
+              provider:
+                type: string
+                enum: [geo-experiment]
+                description: Experiment-tracking provider (currently only geo-experiment)
+              startedAt:
+                type: string
+                format: date-time
+                description: Optional ISO-8601 experiment start timestamp
+    responses:
+      '200':
+        description: Tracking enabled successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                strategyId:
+                  type: string
+                experimentId:
+                  type: string
+                  format: uuid
+                provider:
+                  type: string
+                  enum: [geo-experiment]
+                status:
+                  type: string
+                  enum: [tracking]
+                linkedAt:
+                  type: string
+                  format: date-time
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Strategy not found
+      '409':
+        description: Strategy already has tracking enabled
+      '423':
+        description: Strategy is not in `completed` state
+      '502':
+        description: GeoExperiment link failed
+    security:
+      - api_key: []
