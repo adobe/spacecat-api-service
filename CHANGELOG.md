@@ -1,3 +1,10 @@
+# [1.476.0](https://github.com/adobe/spacecat-api-service/compare/v1.475.1...v1.476.0) (2026-05-06)
+
+
+### Features
+
+* add URL trend endpoint for referral traffic | LLMO-4261 ([#2336](https://github.com/adobe/spacecat-api-service/issues/2336)) ([cfaa49e](https://github.com/adobe/spacecat-api-service/commit/cfaa49e56b67e40bd730b51839fa404d92515a78))
+
 ## [1.475.1](https://github.com/adobe/spacecat-api-service/compare/v1.475.0...v1.475.1) (2026-05-06)
 
 
