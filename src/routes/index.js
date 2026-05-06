@@ -151,6 +151,7 @@ export default function getRouteHandlers(
   plgOnboardingController,
   drsBpPgAuditController,
   webhooksController,
+  strategyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -431,6 +432,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
+    'POST /sites/:siteId/strategies/:strategyId/experiment-tracking': strategyController.enableExperimentTracking,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'GET /sites/:siteId/llmo/probes/edge-optimize': llmoController.checkWafConnectivity,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,

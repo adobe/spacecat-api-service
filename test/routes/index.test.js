@@ -459,6 +459,10 @@ describe('getRouteHandlers', () => {
     processGitHubWebhook: sinon.stub(),
   };
 
+  const mockStrategyController = {
+    enableExperimentTracking: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -512,6 +516,7 @@ describe('getRouteHandlers', () => {
       mockPlgOnboardingController,
       mockDrsBpPgAuditController,
       mockWebhooksController,
+      mockStrategyController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -876,6 +881,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/probes/edge-optimize',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
+      'POST /sites/:siteId/strategies/:strategyId/experiment-tracking',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
@@ -1178,6 +1184,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.saveStrategy);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/strategies/:strategyId/experiment-tracking'].handler).to.equal(mockStrategyController.enableExperimentTracking);
+    expect(dynamicRoutes['POST /sites/:siteId/strategies/:strategyId/experiment-tracking'].paramNames).to.deep.equal(['siteId', 'strategyId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/brand-presence'].handler).to.equal(mockLlmoController.getDemoBrandPresence);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/brand-presence'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/recommendations'].handler).to.equal(mockLlmoController.getDemoRecommendations);
