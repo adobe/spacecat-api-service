@@ -100,7 +100,9 @@ async function getOrgMembersCsv(context, orgId) {
   }
 
   try {
+    const start = Date.now();
     const trialUsers = await trialUserModel.allByOrganizationId(orgId);
+    context?.log?.info?.(`[cdn-opt-in-notification] step=org-members-resolved took=${Date.now() - start}ms org=${orgId}`);
     return formatOrgMembersCsv(trialUsers);
   } catch (error) {
     context?.log?.warn?.(

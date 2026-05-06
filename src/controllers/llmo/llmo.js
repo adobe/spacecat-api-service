@@ -1311,6 +1311,44 @@ function LlmoController(ctx) {
       const currentConfig = site.getConfig();
       const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
       const isNewlyOpted = !existingEdgeConfig.opted;
+
+      // Kick off IMS + S3 in parallel with saveSiteConfig — all three are independent
+      let notificationPrep = null;
+      let optInHandlerStart;
+      if (isNewlyOpted) {
+        optInHandlerStart = Date.now();
+        const imsUserId = profile?.email;
+
+        const imsStart = Date.now();
+        const imsPromise = imsUserId && context.imsClient
+          ? Promise.resolve(context.imsClient.getImsAdminProfile(imsUserId))
+            .then((r) => {
+              log.info(`[cdn-opt-in-notification] step=ims-resolved took=${Date.now() - imsStart}ms (site=${siteId})`);
+              return r;
+            })
+            .catch((e) => {
+              log.warn(`[cdn-opt-in-notification] step=ims-failed took=${Date.now() - imsStart}ms (site=${siteId})`);
+              throw e;
+            })
+          : Promise.resolve(null);
+
+        const s3Start = Date.now();
+        const s3Promise = s3?.s3Client
+          ? Promise.resolve(readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket }))
+            .then((r) => {
+              log.info(`[cdn-opt-in-notification] step=s3-resolved took=${Date.now() - s3Start}ms (site=${siteId})`);
+              return r;
+            })
+            .catch((e) => {
+              log.warn(`[cdn-opt-in-notification] step=s3-failed took=${Date.now() - s3Start}ms (site=${siteId})`);
+              throw e;
+            })
+          : Promise.resolve(null);
+
+        notificationPrep = Promise.allSettled([imsPromise, s3Promise]);
+        log.info(`[cdn-opt-in-notification] step=ims+s3-kicked-off elapsed=0ms (site=${siteId})`);
+      }
+
       currentConfig.updateEdgeOptimizeConfig({
         ...existingEdgeConfig,
         opted: existingEdgeConfig.opted ?? Date.now(),
@@ -1319,8 +1357,9 @@ function LlmoController(ctx) {
       log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${lastModifiedBy}`);
 
       // Send Slack notification only when opted field is being added
-      const optInHandlerStart = Date.now();
       if (isNewlyOpted) {
+        log.info(`[cdn-opt-in-notification] step=save-config-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+
         try {
           const llmoTeamUserIds = env.SLACK_LLMO_EDGE_OPTIMIZE_TEAM;
 
@@ -1340,26 +1379,12 @@ function LlmoController(ctx) {
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
         }
 
-        log.info(`[cdn-opt-in-notification] opt-in handler reached notification step in ${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+        log.info(`[cdn-opt-in-notification] step=slack-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
 
-        // IMS lookup and S3 read run in parallel to minimise added latency.
-        // Previously this was a detached IIFE, but async Lambda handlers freeze
-        // the container when the handler promise resolves — detached promises are
-        // abandoned before they run. Awaiting directly is the reliable fix.
         try {
-          const notificationStart = Date.now();
-          const imsUserId = profile?.email;
-
-          const [adminProfile, llmoCfgResult] = await Promise.allSettled([
-            imsUserId && context.imsClient
-              ? context.imsClient.getImsAdminProfile(imsUserId)
-              : Promise.resolve(null),
-            s3?.s3Client
-              ? readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket })
-              : Promise.resolve(null),
-          ]);
-
-          log.info(`[cdn-opt-in-notification] IMS + S3 parallel lookup took ${Date.now() - notificationStart}ms (site=${siteId})`);
+          const imsS3WaitStart = Date.now();
+          const [adminProfile, llmoCfgResult] = await notificationPrep;
+          log.info(`[cdn-opt-in-notification] step=ims+s3-resolved wait=${Date.now() - imsS3WaitStart}ms elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
 
           let optedBy;
           if (adminProfile.status === 'fulfilled') {
@@ -1378,7 +1403,6 @@ function LlmoController(ctx) {
             notificationCdnType = cdnType;
           }
 
-          const emailStart = Date.now();
           await notifyOptInIfNeeded(context, {
             siteId,
             siteBaseURL: baseURL,
@@ -1386,13 +1410,12 @@ function LlmoController(ctx) {
             orgId: site.getOrganizationId?.(),
             optedBy,
           });
-          log.info(`[cdn-opt-in-notification] email send took ${Date.now() - emailStart}ms (site=${siteId})`);
-          log.info(`[cdn-opt-in-notification] total notification flow took ${Date.now() - notificationStart}ms (site=${siteId})`);
+          log.info(`[cdn-opt-in-notification] step=email-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
         } catch (err) {
           log.error('[cdn-opt-in-notification] Unhandled error:', err);
         }
 
-        log.info(`[cdn-opt-in-notification] total added latency to opt-in API: ${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+        log.info(`[cdn-opt-in-notification] step=complete total=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
       }
 
       let cdnTypeNormalized = null;
