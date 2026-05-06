@@ -125,6 +125,8 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/sites/{siteId}/brand:
+    $ref: './brands-v2-api.yaml#/v2-brand-for-org-site'
   /v2/orgs/{spaceCatId}/categories:
     $ref: './categories-v2-api.yaml#/v2-categories-for-org'
   /v2/orgs/{spaceCatId}/categories/{categoryId}:
