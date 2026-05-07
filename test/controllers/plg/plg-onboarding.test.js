@@ -3117,6 +3117,40 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(record2.setStatus).to.have.been.calledWith('OUTDATED');
     });
 
+    it('logs warn and continues when notification throws during WAITLISTED sweep', async () => {
+      // postPlgOnboardingNotification has its own internal try/catch for postSlackMessage,
+      // so the outer catch at lines 710-711 fires only when something else inside the
+      // function throws unexpectedly. getImsOrgId() is an unprotected call — making it
+      // throw exercises that exact path without needing a separate esmock.
+      const staleRecord = createMockOnboarding({
+        id: 'stale-id',
+        domain: 'stale-domain.com',
+        status: 'WAITLISTED',
+        waitlistReason: 'old reason',
+      });
+      staleRecord.getImsOrgId.throws(new Error('IMS org ID fetch failed'));
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([staleRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      context.env = {
+        ...context.env,
+        SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123',
+        SLACK_BOT_TOKEN: 'xoxb-test',
+      };
+      const res = await controller.onboard(context);
+
+      // Onboarding still succeeds despite notification failure
+      expect(res.status).to.equal(200);
+      // Peer record was saved before notification was attempted
+      expect(staleRecord.save).to.have.been.called;
+      // Notification failure is logged as a warning, not rethrown
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        /Failed to post OUTDATED notification for domain stale-domain\.com/,
+      );
+      // Main onboarding proceeded normally
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
     it('does not auto-transition the record for the domain being onboarded', async () => {
       const sameRecord = createMockOnboarding({
         id: 'same-domain-id',
