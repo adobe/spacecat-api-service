@@ -1107,6 +1107,7 @@ async function performAsoPlgOnboarding({
         // Only update deliveryConfig if authorURL is not already set
         const existingDeliveryConfig = site.getDeliveryConfig() || {};
         if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
+          site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_CS);
           site.setDeliveryConfig({
             ...existingDeliveryConfig,
             authorURL: resolvedConfig.authorURL,
