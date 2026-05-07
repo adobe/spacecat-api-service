@@ -1,3 +1,31 @@
+## [1.482.2](https://github.com/adobe/spacecat-api-service/compare/v1.482.1...v1.482.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* **plg:** set AEM_CS delivery type when auto-resolving author URL ([#2359](https://github.com/adobe/spacecat-api-service/issues/2359)) ([534fa63](https://github.com/adobe/spacecat-api-service/commit/534fa632abf92cc8523a1a66d0e6b821ab5a474f))
+
+## [1.482.1](https://github.com/adobe/spacecat-api-service/compare/v1.482.0...v1.482.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* **llmo:** use server-side RPC for sentiment-overview to fix missing weeks ([#2348](https://github.com/adobe/spacecat-api-service/issues/2348)) ([060e36a](https://github.com/adobe/spacecat-api-service/commit/060e36a150c9d6e4049f59157204ca819b43f586)), closes [#548](https://github.com/adobe/spacecat-api-service/issues/548)
+
+# [1.482.0](https://github.com/adobe/spacecat-api-service/compare/v1.481.0...v1.482.0) (2026-05-07)
+
+
+### Features
+
+* **llmo:** add offsite LLMO audits to paid onboarding profile ([#2341](https://github.com/adobe/spacecat-api-service/issues/2341)) ([c425375](https://github.com/adobe/spacecat-api-service/commit/c425375b9ecb93641e8b59061af3bb52967ba5c2))
+
+# [1.481.0](https://github.com/adobe/spacecat-api-service/compare/v1.480.0...v1.481.0) (2026-05-07)
+
+
+### Features
+
+* add Slack ops data checks ([#2258](https://github.com/adobe/spacecat-api-service/issues/2258)) ([e8104d2](https://github.com/adobe/spacecat-api-service/commit/e8104d2a6749ff30d1c4adb2724c43ded95c82ae))
+
 # [1.480.0](https://github.com/adobe/spacecat-api-service/compare/v1.479.0...v1.480.0) (2026-05-06)
 
 
