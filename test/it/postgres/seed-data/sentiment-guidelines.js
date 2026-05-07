@@ -15,6 +15,7 @@
  * All under SITE_1 (accessible).
  *
  * - GUIDELINE_1: enabled, audits: wikipedia-analysis + reddit-analysis
+ *   + youtube-analysis + cited-analysis
  * - GUIDELINE_2: enabled, no audits
  * - GUIDELINE_3: disabled, audit: youtube-analysis
  *
@@ -26,7 +27,7 @@ export const sentimentGuidelines = [
     guideline_id: 'b1111111-1111-4111-b111-111111111111',
     name: 'Wikipedia Tone',
     instruction: 'Analyze Wikipedia articles for neutral tone',
-    audits: ['wikipedia-analysis', 'reddit-analysis'],
+    audits: ['wikipedia-analysis', 'reddit-analysis', 'youtube-analysis', 'cited-analysis'],
     enabled: true,
     created_by: 'seed@test.com',
   },

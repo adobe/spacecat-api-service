@@ -14,9 +14,61 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import {
   createFilterDimensionsHandler,
   createBrandPresenceWeeksHandler, createSentimentOverviewHandler,
-  createMarketTrackingTrendsHandler,
+  createMarketTrackingTrendsHandler, createCompetitorSummaryHandler, createTopicsHandler,
+  createTopicPromptsHandler,
+  createPromptExecutionStatusHandler,
+  createSearchHandler,
+  createTopicDetailHandler,
+  createPromptDetailHandler,
+  createPromptDetailByPromptIdHandler,
+  createExecutionSourcesHandler,
+  createSentimentMoversHandler,
+  createShareOfVoiceHandler,
   createBrandPresenceStatsHandler,
+  createRegionsHandler,
 } from './llmo-brand-presence.js';
+import {
+  createUrlInspectorStatsHandler,
+  createUrlInspectorOwnedUrlsHandler,
+  createUrlInspectorTrendingUrlsHandler,
+  createUrlInspectorCitedDomainsHandler,
+  createUrlInspectorDomainUrlsHandler,
+  createUrlInspectorUrlPromptsHandler,
+  createUrlInspectorFilterDimensionsHandler,
+} from './llmo-url-inspector.js';
+import {
+  createAgenticTrafficGlobalGetHandler,
+  createAgenticTrafficGlobalPostHandler,
+} from './llmo-agentic-traffic-global.js';
+import {
+  createAgenticTrafficKpisHandler,
+  createAgenticTrafficKpisTrendHandler,
+  createAgenticTrafficByRegionHandler,
+  createAgenticTrafficByCategoryHandler,
+  createAgenticTrafficByPageTypeHandler,
+  createAgenticTrafficByStatusHandler,
+  createAgenticTrafficByUserAgentHandler,
+  createAgenticTrafficByUrlHandler,
+  createAgenticTrafficFilterDimensionsHandler,
+  createAgenticTrafficWeeksHandler,
+  createAgenticTrafficMoversHandler,
+  createAgenticTrafficUrlBrandPresenceHandler,
+  createAgenticTrafficHasDataHandler,
+} from './llmo-agentic-traffic.js';
+import {
+  createReferralTrafficFilterDimensionsHandler,
+  createReferralTrafficKpisHandler,
+  createReferralTrafficTrendHandler,
+  createReferralTrafficByPlatformHandler,
+  createReferralTrafficByRegionHandler,
+  createReferralTrafficByPageIntentHandler,
+  createReferralTrafficByUrlHandler,
+  createReferralTrafficUrlTrendHandler,
+  createReferralTrafficBusinessImpactHandler,
+  createReferralTrafficWeeksHandler,
+  createReferralTrafficByDeviceHandler,
+  createReferralTrafficHasDataHandler,
+} from './llmo-referral-traffic.js';
 
 /**
  * Controller for LLMO + Mysticat (mysticat-data-service / PostgreSQL) endpoints.
@@ -24,6 +76,7 @@ import {
  */
 function LlmoMysticatController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+  const hasLlmoOrganizationAccess = (organization) => accessControlUtil.hasAccess(organization, '', 'LLMO');
 
   const getOrgAndValidateAccess = async (context) => {
     const { spaceCatId } = context.params;
@@ -34,24 +87,199 @@ function LlmoMysticatController(ctx) {
     if (!organization) {
       throw new Error(`Organization not found: ${spaceCatId}`);
     }
-    if (!await accessControlUtil.hasAccess(organization, '', 'LLMO')) {
+    if (!await hasLlmoOrganizationAccess(organization)) {
       throw new Error('Only users belonging to the organization can view brand presence data');
     }
     return { organization };
   };
 
+  const validateGlobalAgenticTrafficReadAccess = async (context) => {
+    if (accessControlUtil.hasAdminAccess() || context.s2sConsumer) {
+      return;
+    }
+
+    const authInfo = context.attributes?.authInfo;
+    const profile = authInfo?.getProfile?.() ?? authInfo?.profile;
+    const tenantIds = authInfo?.getTenantIds?.()
+      ?? profile?.tenants?.map((tenant) => tenant.id)
+      ?? [];
+    const imsOrgIds = [...new Set(
+      tenantIds
+        .filter(Boolean)
+        .map((tenantId) => {
+          const normalized = String(tenantId);
+          return normalized.includes('@') ? normalized : `${normalized}@AdobeOrg`;
+        }),
+    )];
+    const organizations = (await Promise.all(
+      imsOrgIds.map((imsOrgId) => context.dataAccess.Organization.findByImsOrgId(imsOrgId)),
+    )).filter(Boolean);
+    const accessResults = await Promise.all(
+      organizations.map(hasLlmoOrganizationAccess),
+    );
+
+    if (!accessResults.some(Boolean)) {
+      throw new Error('Only admins or users with LLMO organization access can view global agentic traffic');
+    }
+  };
+
   const getFilterDimensions = createFilterDimensionsHandler(getOrgAndValidateAccess);
   const getBrandPresenceWeeks = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
   const getMarketTrackingTrends = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+  const getCompetitorSummary = createCompetitorSummaryHandler(getOrgAndValidateAccess);
   const getSentimentOverview = createSentimentOverviewHandler(getOrgAndValidateAccess);
+  const getTopics = createTopicsHandler(getOrgAndValidateAccess);
+  const getTopicPrompts = createTopicPromptsHandler(getOrgAndValidateAccess);
+  const getPromptExecutionStatus = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+  const getSearch = createSearchHandler(getOrgAndValidateAccess);
+  const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
+  const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
+  const getPromptDetailByPromptId = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
+  const getExecutionSources = createExecutionSourcesHandler(getOrgAndValidateAccess);
+  const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
+  const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorStats = createUrlInspectorStatsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorOwnedUrls = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorTrendingUrls = createUrlInspectorTrendingUrlsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorCitedDomains = createUrlInspectorCitedDomainsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorDomainUrls = createUrlInspectorDomainUrlsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorUrlPrompts = createUrlInspectorUrlPromptsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorFilterDimensions = createUrlInspectorFilterDimensionsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getRegions = createRegionsHandler();
+  const getAgenticTrafficGlobal = createAgenticTrafficGlobalGetHandler(
+    validateGlobalAgenticTrafficReadAccess,
+  );
+  const postAgenticTrafficGlobal = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+
+  const getSiteAndValidateAccess = async (context) => {
+    const { siteId } = context.params;
+    const { dataAccess } = context;
+    const { Site, Organization } = dataAccess;
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      throw new Error(`Site not found: ${siteId}`);
+    }
+    const organization = await Organization.findById(site.getOrganizationId());
+    if (!organization) {
+      throw new Error(`Organization not found for site: ${siteId}`);
+    }
+    if (!await hasLlmoOrganizationAccess(organization)) {
+      throw new Error('Only users belonging to the organization can view agentic traffic data');
+    }
+    return { site, organization };
+  };
+
+  const getAgenticTrafficKpis = createAgenticTrafficKpisHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficKpisTrend = createAgenticTrafficKpisTrendHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficByRegion = createAgenticTrafficByRegionHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficByCategory = createAgenticTrafficByCategoryHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficByPageType = createAgenticTrafficByPageTypeHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficByStatus = createAgenticTrafficByStatusHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficByUserAgent = createAgenticTrafficByUserAgentHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficByUrl = createAgenticTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficFilterDimensions = createAgenticTrafficFilterDimensionsHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficWeeks = createAgenticTrafficWeeksHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficMovers = createAgenticTrafficMoversHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficUrlBrandPresence = createAgenticTrafficUrlBrandPresenceHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
+
+  const getReferralTrafficFilterDimensions = createReferralTrafficFilterDimensionsHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficKpis = createReferralTrafficKpisHandler(getSiteAndValidateAccess);
+  const getReferralTrafficTrend = createReferralTrafficTrendHandler(getSiteAndValidateAccess);
+  const getReferralTrafficByPlatform = createReferralTrafficByPlatformHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByRegion = createReferralTrafficByRegionHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByPageIntent = createReferralTrafficByPageIntentHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByUrl = createReferralTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getReferralTrafficUrlTrend = createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess);
+  const getReferralTrafficBusinessImpact = createReferralTrafficBusinessImpactHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficWeeks = createReferralTrafficWeeksHandler(getSiteAndValidateAccess);
+  const getReferralTrafficByDevice = createReferralTrafficByDeviceHandler(getSiteAndValidateAccess);
+  const getReferralTrafficHasData = createReferralTrafficHasDataHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
     getBrandPresenceWeeks,
     getMarketTrackingTrends,
+    getCompetitorSummary,
     getSentimentOverview,
+    getTopics,
+    getTopicPrompts,
+    getPromptExecutionStatus,
+    getSearch,
+    getTopicDetail,
+    getPromptDetail,
+    getPromptDetailByPromptId,
+    getExecutionSources,
+    getSentimentMovers,
+    getShareOfVoice,
     getBrandPresenceStats,
+    getUrlInspectorStats,
+    getUrlInspectorOwnedUrls,
+    getUrlInspectorTrendingUrls,
+    getUrlInspectorCitedDomains,
+    getUrlInspectorDomainUrls,
+    getUrlInspectorUrlPrompts,
+    getUrlInspectorFilterDimensions,
+    getRegions,
+    getAgenticTrafficGlobal,
+    postAgenticTrafficGlobal,
+    getAgenticTrafficKpis,
+    getAgenticTrafficKpisTrend,
+    getAgenticTrafficByRegion,
+    getAgenticTrafficByCategory,
+    getAgenticTrafficByPageType,
+    getAgenticTrafficByStatus,
+    getAgenticTrafficByUserAgent,
+    getAgenticTrafficByUrl,
+    getAgenticTrafficFilterDimensions,
+    getAgenticTrafficWeeks,
+    getAgenticTrafficMovers,
+    getAgenticTrafficUrlBrandPresence,
+    getAgenticTrafficHasData,
+    getReferralTrafficFilterDimensions,
+    getReferralTrafficKpis,
+    getReferralTrafficTrend,
+    getReferralTrafficByPlatform,
+    getReferralTrafficByRegion,
+    getReferralTrafficByPageIntent,
+    getReferralTrafficByUrl,
+    getReferralTrafficUrlTrend,
+    getReferralTrafficBusinessImpact,
+    getReferralTrafficWeeks,
+    getReferralTrafficByDevice,
+    getReferralTrafficHasData,
   };
 }
 

@@ -150,6 +150,63 @@ site-cdn-logs-config:
       '500':
         $ref: './responses.yaml#/500'
 
+site-page-relationships-search:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    x-experimental: true
+    tags:
+      - site
+    summary: Search page relationships for caller-provided pages
+    description: |
+      Experimental endpoint.
+
+      Resolves page relationship context for the provided set of page paths/URLs.
+      This endpoint is intended for on-demand UI flows (for example, fix-confirmation popups),
+      where only specific pages need relationship context at request time.
+
+      Supported only for AEM-authored sites with Content API support.
+      The returned `relationships[*].chain` is ordered from the immediate parent
+      of the requested page to grandparent, and so on toward the root.
+    operationId: searchSitePageRelationships
+    security:
+      - ims_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/PageRelationshipsSearchRequest'
+          examples:
+            page-relationships-search-request:
+              $ref: './examples.yaml#/page-relationships-search-request'
+    responses:
+      '200':
+        description: Relationship lookup completed
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PageRelationshipsSearchResponse'
+            examples:
+              page-relationships-search-response:
+                $ref: './examples.yaml#/page-relationships-search-response'
+              page-relationships-search-no-relationship-response:
+                $ref: './examples.yaml#/page-relationships-search-no-relationship-response'
+              page-relationships-search-partial-response:
+                $ref: './examples.yaml#/page-relationships-search-partial-response'
+              page-relationships-search-unsupported-response:
+                $ref: './examples.yaml#/page-relationships-search-unsupported-response'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403-site-access-forbidden'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+
 site-reports:
   parameters:
     - $ref: './parameters.yaml#/siteId'

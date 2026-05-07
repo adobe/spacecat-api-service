@@ -41,8 +41,12 @@ import { SiteDto } from '../dto/site.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
-import { wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled } from '../support/utils.js';
+import {
+  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
+} from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
+import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
@@ -52,7 +56,7 @@ import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
  * @constructor
  */
 
-const AHREFS = 'ahrefs';
+const SEO = 'seo';
 const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
@@ -185,10 +189,10 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
   const { SiteTopPage } = dataAccess;
 
   // Fetch Ahrefs pages
-  let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'ahrefs', geo);
+  let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'seo', geo);
 
   if (!topPages || topPages.length === 0) {
-    log.warn(`No Ahrefs top pages found for site ${siteId}, returning empty result`);
+    log.warn(`No SEO top pages found for site ${siteId}, returning empty result`);
     return [];
   }
 
@@ -198,7 +202,7 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
 
     // If no pages match the base URL after filtering, return empty result
     if (topPages.length === 0) {
-      log.warn(`No Ahrefs top pages match base URL for site ${siteId}, returning empty result`);
+      log.warn(`No SEO top pages match base URL for site ${siteId}, returning empty result`);
       return [];
     }
   }
@@ -312,12 +316,22 @@ function SitesController(ctx, log, env) {
   };
 
   /**
-   * Gets all sites.
+   * Gets all sites. Accessible to admin callers (legacy admin path) and to S2S
+   * consumers that hold the `site:readAll` capability - see
+   * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
    * @returns {Promise<Response>} Array of sites response.
    */
-  const getAll = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can view all sites');
+  const getAll = async (context) => {
+    const requestId = context?.invocation?.id || 'unknown';
+    // Read-only admin and full admin both bypass the S2S capability check;
+    // S2S consumers must hold site:readAll. See READALL_CAPABILITY_DESIGN.md.
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied GET /sites - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Forbidden: admin access or site:readAll capability required');
     }
 
     // TODO: implement proper pagination or filtering to stay under AWS Lambda
@@ -331,7 +345,12 @@ function SitesController(ctx, log, env) {
     const all = await Site.all({}, { fetchAllPages: true });
     const sites = all
       .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
-      .map((site) => SiteDto.toJSON(site));
+      .map((site) => SiteDto.toListJSON(site));
+
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
+    }
+
     return ok(sites);
   };
 
@@ -341,7 +360,7 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAllByDeliveryType = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all sites');
     }
     const deliveryType = context.params?.deliveryType;
@@ -365,7 +384,7 @@ function SitesController(ctx, log, env) {
    * @return {Promise<Response>} Array of sites response.
    */
   const getAllWithLatestAudit = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all sites');
     }
     const auditType = context.params?.auditType;
@@ -391,7 +410,7 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} XLS file.
    */
   const getAllAsXLS = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all sites');
     }
     const sites = await Site.all();
@@ -403,7 +422,7 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} CSV file.
    */
   const getAllAsCSV = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all sites');
     }
     const sites = await Site.all();
@@ -632,7 +651,33 @@ function SitesController(ctx, log, env) {
     }
 
     if (isObject(requestBody.config)) {
-      site.setConfig(requestBody.config);
+      const siteConfig = site.getConfig();
+      const existingConfig = isNonEmptyObject(siteConfig)
+        ? Config.toDynamoItem(siteConfig) || {}
+        : {};
+      const merged = { ...existingConfig, ...requestBody.config };
+      if (requestBody.config?.auditTargetURLs && existingConfig?.auditTargetURLs) {
+        merged.auditTargetURLs = {
+          ...existingConfig.auditTargetURLs,
+          ...requestBody.config.auditTargetURLs,
+        };
+      }
+      const auditTargetURLsResult = auditTargetURLsPatchGuard(
+        merged,
+        site.getBaseURL(),
+        requestBody.config,
+        badRequest,
+      );
+      if (auditTargetURLsResult?.error) {
+        return auditTargetURLsResult.error;
+      }
+      // When the guard returns no `normalized` (patch had `auditTargetURLs` but no known
+      // sources), `merged.auditTargetURLs` already holds the correct deep-merged value
+      // from the block above and intentionally needs no further update.
+      if (auditTargetURLsResult?.normalized !== undefined) {
+        merged.auditTargetURLs = auditTargetURLsResult.normalized;
+      }
+      site.setConfig(merged);
       updates = true;
     }
 
@@ -821,7 +866,7 @@ function SitesController(ctx, log, env) {
         .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
         .slice(0, 100);
 
-      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
+      log.debug(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
     }
 
     // Return object wrapper if objectResponseDataKey was used, otherwise return plain array
@@ -867,7 +912,7 @@ function SitesController(ctx, log, env) {
       const [domain, organicTraffic] = await Promise.all([
         resolveWwwUrl(site, context),
         getStoredMetrics(
-          { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
+          { siteId, metric: ORGANIC_TRAFFIC, source: SEO },
           context,
         ),
       ]);
@@ -1018,6 +1063,80 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  const CITABILITY_GROUP_BY_FIELDS = new Set(['updatedBy', 'url', 'updatedAt']);
+  const CITABILITY_PERIODS = new Set(['7d', '30d', '90d', '1y', 'all']);
+  const CITABILITY_PERIOD_MS = {
+    '7d': 7, '30d': 30, '90d': 90, '1y': 365,
+  };
+
+  const getPageCitabilityCounts = async (context) => {
+    const { siteId } = context.params;
+    const groupBy = context.data?.groupBy ?? 'updatedBy';
+    const period = context.data?.period;
+    const from = context.data?.from;
+    const to = context.data?.to;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!CITABILITY_GROUP_BY_FIELDS.has(groupBy)) {
+      return badRequest(`Invalid groupBy field. Allowed values: ${[...CITABILITY_GROUP_BY_FIELDS].join(', ')}`);
+    }
+
+    if (period && (from || to)) {
+      return badRequest('period and from/to are mutually exclusive');
+    }
+
+    if (period && !CITABILITY_PERIODS.has(period)) {
+      return badRequest(`Invalid period. Allowed values: ${[...CITABILITY_PERIODS].join(', ')}`);
+    }
+
+    let fromDate = null;
+    let toDate = null;
+
+    if (from || to) {
+      if (from) {
+        fromDate = new Date(from);
+        if (Number.isNaN(fromDate.getTime())) {
+          return badRequest('Invalid from date');
+        }
+      }
+      if (to) {
+        toDate = new Date(to);
+        if (Number.isNaN(toDate.getTime())) {
+          return badRequest('Invalid to date');
+        }
+      }
+    } else if (period && period !== 'all') {
+      const days = CITABILITY_PERIOD_MS[period];
+      toDate = new Date();
+      fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its page citability records');
+    }
+
+    const { PageCitability } = dataAccess;
+    const queryOptions = (fromDate || toDate)
+      ? { between: { attribute: 'updatedAt', start: (fromDate ?? new Date(0)).toISOString(), end: (toDate ?? new Date()).toISOString() } }
+      : {};
+    const records = await PageCitability.allBySiteId(siteId, queryOptions);
+    const counts = {};
+    for (const record of records) {
+      const getterName = `get${groupBy.charAt(0).toUpperCase()}${groupBy.slice(1)}`;
+      const value = String(record[getterName]?.() ?? record[groupBy] ?? 'unknown');
+      counts[value] = (counts[value] ?? 0) + 1;
+    }
+    return ok(counts);
+  };
+
   const getTopPages = async (context) => {
     const { siteId, source, geo } = context.params;
 
@@ -1051,15 +1170,27 @@ function SitesController(ctx, log, env) {
   /**
    * Resolves site and organization data based on query parameters.
    * Tries siteId first, then checks either organizationId or imsOrg (mutually exclusive).
+   *
+   * On failure, returns HTTP 404 with a structured body:
+   *   { message, resolveStatus, details? }
+   * where `resolveStatus` is one of:
+   *   - 'no_entitlement_for_product' — org has no entitlement for the requested x-product.
+   *   - 'aso_pre_onboard' — entitlement tier is not in CUSTOMER_VISIBLE_TIERS (e.g. PRE_ONBOARD).
+   *   - 'site_not_enrolled' — entitlement is visible but no SiteEnrollment links this site.
+   * `details` shape is `{ productCode, siteId, organizationId }` for all three statuses
+   * (these branches are reached only via the siteId path, so siteId is always present).
+   * Unspecified 404s fall through without resolveStatus (unknown/generic not-found).
+   *
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Resolved site and organization data response.
    */
   const resolveSite = async (context) => {
-    const { organizationId, imsOrg, siteId } = context.data;
+    const {
+      organizationId, imsOrg, siteId, callerImsOrg,
+    } = context.data;
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
     const productCode = pathInfo.headers[X_PRODUCT_HEADER];
-
     if (!hasText(productCode)) {
       return badRequest('Product code required in x-product header');
     }
@@ -1067,6 +1198,68 @@ function SitesController(ctx, log, env) {
     if (!hasText(organizationId) && !hasText(imsOrg)) {
       return badRequest('Either organizationId or imsOrg must be provided');
     }
+
+    const resolveFailure = (message, resolveStatus, details) => createResponse(
+      { message, resolveStatus, details },
+      404,
+      { 'x-error': message },
+    );
+
+    // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
+    // independent of which org's data is being requested via organizationId/imsOrg.
+    // We translate it to a Spacecat UUID once, up front, so the per-path remap can
+    // decide whether the caller is an internal/demo org listed in ASO_PLG_EXCLUDED_ORGS.
+    let callerIsInternal = false;
+    if (hasText(callerImsOrg)) {
+      try {
+        const callerOrg = await Organization.findByImsOrgId(callerImsOrg);
+        if (callerOrg) {
+          callerIsInternal = isInternalOrg(callerOrg.getId(), context.env);
+          log.info(`[resolveSite] callerOrg UUID=${callerOrg.getId()} callerIsInternal=${callerIsInternal}`);
+        } else {
+          log.info(`[resolveSite] callerImsOrg=${callerImsOrg} not found in DB`);
+        }
+      } catch (e) {
+        log.warn('[resolveSite] caller org lookup failed, treating as non-internal', e);
+      }
+    }
+
+    // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
+    // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
+    //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
+    //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
+    const resolveByOrg = async (org, failureDetails) => {
+      const tierClient = TierClient.createForOrg(context, org, productCode);
+      const { entitlement, site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+      if (!entitlement) {
+        if (callerIsInternal) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+      }
+
+      if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+        if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+          return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+        }
+        log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
+      }
+
+      if (enrolledSite && (accessControlUtil.hasAdminAccess()
+        || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
+        const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
+        return ok({
+          data: {
+            organization: OrganizationDto.toJSON(org),
+            site: SiteDto.toJSON(enrolledSite),
+            isSummitPlgEnabled,
+          },
+        });
+      }
+
+      return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+    };
 
     let organization;
     let site;
@@ -1088,17 +1281,41 @@ function SitesController(ctx, log, env) {
             if (organization && await accessControlUtil.hasAccess(organization)) {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
+              const failureDetails = { productCode, siteId, organizationId: orgId };
 
-              if (entitlement && enrollments?.length) {
-                const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
-                const data = {
+              // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS):
+              // - No entitlement: return site_not_enrolled (login fails anyway, no PLG wizard)
+              // - Non-customer tier (e.g. PRE_ONBOARD): skip tier check, let enrollment decide
+              //   (enrolled → 200 dashboard, not enrolled → site_not_enrolled)
+              // - Customer tiers (FREE_TRIAL/PAID/PLG): unchanged — pass through to enrollment
+              // Customer callers are completely unaffected by this block.
+              if (!entitlement) {
+                if (callerIsInternal) {
+                  log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);
+                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+                }
+                return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+              }
+
+              if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+                if (!callerIsInternal) {
+                  return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+                }
+                log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
+              }
+
+              if (!enrollments?.length) {
+                return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+              }
+
+              const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
+              return ok({
+                data: {
                   organization: OrganizationDto.toJSON(organization),
                   site: SiteDto.toJSON(site),
                   isSummitPlgEnabled,
-                };
-
-                return ok({ data });
-              }
+                },
+              });
             }
           }
         }
@@ -1106,37 +1323,27 @@ function SitesController(ctx, log, env) {
 
       if (hasText(organizationId) && isValidUUID(organizationId)) {
         organization = await Organization.findById(organizationId);
-        if (organization && await accessControlUtil.hasAccess(organization)) {
-          const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
-
-          if (enrolledSite) {
-            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-            const data = {
-              organization: OrganizationDto.toJSON(organization),
-              site: SiteDto.toJSON(enrolledSite),
-              isSummitPlgEnabled,
-            };
-
-            return ok({ data });
-          }
+        if (!organization) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            { productCode, organizationId },
+          );
+        }
+        if (await accessControlUtil.hasAccess(organization)) {
+          return resolveByOrg(organization, { productCode, organizationId });
         }
       } else if (hasText(imsOrg)) {
         organization = await Organization.findByImsOrgId(imsOrg);
-        if (organization && await accessControlUtil.hasAccess(organization)) {
-          const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
-
-          if (enrolledSite) {
-            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-            const data = {
-              organization: OrganizationDto.toJSON(organization),
-              site: SiteDto.toJSON(enrolledSite),
-              isSummitPlgEnabled,
-            };
-
-            return ok({ data });
-          }
+        if (!organization) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            { productCode },
+          );
+        }
+        if (await accessControlUtil.hasAccess(organization)) {
+          return resolveByOrg(organization, { productCode, organizationId: organization.getId() });
         }
       }
 
@@ -1217,6 +1424,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    getPageCitabilityCounts,
     getTopPages,
     resolveSite,
     getBrandProfile,

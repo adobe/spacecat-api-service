@@ -38,7 +38,9 @@ import { sendEmail, getEmailServiceToken } from './email-service.js';
  * @returns {Promise<string>} Display name or email.
  */
 async function resolveUserName(dataAccess, email) {
-  if (!dataAccess?.TrialUser) return email;
+  if (!dataAccess?.TrialUser) {
+    return email;
+  }
   try {
     const user = await dataAccess.TrialUser.findByEmailId(email);
     if (user) {
@@ -49,7 +51,9 @@ async function resolveUserName(dataAccess, email) {
       const fullName = `${cleanFirst} ${cleanLast}`.trim();
       return fullName || email;
     }
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
   return email;
 }
 
@@ -59,7 +63,9 @@ async function resolveUserName(dataAccess, email) {
  * @returns {string} Hostname or empty string.
  */
 function extractHostnameFromBaseURL(baseUrl) {
-  if (!baseUrl) return '';
+  if (!baseUrl) {
+    return '';
+  }
   try {
     const url = new URL(baseUrl.startsWith('http') ? baseUrl : `https://${baseUrl}`);
     return url.hostname;
@@ -76,7 +82,9 @@ function extractHostnameFromBaseURL(baseUrl) {
  */
 function buildOpportunityIndex(strategyData) {
   const index = new Map();
-  if (!strategyData?.strategies) return index;
+  if (!strategyData?.strategies) {
+    return index;
+  }
 
   for (const strategy of strategyData.strategies) {
     const oppMap = new Map();
@@ -95,7 +103,9 @@ function buildOpportunityIndex(strategyData) {
  */
 function buildStrategyIndex(strategyData) {
   const index = new Map();
-  if (!strategyData?.strategies) return index;
+  if (!strategyData?.strategies) {
+    return index;
+  }
   for (const strategy of strategyData.strategies) {
     index.set(strategy.id, strategy);
   }
@@ -141,7 +151,9 @@ function filterValidEmails(candidates, log) {
  */
 export function detectStatusChanges(prevData, nextData, log) {
   const changes = [];
-  if (!nextData) return changes;
+  if (!nextData) {
+    return changes;
+  }
 
   // Build name lookup from opportunity library
   const libraryOppNames = new Map();

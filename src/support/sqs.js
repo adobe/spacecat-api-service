@@ -33,20 +33,29 @@ export class SQS {
    *
    * @param {string|URL} queueNameOrUrl - The name or URL of the SQS queue.
    * @param {object} message - The message to send.
+   * @param {string} [messageGroupId] - The message group ID for FIFO queues.
+   * @param {object} [options] - Additional send options.
+   * @param {number} [options.delaySeconds] - Per-message delivery delay.
    * @returns {Promise<void>} - Promise that resolves when the message is sent.
    */
-  async sendMessage(queueNameOrUrl, message, messageGroupId) {
+  async sendMessage(queueNameOrUrl, message, messageGroupId, options = {}) {
     const body = {
       ...message,
       timestamp: new Date().toISOString(),
     };
 
     const queueUrl = await this.#toQueueUrl(queueNameOrUrl);
-    const msgCommand = new SendMessageCommand({
+    const params = {
       MessageBody: JSON.stringify(body),
       QueueUrl: queueUrl,
       MessageGroupId: messageGroupId, // Only needed for FIFO queues
-    });
+    };
+
+    if (Number.isInteger(options.delaySeconds) && options.delaySeconds >= 0) {
+      params.DelaySeconds = options.delaySeconds;
+    }
+
+    const msgCommand = new SendMessageCommand(params);
 
     try {
       const data = await this.sqsClient.send(msgCommand);

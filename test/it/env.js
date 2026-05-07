@@ -15,19 +15,23 @@ import { POSTGREST_WRITER_JWT } from './shared/postgrest-jwt.js';
 /**
  * Builds the full mandatory env matrix for the IT dev server.
  *
- * @param {'dynamo'|'postgres'} mode - Backend mode
  * @param {string} publicKeyB64 - Base64-encoded ES256 SPKI public key
  * @returns {object} Environment variables object
  */
-export function buildEnv(mode, publicKeyB64) {
-  const env = {
+export function buildEnv(publicKeyB64) {
+  return {
     // Auth
     AUTH_PUBLIC_KEY_B64: publicKeyB64,
 
-    // AWS (needed for SDK client init even with dummy values)
+    // AWS — point S3 at the local MinIO container; other services use dummy credentials.
+    // AWS_SESSION_TOKEN is cleared so that the CI configure-aws-credentials step's real
+    // STS token does not leak into MinIO requests (MinIO validates or rejects STS tokens).
     AWS_REGION: 'us-east-1',
-    AWS_ACCESS_KEY_ID: 'dummy',
-    AWS_SECRET_ACCESS_KEY: 'dummy',
+    AWS_ACCESS_KEY_ID: 'minioadmin',
+    AWS_SECRET_ACCESS_KEY: 'minioadmin',
+    AWS_SESSION_TOKEN: '',
+    AWS_ENDPOINT_URL_S3: `http://localhost:${process.env.IT_MINIO_PORT || '9100'}`,
+    S3_BUCKET_NAME: 'spacecat-it-test',
 
     // IMS client (eager, hard-throws per-request)
     IMS_HOST: 'https://dummy-ims.example.com',
@@ -70,21 +74,11 @@ export function buildEnv(mode, publicKeyB64) {
 
     // Consumers (S2S) — allow ORG_1 IMS org for seeding and IT tests
     S2S_ALLOWED_IMS_ORG_IDS: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
+
+    // PostgreSQL data service
+    DATA_SERVICE_PROVIDER: 'postgres',
+    POSTGREST_URL: `http://localhost:${process.env.IT_POSTGREST_PORT || '3300'}`,
+    POSTGREST_SCHEMA: 'public',
+    POSTGREST_API_KEY: POSTGREST_WRITER_JWT,
   };
-
-  if (mode === 'dynamo') {
-    Object.assign(env, {
-      DYNAMO_TABLE_NAME_DATA: 'spacecat-services-data',
-      AWS_ENDPOINT_URL_DYNAMODB: 'http://127.0.0.1:8000',
-    });
-  } else if (mode === 'postgres') {
-    Object.assign(env, {
-      DATA_SERVICE_PROVIDER: 'postgres',
-      POSTGREST_URL: 'http://localhost:3300',
-      POSTGREST_SCHEMA: 'public',
-      POSTGREST_API_KEY: POSTGREST_WRITER_JWT,
-    });
-  }
-
-  return env;
 }

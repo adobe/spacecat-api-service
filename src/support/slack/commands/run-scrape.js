@@ -64,7 +64,7 @@ function RunScrapeCommand(context) {
       return null;
     }
 
-    const result = await site.getSiteTopPagesBySourceAndGeo('ahrefs', 'global');
+    const result = await site.getSiteTopPagesBySourceAndGeo('seo', 'global');
     const topPages = result || [];
 
     if (!isNonEmptyArray(topPages)) {

@@ -34,7 +34,9 @@ export const SUGGESTION_SKIP_REASONS = Object.values(Suggestion.SKIP_REASONS);
  * @returns {object|null} Object with only relevant fields, or null if no data.
  */
 const extractMinimalData = (data, opportunityType) => {
-  if (!data) return null;
+  if (!data) {
+    return null;
+  }
 
   // Get schema-driven projection configuration
   const projection = Suggestion.getProjection(opportunityType, 'minimal');
@@ -74,8 +76,12 @@ export const SuggestionDto = {
     const skipReason = suggestion.getSkipReason?.();
     const skipDetail = suggestion.getSkipDetail?.();
     const skipFields = {};
-    if (skipReason != null) skipFields.skipReason = skipReason;
-    if (skipDetail != null) skipFields.skipDetail = skipDetail;
+    if (skipReason != null) {
+      skipFields.skipReason = skipReason;
+    }
+    if (skipDetail != null) {
+      skipFields.skipDetail = skipDetail;
+    }
 
     // Minimal view: id, status, timestamps, and URL-related data fields
     if (view === 'minimal') {

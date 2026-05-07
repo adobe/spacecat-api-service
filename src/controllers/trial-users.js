@@ -182,10 +182,14 @@ function TrialUsersController(ctx) {
    */
   const getCurrentUserEmail = (context) => {
     const authInfo = context.attributes?.authInfo;
-    if (!authInfo) return null;
+    if (!authInfo) {
+      return null;
+    }
 
     const profile = authInfo.getProfile?.();
-    if (!profile) return null;
+    if (!profile) {
+      return null;
+    }
 
     // Try multiple fields that might contain the email
     return profile.trial_email || profile.preferred_username || profile.email || null;

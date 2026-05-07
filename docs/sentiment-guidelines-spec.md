@@ -82,7 +82,7 @@ interface SentimentGuideline {
   guidelineId: string;      // Unique guideline identifier (sort key, auto-generated UUID)
   name: string;             // Display name (required)
   instruction: string;      // The actual guideline instruction (required)
-  audits: string[];         // Enabled audit types (e.g., ['wikipedia-analysis', 'reddit-analysis'])
+  audits: string[];         // Enabled audit types (e.g., ['wikipedia-analysis', 'reddit-analysis', 'youtube-analysis', 'cited-analysis'])
   enabled: boolean;         // Whether guideline is active (default: true)
   createdAt: string;        // ISO 8601 timestamp
   updatedAt: string;        // ISO 8601 timestamp
@@ -98,7 +98,7 @@ interface SentimentGuideline {
   "guidelineId": "guideline-001",
   "name": "Product Quality Focus",
   "instruction": "Focus on sentiment related to product quality, durability, and craftsmanship. Highlight mentions of build quality, materials, and reliability.",
-  "audits": ["wikipedia-analysis", "reddit-analysis"],
+  "audits": ["wikipedia-analysis", "reddit-analysis", "youtube-analysis", "cited-analysis"],
   "enabled": true,
   "createdAt": "2026-01-10T08:00:00Z",
   "updatedAt": "2026-01-10T08:00:00Z",
@@ -190,7 +190,7 @@ POST /sites/:siteId/sentiment/guidelines
   {
     "name": "Product Quality Focus",
     "instruction": "Focus on product quality and durability mentions",
-    "audits": ["wikipedia-analysis", "reddit-analysis"],
+    "audits": ["wikipedia-analysis", "reddit-analysis", "youtube-analysis", "cited-analysis"],
     "enabled": true
   }
 ]
@@ -204,7 +204,7 @@ POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits
 **Request Body:**
 ```json
 {
-  "audits": ["wikipedia-analysis", "reddit-analysis"]
+  "audits": ["wikipedia-analysis", "reddit-analysis", "youtube-analysis", "cited-analysis"]
 }
 ```
 
@@ -262,6 +262,7 @@ Guidelines can be associated with specific audit types. The following audit type
 - `reddit-analysis`
 - `youtube-analysis`
 - `twitter-analysis`
+- `cited-analysis`
 - `news-analysis`
 - `forum-analysis`
 
@@ -311,7 +312,7 @@ This provides:
    Body: [{
      name: "Quality Focus",
      instruction: "Focus on product quality mentions",
-     audits: ["wikipedia-analysis", "reddit-analysis"]
+     audits: ["wikipedia-analysis", "reddit-analysis", "youtube-analysis", "cited-analysis"]
    }]
    ```
 

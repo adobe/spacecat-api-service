@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
@@ -60,6 +58,16 @@ describe('S3 client wrapper tests', () => {
     expect(firstCall.args[1].s3.s3Client).to.be.an('object');
     expect(firstCall.args[1].s3.getSignedUrl).to.be.a('function');
     expect(firstCall.args[1].s3.s3Bucket).to.equal(mockContext.env.S3_BUCKET_NAME);
+  });
+
+  it('configures endpoint and forcePathStyle when AWS_ENDPOINT_URL_S3 is set', async () => {
+    mockContext.env.AWS_ENDPOINT_URL_S3 = 'http://localhost:9100';
+
+    await s3ClientWrapper(exampleHandler)(mockRequest, mockContext);
+
+    expect(exampleHandler.calledOnce).to.be.true;
+    const { s3 } = exampleHandler.getCall(0).args[1];
+    expect(s3.s3Client).to.be.an('object');
   });
 
   it('does not create a new S3Client if one already exists in the context', async () => {

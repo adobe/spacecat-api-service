@@ -44,45 +44,79 @@ export const OpportunitySummaryDto = {
     const urls = new Set();
     let totalPageViews = 0;
 
+    const opportunityType = opportunity.getType();
+    const isSiteWideOpportunity = opportunityType === 'consent-banner';
+
+    // Get opportunity data early to check for page-specific URLs
+    const opportunityData = opportunity.getData() || {};
+
     // If paidUrlsData provided, use those URLs and pageViews
     // (for CWV opportunities from paid traffic)
-    if (paidUrlsData && paidUrlsData.urls) {
+    if (paidUrlsData && paidUrlsData.urls && !isSiteWideOpportunity) {
       paidUrlsData.urls.forEach((url) => urls.add(url));
       totalPageViews = paidUrlsData.pageViews || 0;
     } else {
-      // Otherwise, extract all URLs from suggestion data (for paid media opportunities)
-      suggestions.forEach((suggestion) => {
-        const data = suggestion.getData();
-        if (!data) return; // Skip if data is null/undefined
-        // Handle different URL field names in suggestion data
-        if (data.url_from) urls.add(data.url_from);
-        if (data.url_to) urls.add(data.url_to);
-        if (data.urlFrom) urls.add(data.urlFrom);
-        if (data.urlTo) urls.add(data.urlTo);
-        if (data.url) urls.add(data.url);
-      });
+      // Check if opportunity data has a page-specific URL
+      // (e.g., no-cta-above-the-fold, high-organic-low-ctr)
+      if (opportunityData.page && !isSiteWideOpportunity) {
+        urls.add(opportunityData.page);
+      }
 
-      // Aggregate page views from rank (which often represents traffic)
-      suggestions.forEach((suggestion) => {
-        const data = suggestion.getData();
-        if (!data) return; // Skip if data is null/undefined
-        const rank = suggestion.getRank();
-        if (rank && typeof rank === 'number') {
-          totalPageViews += rank;
-        }
+      // Extract all URLs from suggestion data (for paid media opportunities)
+      if (!isSiteWideOpportunity) {
+        suggestions.forEach((suggestion) => {
+          const data = suggestion.getData();
+          if (!data) {
+            return; // Skip if data is null/undefined
+          }
+          // Handle different URL field names in suggestion data
+          if (data.url_from) {
+            urls.add(data.url_from);
+          }
+          if (data.url_to) {
+            urls.add(data.url_to);
+          }
+          if (data.urlFrom) {
+            urls.add(data.urlFrom);
+          }
+          if (data.urlTo) {
+            urls.add(data.urlTo);
+          }
+          if (data.url) {
+            urls.add(data.url);
+          }
+          // Handle no-cta-above-the-fold contentFix structure
+          if (data.contentFix?.page_patch?.original_page_url) {
+            urls.add(data.contentFix.page_patch.original_page_url);
+          }
+        });
+      }
 
-        // Also check for traffic_domain or trafficDomain in data
-        if (data.traffic_domain && typeof data.traffic_domain === 'number') {
-          totalPageViews += data.traffic_domain;
-        }
-        if (data.trafficDomain && typeof data.trafficDomain === 'number') {
-          totalPageViews += data.trafficDomain;
-        }
-      });
+      // Use pageViews from opportunity data if available
+      if (opportunityData.pageViews && typeof opportunityData.pageViews === 'number') {
+        totalPageViews = opportunityData.pageViews;
+      } else {
+        // Otherwise, aggregate page views from rank (which often represents traffic)
+        suggestions.forEach((suggestion) => {
+          const data = suggestion.getData();
+          if (!data) {
+            return; // Skip if data is null/undefined
+          }
+          const rank = suggestion.getRank();
+          if (rank && typeof rank === 'number') {
+            totalPageViews += rank;
+          }
+
+          // Also check for traffic_domain or trafficDomain in data
+          if (data.traffic_domain && typeof data.traffic_domain === 'number') {
+            totalPageViews += data.traffic_domain;
+          }
+          if (data.trafficDomain && typeof data.trafficDomain === 'number') {
+            totalPageViews += data.trafficDomain;
+          }
+        });
+      }
     }
-
-    // Get projected traffic data from opportunity data
-    const opportunityData = opportunity.getData() || {};
     const projectedTrafficLost = opportunityData.projectedTrafficLost || 0;
     const projectedTrafficValue = opportunityData.projectedTrafficValue || 0;
     const projectedConversionValue = opportunityData.projectedConversionValue || 0;
@@ -111,7 +145,7 @@ export const OpportunitySummaryDto = {
       type: null,
       description: null,
       status: opportunity.getStatus(),
-      system_type: opportunity.getType(),
+      system_type: opportunityType,
       system_description: opportunity.getDescription(),
       pageViews: totalPageViews,
       projectedTrafficLost,

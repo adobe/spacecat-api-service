@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -66,7 +64,9 @@ describe('ReportsController', () => {
     it('should return bad request for invalid site ID', async () => {
       const context = createValidContext('invalid-uuid', requiresReportId ? validReportId : null);
       // Only delete data for non-createReport methods
-      if (methodName !== 'createReport') delete context.data;
+      if (methodName !== 'createReport') {
+        delete context.data;
+      }
 
       const result = await reportsController[methodName](context);
 
@@ -94,7 +94,9 @@ describe('ReportsController', () => {
 
       const context = createValidContext('123e4567-e89b-12d3-a456-426614174000', requiresReportId ? validReportId : null);
       // Only delete data for non-createReport and non-patchReport methods
-      if (methodName !== 'createReport' && methodName !== 'patchReport') delete context.data;
+      if (methodName !== 'createReport' && methodName !== 'patchReport') {
+        delete context.data;
+      }
 
       const result = await reportsController[methodName](context);
 
@@ -112,7 +114,9 @@ describe('ReportsController', () => {
 
       const context = createValidContext('123e4567-e89b-12d3-a456-426614174000', requiresReportId ? validReportId : null);
       // Only delete data for non-createReport and non-patchReport methods
-      if (methodName !== 'createReport' && methodName !== 'patchReport') delete context.data;
+      if (methodName !== 'createReport' && methodName !== 'patchReport') {
+        delete context.data;
+      }
 
       const result = await reportsController[methodName](context);
 

@@ -19,6 +19,19 @@ import BaseCommand from './base.js';
 
 const PHRASES = ['onboard-llmo'];
 
+/** Flags that skip updating helix-query.yaml (same effect as HTTP `temp-onboarding`). */
+const TEMP_ONBOARDING_FLAGS = new Set(['--skip-helix-query', '--temp-onboarding']);
+
+/**
+ * @param {string[]} args
+ * @returns {{ siteInput: string, tempOnboarding: boolean }}
+ */
+function splitLlmoOnboardCommandArgs(args) {
+  const urlTokens = args.filter((a) => !TEMP_ONBOARDING_FLAGS.has(a));
+  const tempOnboarding = args.some((a) => TEMP_ONBOARDING_FLAGS.has(a));
+  return { siteInput: urlTokens.join(' '), tempOnboarding };
+}
+
 /**
  * Factory function to create the LlmoOnboardCommand object.
  *
@@ -32,7 +45,7 @@ function LlmoOnboardCommand(context) {
     name: 'Onboard LLMO',
     description: 'Onboards a site for LLMO (Large Language Model Optimizer) through a modal interface.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} <site url>`,
+    usageText: `${PHRASES[0]} <site url> [${[...TEMP_ONBOARDING_FLAGS].join(' | ')}]`,
   });
 
   const { log } = context;
@@ -49,9 +62,8 @@ function LlmoOnboardCommand(context) {
     const { say, threadTs } = slackContext;
     const { dataAccess } = context;
 
-    const [site] = args;
-
-    const normalizedSite = extractURLFromSlackInput(site);
+    const { siteInput, tempOnboarding } = splitLlmoOnboardCommandArgs(args);
+    const normalizedSite = extractURLFromSlackInput(siteInput);
 
     if (!normalizedSite) {
       await say(baseCommand.usage());
@@ -151,7 +163,10 @@ function LlmoOnboardCommand(context) {
                     type: 'plain_text',
                     text: 'Start Onboarding',
                   },
-                  value: normalizedSite,
+                  value: JSON.stringify({
+                    brandURL: normalizedSite,
+                    ...(tempOnboarding ? { tempOnboarding: true } : {}),
+                  }),
                   action_id: 'start_llmo_onboarding',
                   style: 'primary',
                 },

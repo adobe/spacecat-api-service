@@ -27,7 +27,8 @@ import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { filterSitesForProductCode } from '../support/utils.js';
+import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
+import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -50,7 +51,9 @@ function OrganizationsController(ctx, env) {
     throw new Error('Environment object required');
   }
   const { SLACK_URL_WORKSPACE_EXTERNAL: slackExternalWorkspaceUrl } = env;
-  const { Organization, Project, Site } = dataAccess;
+  const {
+    Organization, Project, Site, SiteImsOrgAccess, Entitlement, SiteEnrollment,
+  } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -78,16 +81,32 @@ function OrganizationsController(ctx, env) {
   };
 
   /**
-   * Gets all organizations.
+   * Gets all organizations. Accessible to admin callers (legacy admin path) and to S2S
+   * consumers that hold the `organization:readAll` capability - see
+   * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
    * @returns {Promise<Response>} Array of organizations response.
    */
-  const getAll = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can view all Organizations');
+  const getAll = async (context) => {
+    const { log } = ctx;
+    const requestId = context?.invocation?.id || 'unknown';
+    // Read-only admin and full admin both bypass the S2S capability check;
+    // S2S consumers must hold organization:readAll. See READALL_CAPABILITY_DESIGN.md.
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_ORG_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied GET /organizations - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Forbidden: admin access or organization:readAll capability required');
     }
 
     const organizations = (await Organization.all())
       .map((organization) => OrganizationDto.toJSON(organization));
+
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /organizations granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_ORG_READ_ALL} count=${organizations.length} requestId=${requestId}`);
+    }
+
     return ok(organizations);
   };
 
@@ -148,7 +167,7 @@ function OrganizationsController(ctx, env) {
    * @throws {Error} If IMS org ID is not provided, org not found, or Slack config not found.
    */
   const getSlackConfigByImsOrgID = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view Slack configurations');
     }
     const response = await getByImsOrgID(context);
@@ -197,16 +216,87 @@ function OrganizationsController(ctx, env) {
       return forbidden('Only users belonging to the organization can view its sites');
     }
 
-    const sites = await Site.allByOrganizationId(organizationId);
+    const ownSites = await Site.allByOrganizationId(organizationId);
+    const delegatedSites = [];
 
+    if (SiteImsOrgAccess) {
+      try {
+        const delegatedEntries = await SiteImsOrgAccess.allByOrganizationIdWithSites(
+          organizationId,
+        );
+        const now = new Date();
+        const ownSiteIds = new Set(ownSites.map((s) => s.getId()));
+
+        // First pass: filter to active grants that match the product code
+        const activeEntries = delegatedEntries.filter((entry) => {
+          const notExpired = !entry.grant.getExpiresAt()
+            || new Date(entry.grant.getExpiresAt()) > now;
+          return entry.grant.getProductCode() === productCode
+            && notExpired
+            && entry.site
+            && !ownSiteIds.has(entry.site.getId());
+        });
+
+        if (activeEntries.length > 0 && Entitlement && SiteEnrollment) {
+          // Batch entitlement lookups by unique target org — one Promise.all round, not N+1
+          const uniqueTargetOrgIds = [...new Set(
+            activeEntries.map((e) => e.grant.getTargetOrganizationId()),
+          )];
+          const entitlementResults = await Promise.all(
+            uniqueTargetOrgIds.map((targetOrgId) => Entitlement.findByIndexKeys({
+              organizationId: targetOrgId,
+              productCode,
+            })),
+          );
+
+          // Batch enrollment lookups for all found entitlements — another Promise.all round
+          const enrolledByTargetOrg = new Map();
+          await Promise.all(
+            uniqueTargetOrgIds.map(async (targetOrgId, i) => {
+              const entitlement = entitlementResults[i];
+              if (entitlement) {
+                // PRE_ONBOARD and any future internal tiers
+                // are not customer-visible and not allowed for delegation
+                if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+                  return;
+                }
+
+                const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+                // eslint-disable-next-line max-len
+                enrolledByTargetOrg.set(targetOrgId, new Set(enrollments.map((e) => e.getSiteId())));
+              }
+            }),
+          );
+
+          // Only include delegated sites that are enrolled under the target org's entitlement.
+          // This ensures delegation cannot grant access to sites the target org is not entitled to.
+          for (const entry of activeEntries) {
+            const enrolledSiteIds = enrolledByTargetOrg.get(entry.grant.getTargetOrganizationId());
+            if (enrolledSiteIds?.has(entry.site.getId())) {
+              delegatedSites.push(entry.site);
+              ownSiteIds.add(entry.site.getId());
+            }
+          }
+        }
+      } catch (err) {
+        ctx.log.warn(
+          '[Organizations] Failed to load delegated sites, returning own-org sites only',
+          err,
+        );
+      }
+    }
+
+    // Own sites go through the enrollment filter (delegate org's entitlement).
+    // Delegated sites have already been validated against the target org's entitlement above.
     const filteredSites = await filterSitesForProductCode(
       context,
       organization,
-      sites,
+      ownSites,
       productCode,
+      accessControlUtil,
     );
 
-    return ok(filteredSites.map((site) => SiteDto.toJSON(site)));
+    return ok([...filteredSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
   };
 
   /**

@@ -33,7 +33,8 @@ export const OpportunityDto = {
     * createdAt: date,
     * createdBy: string,
     * updatedAt: date,
-    * updatedBy: string
+    * updatedBy: string,
+    * lastAuditedAt: date
     * }} JSON object.
    */
   toJSON: (oppty) => ({
@@ -52,5 +53,6 @@ export const OpportunityDto = {
     createdAt: oppty.getCreatedAt(),
     updatedAt: oppty.getUpdatedAt(),
     updatedBy: oppty.getUpdatedBy(),
+    lastAuditedAt: oppty.getLastAuditedAt(),
   }),
 };

@@ -27,8 +27,11 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { OpportunityDto } from '../dto/opportunity.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import { getIsSummitPlgEnabled } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+const SUMMIT_PLG_ALLOWED_TYPES = ['broken-backlinks', 'cwv', 'alt-text'];
 
 /**
  * Opportunities controller.
@@ -52,6 +55,21 @@ function OpportunitiesController(ctx) {
   const { Site } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Filters opportunities to only PLG-allowed types when summit PLG is enabled for the site.
+   * @param {Object} site - Site entity
+   * @param {Array} opportunities - Array of opportunity entities
+   * @returns {Promise<Array>} Filtered (or unfiltered) opportunities
+   */
+  async function filterForSummitPlg(site, opportunities, requestContext) {
+    if (await getIsSummitPlgEnabled(site, ctx, requestContext)) {
+      return opportunities.filter(
+        (oppty) => SUMMIT_PLG_ALLOWED_TYPES.includes(oppty.getType()),
+      );
+    }
+    return opportunities;
+  }
 
   /**
    * returns a response for a data access error.
@@ -91,7 +109,8 @@ function OpportunitiesController(ctx) {
       return forbidden('Only users belonging to the organization of the site can view its opportunities');
     }
 
-    const opptys = (await Opportunity.allBySiteId(siteId))
+    const allOpptys = await Opportunity.allBySiteId(siteId);
+    const opptys = (await filterForSummitPlg(site, allOpptys, context))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
     return ok(opptys);
@@ -121,7 +140,8 @@ function OpportunitiesController(ctx) {
       return forbidden('Only users belonging to the organization of the site can view its opportunities');
     }
 
-    const opptys = (await Opportunity.allBySiteIdAndStatus(siteId, status))
+    const allOpptys = await Opportunity.allBySiteIdAndStatus(siteId, status);
+    const opptys = (await filterForSummitPlg(site, allOpptys, context))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
     return ok(opptys);
@@ -155,6 +175,14 @@ function OpportunitiesController(ctx) {
     const oppty = await Opportunity.findById(opptyId);
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
+    }
+    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+      try {
+        await grantSuggestionsForOpportunity(dataAccess, site, oppty);
+      /* c8 ignore next 3 */
+      } catch (err) {
+        ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
+      }
     }
     return ok(OpportunityDto.toJSON(oppty));
   };

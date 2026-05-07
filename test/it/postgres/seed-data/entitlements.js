@@ -33,4 +33,10 @@ export const entitlements = [
     product_code: 'ASO',
     tier: 'PAID',
   },
+  {
+    id: 'dd333333-3333-4333-b333-333333333333',
+    organization_id: '33330000-3333-4333-b333-000000000333',
+    product_code: 'LLMO',
+    tier: 'PAID',
+  },
 ];

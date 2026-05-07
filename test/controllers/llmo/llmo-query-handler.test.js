@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -187,7 +186,7 @@ describe('llmo-query-handler', () => {
       await expect(
         queryLlmoFiles(mockContext, mockLlmoConfig),
       ).to.be.rejectedWith('External API returned 500');
-      expect(mockLog.error).to.have.been.calledWith(
+      expect(mockLog.debug).to.have.been.calledWith(
         sinon.match(/Failed to fetch data from external endpoint/),
       );
     });
@@ -200,7 +199,7 @@ describe('llmo-query-handler', () => {
       await expect(
         queryLlmoFiles(mockContext, mockLlmoConfig),
       ).to.be.rejectedWith('Request timeout after 15000ms');
-      expect(mockLog.error).to.have.been.calledWith(
+      expect(mockLog.debug).to.have.been.calledWith(
         sinon.match(/Request timeout after 15000ms/),
       );
     });
@@ -657,7 +656,7 @@ describe('llmo-query-handler', () => {
       expect(result.data[0].status).to.equal('success');
       expect(result.data[1].status).to.equal('error');
       expect(result.data[1].error).to.equal('Network error');
-      expect(mockLog.error).to.have.been.calledWith(
+      expect(mockLog.debug).to.have.been.calledWith(
         sinon.match(/Error fetching and processing file file2.json/),
       );
     });

@@ -16,6 +16,7 @@ import {
   forbidden,
   badRequest,
   ok,
+  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { buildS3Prefix, ErrorWithStatusCode } from '../support/utils.js';
@@ -167,8 +168,66 @@ function ScrapeController(ctx) {
     }
   }
 
+  /**
+   * Get scraped metadata (title, description, h1) for a site's pages.
+   * Reads scrape.json objects from S3 for the given site.
+   * Accepts an optional query parameter `path` to fetch metadata for a specific page.
+   * If no path is provided, returns metadata for the homepage.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} JSON response with page metadata.
+   */
+  async function getMetadata(context) {
+    const { siteId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can access site metadata');
+    }
+
+    const data = context.data || {};
+    const pagePath = data.path || '';
+    const normalizedPath = pagePath.replace(/\/$/, '');
+    const s3Key = `scrapes/${siteId}${normalizedPath}/scrape.json`;
+
+    try {
+      const command = new GetObjectCommand({
+        Bucket: bucketName,
+        Key: s3Key,
+      });
+      const response = await s3Client.send(command);
+      const body = await response.Body.transformToString();
+      const scrapeData = JSON.parse(body);
+
+      const tags = scrapeData?.scrapeResult?.tags;
+      if (!tags) {
+        return notFound('No metadata found for the requested page');
+      }
+
+      return ok({
+        title: tags.title || null,
+        description: tags.description || null,
+        h1: tags.h1 || null,
+      });
+    } catch (err) {
+      if (err.name === 'NoSuchKey') {
+        return notFound('No scraped data found for the requested page');
+      }
+      log.error(`Failed to fetch metadata from S3 for site ${siteId}, key: ${s3Key}`, err);
+      return internalServerError('Failed to retrieve metadata');
+    }
+  }
+
   return {
     getFileByKey,
+    getMetadata,
     listScrapedContentFiles,
   };
 }

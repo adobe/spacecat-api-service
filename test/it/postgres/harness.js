@@ -29,20 +29,32 @@ import { startPostgres, stopPostgres } from './setup.js';
 /** Shared state populated during beforeAll, consumed by test files. */
 export const ctx = {};
 
+// Extended timeout for the harness hooks: docker compose pull + container startup
+// + dbmate migrations + PostgREST readiness can routinely exceed mocha's default
+// 2s hook timeout (and the prior 30s ceiling that caused IT failures on heavier
+// data-service image versions). 180s gives enough headroom on cold CI runs without
+// masking real bugs.
+const HARNESS_HOOK_TIMEOUT_MS = 180_000;
+
 export const mochaHooks = {
   async beforeAll() {
+    this.timeout(HARNESS_HOOK_TIMEOUT_MS);
+
     const { publicKeyB64 } = await initAuth();
     const tokens = await createAllTokens();
 
     await startPostgres();
 
-    const env = buildEnv('postgres', publicKeyB64);
+    const env = buildEnv(publicKeyB64);
     const baseUrl = await startServer(env);
 
     ctx.httpClient = createHttpClient(baseUrl, tokens);
+    ctx.baseUrl = baseUrl;
+    ctx.tokens = tokens;
   },
 
   async afterAll() {
+    this.timeout(HARNESS_HOOK_TIMEOUT_MS);
     await stopServer();
     await stopPostgres();
   },

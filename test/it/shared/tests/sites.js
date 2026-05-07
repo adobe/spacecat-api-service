@@ -11,18 +11,27 @@
  */
 
 import { expect } from 'chai';
-import { expectISOTimestamp, sortById } from '../helpers/assertions.js';
+import { expectISOTimestamp } from '../helpers/assertions.js';
 import {
   ORG_1_ID,
   ORG_2_ID,
   SITE_1_ID,
   SITE_1_BASE_URL,
-  SITE_2_ID,
   SITE_3_ID,
   SITE_3_BASE_URL,
+  SITE_4_ID,
+  SITE_4_BASE_URL,
+  SITE_LEGACY_LLMO_ID,
+  SITE_NEW_LLMO_ID,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
 } from '../seed-ids.js';
+
+// LLMO-4176 mode-resolution test sites are seeded with intentionally
+// historical / future created_at values to straddle the Brandalf GA cutoff
+// (2026-04-01). They MUST be excluded from expectSiteListDto, which asserts
+// createdAt is within the last hour.
+const LLMO_FIXTURE_SITE_IDS = new Set([SITE_LEGACY_LLMO_ID, SITE_NEW_LLMO_ID]);
 
 /**
  * Base64-encode a URL for the /sites/by-base-url/:baseURL path parameter.
@@ -47,6 +56,23 @@ function expectSiteDto(site) {
 }
 
 /**
+ * Asserts that an object has the slim SiteDto.toListJSON shape
+ * returned by GET /sites (list endpoint).
+ */
+function expectSiteListDto(site) {
+  expect(site).to.be.an('object');
+  expect(site.id).to.be.a('string');
+  expect(site.baseURL).to.be.a('string');
+  expect(site.organizationId).to.be.a('string');
+  expectISOTimestamp(site.createdAt, 'createdAt');
+  expectISOTimestamp(site.updatedAt, 'updatedAt');
+  expect(site).to.have.property('deliveryType');
+  expect(site).to.have.property('isLive');
+  expect(site).to.have.property('config');
+  expect(site).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
+}
+
+/**
  * Shared Site endpoint tests.
  * Runs identically against both DynamoDB (v2) and PostgreSQL (v3).
  *
@@ -60,21 +86,60 @@ export default function siteTests(getHttpClient, resetData) {
     // ── Read-only assertions on baseline seed ──
 
     describe('GET /sites', () => {
-      it('admin: returns all sites', async () => {
+      it('admin: returns all sites (excluding default org)', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(3);
-        const sorted = sortById(res.body);
-        sorted.forEach((site) => expectSiteDto(site));
-        expect(sorted[0].id).to.equal(SITE_1_ID);
-        expect(sorted[1].id).to.equal(SITE_2_ID);
-        expect(sorted[2].id).to.equal(SITE_3_ID);
+        // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
+        // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3) + SITE_LEGACY_LLMO + SITE_NEW_LLMO
+        // (LLMO-4176 mode-resolution test fixtures, neither under ORG_1).
+        expect(res.body).to.be.an('array').with.lengthOf(4);
+        // Skip the LLMO fixtures in the DTO check — they have intentional
+        // historical/future createdAt values that fail the "recent" assertion.
+        res.body
+          .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
+          .forEach((s) => expectSiteListDto(s));
+        const ids = res.body.map((s) => s.id);
+        expect(ids).to.include(SITE_3_ID);
+        expect(ids).to.include(SITE_4_ID);
       });
 
       it('user: returns 403', async () => {
         const http = getHttpClient();
         const res = await http.user.get('/sites');
+        expect(res.status).to.equal(403);
+      });
+
+      // ── S2S readAll capability path ──
+      // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
+
+      it('s2sConsumerReadAll: returns all sites (site:readAll)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get('/sites');
+        expect(res.status).to.equal(200);
+        // Same exclusions as the admin path apply (DEFAULT_ORGANIZATION_ID excluded).
+        // Admin baseline returns 4: SITE_3, SITE_4, SITE_LEGACY_LLMO, SITE_NEW_LLMO.
+        expect(res.body).to.be.an('array').with.lengthOf(4);
+        const ids = res.body.map((s) => s.id);
+        expect(ids).to.include(SITE_3_ID);
+        expect(ids).to.include(SITE_4_ID);
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no site:readAll)', async () => {
+        // Layer 1 (s2sAuthWrapper) denies - GET /sites now maps to site:readAll which
+        // CONSUMER_1 does NOT hold.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get('/sites');
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerUnknown: returns 403 (no Consumer row for the (clientId, imsOrgId) pair)', async () => {
+        // Trust-boundary assertion: a token signed correctly by the auth-service for
+        // a (clientId, imsOrgId) pair that has no Consumer row is rejected at Layer 1
+        // by the s2sAuthWrapper - the Consumer-record lookup is the load-bearing
+        // isolation invariant per the design.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerUnknown.get('/sites');
         expect(res.status).to.equal(403);
       });
     });
@@ -129,6 +194,51 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.admin.get('/sites/not-a-uuid');
         expect(res.status).to.equal(400);
       });
+
+      // ── Delegation persona smoke tests ──
+      // hasAccess(site) is called without productCode, so delegation does NOT trigger.
+      // delegatedUser has primary tenant ORG_3 only.
+
+      it('delegatedUser: returns SITE_4 (owned by primary org ORG_3)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(`/sites/${SITE_4_ID}`);
+        expect(res.status).to.equal(200);
+        expectSiteDto(res.body);
+        expect(res.body.id).to.equal(SITE_4_ID);
+        expect(res.body.baseURL).to.equal(SITE_4_BASE_URL);
+      });
+
+      it('delegatedUser: returns 403 for SITE_1 (owned by ORG_1, delegation does not apply without productCode)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(`/sites/${SITE_1_ID}`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('delegatedUser: returns 403 for SITE_3 (owned by ORG_2, not in any tenant)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(`/sites/${SITE_3_ID}`);
+        expect(res.status).to.equal(403);
+      });
+
+      // ── Read-only admin smoke tests ──
+      // readOnlyAdminWrapper is fail-closed: without a LaunchDarkly SDK key in the
+      // IT environment the feature-flag evaluation returns false, so ALL routes return
+      // 403 regardless of HTTP method. These tests verify:
+      //   1. The token is correctly parsed as a read-only admin identity.
+      //   2. The readOnlyAdminWrapper is wired and rejects the request (fail-closed).
+      // In an environment with the LD flag enabled, GET routes would return 200 and
+      // POST/mutating routes would return 403.
+      it('readOnlyAdmin: returns 403 for GET /sites/:siteId (fail-closed without LD flag)', async () => {
+        const http = getHttpClient();
+        const res = await http.readOnlyAdmin.get(`/sites/${SITE_1_ID}`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('readOnlyAdmin: returns 403 for POST /sites (fail-closed without LD flag)', async () => {
+        const http = getHttpClient();
+        const res = await http.readOnlyAdmin.post('/sites', { baseURL: 'https://ro-admin-test.example.com' });
+        expect(res.status).to.equal(403);
+      });
     });
 
     describe('GET /sites/by-base-url/:baseURL', () => {
@@ -168,8 +278,9 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/aem_edge');
         expect(res.status).to.equal(200);
-        // SITE_1 + SITE_3 are aem_edge; SITE_2 is aem_cs
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        // SITE_1, SITE_3, SITE_4, SITE_LEGACY_LLMO, SITE_NEW_LLMO are aem_edge;
+        // SITE_2 is aem_cs.
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });
@@ -192,7 +303,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/AEM_EDGE');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });
@@ -202,7 +313,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/Aem_Edge');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });

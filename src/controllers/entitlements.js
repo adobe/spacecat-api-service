@@ -96,7 +96,13 @@ function EntitlementsController(ctx) {
       return forbidden('Only admins can create entitlements');
     }
     const { organizationId } = context.params;
-    const { productCode = EntitlementModel.PRODUCT_CODES.LLMO } = context.data || {};
+    const {
+      productCode = EntitlementModel.PRODUCT_CODES.LLMO,
+      tier = FREE_TRIAL_TIER,
+    } = context.data || {};
+    if (typeof tier !== 'string' || !Object.values(EntitlementModel.TIERS).includes(tier)) {
+      return badRequest(`Invalid tier. Must be one of: ${Object.values(EntitlementModel.TIERS).join(', ')}`);
+    }
     if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
     }
@@ -113,7 +119,7 @@ function EntitlementsController(ctx) {
         organization,
         productCode,
       );
-      const { entitlement } = await tierClient.createEntitlement(FREE_TRIAL_TIER);
+      const { entitlement } = await tierClient.createEntitlement(tier);
       return created(EntitlementDto.toJSON(entitlement));
     } catch (e) {
       context.log.error(`Error creating entitlement for organization ${organizationId}: ${e.message}`);

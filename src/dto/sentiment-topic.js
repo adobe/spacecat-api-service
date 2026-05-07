@@ -38,7 +38,6 @@ export const SentimentTopicDto = {
     topicId: topic.getTopicId(),
     name: topic.getName(),
     description: topic.getDescription(),
-    urls: topic.getUrls() || [],
     enabled: topic.getEnabled(),
     createdAt: topic.getCreatedAt(),
     updatedAt: topic.getUpdatedAt(),

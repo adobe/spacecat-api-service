@@ -1,0 +1,269 @@
+v2-brands-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: status
+      in: query
+      required: false
+      description: Filter by brand status. Default excludes deleted brands.
+      schema:
+        type: string
+        enum: [active, pending, deleted]
+        example: 'active'
+  get:
+    tags:
+      - brands
+      - customer-config
+    summary: List brands for an organization (v2)
+    description: |
+      Returns all brands for the given organization, backed by PostgREST/Aurora.
+      By default, deleted brands are excluded. Use the `status` query parameter
+      to filter by specific status or include deleted brands.
+    operationId: listBrandsForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: Brands retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2BrandListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+  post:
+    tags:
+      - brands
+      - customer-config
+    summary: Create or upsert a brand (v2)
+    description: |
+      Creates a new brand for the organization. If a brand with the same name
+      already exists for this organization, the existing brand is updated
+      (upsert on `organization_id, name` conflict).
+
+      Nested arrays (`urls`, `socialAccounts`, `earnedContent`, `brandAliases`,
+      `competitors`) use full-replace semantics — existing child rows are deleted
+      and re-inserted on each write.
+
+      **Note:** The current implementation always returns 201 regardless of
+      create vs update. Per HTTP semantics, upsert-update should return 200.
+    operationId: createBrandForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2BrandInput'
+    responses:
+      '201':
+        description: Brand created (or updated via upsert)
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
+v2-brand-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - brands
+      - customer-config
+    summary: Get a brand by ID (v2)
+    description: |
+      Retrieves a single brand by its UUID for the given organization.
+    operationId: getBrandForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: Brand retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or brand not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+  patch:
+    tags:
+      - brands
+      - customer-config
+    summary: Update a brand (v2)
+    description: |
+      Updates an existing brand. Only provided fields are updated.
+      Nested arrays use full-replace semantics on each write.
+    operationId: updateBrandForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2BrandUpdateInput'
+    responses:
+      '200':
+        description: Brand updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or brand not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+  delete:
+    tags:
+      - brands
+      - customer-config
+    summary: Delete a brand (v2)
+    description: |
+      Soft-deletes a brand by setting its status to `deleted`.
+      The brand remains queryable with `?status=deleted`.
+    operationId: deleteBrandForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '204':
+        description: Brand deleted successfully
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or brand not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
+v2-brand-for-org-site:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: siteId
+      in: path
+      required: true
+      description: Site ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - brands
+      - customer-config
+    summary: Resolve the active brand for an (org, site) pair (v2)
+    description: |
+      Returns the single active brand row that maps to the given site within
+      the given organization. Used by downstream brand-presence pipelines
+      (DRS scheduler, audit-worker geo-brand-presence) to discover the v2
+      `brand_id` to thread onto Job records.
+
+      Gating: returns 404 unless the organization is v2-eligible — meaning
+      `brandalf=true` OR `brandalf_migration=true`. The migration flag
+      surfaces brands during the dual-publish window (BP DB sync is on,
+      v2 brand records exist) so the BP runner can enter the v2 path
+      before brandalf flips fully. Pure-v1 organizations receive 404,
+      which callers interpret as "no v2 brand — fall back to v1 path."
+
+      Lookup: `brands.site_id == siteId` AND `status == 'active'` AND
+      `organization_id == orgId`. `brands.site_id` is the authoritative
+      mapping from a brand to its primary site (set during v2 onboarding).
+      `brand_sites` is intentionally not consulted — that join table also
+      stores citation entries, so a `brand_sites` match does not imply a
+      brand IS the brand for that site.
+
+      LLMO-4592 invariant: ACTIVE brands have a unique `(organization_id,
+      site_id)` pair. If the data violates that invariant, the first row
+      (deterministic by name) is returned and a warning logged.
+    operationId: getBrandForOrgSite
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: Active brand for site resolved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: |
+          User does not have access to this organization, OR the site does not
+          belong to the organization (tenant isolation — matches the same
+          check on `POST /v2/orgs/{spaceCatId}/sites/{siteId}/sync-config`).
+      '404':
+        description: |
+          Organization not found, site not found, organization is not in v2
+          mode, or no active brand for this site.
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)

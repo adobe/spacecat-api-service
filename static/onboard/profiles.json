@@ -26,7 +26,13 @@
 			"alt-text": {},
 			"cwv": {},
 			"broken-backlinks": {},
-			"scrape-top-pages": {}
+			"scrape-top-pages": {},
+			"broken-backlinks-auto-suggest": {},
+			"broken-backlinks-auto-fix": {},
+			"alt-text-auto-fix": {},
+			"alt-text-auto-suggest-mystique": {},
+			"cwv-auto-fix": {},
+			"cwv-auto-suggest": {}
 		},
 		"imports": {
 			"organic-traffic": {},
@@ -68,7 +74,6 @@
 			"scrape-top-pages": {},
 			"broken-backlinks": {},
 			"broken-internal-links": {},
-			"experimentation-opportunities": {},
 			"meta-tags": {},
 			"product-metatags": {},
 			"commerce-product-enrichments": {},
@@ -105,11 +110,11 @@
 		"integrations": {}
 	},
 	"paid":  {
+		"protected": true,
 		"audits": {
 			"scrape-top-pages": {},
 			"broken-backlinks": {},
 			"broken-internal-links": {},
-			"experimentation-opportunities": {},
 			"meta-tags": {},
 			"redirect-chains": {},
 			"cwv": {},
@@ -124,7 +129,8 @@
 			"accessibility": {},
 			"hreflang": {},
 			"security-vulnerabilities": {},
-			"security-vulnerabilities-auto-suggest": {}
+			"security-vulnerabilities-auto-suggest": {},
+			"wikipedia-analysis": {}
 		},
 		"imports": {
 			"organic-traffic" : {},

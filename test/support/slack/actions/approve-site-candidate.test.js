@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { SiteCandidate } from '@adobe/spacecat-shared-data-access';
 
 import { use, expect } from 'chai';

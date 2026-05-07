@@ -145,7 +145,9 @@ export default class OrgDetectorAgent {
    * @returns {OrgDetectorAgent} A new OrgDetectorAgent instance.
    */
   static fromContext(context) {
-    if (context.orgDetectorAgent) return context.orgDetectorAgent;
+    if (context.orgDetectorAgent) {
+      return context.orgDetectorAgent;
+    }
 
     const {
       dataAccess,
@@ -237,7 +239,9 @@ export default class OrgDetectorAgent {
    */
   #shouldContinue(state) {
     const msgs = state.messages;
-    if (msgs.length === 0) return END;
+    if (msgs.length === 0) {
+      return END;
+    }
 
     const lastMessage = msgs[msgs.length - 1];
     // if the agent just requested a tool call, go to "tools"

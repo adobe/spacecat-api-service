@@ -16,8 +16,12 @@ import {
   SITE_1_ID,
   SITE_2_ID,
   SITE_3_ID,
+  SITE_4_ID,
   SITE_ENROLLMENT_1_ID,
+  SITE_ENROLLMENT_2_ID,
+  SITE_ENROLLMENT_3_ID,
   ENTITLEMENT_1_ID,
+  ENTITLEMENT_3_ID,
   NON_EXISTENT_SITE_ID,
 } from '../seed-ids.js';
 
@@ -52,11 +56,17 @@ export default function siteEnrollmentTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.get(BASE);
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(1);
-        expectSiteEnrollmentDto(res.body[0]);
-        expect(res.body[0].id).to.equal(SITE_ENROLLMENT_1_ID);
-        expect(res.body[0].siteId).to.equal(SITE_1_ID);
-        expect(res.body[0].entitlementId).to.equal(ENTITLEMENT_1_ID);
+        // SITE_1 has two enrollments: ENTITLEMENT_1 (ORG_1, LLMO FREE_TRIAL)
+        // + ENTITLEMENT_3 (ORG_3, LLMO PAID)
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((e) => expectSiteEnrollmentDto(e));
+        const ids = res.body.map((e) => e.id);
+        expect(ids).to.include(SITE_ENROLLMENT_1_ID);
+        expect(ids).to.include(SITE_ENROLLMENT_2_ID);
+        res.body.forEach((e) => expect(e.siteId).to.equal(SITE_1_ID));
+        const entitlementIds = res.body.map((e) => e.entitlementId);
+        expect(entitlementIds).to.include(ENTITLEMENT_1_ID);
+        expect(entitlementIds).to.include(ENTITLEMENT_3_ID);
       });
 
       it('user: returns 403 for denied site', async () => {
@@ -82,6 +92,25 @@ export default function siteEnrollmentTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.get('/sites/not-a-uuid/site-enrollments');
         expect(res.status).to.equal(400);
+      });
+
+      // ── Delegation persona smoke tests ──
+      // Site enrollment endpoint uses hasAccess(site) without productCode.
+
+      it('delegatedUser: returns enrollment for SITE_4 (primary org ORG_3, enrolled in ENTITLEMENT_3)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(`/sites/${SITE_4_ID}/site-enrollments`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(SITE_ENROLLMENT_3_ID);
+        expect(res.body[0].siteId).to.equal(SITE_4_ID);
+        expect(res.body[0].entitlementId).to.equal(ENTITLEMENT_3_ID);
+      });
+
+      it('delegatedUser: returns 403 for SITE_1 (ORG_1, no primary-org access)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(`/sites/${SITE_1_ID}/site-enrollments`);
+        expect(res.status).to.equal(403);
       });
     });
   });

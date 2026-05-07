@@ -10,7 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
-import { ORG_1_ID, TRIAL_USER_1_ID, TRIAL_USER_1_EMAIL } from '../../shared/seed-ids.js';
+import {
+  ORG_1_ID,
+  TRIAL_USER_1_ID,
+  TRIAL_USER_1_EMAIL,
+  TRIAL_USER_2_ID,
+  TRIAL_USER_2_EMAIL,
+} from '../../shared/seed-ids.js';
 
 export const trialUsers = [
   {
@@ -18,5 +24,14 @@ export const trialUsers = [
     email_id: TRIAL_USER_1_EMAIL,
     organization_id: ORG_1_ID,
     status: 'INVITED',
+  },
+  // Pre-seeded so validateEntitlement's FREE_TRIAL branch finds this user instead of trying
+  // to create a new one when delegatedUser (trial_email='test-delegate@example.com') accesses
+  // SITE_1 (owned by ORG_1 whose LLMO entitlement is FREE_TRIAL).
+  {
+    id: TRIAL_USER_2_ID,
+    email_id: TRIAL_USER_2_EMAIL,
+    organization_id: ORG_1_ID,
+    status: 'REGISTERED',
   },
 ];

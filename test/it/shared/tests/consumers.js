@@ -11,10 +11,11 @@
  */
 
 import { expect } from 'chai';
-import { expectISOTimestamp } from '../helpers/assertions.js';
+// expectISOTimestamp not used - consumer seed has fixed timestamps
 import {
   CONSUMER_1_ID,
   CONSUMER_1_CLIENT_ID,
+  CONSUMER_2_ID,
   NON_EXISTENT_CONSUMER_ID,
 } from '../seed-ids.js';
 
@@ -30,8 +31,9 @@ function expectConsumerDto(consumer) {
   expect(consumer.consumerName).to.be.a('string');
   expect(consumer.status).to.be.a('string');
   expect(consumer.capabilities).to.be.an('array');
-  expectISOTimestamp(consumer.createdAt, 'createdAt');
-  expectISOTimestamp(consumer.updatedAt, 'updatedAt');
+  // Seed data has fixed timestamps, so just check format (not recency)
+  expect(consumer.createdAt).to.be.a('string').and.match(/^\d{4}-\d{2}-\d{2}T/);
+  expect(consumer.updatedAt).to.be.a('string').and.match(/^\d{4}-\d{2}-\d{2}T/);
 }
 
 /**
@@ -51,12 +53,12 @@ export default function consumerTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/consumers');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(1);
-        expectConsumerDto(res.body[0]);
-        expect(res.body[0].consumerId).to.equal(CONSUMER_1_ID);
-        expect(res.body[0].clientId).to.equal(CONSUMER_1_CLIENT_ID);
-        expect(res.body[0].consumerName).to.equal('IT Test Consumer');
-        expect(res.body[0].status).to.equal('ACTIVE');
+        // CONSUMER_1 (site:read + site:write) and CONSUMER_2 (readAll capabilities).
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((c) => expectConsumerDto(c));
+        const ids = res.body.map((c) => c.consumerId);
+        expect(ids).to.include(CONSUMER_1_ID);
+        expect(ids).to.include(CONSUMER_2_ID);
       });
 
       it('user: returns 403 (requires S2S admin)', async () => {
@@ -141,7 +143,7 @@ export default function consumerTests(getHttpClient, resetData) {
 
       it('admin: revokes consumer', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(`/consumers/${CONSUMER_1_ID}/revoke`);
+        const res = await http.admin.post(`/consumers/${CONSUMER_1_ID}/revoke`, {});
         expect(res.status).to.equal(200);
         expect(res.body.status).to.equal('REVOKED');
         expect(res.body.revokedAt).to.be.a('string');
@@ -149,7 +151,7 @@ export default function consumerTests(getHttpClient, resetData) {
 
       it('user: returns 403 (requires S2S admin)', async () => {
         const http = getHttpClient();
-        const res = await http.user.post(`/consumers/${CONSUMER_1_ID}/revoke`);
+        const res = await http.user.post(`/consumers/${CONSUMER_1_ID}/revoke`, {});
         expect(res.status).to.equal(403);
       });
     });

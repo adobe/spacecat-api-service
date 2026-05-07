@@ -32,7 +32,6 @@ import { isValidDateInterval } from '../../../utils/date-utils.js';
 const PHRASES = ['run import'];
 
 const SUPPORTS_PAGE_URLS = [
-  'llmo-prompts-ahrefs',
   'organic-keywords',
   'organic-keywords-nonbranded',
   'organic-keywords-ai-overview',
@@ -54,7 +53,7 @@ function RunImportCommand(context) {
     description: 'Runs the specified import type for the site identified with its id, and optionally for a date range.'
       + '\nOnly selected SpaceCat fluid team members can run imports.'
       + '\nCurrently this will run the import for all sources and all destinations configured for the site, hence be aware of costs'
-      + ' (source: ahrefs) when choosing the date range.',
+      + ' (source: seo) when choosing the date range.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {importType} {baseURL|CSV-file} {startDate} {endDate}`,
   });

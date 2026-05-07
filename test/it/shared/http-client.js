@@ -11,11 +11,19 @@
  */
 
 /**
- * Creates an HTTP client with three pre-configured auth personas.
+ * Creates an HTTP client with pre-configured auth personas.
  *
  * @param {string} baseUrl - The dev server base URL (e.g., http://localhost:3002)
- * @param {{ admin: string, user: string, trialUser: string }} tokens - JWT tokens
- * @returns {{ admin: object, user: object, trialUser: object }}
+ * @param {{ admin: string, user: string, trialUser: string, delegatedUser: string,
+ *   delegatedUserTruncated: string, delegatedUserNoSource: string,
+ *   readOnlyAdmin: string,
+ *   s2sConsumerReadOnly: string, s2sConsumerReadAll: string,
+ *   s2sConsumerUnknown: string }} tokens - JWT tokens
+ * @returns {{ admin: object, user: object, trialUser: object, delegatedUser: object,
+ *   delegatedUserTruncated: object, delegatedUserNoSource: object,
+ *   readOnlyAdmin: object,
+ *   s2sConsumerReadOnly: object, s2sConsumerReadAll: object,
+ *   s2sConsumerUnknown: object }}
  */
 export function createHttpClient(baseUrl, tokens) {
   async function request(method, path, body, token, extraHeaders = {}) {
@@ -28,7 +36,9 @@ export function createHttpClient(baseUrl, tokens) {
 
     // Allow callers to omit default headers by setting them to undefined/null
     Object.keys(headers).forEach((key) => {
-      if (headers[key] == null) delete headers[key];
+      if (headers[key] == null) {
+        delete headers[key];
+      }
     });
 
     const options = { method, headers };
@@ -68,5 +78,12 @@ export function createHttpClient(baseUrl, tokens) {
     admin: makeMethods(tokens.admin),
     user: makeMethods(tokens.user),
     trialUser: makeMethods(tokens.trialUser),
+    delegatedUser: makeMethods(tokens.delegatedUser),
+    delegatedUserTruncated: makeMethods(tokens.delegatedUserTruncated),
+    delegatedUserNoSource: makeMethods(tokens.delegatedUserNoSource),
+    readOnlyAdmin: makeMethods(tokens.readOnlyAdmin),
+    s2sConsumerReadOnly: makeMethods(tokens.s2sConsumerReadOnly),
+    s2sConsumerReadAll: makeMethods(tokens.s2sConsumerReadAll),
+    s2sConsumerUnknown: makeMethods(tokens.s2sConsumerUnknown),
   };
 }

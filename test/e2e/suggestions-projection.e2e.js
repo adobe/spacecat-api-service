@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -686,8 +684,11 @@ describe('Suggestion Projection Views - E2E Tests', () => {
 
       results.forEach((r, index) => {
         let statusIcon = '[FAIL]';
-        if (r.status === 'pass') statusIcon = '[PASS]';
-        else if (r.status === 'empty') statusIcon = '[SKIP]';
+        if (r.status === 'pass') {
+          statusIcon = '[PASS]';
+        } else if (r.status === 'empty') {
+          statusIcon = '[SKIP]';
+        }
         console.log(`${index + 1}. ${statusIcon} Opportunity: ${r.opportunityId}`);
         if (r.suggestionCount !== undefined) {
           console.log(`      Suggestions: ${r.suggestionCount}`);
@@ -819,8 +820,11 @@ describe('Suggestion Projection Views - E2E Tests', () => {
 
       results.forEach((r) => {
         let icon = '[FAIL]';
-        if (r.status === 'pass') icon = '[PASS]';
-        else if (r.status === 'empty') icon = '[SKIP]';
+        if (r.status === 'pass') {
+          icon = '[PASS]';
+        } else if (r.status === 'empty') {
+          icon = '[SKIP]';
+        }
         console.log(`${icon} ${r.type}`);
         console.log(`      Opportunity ID: ${r.oppId}`);
         if (r.dataFields && r.dataFields.length > 0) {

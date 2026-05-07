@@ -335,5 +335,146 @@ describe('OpportunitySummaryDto', () => {
       expect(result.impact).to.equal(0);
       expect(result.impactFieldName).to.be.null;
     });
+
+    it('extracts URL from opportunity data.page field for no-cta-above-the-fold', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'No engageable content above the fold on mobile',
+        getDescription: () => 'The page lacks clear call-to-action (CTA) buttons above the fold.',
+        getType: () => 'no-cta-above-the-fold',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          page: 'https://example.com/specific-page',
+          pageViews: 38800,
+          projectedTrafficLost: 30500,
+          projectedTrafficValue: 24400,
+        }),
+      };
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, []);
+
+      expect(result.urls).to.deep.equal(['https://example.com/specific-page']);
+      expect(result.pageViews).to.equal(38800);
+      expect(result.projectedTrafficValue).to.equal(24400);
+    });
+
+    it('extracts URL from suggestion contentFix.page_patch.original_page_url for no-cta-above-the-fold', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'No engageable content above the fold on mobile',
+        getDescription: () => 'The page lacks clear call-to-action (CTA) buttons above the fold.',
+        getType: () => 'no-cta-above-the-fold',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          projectedTrafficValue: 5000,
+        }),
+      };
+
+      const suggestions = [
+        {
+          getData: () => ({
+            contentFix: {
+              page_patch: {
+                original_page_url: 'https://example.com/page-with-fix',
+                changes: { type: 'patch' },
+              },
+            },
+          }),
+          getRank: () => 100,
+        },
+      ];
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, suggestions);
+
+      expect(result.urls).to.deep.equal(['https://example.com/page-with-fix']);
+    });
+
+    it('uses pageViews from opportunity data when available', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Test Description',
+        getType: () => 'no-cta-above-the-fold',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          page: 'https://example.com/page',
+          pageViews: 50000,
+          projectedTrafficValue: 10000,
+        }),
+      };
+
+      const suggestions = [
+        {
+          getData: () => ({ url: 'https://example.com/other-page' }),
+          getRank: () => 200, // Should be ignored when pageViews is in opportunity data
+        },
+      ];
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, suggestions);
+
+      expect(result.pageViews).to.equal(50000);
+    });
+
+    it('combines URLs from both opportunity data.page and suggestions', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Test Description',
+        getType: () => 'no-cta-above-the-fold',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          page: 'https://example.com/main-page',
+          pageViews: 10000,
+        }),
+      };
+
+      const suggestions = [
+        {
+          getData: () => ({
+            contentFix: {
+              page_patch: {
+                original_page_url: 'https://example.com/another-page',
+              },
+            },
+          }),
+          getRank: () => 0,
+        },
+      ];
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, suggestions);
+
+      expect(result.urls).to.have.lengthOf(2);
+      expect(result.urls).to.include('https://example.com/main-page');
+      expect(result.urls).to.include('https://example.com/another-page');
+    });
+
+    it('returns no URLs for consent-banner opportunities even when page-specific data exists', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Cookie consent',
+        getDescription: () => 'Cookie banner blocks the experience',
+        getType: () => 'consent-banner',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          page: 'https://example.com/landing-page',
+          pageViews: 12000,
+          projectedTrafficValue: 5000,
+        }),
+      };
+
+      const suggestions = [
+        {
+          getData: () => ({
+            url: 'https://example.com/should-not-link',
+          }),
+          getRank: () => 50,
+        },
+      ];
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, suggestions);
+
+      expect(result.urls).to.deep.equal([]);
+      expect(result.pageViews).to.equal(12000);
+    });
   });
 });

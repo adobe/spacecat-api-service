@@ -428,7 +428,7 @@ guideline-audits:
     summary: Link audit types to a guideline
     description: |
       Adds audit type associations to a guideline.
-      Valid audit types: wikipedia-analysis, reddit-analysis, youtube-analysis, etc.
+      Valid audit types: wikipedia-analysis, reddit-analysis, youtube-analysis, cited-analysis, etc.
     operationId: linkGuidelineAudits
     requestBody:
       required: true
