@@ -774,7 +774,13 @@ describe('Brands Controller', () => {
         if (table === 'prompts') {
           const insertChain = { select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) };
           return {
-            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  neq: () => thenable({ data: [], error: null }),
+                }),
+              }),
+            }),
             insert: () => insertChain,
             update: () => ({ eq: () => thenable({ error: null }) }),
           };

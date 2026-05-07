@@ -711,7 +711,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -744,8 +750,10 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    ...thenable(existingData),
-                    in: () => thenable(existingData),
+                    neq: () => ({
+                      ...thenable(existingData),
+                      in: () => thenable(existingData),
+                    }),
                   }),
                 }),
               }),
@@ -766,12 +774,54 @@ describe('prompts-storage', () => {
       expect(result.updated).to.equal(1);
     });
 
+    it('does not reactivate a deleted prompt matched by prompt_id', async () => {
+      // The existingQuery now filters out deleted rows (.neq('status', 'deleted')).
+      // So a deleted row is invisible to the lookup and the UPDATE branch is never reached.
+      const updateStub = sinon.stub().returns({ eq: () => ({ then: (r) => r({ error: null }) }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    // neq filters out deleted row; returns no results
+                    neq: () => ({
+                      ...thenable({ data: [], error: null }),
+                      in: () => thenable({ data: [], error: null }),
+                    }),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'deleted-prompt-id', prompt: 'Deleted prompt text', regions: [] }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(0);
+      expect(updateStub.callCount).to.equal(0);
+    });
+
     it('throws on insert error', async () => {
       const client = {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: null, error: { message: 'Insert failed' } }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -803,8 +853,10 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    ...thenable(existingData),
-                    in: () => thenable(existingData),
+                    neq: () => ({
+                      ...thenable(existingData),
+                      in: () => thenable(existingData),
+                    }),
                   }),
                 }),
               }),
@@ -830,7 +882,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: null, error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -852,7 +910,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -883,7 +947,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -891,7 +961,13 @@ describe('prompts-storage', () => {
           // buildLookupMaps returns empty arrays → maps will be empty
           // ensureLookupEntries will upsert the missing entries by name
           return {
-            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  neq: () => thenable({ data: [], error: null }),
+                }),
+              }),
+            }),
             upsert: (rows) => {
               if (rows[0]?.category_id !== undefined) {
                 upsertedRows.categories = rows;
@@ -935,7 +1011,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -989,7 +1071,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1041,7 +1129,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1090,7 +1184,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1125,7 +1225,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1160,7 +1266,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1195,7 +1307,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1238,8 +1356,10 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    ...thenable(existingData),
-                    in: () => thenable(existingData),
+                    neq: () => ({
+                      ...thenable(existingData),
+                      in: () => thenable(existingData),
+                    }),
                   }),
                 }),
               }),
@@ -1268,8 +1388,10 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    ...thenable({ data: null, error: null }),
-                    in: () => thenable({ data: null, error: null }),
+                    neq: () => ({
+                      ...thenable({ data: null, error: null }),
+                      in: () => thenable({ data: null, error: null }),
+                    }),
                   }),
                 }),
               }),
@@ -1298,8 +1420,10 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    ...thenable({ data: [], error: null }),
-                    in: () => thenable({ data: [], error: null }),
+                    neq: () => ({
+                      ...thenable({ data: [], error: null }),
+                      in: () => thenable({ data: [], error: null }),
+                    }),
                   }),
                 }),
               }),
@@ -1343,8 +1467,10 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    ...thenable({ data: [], error: null }),
-                    in: () => thenable({ data: [], error: null }),
+                    neq: () => ({
+                      ...thenable({ data: [], error: null }),
+                      in: () => thenable({ data: [], error: null }),
+                    }),
                   }),
                 }),
               }),
@@ -1719,7 +1845,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1743,7 +1875,13 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    neq: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
