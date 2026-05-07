@@ -219,24 +219,28 @@ async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
 // AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
 const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
 
-// RFC 1123 hostname: labels of 1-63 alphanumeric/hyphen chars, separated by dots, max 253 chars
-const HOSTNAME_RE = /^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+// RFC 1123 hostname optionally followed by a URL path; no scheme, query string, or fragment.
+// Hostname max 253 chars; labels 1-63 alphanumeric/hyphen chars separated by dots.
+// Valid: nba.com, www.nba.com, nba.com/kings  Invalid: https://nba.com, nba.com?q=1
+// eslint-disable-next-line max-len
+const DOMAIN_RE = /^(?=[^/]{1,253}(?:\/|$))([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(\/[^\s?#]*)?$/;
 
 /**
- * Validates that a domain is a syntactically valid hostname (RFC 1123).
- * @param {string} domain - The domain to validate.
- * @returns {boolean} true if valid hostname, false otherwise.
+ * Validates that a domain string is a syntactically valid hostname or hostname/path (RFC 1123).
+ * @param {string} domain - The domain to validate (e.g. "nba.com" or "nba.com/kings").
+ * @returns {boolean} true if valid, false otherwise.
  */
-function isValidHostname(domain) {
-  return HOSTNAME_RE.test(domain);
+function isValidDomain(domain) {
+  return DOMAIN_RE.test(domain);
 }
 
 /**
  * Validates that a domain is not a private/internal address to prevent SSRF.
- * @param {string} domain - The domain to validate.
+ * @param {string} domain - The domain to validate (may include a path, e.g. "nba.com/kings").
  * @returns {boolean} true if safe, false if potentially dangerous.
  */
 function isSafeDomain(domain) {
+  const hostname = domain.split('/')[0];
   const blocked = [
     /^localhost$/i,
     /^127\./,
@@ -250,7 +254,7 @@ function isSafeDomain(domain) {
     /\.internal$/i,
     /\.private\./i,
   ];
-  return !blocked.some((pattern) => pattern.test(domain));
+  return !blocked.some((pattern) => pattern.test(hostname));
 }
 
 function getReviewerIdentity(context) {
@@ -634,9 +638,9 @@ async function performAsoPlgOnboarding({
   } = dataAccess;
 
   /* c8 ignore next 7 */
-  if (!isValidHostname(domain)) {
+  if (!isValidDomain(domain)) {
     throw Object.assign(
-      new Error('Invalid domain: must be a valid hostname'),
+      new Error('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)'),
       { clientError: true },
     );
   }
@@ -1440,8 +1444,8 @@ function PlgOnboardingController(ctx) {
 
     const updatedBy = isInternalCall ? null : (authInfo?.getProfile()?.email || 'system');
 
-    if (!isValidHostname(domain)) {
-      return badRequest('Invalid domain: must be a valid hostname');
+    if (!isValidDomain(domain)) {
+      return badRequest('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)');
     }
 
     try {

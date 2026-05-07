@@ -675,17 +675,21 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    const invalidHostnames = [
+    const invalidDomains = [
       '../../etc/passwd',
       'domain.com:8080',
       'http://domain.com',
       '-invalid.com',
       `${'a'.repeat(254)}.com`,
       'domain..com',
+      'nba.com?q=1',
+      'nba.com#section',
+      'nba.com/kings?q=1',
+      'nba.com/kings#section',
     ];
 
-    invalidHostnames.forEach((invalidDomain) => {
-      it(`returns 400 for invalid hostname: ${invalidDomain}`, async () => {
+    invalidDomains.forEach((invalidDomain) => {
+      it(`returns 400 for invalid domain: ${invalidDomain}`, async () => {
         const context = buildContext({ domain: invalidDomain });
 
         const res = await controller.onboard(context);
@@ -700,6 +704,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       'myhost.local',
       'service.internal',
       'foo.private.adobe.io',
+      'myhost.local/path',
+      'service.internal/api',
     ];
 
     unsafeDomains.forEach((unsafeDomain) => {
@@ -713,7 +719,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
     });
 
-    // These fail hostname validation before reaching SSRF check
+    // These fail domain validation before reaching SSRF check
     const invalidAsHostnames = [
       'localhost',
       '127.0.0.1',
@@ -733,6 +739,29 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
         expect(res.status).to.equal(400);
         expect(res.value).to.include('Invalid domain');
+      });
+    });
+  });
+
+  // --- Subpath domain support ---
+
+  describe('onboard - subpath domain support', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    const validSubpathDomains = [
+      'nba.com/kings',
+      'nba.com/us/kings',
+      'www.example.com/blog',
+    ];
+
+    validSubpathDomains.forEach((domain) => {
+      it(`accepts subpath domain: ${domain}`, async () => {
+        const context = buildContext({ domain });
+        const res = await controller.onboard(context);
+        expect(res.status).to.not.equal(400);
       });
     });
   });
