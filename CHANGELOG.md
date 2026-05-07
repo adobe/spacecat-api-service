@@ -1,3 +1,10 @@
+## [1.483.1](https://github.com/adobe/spacecat-api-service/compare/v1.483.0...v1.483.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* chunk uploaded status report files to avoid Slack timeout ([#2358](https://github.com/adobe/spacecat-api-service/issues/2358)) ([d099588](https://github.com/adobe/spacecat-api-service/commit/d099588ebb1d8995b1a5b7ae36092bf0c35f29e5))
+
 # [1.483.0](https://github.com/adobe/spacecat-api-service/compare/v1.482.2...v1.483.0) (2026-05-07)
 
 
