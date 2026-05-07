@@ -4552,6 +4552,7 @@ describe('Suggestions Controller', () => {
       const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
       expect(sqsPayload).to.have.property('relationshipContext');
       expect(sqsPayload.relationshipContext).to.have.property('fixTargetPageId', '/content/my-site/en/target-page');
+      expect(sqsPayload.relationshipContext).to.have.property('fixTargetMode', 'local');
       expect(sqsPayload.suggestionIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[2]]);
     });
 
@@ -4953,6 +4954,43 @@ describe('Suggestions Controller', () => {
         'message',
         'fixTargetGroups is not supported for opportunity type "broken-backlinks"',
       );
+    });
+
+    it('accepts fixTargetGroups for alt-text opportunity type', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/my-site/en/target-page',
+                fixTargetMode: 'local',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload).to.have.property('relationshipContext');
+      expect(sqsPayload.relationshipContext).to.have.property('fixTargetPageId', '/content/my-site/en/target-page');
+      expect(sqsPayload.relationshipContext).to.have.property('fixTargetMode', 'local');
     });
 
     it('sends multiple SQS messages for multiple fixTargetGroups', async () => {

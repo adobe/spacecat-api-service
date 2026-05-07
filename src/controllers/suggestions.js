@@ -81,6 +81,8 @@ function SuggestionsController(ctx, sqs, env) {
     'high-page-views-low-form-views',
   ];
 
+  const RELATIONSHIP_AWARE_OPPTY_TYPES = Object.freeze(['meta-tags', 'alt-text']);
+
   const DEFAULT_PAGE_SIZE = 100;
 
   /**
@@ -1057,7 +1059,6 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Relationship-aware autofix is only supported for specific opportunity types.
     // Reject fixTargetGroups for unsupported types to prevent silent pass-through.
-    const RELATIONSHIP_AWARE_OPPTY_TYPES = ['meta-tags', 'alt-text'];
     if (
       isNonEmptyArray(fixTargetGroups)
       && !RELATIONSHIP_AWARE_OPPTY_TYPES.includes(opportunity.getType())
