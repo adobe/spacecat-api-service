@@ -207,7 +207,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: 'x@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('Adobe LLM Optimizer Users\' IMS Product Profile access');
+      ).to.be.rejectedWith('Adobe LLM Optimizer Users\' Product Profile access');
     });
 
     it('rejects trial when ims org id is missing', async () => {
