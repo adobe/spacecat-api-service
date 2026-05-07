@@ -1,3 +1,17 @@
+## [1.482.1](https://github.com/adobe/spacecat-api-service/compare/v1.482.0...v1.482.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* **llmo:** use server-side RPC for sentiment-overview to fix missing weeks ([#2348](https://github.com/adobe/spacecat-api-service/issues/2348)) ([060e36a](https://github.com/adobe/spacecat-api-service/commit/060e36a150c9d6e4049f59157204ca819b43f586)), closes [#548](https://github.com/adobe/spacecat-api-service/issues/548)
+
+# [1.482.0](https://github.com/adobe/spacecat-api-service/compare/v1.481.0...v1.482.0) (2026-05-07)
+
+
+### Features
+
+* **llmo:** add offsite LLMO audits to paid onboarding profile ([#2341](https://github.com/adobe/spacecat-api-service/issues/2341)) ([c425375](https://github.com/adobe/spacecat-api-service/commit/c425375b9ecb93641e8b59061af3bb52967ba5c2))
+
 # [1.481.0](https://github.com/adobe/spacecat-api-service/compare/v1.480.0...v1.481.0) (2026-05-07)
 
 
