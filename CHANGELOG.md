@@ -1,3 +1,10 @@
+## [1.483.3](https://github.com/adobe/spacecat-api-service/compare/v1.483.2...v1.483.3) (2026-05-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.7.1 ([#2365](https://github.com/adobe/spacecat-api-service/issues/2365)) ([8276003](https://github.com/adobe/spacecat-api-service/commit/8276003b2c91a36886e4ee7270e124f3de6bc904))
+
 ## [1.483.2](https://github.com/adobe/spacecat-api-service/compare/v1.483.1...v1.483.2) (2026-05-07)
 
 
