@@ -122,6 +122,7 @@ export const TRIAL_USER_ACTIVITY_1_ID = 'c2222222-2222-4222-a222-222222222222'; 
 // ── AsyncJobs (preflight) ──
 
 export const ASYNC_JOB_1_ID = 'eeee1111-1111-4111-b111-111111111111'; // COMPLETED preflight job
+export const ASYNC_JOB_2_ID = 'eeee2222-2222-4222-a222-222222222222'; // IN_PROGRESS site-detection job
 export const NON_EXISTENT_JOB_ID = 'eeee9999-9999-4999-b999-999999999999';
 
 // ── Consumers (S2S) ──

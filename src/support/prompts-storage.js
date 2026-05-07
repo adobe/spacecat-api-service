@@ -238,9 +238,17 @@ function mapRowToPrompt(row) {
     updatedBy: row.updated_by,
     brandId: brand?.id ?? null,
     brandName: brand?.name ?? null,
+    // `uuid` is the UUID PK consumers must use for FK linkage (e.g. DRS reads
+    // `category.uuid` / `topic.uuid` to populate
+    // `brand_presence_executions.category_id` / `.topic_id`). Documented in
+    // OpenAPI V2Prompt schema; absent here previously, which produced NULL FKs
+    // for the v2 (brandalf) cohort. `id` kept unchanged for backward compat
+    // (today it carries the UUID, not the business key as the OpenAPI schema
+    // suggests; aligning to schema is a deferred breaking change).
     category: category
       ? {
         id: category.id,
+        uuid: category.id,
         name: category.name,
         origin: category.origin,
       }
@@ -248,6 +256,7 @@ function mapRowToPrompt(row) {
     topic: topic
       ? {
         id: topic.id,
+        uuid: topic.id,
         name: topic.name,
       }
       : null,
@@ -500,7 +509,8 @@ export async function upsertPrompts({
     .from('prompts')
     .select('id,prompt_id,text,regions')
     .eq('organization_id', organizationId)
-    .eq('brand_id', brandUuid);
+    .eq('brand_id', brandUuid)
+    .neq('status', 'deleted');
 
   if (incomingIds.length > 0) {
     existingQuery = existingQuery.in('prompt_id', incomingIds);

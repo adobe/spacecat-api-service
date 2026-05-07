@@ -284,6 +284,18 @@ describe('getRouteHandlers', () => {
     getAgenticTrafficMovers: () => null,
     getAgenticTrafficUrlBrandPresence: () => null,
     getAgenticTrafficHasData: () => null,
+    getReferralTrafficHasData: () => null,
+    getReferralTrafficFilterDimensions: () => null,
+    getReferralTrafficKpis: () => null,
+    getReferralTrafficTrend: () => null,
+    getReferralTrafficByPlatform: () => null,
+    getReferralTrafficByRegion: () => null,
+    getReferralTrafficByDevice: () => null,
+    getReferralTrafficByPageIntent: () => null,
+    getReferralTrafficByUrl: () => null,
+    getReferralTrafficUrlTrend: () => null,
+    getReferralTrafficBusinessImpact: () => null,
+    getReferralTrafficWeeks: () => null,
   };
 
   const mockLlmoOpportunitiesController = {
@@ -429,6 +441,11 @@ describe('getRouteHandlers', () => {
     runChecks: sinon.stub(),
   };
 
+  const mockSiteDetectionController = {
+    createSiteDetectionJob: sinon.stub(),
+    getSiteDetectionJobStatus: sinon.stub(),
+  };
+
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
     getAllOnboardings: sinon.stub(),
@@ -498,6 +515,7 @@ describe('getRouteHandlers', () => {
       mockPageRelationshipsController,
       mockEphemeralRunController,
       mockAutofixChecksController,
+      mockSiteDetectionController,
       mockPlgOnboardingController,
       mockDrsBpPgAuditController,
       mockWebhooksController,
@@ -518,6 +536,7 @@ describe('getRouteHandlers', () => {
       'POST /projects',
       'POST /preflight/jobs',
       'POST /preflight/beta/jobs',
+      'POST /sites/detect/jobs',
       'GET /sites',
       'POST /sites',
       'GET /sites.csv',
@@ -676,6 +695,7 @@ describe('getRouteHandlers', () => {
       'GET /projects/by-project-name/:projectName/sites',
       'GET /preflight/jobs/:jobId',
       'GET /preflight/beta/jobs/:jobId',
+      'GET /sites/detect/jobs/:jobId',
       'GET /sites/:siteId',
       'PATCH /sites/:siteId',
       'PATCH /sites/:siteId/config/cdn-logs',
@@ -933,6 +953,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/agentic-traffic/movers',
       'GET /sites/:siteId/agentic-traffic/url-brand-presence',
       'GET /sites/:siteId/agentic-traffic/has-data',
+      'GET /sites/:siteId/referral-traffic/has-data',
       'GET /sites/:siteId/referral-traffic/filter-dimensions',
       'GET /sites/:siteId/referral-traffic/kpis',
       'GET /sites/:siteId/referral-traffic/trend',

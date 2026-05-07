@@ -1,0 +1,98 @@
+site-detection-jobs:
+  post:
+    tags:
+      - site-detection
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+    summary: Submit a new site detection async job
+    description: |
+      Triggers an async site detection job for the given domain.
+      The job validates the domain, checks for existing Site/SiteCandidate records,
+      verifies the domain serves an AEM Edge Delivery (Helix) site, creates a
+      SiteCandidate record, and sends a Slack notification.
+      The terminal outcome (created / duplicate / rejected) is surfaced on the
+      job record and must be retrieved via GET /sites/detect/jobs/{jobId}.
+    operationId: createSiteDetectionJob
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              domain:
+                type: string
+                description: The hostname to detect (e.g. "www.example.com")
+                example: www.example.com
+              hlxVersion:
+                type: integer
+                description: The Helix version detected from CDN logs
+                example: 5
+            required:
+              - domain
+    responses:
+      '202':
+        description: Site detection job accepted
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CreateSiteDetectionJobResponse'
+      '400':
+        description: Invalid request (missing/invalid domain or invalid hlxVersion)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+
+site-detection-job-status:
+  parameters:
+    - $ref: './parameters.yaml#/jobId'
+  get:
+    tags:
+      - site-detection
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+    summary: Get site detection job status and result
+    description: |
+      Returns the current status and (once completed) the result of a site detection job.
+      The result includes the action taken (created, rejected, or duplicate), the domain,
+      and an optional reason string.
+    operationId: getSiteDetectionJobStatus
+    responses:
+      '200':
+        description: Job status and (if available) result
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SiteDetectionJobResponse'
+      '400':
+        description: Invalid jobId format
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: Job not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '500':
+        $ref: './responses.yaml#/500'
