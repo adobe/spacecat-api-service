@@ -10,15 +10,20 @@
  * governing permissions and limitations under the License.
  */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import nock from 'nock';
 
 import {
   appendLimitedDetails,
   parseStatusCommandArgs,
   parseUtcDateArg,
   postReport,
+  splitLinesIntoFileChunks,
 } from '../../../../src/support/slack/commands/status-command-helpers.js';
+
+use(sinonChai);
 
 describe('status command helpers', () => {
   it('returns null when parseUtcDateArg receives a non-date token', () => {
@@ -125,5 +130,123 @@ describe('status command helpers', () => {
     expect(slackContext.say.firstCall.args[0]).to.equal('compact');
     expect(slackContext.say.secondCall.args[0])
       .to.equal(':warning: Full report upload failed: Failed to get upload URL: upload denied');
+  });
+
+  describe('splitLinesIntoFileChunks', () => {
+    it('returns a single chunk when the lines fit under the limit', () => {
+      const chunks = splitLinesIntoFileChunks(['one', 'two', 'three'], 1024);
+      expect(chunks).to.deep.equal([['one', 'two', 'three']]);
+    });
+
+    it('returns no chunks for an empty input', () => {
+      expect(splitLinesIntoFileChunks([], 1024)).to.deep.equal([]);
+    });
+
+    it('splits across multiple chunks when total bytes exceed the limit', () => {
+      const lines = Array.from({ length: 6 }, (_, i) => `line-${i}-${'x'.repeat(50)}`);
+      // Each line is ~57 bytes + newline; 4 lines per ~250 byte chunk.
+      const chunks = splitLinesIntoFileChunks(lines, 250);
+      expect(chunks.length).to.be.greaterThan(1);
+      expect(chunks.flat()).to.deep.equal(lines);
+      for (const chunk of chunks) {
+        const bytes = chunk.reduce(
+          (sum, line) => sum + Buffer.byteLength(line, 'utf8') + 1,
+          0,
+        );
+        // A single oversized line is allowed to overflow on its own,
+        // but no chunk should pack more lines than the limit allows.
+        if (chunk.length > 1) {
+          expect(bytes).to.be.at.most(250);
+        }
+      }
+    });
+
+    it('keeps a single oversized line in its own chunk', () => {
+      const big = 'x'.repeat(500);
+      const chunks = splitLinesIntoFileChunks(['head', big, 'tail'], 100);
+      expect(chunks).to.deep.equal([['head'], [big], ['tail']]);
+    });
+  });
+
+  describe('postReport upload chunking', () => {
+    const UPLOAD_URL = 'https://files-upload.slack.test/upload';
+    const buildSlackContext = () => ({
+      channelId: 'C123',
+      say: sinon.stub().resolves(),
+      client: {
+        files: {
+          getUploadURLExternal: sinon.stub().resolves({
+            ok: true, upload_url: UPLOAD_URL, file_id: 'F1',
+          }),
+          completeUploadExternal: sinon.stub().resolves({ ok: true }),
+        },
+      },
+    });
+
+    beforeEach(() => {
+      nock('https://files-upload.slack.test')
+        .persist()
+        .post('/upload')
+        .reply(200, 'OK');
+    });
+    afterEach(() => {
+      nock.cleanAll();
+    });
+
+    it('uploads a single file when the full report fits under the byte limit', async () => {
+      const slackContext = buildSlackContext();
+      const fullLines = Array.from({ length: 5 }, (_, i) => `line-${i}`);
+
+      await postReport(slackContext, ['compact'], 'rpt', 'Title', 'Comment', fullLines);
+
+      expect(slackContext.client.files.getUploadURLExternal).to.have.been.calledOnce;
+      expect(slackContext.client.files.getUploadURLExternal.firstCall.args[0].filename)
+        .to.equal('rpt.txt');
+      expect(slackContext.client.files.completeUploadExternal.firstCall.args[0].initial_comment)
+        .to.equal('Comment');
+    });
+
+    it('splits a large report into multiple uploaded files with part-of suffixes', async () => {
+      const slackContext = buildSlackContext();
+      const big = 'x'.repeat(80 * 1024);
+      const fullLines = Array.from({ length: 4 }, () => big); // ~320KB total
+
+      await postReport(slackContext, ['compact'], 'big-rpt', 'Big', 'Comment', fullLines);
+
+      const filenames = slackContext.client.files.getUploadURLExternal
+        .getCalls().map((c) => c.args[0].filename);
+      expect(filenames.length).to.be.greaterThan(1);
+      filenames.forEach((name, idx) => {
+        expect(name).to.equal(`big-rpt-part-${idx + 1}-of-${filenames.length}.txt`);
+      });
+      const comments = slackContext.client.files.completeUploadExternal
+        .getCalls().map((c) => c.args[0].initial_comment);
+      comments.forEach((comment, idx) => {
+        expect(comment).to.equal(`Comment — part ${idx + 1} of ${comments.length}`);
+      });
+    });
+
+    it('continues uploading remaining parts when one part fails', async () => {
+      const slackContext = buildSlackContext();
+      const big = 'x'.repeat(80 * 1024);
+      const fullLines = Array.from({ length: 4 }, () => big);
+      slackContext.client.files.getUploadURLExternal.onSecondCall()
+        .resolves({ ok: false, error: 'upload denied' });
+
+      await postReport(slackContext, ['compact'], 'big-rpt', 'Big', 'Comment', fullLines);
+
+      const totalParts = slackContext.client.files.getUploadURLExternal.callCount;
+      expect(totalParts).to.be.greaterThan(1);
+      const completed = slackContext.client.files.completeUploadExternal.callCount;
+      // Part 1 + Parts 3..N succeed; part 2 fails before completeUpload.
+      expect(completed).to.equal(totalParts - 1);
+      const warnings = slackContext.say.getCalls()
+        .map((c) => c.args[0])
+        .filter((m) => typeof m === 'string' && m.startsWith(':warning:'));
+      expect(warnings).to.have.length(1);
+      expect(warnings[0]).to.match(
+        new RegExp(`Full report upload \\(part 2/${totalParts}\\) failed: `),
+      );
+    });
   });
 });
