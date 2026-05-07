@@ -1608,39 +1608,13 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
+
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
       const model = resolveModelFromRequest(params.model);
-
-      let q = client
-        .from('brand_presence_executions_active')
-        .select('execution_date, sentiment, prompt, region_code, topics')
-        .eq('organization_id', organizationId)
-        .gte('execution_date', startDate)
-        .lte('execution_date', endDate)
-        .eq('model', model);
-
-      if (shouldApplyFilter(params.siteId)) {
-        q = q.eq('site_id', params.siteId);
-      }
-      if (filterByBrandId) {
-        q = q.eq('brand_id', filterByBrandId);
-      }
-      q = applyExecutionCategoryFilter(q, params);
-      if (params.topicIds?.length > 0) {
-        q = q.in('topic_id', params.topicIds);
-      }
-      q = applyExecutionRegionFilter(q, params);
-      if (shouldApplyFilter(params.origin)) {
-        q = q.ilike('origin', params.origin);
-      }
-
-      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
-
-      if (error) {
-        ctx.log.error(`Brand presence sentiment-overview PostgREST error: ${error.message}`);
-        return badRequest(error.message);
-      }
 
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
@@ -1653,7 +1627,41 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const weeklyTrends = aggregateSentimentByWeek(data || []);
+      const { data, error } = await client.rpc('rpc_brand_presence_sentiment_overview', {
+        p_organization_id: organizationId,
+        p_start_date: startDate,
+        p_end_date: endDate,
+        p_model: model,
+        p_brand_id: filterByBrandId || null,
+        p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
+        p_category_id: params.categoryUuidIds?.[0] ?? null,
+        p_category_name: params.categoryNames?.[0] ?? null,
+        p_region_code: params.regionCodesList?.[0] ?? null,
+        p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
+        p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
+      });
+
+      if (error) {
+        ctx.log.error(`Brand presence sentiment-overview RPC error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const weeklyTrends = (data || []).map((row) => ({
+        week: row.week_str,
+        weekNumber: row.week_number,
+        year: row.year,
+        sentiment: [
+          { name: 'Positive', value: row.positive_pct, color: SENTIMENT_COLORS.positive },
+          { name: 'Neutral', value: row.neutral_pct, color: SENTIMENT_COLORS.neutral },
+          { name: 'Negative', value: row.negative_pct, color: SENTIMENT_COLORS.negative },
+        ],
+        totalPrompts: row.total_prompts,
+        promptsWithSentiment: row.prompts_with_sentiment,
+        mentions: 0,
+        citations: 0,
+        visibilityScore: 0,
+        competitors: [],
+      }));
       return cachedOk({ weeklyTrends });
     },
   );
