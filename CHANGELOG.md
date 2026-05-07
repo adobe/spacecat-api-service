@@ -1,3 +1,11 @@
+## [1.483.2](https://github.com/adobe/spacecat-api-service/compare/v1.483.1...v1.483.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* Add new query pattern for getTokensBySiteIdByCycle ([#2298](https://github.com/adobe/spacecat-api-service/issues/2298)) ([368bf1c](https://github.com/adobe/spacecat-api-service/commit/368bf1ca8288f6d966a3cbf0cec7502e2a1200e1))
+* block llmo spreadsheet read for 59bdf35f-c0d4-4c51-9013-8a5b63d7… ([#2362](https://github.com/adobe/spacecat-api-service/issues/2362)) ([b067121](https://github.com/adobe/spacecat-api-service/commit/b067121766a503209b1a42da75383aa45d6295cd))
+
 ## [1.483.1](https://github.com/adobe/spacecat-api-service/compare/v1.483.0...v1.483.1) (2026-05-07)
 
 
