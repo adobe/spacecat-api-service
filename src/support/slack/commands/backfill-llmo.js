@@ -17,6 +17,11 @@ import {
 } from '../../../utils/slack/base.js';
 
 import BaseCommand from './base.js';
+import {
+  addUtcDays,
+  formatUtcDate,
+  startOfUtcIsoWeek,
+} from './status-command-helpers.js';
 
 const PHRASES = ['backfill-llmo'];
 
@@ -27,6 +32,7 @@ const AUDIT_TYPES = {
   LLM_ERROR_PAGES: 'llm-error-pages',
 };
 const CDN_LOGS_ANALYSIS_DELAY_SECONDS = 5;
+const SQS_MAX_DELAY_SECONDS = 900;
 
 function parseArgs(args) {
   const parsed = {};
@@ -39,6 +45,86 @@ function parseArgs(args) {
   }
 
   return parsed;
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function isDbBackfillMode(parsed) {
+  return parsed.mode?.toLowerCase() === 'db';
+}
+
+function isWeeklyDbRefreshMode(parsed) {
+  return parsed.mode?.toLowerCase() === 'weekly-db';
+}
+
+function hasDateInput(parsed) {
+  return Boolean(parsed.date || (parsed.year && parsed.month && parsed.day));
+}
+
+function parseTrafficDate(parsed) {
+  const dateArg = parsed.date
+    || (parsed.year && parsed.month && parsed.day
+      ? `${parsed.year}-${pad2(parsed.month)}-${pad2(parsed.day)}`
+      : null);
+
+  if (!dateArg) {
+    return null;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateArg)) {
+    throw new Error('Invalid date format. Use date=YYYY-MM-DD.');
+  }
+
+  const date = new Date(`${dateArg}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || formatUtcDate(date) !== dateArg) {
+    throw new Error('Invalid date format. Use date=YYYY-MM-DD.');
+  }
+
+  return {
+    date,
+    dateStr: dateArg,
+  };
+}
+
+function getIsoWeekRange(date) {
+  const weekStart = startOfUtcIsoWeek(date);
+  return {
+    weekStartDate: weekStart,
+    weekEndDate: addUtcDays(weekStart, 6),
+    weekStart: formatUtcDate(weekStart),
+    weekEnd: formatUtcDate(addUtcDays(weekStart, 6)),
+  };
+}
+
+function isCompletedIsoWeek(weekRange, now = new Date()) {
+  return weekRange.weekEndDate < startOfUtcIsoWeek(now);
+}
+
+async function refreshAgenticWeeklyRollup(context, siteId, weekRange) {
+  const postgrestClient = context.dataAccess?.services?.postgrestClient;
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is unavailable; cannot refresh agentic weekly rollup.');
+  }
+
+  const { data, error } = await postgrestClient.rpc('wrpc_refresh_agentic_traffic_weekly', {
+    p_site_id: siteId,
+    p_start_date: weekRange.weekStart,
+    p_end_date: weekRange.weekEnd,
+    p_updated_by: 'slack:backfill-llmo-weekly-db',
+  });
+
+  if (error) {
+    throw new Error(`wrpc_refresh_agentic_traffic_weekly: ${error.message}`);
+  }
+
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return data ? [data] : [];
+}
+
+function sumRowsInserted(rows) {
+  return rows.reduce((sum, row) => sum + Number(row.rows_inserted || 0), 0);
 }
 
 async function triggerBackfill(
@@ -90,7 +176,12 @@ async function triggerBackfill(
             configuration.getQueues().audits,
             message,
             undefined,
-            { delaySeconds: (dayOffset - 1) * CDN_LOGS_ANALYSIS_DELAY_SECONDS },
+            {
+              delaySeconds: Math.min(
+                (dayOffset - 1) * CDN_LOGS_ANALYSIS_DELAY_SECONDS,
+                SQS_MAX_DELAY_SECONDS,
+              ),
+            },
           );
         }
       }
@@ -98,6 +189,19 @@ async function triggerBackfill(
     }
 
     case AUDIT_TYPES.CDN_LOGS_REPORT: {
+      if (specificDate?.date) {
+        const message = {
+          type: auditType,
+          siteId,
+          auditContext: {
+            date: specificDate.date,
+            refreshAgenticDailyExport: true,
+          },
+        };
+        await sqs.sendMessage(configuration.getQueues().audits, message);
+        break;
+      }
+
       const weeks = timeValue;
 
       // Determine weekOffset values: [0] for current week, [-1, -2, -3, -4] for previous weeks
@@ -181,7 +285,21 @@ function BackfillLlmoCommand(context) {
     try {
       const parsed = parseArgs(args);
 
-      if (!parsed.baseurl || !parsed.audit) {
+      if (parsed.mode
+        && parsed.audit
+        && parsed.audit !== AUDIT_TYPES.CDN_LOGS_REPORT) {
+        await say(`:warning: mode=${parsed.mode} is only supported for audit=${AUDIT_TYPES.CDN_LOGS_REPORT}.`);
+        return;
+      }
+
+      if (parsed.mode
+        && !isDbBackfillMode(parsed)
+        && !isWeeklyDbRefreshMode(parsed)) {
+        await say(':warning: Unsupported mode. Use mode=db for daily DB imports or mode=weekly-db for weekly DB refresh.');
+        return;
+      }
+
+      if (!parsed.baseurl || (!parsed.audit && !isWeeklyDbRefreshMode(parsed))) {
         await say(':warning: Required: baseurl={baseURL|all} audit={auditType}');
         await say('Examples:');
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} days=3\` (last 3 days)`);
@@ -189,13 +307,17 @@ function BackfillLlmoCommand(context) {
         await say(`• \`backfill-llmo baseurl=all audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=14\` (all enabled sites)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=2\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=0\` (current week)`);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} mode=db date=2026-04-27\` (daily DB import for that traffic date)`);
+        await say('• `backfill-llmo baseurl=https://example.com mode=weekly-db date=2026-05-03` (weekly DB refresh for that completed ISO week)');
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLM_ERROR_PAGES} weeks=2\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLM_ERROR_PAGES} weeks=0\` (current week)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} weeks=2\``);
         return;
       }
 
-      const auditType = parsed.audit;
+      const auditType = isWeeklyDbRefreshMode(parsed)
+        ? (parsed.audit || AUDIT_TYPES.CDN_LOGS_REPORT)
+        : parsed.audit;
       const isAllSites = parsed.baseurl?.toLowerCase() === 'all';
       const baseURL = isAllSites ? 'all' : extractURLFromSlackInput(parsed.baseurl);
 
@@ -233,6 +355,53 @@ function BackfillLlmoCommand(context) {
           break;
 
         case AUDIT_TYPES.CDN_LOGS_REPORT:
+          if (hasDateInput(parsed) && !isDbBackfillMode(parsed) && !isWeeklyDbRefreshMode(parsed)) {
+            await say(':warning: For cdn-logs-report DB refreshes, use mode=db or mode=weekly-db with date=YYYY-MM-DD.');
+            return;
+          }
+
+          if (isDbBackfillMode(parsed) && !hasDateInput(parsed)) {
+            await say(':warning: mode=db requires date=YYYY-MM-DD for the traffic date.');
+            return;
+          }
+
+          if (isWeeklyDbRefreshMode(parsed) && !hasDateInput(parsed)) {
+            await say(':warning: mode=weekly-db requires date=YYYY-MM-DD within the ISO week to refresh.');
+            return;
+          }
+
+          try {
+            const trafficDate = parseTrafficDate(parsed);
+            if (trafficDate) {
+              if (isWeeklyDbRefreshMode(parsed)) {
+                const weekRange = getIsoWeekRange(trafficDate.date);
+                if (!isCompletedIsoWeek(weekRange)) {
+                  await say(`:warning: mode=weekly-db only supports completed ISO weeks. Week ${weekRange.weekStart}..${weekRange.weekEnd} is not complete yet.`);
+                  return;
+                }
+                specificDate = {
+                  mode: 'weekly-db',
+                  anchorDate: trafficDate.dateStr,
+                  ...weekRange,
+                };
+                timeValue = 1;
+                timeDesc = `weekly DB refresh for ${weekRange.weekStart}..${weekRange.weekEnd} (from ${trafficDate.dateStr})`;
+                break;
+              }
+              const auditContextDate = formatUtcDate(addUtcDays(trafficDate.date, 1));
+              specificDate = {
+                date: auditContextDate,
+                trafficDate: trafficDate.dateStr,
+              };
+              timeValue = 1;
+              timeDesc = `daily DB import for ${trafficDate.dateStr} (audit context date ${auditContextDate})`;
+              break;
+            }
+          } catch (e) {
+            await say(`:warning: ${e.message}`);
+            return;
+          }
+
           timeValue = parseInt(parsed.weeks, 10);
           if (Number.isNaN(timeValue)) {
             timeValue = 4;
@@ -287,6 +456,11 @@ function BackfillLlmoCommand(context) {
           return;
       }
 
+      if (isAllSites && specificDate?.mode === 'weekly-db') {
+        await say(':warning: mode=weekly-db requires a specific baseurl. Run the weekly status check first, then refresh only the missing sites.');
+        return;
+      }
+
       // Get sites to process
       let sites;
       if (isAllSites) {
@@ -305,6 +479,13 @@ function BackfillLlmoCommand(context) {
           return;
         }
         sites = [site];
+      }
+
+      if (specificDate?.mode === 'weekly-db') {
+        await say(`:rocket: Running ${auditType} weekly DB refresh for ${baseURL} (${specificDate.weekStart}..${specificDate.weekEnd})...`);
+        const rows = await refreshAgenticWeeklyRollup(context, sites[0].getId(), specificDate);
+        await say(`:white_check_mark: Done! wrpc_refresh_agentic_traffic_weekly refreshed ${specificDate.weekStart}..${specificDate.weekEnd}; rows_inserted=${sumRowsInserted(rows)}.`);
+        return;
       }
 
       const target = isAllSites ? `${sites.length} sites` : baseURL;
