@@ -1537,6 +1537,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(autoResolveAuthorUrlStub).to.have.been.calledWith(mockSite, context);
+      expect(mockSite.setDeliveryType).to.have.been.calledWith(SiteModel.DELIVERY_TYPES.AEM_CS);
       expect(mockSite.setDeliveryConfig).to.have.been.calledWith({
         authorURL: 'https://author-p123-e456.adobeaemcloud.com',
         programId: '123',
@@ -1564,6 +1565,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
+      expect(mockSite.setDeliveryType).to.have.been.calledWith(SiteModel.DELIVERY_TYPES.AEM_CS);
       expect(mockSite.setDeliveryConfig).to.have.been.calledWith({
         authorURL: 'https://author-p123-e456.adobeaemcloud.com',
         programId: '123',

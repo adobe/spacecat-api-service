@@ -1,3 +1,10 @@
+## [1.482.2](https://github.com/adobe/spacecat-api-service/compare/v1.482.1...v1.482.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* **plg:** set AEM_CS delivery type when auto-resolving author URL ([#2359](https://github.com/adobe/spacecat-api-service/issues/2359)) ([534fa63](https://github.com/adobe/spacecat-api-service/commit/534fa632abf92cc8523a1a66d0e6b821ab5a474f))
+
 ## [1.482.1](https://github.com/adobe/spacecat-api-service/compare/v1.482.0...v1.482.1) (2026-05-07)
 
 
