@@ -263,7 +263,6 @@ function ConfigurationController(ctx) {
    * @param {UniversalContext} context - Context of the request.
    * @return {Promise<Response>} Updated configuration response.
    */
-  /* c8 ignore start - temporary API, no unit tests needed */
   const replaceHandlerEnabledDisabled = async (context) => {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can update handler configuration');
@@ -335,7 +334,6 @@ function ConfigurationController(ctx) {
       return badRequest(error.message);
     }
   };
-  /* c8 ignore stop */
 
   /**
    * Updates the entire configuration or specific sections.
