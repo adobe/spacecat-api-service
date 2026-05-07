@@ -20,6 +20,7 @@ import {
   PLG_ONBOARDING_2_ID,
   PLG_ONBOARDING_3_ID,
   PLG_ONBOARDING_4_ID,
+  PLG_ONBOARDING_5_ID,
   NON_EXISTENT_IMS_ORG_ID,
 } from '../seed-ids.js';
 
@@ -369,22 +370,21 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
           expectISOTimestamp(res.body.reviews[0].reviewedAt, 'reviewedAt');
         });
 
-        // PLG_ONBOARDING_2 was transitioned to REJECTED by the UPHELD test above
         it('REJECTED: transitions to OUTDATED with REOPENED review', async () => {
           const http = getHttpClient();
-          const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_2_ID}/status`, {
+          const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_5_ID}/status`, {
             status: 'OUTDATED',
             justification: 'Re-opening rejected domain for new attempt',
           });
           expect(res.status).to.equal(200);
           expectPlgOnboardingDto(res.body);
           expect(res.body.status).to.equal('OUTDATED');
-          expect(res.body.reviews).to.be.an('array').with.lengthOf(2);
-          expect(res.body.reviews[1].decision).to.equal('REOPENED');
-          expect(res.body.reviews[1].justification).to.equal('Re-opening rejected domain for new attempt');
-          expect(res.body.reviews[1].reason).to.include('waitlisted-site.example.com');
-          expect(res.body.reviews[1].reviewedBy).to.be.a('string');
-          expectISOTimestamp(res.body.reviews[1].reviewedAt, 'reviewedAt');
+          expect(res.body.reviews).to.be.an('array').with.lengthOf(1);
+          expect(res.body.reviews[0].decision).to.equal('REOPENED');
+          expect(res.body.reviews[0].justification).to.equal('Re-opening rejected domain for new attempt');
+          expect(res.body.reviews[0].reason).to.include('rejected-plg-it.example.com');
+          expect(res.body.reviews[0].reviewedBy).to.be.a('string');
+          expectISOTimestamp(res.body.reviews[0].reviewedAt, 'reviewedAt');
         });
       }
     });

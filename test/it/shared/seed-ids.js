@@ -151,6 +151,12 @@ export const PLG_ONBOARDING_3_DOMAIN = 'in-progress-plg-it.example.com';
 /** WAITLISTED — dedicated record for transitionStatus WAITLISTED → OUTDATED test */
 export const PLG_ONBOARDING_4_ID = 'd4444444-4444-4444-b444-444444444444';
 export const PLG_ONBOARDING_4_DOMAIN = 'waitlisted-for-transition.example.com';
+/**
+ * REJECTED — dedicated record for transitionStatus REJECTED → OUTDATED test
+ * (no predecessor dependency)
+ */
+export const PLG_ONBOARDING_5_ID = 'd5555555-5555-4555-b555-555555555555';
+export const PLG_ONBOARDING_5_DOMAIN = 'rejected-plg-it.example.com';
 
 // ── ORG_3: Delegate Agency Org ──
 

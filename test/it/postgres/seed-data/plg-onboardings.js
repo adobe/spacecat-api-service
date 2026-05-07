@@ -75,4 +75,15 @@ export const plgOnboardings = [
       orgResolved: true,
     },
   },
+  {
+    id: 'd5555555-5555-4555-b555-555555555555',
+    ims_org_id: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
+    domain: 'rejected-plg-it.example.com',
+    base_url: 'https://www.rejected-plg-it.example.com',
+    status: 'REJECTED',
+    organization_id: '11111111-1111-4111-b111-111111111111',
+    steps: {
+      orgResolved: true,
+    },
+  },
 ];

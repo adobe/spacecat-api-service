@@ -691,7 +691,7 @@ async function performAsoPlgOnboarding({
       STATUSES.WAITING_FOR_IP_ALLOWLISTING,
     ].includes(r.getStatus()),
   );
-  await Promise.all(waitlistedRecords.map(async (r) => {
+  await Promise.allSettled(waitlistedRecords.map(async (r) => {
     r.setStatus(STATUSES.OUTDATED);
     r.setWaitlistReason(null);
     r.setUpdatedBy('system');
@@ -704,7 +704,11 @@ async function performAsoPlgOnboarding({
       justification: `Automatically closed by system — superseded by new onboarding for domain ${domain}.`,
     }]);
     await r.save();
-    await postPlgOnboardingNotification(r, context);
+    try {
+      await postPlgOnboardingNotification(r, context);
+    } catch (notifyErr) {
+      log.warn(`Failed to post OUTDATED notification for domain ${r.getDomain()}: ${notifyErr.message}`);
+    }
   }));
 
   const alreadyOnboarded = existingRecords
@@ -1645,12 +1649,13 @@ function PlgOnboardingController(ctx) {
 
   /**
    * PATCH /plg/onboard/:onboardingId
-   * Admin-only: review an onboarding record with one of four decisions:
-   * - BYPASSED: re-run the flow (WAITLISTED only)
-   * - UPHELD: transition to REJECTED (WAITLISTED or ONBOARDED)
-   * - CLOSED: transition to OUTDATED (WAITLISTED or ONBOARDED)
-   * - REOPENED: transition to OUTDATED (REJECTED only — lifts a prior rejection)
-   * Revokes ASO site enrollments when transitioning away from ONBOARDED.
+   * Admin-only: review a WAITLISTED onboarding record. Accepted decisions:
+   * - BYPASSED: re-run the PLG flow to attempt onboarding again
+   * - UPHELD: transition to REJECTED (terminal)
+   * - CLOSED: retire the current domain to OUTDATED and onboard an alternate domain
+   *           (requires siteConfig.alternateDomain for DOMAIN_ALREADY_ASSIGNED reason)
+   * REOPENED and OFFBOARDED are handled by transitionStatus
+   * (PATCH /plg/onboard/:onboardingId/status).
    */
   const update = async (context) => {
     const {
@@ -1673,9 +1678,11 @@ function PlgOnboardingController(ctx) {
 
     const { decision, justification, siteConfig } = data;
 
-    if (!hasText(decision)
-      || !Object.values(REVIEW_DECISIONS).includes(decision)) {
-      return badRequest(`decision is required and must be one of: ${Object.values(REVIEW_DECISIONS).join(', ')}`);
+    const allowedDecisions = [
+      REVIEW_DECISIONS.BYPASSED, REVIEW_DECISIONS.UPHELD, REVIEW_DECISIONS.CLOSED,
+    ];
+    if (!hasText(decision) || !allowedDecisions.includes(decision)) {
+      return badRequest(`decision must be one of: ${allowedDecisions.join(', ')}`);
     }
 
     if (!hasText(justification)) {
@@ -2102,16 +2109,6 @@ function PlgOnboardingController(ctx) {
       return badRequest(`Only WAITLISTED, ONBOARDED, or REJECTED records can be transitioned to ${targetStatus}, current status: ${currentStatus}`);
     }
 
-    if (currentStatus === STATUSES.ONBOARDED) {
-      try {
-        await revokeAsoSiteEnrollments(onboarding, context);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Failed to revoke ASO enrollments for onboarding ${onboardingId}: ${msg}`, err);
-        return internalServerError('Failed to revoke ASO enrollments. Please try again later.');
-      }
-    }
-
     // System-generated review: decision is derived from the source status
     let decision;
     if (currentStatus === STATUSES.REJECTED) {
@@ -2136,6 +2133,19 @@ function PlgOnboardingController(ctx) {
     onboarding.setWaitlistReason(null);
     onboarding.setUpdatedBy(adminIdentity);
     await onboarding.save();
+
+    // Revoke after save: a stale active enrollment is recoverable on retry;
+    // a saved OUTDATED record with entitlements still active is preferable to
+    // revoked entitlements with the record still showing ONBOARDED.
+    if (currentStatus === STATUSES.ONBOARDED) {
+      try {
+        await revokeAsoSiteEnrollments(onboarding, context);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(`Failed to revoke ASO enrollments for onboarding ${onboardingId}: ${msg}`, err);
+      }
+    }
+
     await postPlgOnboardingNotification(onboarding, context);
     return ok(PlgOnboardingDto.toAdminJSON(onboarding));
   };

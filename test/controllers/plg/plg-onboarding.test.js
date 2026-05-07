@@ -7333,7 +7333,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to disable summit-plg handler/);
       });
 
-      it('returns 500 when ASO enrollment revocation fails for ONBOARDED record', async () => {
+      it('returns 200 and logs error when ASO enrollment revocation fails for ONBOARDED record', async () => {
         const linkedSite = createMockSite({
           siteEnrollments: [{
             getId: () => 'enroll-fail',
@@ -7353,8 +7353,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           env: {},
         });
 
-        expect(res.status).to.equal(500);
-        expect(res.value).to.equal('Failed to revoke ASO enrollments. Please try again later.');
+        expect(res.status).to.equal(200);
+        expect(record.setStatus).to.have.been.calledWith('OUTDATED');
+        expect(record.save).to.have.been.called;
+        expect(mockLog.error).to.have.been.calledWith(sinon.match(/Failed to revoke ASO enrollments/));
       });
 
       it('returns 400 when data is null (covers data || {} fallback)', async () => {
@@ -7370,7 +7372,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(res.status).to.equal(400);
       });
 
-      it('returns 500 and stringifies non-Error thrown by revokeAsoSiteEnrollments', async () => {
+      it('returns 200 and logs stringified non-Error thrown by revokeAsoSiteEnrollments', async () => {
         const record = createMockOnboarding({ status: 'ONBOARDED', siteId: TEST_SITE_ID });
         mockDataAccess.PlgOnboarding.findById.resolves(record);
         mockDataAccess.Site.findById.callsFake(async () => {
@@ -7387,8 +7389,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           log: mockLog,
         });
 
-        expect(res.status).to.equal(500);
-        expect(res.value).to.equal('Failed to revoke ASO enrollments. Please try again later.');
+        expect(res.status).to.equal(200);
+        expect(record.setStatus).to.have.been.calledWith('OUTDATED');
+        expect(record.save).to.have.been.called;
+        expect(mockLog.error).to.have.been.calledWith(sinon.match(/Failed to revoke ASO enrollments/));
       });
 
       it('appends to existing reviews rather than replacing them', async () => {
