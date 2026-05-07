@@ -8503,6 +8503,61 @@ UrlInspectorFilterDimensions:
           label: { type: string }
         required: [id, label]
   required: [categories, regions, content_types]
+
+BrandPresenceFilterOption:
+  type: object
+  description: A single id/label option for a filter dropdown
+  properties:
+    id: { type: string }
+    label: { type: string }
+  required: [id, label]
+
+BrandPresenceFilterDimensions:
+  type: object
+  description: |
+    Filter dimensions for the Brand Presence configuration view.
+    Each dimension is an array of id/label pairs except `stats`.
+  properties:
+    brands:
+      type: array
+      description: Brands accessible for the organization (and optionally a specific site).
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    categories:
+      type: array
+      description: Prompt categories configured for the organization.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    topics:
+      type: array
+      description: Topics for the organization, optionally scoped to a category.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    regions:
+      type: array
+      description: Available region codes.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    origins:
+      type: array
+      description: Prompt origin values (e.g. `human`, `ai`).
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    page_intents:
+      type: array
+      description: Page intent values derived from the brand's prompt data.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    stats:
+      type: object
+      description: Aggregate statistics for the current filter scope.
+      properties:
+        distinct_prompt_count:
+          type: integer
+          description: Number of distinct prompts matching the current filter scope.
+      required: [distinct_prompt_count]
+  required: [brands, categories, topics, regions, origins, page_intents, stats]
+
 WebhookAccepted:
   type: object
   properties:

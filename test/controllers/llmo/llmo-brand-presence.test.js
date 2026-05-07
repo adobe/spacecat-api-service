@@ -1436,6 +1436,19 @@ describe('llmo-brand-presence', () => {
       expect(body.topics).to.deep.equal([{ id: topicId, label: 'Topic In Cat' }]);
       expect(body.stats.distinct_prompt_count).to.equal(4);
     });
+
+    it('returns badRequest when categoryId is not a valid UUID', async () => {
+      mockContext.params.brandId = 'all';
+      mockContext.data = { categoryId: 'not-a-uuid' };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({});
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Category id must be a valid UUID');
+    });
   });
 
   describe('fetchDistinctPromptCountForConfig', () => {
@@ -1625,6 +1638,44 @@ describe('llmo-brand-presence', () => {
         '0178a3f0-1234-7000-8000-0000000000ff',
       );
       expect(results).to.deep.equal([]);
+    });
+
+    it('chunks topicIdFilter into groups of 50 when categoryId maps to more than 50 topics', async () => {
+      const catId = '0178a3f0-1234-7000-8000-0000000000ff';
+      const topicIds = Array.from(
+        { length: 51 },
+        (_, i) => `0178a3f0-1234-7000-8000-${String(i).padStart(12, '0')}`,
+      );
+      const inStub = sinon.stub().returnsThis();
+      const chain = {
+        select() { return chain; },
+        eq() { return chain; },
+        in: inStub,
+        limit() {
+          return Promise.resolve({ data: [], error: null });
+        },
+      };
+      const topicCategoriesChain = {
+        select() { return topicCategoriesChain; },
+        eq() { return topicCategoriesChain; },
+        in() { return topicCategoriesChain; },
+        limit() {
+          return Promise.resolve({
+            data: topicIds.map((id) => ({ topic_id: id })),
+            error: null,
+          });
+        },
+      };
+      const client = {
+        from(table) {
+          return table === 'topic_categories' ? topicCategoriesChain : chain;
+        },
+      };
+      await fetchTopicsForConfig(client, 'org-1', [], catId);
+      const idCalls = inStub.args.filter(([col]) => col === 'id');
+      expect(idCalls).to.have.lengthOf(2);
+      expect(idCalls[0][1]).to.have.lengthOf(50);
+      expect(idCalls[1][1]).to.have.lengthOf(1);
     });
   });
 

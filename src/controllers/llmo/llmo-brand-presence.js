@@ -902,18 +902,34 @@ export async function fetchTopicsForConfig(
     }
   }
 
-  let query = client
-    .from('topics')
-    .select('id, name, brand_id')
-    .eq('organization_id', organizationId)
-    .in('status', ['pending', 'active']);
-
+  let data;
   if (topicIdFilter) {
-    query = query.in('id', topicIdFilter);
+    const chunks = [];
+    for (let i = 0; i < topicIdFilter.length; i += IN_FILTER_CHUNK_SIZE) {
+      chunks.push(topicIdFilter.slice(i, i + IN_FILTER_CHUNK_SIZE));
+    }
+    const chunkResults = await Promise.all(chunks.map((chunk) => client
+      .from('topics')
+      .select('id, name, brand_id')
+      .eq('organization_id', organizationId)
+      .in('status', ['pending', 'active'])
+      .in('id', chunk)
+      .limit(QUERY_LIMIT)));
+    data = chunkResults.flatMap(({ data: d, error }) => (error || !d ? [] : d));
+  } else {
+    const { data: rows, error } = await client
+      .from('topics')
+      .select('id, name, brand_id')
+      .eq('organization_id', organizationId)
+      .in('status', ['pending', 'active'])
+      .limit(QUERY_LIMIT);
+    if (error || !rows?.length) {
+      return [];
+    }
+    data = rows;
   }
 
-  const { data, error } = await query.limit(QUERY_LIMIT);
-  if (error || !data?.length) {
+  if (!data.length) {
     return [];
   }
   const filtered = data.filter((t) => !t.brand_id || brandIdSet.has(String(t.brand_id)));
@@ -1028,6 +1044,10 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
 
       if (filterByBrandId && !isValidUUID(filterByBrandId)) {
         return badRequest('Brand id must be a valid UUID');
+      }
+
+      if (categoryId && !isValidUUID(categoryId)) {
+        return badRequest('Category id must be a valid UUID');
       }
 
       if (shouldApplyFilter(siteFilter)) {
