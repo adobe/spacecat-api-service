@@ -1613,6 +1613,19 @@ describe('llmo-brand-presence', () => {
       );
       expect(results).to.deep.equal([]);
     });
+
+    it('returns empty array when all topic_ids are filtered out as falsy', async () => {
+      const client = createTableAwareMock({
+        topic_categories: { data: [{ topic_id: null }, { topic_id: undefined }], error: null },
+      });
+      const results = await fetchTopicsForConfig(
+        client,
+        'org-1',
+        [],
+        '0178a3f0-1234-7000-8000-0000000000ff',
+      );
+      expect(results).to.deep.equal([]);
+    });
   });
 
   describe('fetchFilterDimensionsStats', () => {
