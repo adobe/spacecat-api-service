@@ -90,6 +90,7 @@ const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
   '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3', // adobe.com Prod
   'c2473d89-e997-458d-a86d-b4096649c12b', // adobe.com Stage
+  '59bdf35f-c0d4-4c51-9013-8a5b63d71eeb', // ekremney.com configured to use the adobe data folder for some reason
 ]);
 
 const HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE = 'Access to HLX sheet data has been blocked for this site due to PG migration';
