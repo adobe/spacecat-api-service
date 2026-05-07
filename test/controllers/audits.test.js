@@ -1271,15 +1271,15 @@ describe('Audits Controller', () => {
 
     describe('process includedURLs parameter', () => {
       const auditType = 'broken-backlinks';
-      let handlers;
+      let patchHandlers;
       let siteConfig;
 
       beforeEach(() => {
-        handlers = { [auditType]: {} };
+        patchHandlers = { [auditType]: {} };
         siteConfig = {
-          getHandlerConfig: sandbox.stub().returns(handlers[auditType]),
+          getHandlerConfig: sandbox.stub().returns(patchHandlers[auditType]),
           getIncludedURLs: sandbox.stub().returns(undefined),
-          getHandlers: () => handlers,
+          getHandlers: () => patchHandlers,
           getSlackConfig: () => {},
           getContentAiConfig: () => {},
           getImports: () => [],
@@ -1322,7 +1322,7 @@ describe('Audits Controller', () => {
       });
 
       it('clears includedURLs when array is empty', async () => {
-        handlers[auditType].includedURLs = ['https://existing.com'];
+        patchHandlers[auditType].includedURLs = ['https://existing.com'];
 
         const context = {
           params: { siteId, auditType },
@@ -1332,7 +1332,7 @@ describe('Audits Controller', () => {
         const result = await auditsController.patchAuditForSite(context);
 
         expect(result.status).to.equal(200);
-        expect(handlers[auditType].includedURLs).to.deep.equal([]);
+        expect(patchHandlers[auditType].includedURLs).to.deep.equal([]);
         expect(site.setConfig).to.have.been.calledOnce;
         expect(site.save).to.have.been.calledOnce;
       });
@@ -1348,7 +1348,7 @@ describe('Audits Controller', () => {
         const result = await auditsController.patchAuditForSite(context);
 
         expect(result.status).to.equal(200);
-        expect(handlers[auditType].includedURLs).to.deep.equal([
+        expect(patchHandlers[auditType].includedURLs).to.deep.equal([
           'https://example.com/page1',
           'https://example.com/page2',
         ]);
@@ -1367,7 +1367,7 @@ describe('Audits Controller', () => {
         const result = await auditsController.patchAuditForSite(context);
 
         expect(result.status).to.equal(200);
-        expect(handlers[auditType].includedURLs).to.deep.equal([
+        expect(patchHandlers[auditType].includedURLs).to.deep.equal([
           'https://example.com/existing',
           'https://example.com/new',
         ]);
@@ -1384,7 +1384,7 @@ describe('Audits Controller', () => {
         const result = await auditsController.patchAuditForSite(context);
 
         expect(result.status).to.equal(200);
-        expect(handlers[auditType].includedURLs).to.deep.equal(['https://example.com/page']);
+        expect(patchHandlers[auditType].includedURLs).to.deep.equal(['https://example.com/page']);
       });
 
       it('replaces includedURLs atomically when replaceIncludedURLs is true', async () => {
@@ -1404,7 +1404,7 @@ describe('Audits Controller', () => {
         const result = await auditsController.patchAuditForSite(context);
 
         expect(result.status).to.equal(200);
-        expect(handlers[auditType].includedURLs).to.deep.equal(['https://example.com/kept']);
+        expect(patchHandlers[auditType].includedURLs).to.deep.equal(['https://example.com/kept']);
       });
 
       it('replaces excludedURLs atomically when replaceExcludedURLs is true', async () => {
@@ -1500,7 +1500,7 @@ describe('Audits Controller', () => {
           auditType,
           ['https://example.com/excluded'],
         )).to.be.true;
-        expect(handlers[auditType].includedURLs).to.deep.equal(['https://example.com/included']);
+        expect(patchHandlers[auditType].includedURLs).to.deep.equal(['https://example.com/included']);
         expect(site.setConfig).to.have.been.calledOnce;
         expect(site.save).to.have.been.calledOnce;
       });
