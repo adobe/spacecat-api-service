@@ -1045,14 +1045,15 @@ async function performAsoPlgOnboarding({
       if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_CS && presetAuthorUrl) {
         // Derive programId and environmentId from AEM CS author URL
         const csMatch = presetAuthorUrl.match(AEM_CS_AUTHOR_URL_PATTERN);
+        site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_CS);
         /* c8 ignore next */
         const [, programId, environmentId] = csMatch || [];
         site.setDeliveryConfig({
           ...existingDeliveryConfig,
           authorURL: presetAuthorUrl,
-          ...(programId && {
-            programId, environmentId, preferContentApi: true, enableDAMAltTextUpdate: true,
-          }),
+          preferContentApi: true,
+          enableDAMAltTextUpdate: true,
+          ...(programId && { programId, environmentId }),
           imsOrgId,
         });
         log.info(`Set AEM CS delivery config from preset author URL: ${presetAuthorUrl}`);
@@ -1107,6 +1108,7 @@ async function performAsoPlgOnboarding({
         // Only update deliveryConfig if authorURL is not already set
         const existingDeliveryConfig = site.getDeliveryConfig() || {};
         if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
+          site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_CS);
           site.setDeliveryConfig({
             ...existingDeliveryConfig,
             authorURL: resolvedConfig.authorURL,
