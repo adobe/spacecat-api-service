@@ -1,3 +1,10 @@
+# [1.481.0](https://github.com/adobe/spacecat-api-service/compare/v1.480.0...v1.481.0) (2026-05-07)
+
+
+### Features
+
+* add Slack ops data checks ([#2258](https://github.com/adobe/spacecat-api-service/issues/2258)) ([e8104d2](https://github.com/adobe/spacecat-api-service/commit/e8104d2a6749ff30d1c4adb2724c43ded95c82ae))
+
 # [1.480.0](https://github.com/adobe/spacecat-api-service/compare/v1.479.0...v1.480.0) (2026-05-06)
 
 
