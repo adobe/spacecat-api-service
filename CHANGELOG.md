@@ -1,3 +1,15 @@
+# [1.483.0](https://github.com/adobe/spacecat-api-service/compare/v1.482.2...v1.483.0) (2026-05-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.59.0 ([#2361](https://github.com/adobe/spacecat-api-service/issues/2361)) ([2463626](https://github.com/adobe/spacecat-api-service/commit/24636260f577e355275753715842e49925ced4cf))
+
+
+### Features
+
+* **plg:** enrich onboarding Slack notifications with context notes ([#2360](https://github.com/adobe/spacecat-api-service/issues/2360)) ([c8707e1](https://github.com/adobe/spacecat-api-service/commit/c8707e176d0ef17ccea15e8323dbbc4ce01a9c32))
+
 ## [1.482.2](https://github.com/adobe/spacecat-api-service/compare/v1.482.1...v1.482.2) (2026-05-07)
 
 
