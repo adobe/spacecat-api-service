@@ -42,7 +42,7 @@ import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import {
-  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS,
+  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
@@ -1170,11 +1170,24 @@ function SitesController(ctx, log, env) {
   /**
    * Resolves site and organization data based on query parameters.
    * Tries siteId first, then checks either organizationId or imsOrg (mutually exclusive).
+   *
+   * On failure, returns HTTP 404 with a structured body:
+   *   { message, resolveStatus, details? }
+   * where `resolveStatus` is one of:
+   *   - 'no_entitlement_for_product' — org has no entitlement for the requested x-product.
+   *   - 'aso_pre_onboard' — entitlement tier is not in CUSTOMER_VISIBLE_TIERS (e.g. PRE_ONBOARD).
+   *   - 'site_not_enrolled' — entitlement is visible but no SiteEnrollment links this site.
+   * `details` shape is `{ productCode, siteId, organizationId }` for all three statuses
+   * (these branches are reached only via the siteId path, so siteId is always present).
+   * Unspecified 404s fall through without resolveStatus (unknown/generic not-found).
+   *
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Resolved site and organization data response.
    */
   const resolveSite = async (context) => {
-    const { organizationId, imsOrg, siteId } = context.data;
+    const {
+      organizationId, imsOrg, siteId, callerImsOrg,
+    } = context.data;
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
     const productCode = pathInfo.headers[X_PRODUCT_HEADER];
@@ -1185,6 +1198,68 @@ function SitesController(ctx, log, env) {
     if (!hasText(organizationId) && !hasText(imsOrg)) {
       return badRequest('Either organizationId or imsOrg must be provided');
     }
+
+    const resolveFailure = (message, resolveStatus, details) => createResponse(
+      { message, resolveStatus, details },
+      404,
+      { 'x-error': message },
+    );
+
+    // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
+    // independent of which org's data is being requested via organizationId/imsOrg.
+    // We translate it to a Spacecat UUID once, up front, so the per-path remap can
+    // decide whether the caller is an internal/demo org listed in ASO_PLG_EXCLUDED_ORGS.
+    let callerIsInternal = false;
+    if (hasText(callerImsOrg)) {
+      try {
+        const callerOrg = await Organization.findByImsOrgId(callerImsOrg);
+        if (callerOrg) {
+          callerIsInternal = isInternalOrg(callerOrg.getId(), context.env);
+          log.info(`[resolveSite] callerOrg UUID=${callerOrg.getId()} callerIsInternal=${callerIsInternal}`);
+        } else {
+          log.info(`[resolveSite] callerImsOrg=${callerImsOrg} not found in DB`);
+        }
+      } catch (e) {
+        log.warn('[resolveSite] caller org lookup failed, treating as non-internal', e);
+      }
+    }
+
+    // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
+    // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
+    //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
+    //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
+    const resolveByOrg = async (org, failureDetails) => {
+      const tierClient = TierClient.createForOrg(context, org, productCode);
+      const { entitlement, site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+      if (!entitlement) {
+        if (callerIsInternal) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+      }
+
+      if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+        if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+          return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+        }
+        log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
+      }
+
+      if (enrolledSite && (accessControlUtil.hasAdminAccess()
+        || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
+        const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
+        return ok({
+          data: {
+            organization: OrganizationDto.toJSON(org),
+            site: SiteDto.toJSON(enrolledSite),
+            isSummitPlgEnabled,
+          },
+        });
+      }
+
+      return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+    };
 
     let organization;
     let site;
@@ -1206,19 +1281,41 @@ function SitesController(ctx, log, env) {
             if (organization && await accessControlUtil.hasAccess(organization)) {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
+              const failureDetails = { productCode, siteId, organizationId: orgId };
 
-              const tierVisible = entitlement
-                && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
-              if (tierVisible && enrollments?.length) {
-                const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
-                const data = {
+              // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS):
+              // - No entitlement: return site_not_enrolled (login fails anyway, no PLG wizard)
+              // - Non-customer tier (e.g. PRE_ONBOARD): skip tier check, let enrollment decide
+              //   (enrolled → 200 dashboard, not enrolled → site_not_enrolled)
+              // - Customer tiers (FREE_TRIAL/PAID/PLG): unchanged — pass through to enrollment
+              // Customer callers are completely unaffected by this block.
+              if (!entitlement) {
+                if (callerIsInternal) {
+                  log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);
+                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+                }
+                return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+              }
+
+              if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+                if (!callerIsInternal) {
+                  return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+                }
+                log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
+              }
+
+              if (!enrollments?.length) {
+                return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+              }
+
+              const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
+              return ok({
+                data: {
                   organization: OrganizationDto.toJSON(organization),
                   site: SiteDto.toJSON(site),
                   isSummitPlgEnabled,
-                };
-
-                return ok({ data });
-              }
+                },
+              });
             }
           }
         }
@@ -1226,41 +1323,27 @@ function SitesController(ctx, log, env) {
 
       if (hasText(organizationId) && isValidUUID(organizationId)) {
         organization = await Organization.findById(organizationId);
-        if (organization && await accessControlUtil.hasAccess(organization)) {
-          const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { entitlement: orgEntitlement, site: enrolledSite } = await tierClient
-            .getFirstEnrollment();
-
-          if (enrolledSite && (accessControlUtil.hasAdminAccess()
-            || CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier()))) {
-            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-            const data = {
-              organization: OrganizationDto.toJSON(organization),
-              site: SiteDto.toJSON(enrolledSite),
-              isSummitPlgEnabled,
-            };
-
-            return ok({ data });
-          }
+        if (!organization) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            { productCode, organizationId },
+          );
+        }
+        if (await accessControlUtil.hasAccess(organization)) {
+          return resolveByOrg(organization, { productCode, organizationId });
         }
       } else if (hasText(imsOrg)) {
         organization = await Organization.findByImsOrgId(imsOrg);
-        if (organization && await accessControlUtil.hasAccess(organization)) {
-          const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { entitlement: imsOrgEntitlement, site: enrolledSite } = await tierClient
-            .getFirstEnrollment();
-
-          if (enrolledSite && (accessControlUtil.hasAdminAccess()
-            || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier()))) {
-            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-            const data = {
-              organization: OrganizationDto.toJSON(organization),
-              site: SiteDto.toJSON(enrolledSite),
-              isSummitPlgEnabled,
-            };
-
-            return ok({ data });
-          }
+        if (!organization) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            { productCode },
+          );
+        }
+        if (await accessControlUtil.hasAccess(organization)) {
+          return resolveByOrg(organization, { productCode, organizationId: organization.getId() });
         }
       }
 
