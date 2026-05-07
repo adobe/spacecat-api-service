@@ -94,6 +94,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
+ * @param {Object} siteDetectionController - The site detection controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
  * @param {Object} webhooksController - GitHub webhook handler controller.
@@ -148,6 +149,7 @@ export default function getRouteHandlers(
   pageRelationshipsController,
   ephemeralRunController,
   autofixChecksController,
+  siteDetectionController,
   plgOnboardingController,
   drsBpPgAuditController,
   webhooksController,
@@ -218,6 +220,8 @@ export default function getRouteHandlers(
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
     'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
+    'POST /sites/detect/jobs': siteDetectionController.createSiteDetectionJob,
+    'GET /sites/detect/jobs/:jobId': siteDetectionController.getSiteDetectionJobStatus,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
