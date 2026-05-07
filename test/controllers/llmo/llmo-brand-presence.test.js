@@ -53,6 +53,7 @@ import {
   createTopicDetailHandler,
   createTopicsHandler,
   createTopicPromptsHandler,
+  createPromptExecutionStatusHandler,
   createSearchHandler,
   buildSearchPattern,
   createSentimentMoversHandler,
@@ -1676,6 +1677,37 @@ describe('llmo-brand-presence', () => {
       expect(idCalls).to.have.lengthOf(2);
       expect(idCalls[0][1]).to.have.lengthOf(50);
       expect(idCalls[1][1]).to.have.lengthOf(1);
+    });
+
+    it('returns empty array when a topic chunk query returns an error', async () => {
+      const catId = '0178a3f0-1234-7000-8000-0000000000ff';
+      const topicIds = ['0178a3f0-1234-7000-8000-000000000001'];
+      const chain = {
+        select() { return chain; },
+        eq() { return chain; },
+        in() { return chain; },
+        limit() {
+          return Promise.resolve({ data: null, error: { message: 'chunk error' } });
+        },
+      };
+      const topicCategoriesChain = {
+        select() { return topicCategoriesChain; },
+        eq() { return topicCategoriesChain; },
+        in() { return topicCategoriesChain; },
+        limit() {
+          return Promise.resolve({
+            data: topicIds.map((id) => ({ topic_id: id })),
+            error: null,
+          });
+        },
+      };
+      const client = {
+        from(table) {
+          return table === 'topic_categories' ? topicCategoriesChain : chain;
+        },
+      };
+      const result = await fetchTopicsForConfig(client, 'org-1', [], catId);
+      expect(result).to.deep.equal([]);
     });
   });
 
@@ -9134,6 +9166,263 @@ describe('llmo-brand-presence', () => {
 
       expect(result.status).to.equal(400);
       expect(mockContext.log.error).to.have.been.calledWith('Regions handler error: DB connection lost');
+    });
+  });
+
+  describe('createPromptExecutionStatusHandler', () => {
+    const VALID_PROMPT_ID_1 = 'aaaaaaaa-1111-4000-8000-000000000001';
+    const VALID_PROMPT_ID_2 = 'bbbbbbbb-2222-4000-8000-000000000002';
+
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
+      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when organization not found', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
+      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization not found: 0178a3f0-1234-7000-8000-000000000001');
+    });
+
+    it('returns badRequest when generic error is thrown', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
+      getOrgAndValidateAccess.rejects(new Error('Database connection failed'));
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Database connection failed');
+    });
+
+    it('returns badRequest when promptIds is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+      mockContext.data = {};
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('promptIds query parameter is required');
+    });
+
+    it('returns badRequest when promptIds is null', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+      mockContext.data = { promptIds: null };
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns badRequest when promptIds array contains only invalid UUIDs', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+      mockContext.data = { promptIds: ['not-a-uuid', 'also-invalid'] };
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('promptIds query parameter is required');
+    });
+
+    it('accepts promptIds as comma-separated string', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+      );
+      mockContext.data = { promptIds: `${VALID_PROMPT_ID_1}, ${VALID_PROMPT_ID_2}` };
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('accepts promptIds as non-string non-array non-null value but filters invalid UUID', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+      mockContext.data = { promptIds: 12345 };
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns badRequest when query returns an error', async () => {
+      const queryError = { message: 'relation brand_presence_executions_active does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: null, error: queryError },
+      );
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('relation brand_presence_executions_active does not exist');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Brand presence prompt-execution-status error: relation brand_presence_executions_active does not exist',
+      );
+    });
+
+    it('returns ok with empty items when data is null', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: null, error: null },
+      );
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.items).to.deep.equal([]);
+    });
+
+    it('returns ok with empty items when data is empty array', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+      );
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.items).to.deep.equal([]);
+    });
+
+    it('groups rows by topic/prompt/region and returns sorted matchedModels', async () => {
+      const rows = [
+        {
+          topic_id: 'topic-1', prompt: 'What is Adobe?', region_code: 'US', model: 'chatgpt-paid',
+        },
+        {
+          topic_id: 'topic-1', prompt: 'What is Adobe?', region_code: 'US', model: 'chatgpt-free',
+        },
+        {
+          topic_id: 'topic-2', prompt: 'Why Adobe?', region_code: 'WW', model: 'chatgpt-paid',
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: rows, error: null },
+      );
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.items).to.have.lengthOf(2);
+
+      const item1 = body.items.find((i) => i.topicId === 'topic-1');
+      expect(item1.prompt).to.equal('What is Adobe?');
+      expect(item1.regionCode).to.equal('US');
+      expect(item1.matchedModels).to.deep.equal(['chatgpt', 'openai']);
+
+      const item2 = body.items.find((i) => i.topicId === 'topic-2');
+      expect(item2.matchedModels).to.deep.equal(['openai']);
+    });
+
+    it('skips null model and does not add it to matchedModels', async () => {
+      const rows = [
+        {
+          topic_id: 'topic-1', prompt: 'What is Adobe?', region_code: 'US', model: null,
+        },
+        {
+          topic_id: 'topic-1', prompt: 'What is Adobe?', region_code: 'US', model: 'chatgpt-free',
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: rows, error: null },
+      );
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.items[0].matchedModels).to.deep.equal(['chatgpt']);
+    });
+
+    it('passes through unknown model values not in DB_MODEL_TO_PLATFORM_CODE', async () => {
+      const rows = [
+        {
+          topic_id: 'topic-1', prompt: 'p', region_code: 'US', model: 'gemini',
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: rows, error: null },
+      );
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.items[0].matchedModels).to.deep.equal(['gemini']);
+    });
+
+    it('returns 403 when siteId does not belong to organization', async () => {
+      const siteId = 'cccdac43-1a22-4659-9086-b762f59b9928';
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1], siteId };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+      );
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Site does not belong to the organization');
+    });
+
+    it('applies site_id filter when siteId belongs to the organization', async () => {
+      const siteId = 'cccdac43-1a22-4659-9086-b762f59b9928';
+      const siteValidation = { data: [{ id: siteId }], error: null };
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        [siteValidation, { data: [], error: null }],
+      );
+      mockContext.data = { promptIds: [VALID_PROMPT_ID_1], siteId };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(chainMock.eq).to.have.been.calledWith('site_id', siteId);
     });
   });
 });
