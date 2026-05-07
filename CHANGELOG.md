@@ -1,3 +1,37 @@
+## [1.483.2](https://github.com/adobe/spacecat-api-service/compare/v1.483.1...v1.483.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* Add new query pattern for getTokensBySiteIdByCycle ([#2298](https://github.com/adobe/spacecat-api-service/issues/2298)) ([368bf1c](https://github.com/adobe/spacecat-api-service/commit/368bf1ca8288f6d966a3cbf0cec7502e2a1200e1))
+* block llmo spreadsheet read for 59bdf35f-c0d4-4c51-9013-8a5b63d7… ([#2362](https://github.com/adobe/spacecat-api-service/issues/2362)) ([b067121](https://github.com/adobe/spacecat-api-service/commit/b067121766a503209b1a42da75383aa45d6295cd))
+
+## [1.483.1](https://github.com/adobe/spacecat-api-service/compare/v1.483.0...v1.483.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* chunk uploaded status report files to avoid Slack timeout ([#2358](https://github.com/adobe/spacecat-api-service/issues/2358)) ([d099588](https://github.com/adobe/spacecat-api-service/commit/d099588ebb1d8995b1a5b7ae36092bf0c35f29e5))
+
+# [1.483.0](https://github.com/adobe/spacecat-api-service/compare/v1.482.2...v1.483.0) (2026-05-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.59.0 ([#2361](https://github.com/adobe/spacecat-api-service/issues/2361)) ([2463626](https://github.com/adobe/spacecat-api-service/commit/24636260f577e355275753715842e49925ced4cf))
+
+
+### Features
+
+* **plg:** enrich onboarding Slack notifications with context notes ([#2360](https://github.com/adobe/spacecat-api-service/issues/2360)) ([c8707e1](https://github.com/adobe/spacecat-api-service/commit/c8707e176d0ef17ccea15e8323dbbc4ce01a9c32))
+
+## [1.482.2](https://github.com/adobe/spacecat-api-service/compare/v1.482.1...v1.482.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* **plg:** set AEM_CS delivery type when auto-resolving author URL ([#2359](https://github.com/adobe/spacecat-api-service/issues/2359)) ([534fa63](https://github.com/adobe/spacecat-api-service/commit/534fa632abf92cc8523a1a66d0e6b821ab5a474f))
+
 ## [1.482.1](https://github.com/adobe/spacecat-api-service/compare/v1.482.0...v1.482.1) (2026-05-07)
 
 
