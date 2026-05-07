@@ -38,6 +38,8 @@ import {
   fetchRegionsForConfig,
   brandLinkedToSite,
   fetchDistinctPromptCountForConfig,
+  fetchTopicsForConfig,
+  fetchFilterDimensionsStats,
   fetchBrandsForOrgSite,
   resolveSiteIdsForConfigPageIntents,
   createPromptDetailHandler,
@@ -1408,6 +1410,32 @@ describe('llmo-brand-presence', () => {
 
       expect(result.status).to.equal(200);
     });
+
+    it('filters topics and prompt count by categoryId when provided', async () => {
+      const catId = '0178a3f0-1234-7000-8000-0000000000ee';
+      const topicId = '0178a3f0-1234-7000-8000-0000000000cc';
+      mockContext.params.brandId = 'all';
+      mockContext.data = { categoryId: catId };
+      const tableMock = createTableAwareMock({
+        regions: { data: [], error: null },
+        sites: { data: [], error: null },
+        brands: { data: [{ id: '0178a3f0-1234-7000-8000-0000000000bb', name: 'Acme' }], error: null },
+        prompts: { data: null, count: 4, error: null },
+        categories: { data: [{ id: catId, name: 'Tools' }], error: null },
+        topic_categories: { data: [{ topic_id: topicId }], error: null },
+        topics: { data: [{ id: topicId, name: 'Topic In Cat', brand_id: null }], error: null },
+        page_intents: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = tableMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topics).to.deep.equal([{ id: topicId, label: 'Topic In Cat' }]);
+      expect(body.stats.distinct_prompt_count).to.equal(4);
+    });
   });
 
   describe('fetchDistinctPromptCountForConfig', () => {
@@ -1481,6 +1509,145 @@ describe('llmo-brand-presence', () => {
         [{ id: '0178a3f0-1234-7000-8000-0000000000aa', label: 'A' }],
       );
       expect(n).to.equal(0);
+    });
+
+    it('filters by category_id when categoryId is provided (single brand)', async () => {
+      const catId = '0178a3f0-1234-7000-8000-0000000000ff';
+      const eqStub = sinon.stub().returnsThis();
+      const chain = {
+        select() { return chain; },
+        eq: eqStub,
+        in() { return chain; },
+        then(resolve) { return Promise.resolve({ count: 5, error: null }).then(resolve); },
+      };
+      const client = { from: () => chain };
+      const n = await fetchDistinctPromptCountForConfig(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+        [],
+        catId,
+      );
+      expect(n).to.equal(5);
+      expect(eqStub).to.have.been.calledWith('category_id', catId);
+    });
+
+    it('does not filter by category_id when categoryId is null', async () => {
+      const eqStub = sinon.stub().returnsThis();
+      const chain = {
+        select() { return chain; },
+        eq: eqStub,
+        in() { return chain; },
+        then(resolve) { return Promise.resolve({ count: 10, error: null }).then(resolve); },
+      };
+      const client = { from: () => chain };
+      const n = await fetchDistinctPromptCountForConfig(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+        [],
+        null,
+      );
+      expect(n).to.equal(10);
+      expect(eqStub).not.to.have.been.calledWith('category_id', sinon.match.any);
+    });
+  });
+
+  describe('fetchTopicsForConfig', () => {
+    it('returns all topics when no categoryId is given', async () => {
+      const client = createTableAwareMock({
+        topics: {
+          data: [
+            { id: '0178a3f0-1234-7000-8000-000000000001', name: 'Topic A', brand_id: null },
+            { id: '0178a3f0-1234-7000-8000-000000000002', name: 'Topic B', brand_id: null },
+          ],
+          error: null,
+        },
+      });
+      const results = await fetchTopicsForConfig(client, 'org-1', []);
+      expect(results).to.have.lengthOf(2);
+      expect(results.map((r) => r.label)).to.deep.equal(['Topic A', 'Topic B']);
+    });
+
+    it('returns empty array when topic_categories has no rows for categoryId', async () => {
+      const client = createTableAwareMock({
+        topic_categories: { data: [], error: null },
+      });
+      const results = await fetchTopicsForConfig(
+        client,
+        'org-1',
+        [],
+        '0178a3f0-1234-7000-8000-0000000000ff',
+      );
+      expect(results).to.deep.equal([]);
+    });
+
+    it('filters topics to those in the category when categoryId is given', async () => {
+      const topicIdInCategory = '0178a3f0-1234-7000-8000-000000000001';
+      const client = createTableAwareMock({
+        topic_categories: { data: [{ topic_id: topicIdInCategory }], error: null },
+        topics: {
+          data: [{ id: topicIdInCategory, name: 'Cat Topic', brand_id: null }],
+          error: null,
+        },
+      });
+      const results = await fetchTopicsForConfig(
+        client,
+        'org-1',
+        [],
+        '0178a3f0-1234-7000-8000-0000000000ff',
+      );
+      expect(results).to.have.lengthOf(1);
+      expect(results[0].label).to.equal('Cat Topic');
+    });
+
+    it('returns empty array when topic_categories query errors', async () => {
+      const client = createTableAwareMock({
+        topic_categories: { data: null, error: { message: 'db error' } },
+      });
+      const results = await fetchTopicsForConfig(
+        client,
+        'org-1',
+        [],
+        '0178a3f0-1234-7000-8000-0000000000ff',
+      );
+      expect(results).to.deep.equal([]);
+    });
+
+    it('returns empty array when all topic_ids are filtered out as falsy', async () => {
+      const client = createTableAwareMock({
+        topic_categories: { data: [{ topic_id: null }, { topic_id: undefined }], error: null },
+      });
+      const results = await fetchTopicsForConfig(
+        client,
+        'org-1',
+        [],
+        '0178a3f0-1234-7000-8000-0000000000ff',
+      );
+      expect(results).to.deep.equal([]);
+    });
+  });
+
+  describe('fetchFilterDimensionsStats', () => {
+    it('passes categoryId to prompt count query', async () => {
+      const catId = '0178a3f0-1234-7000-8000-0000000000ff';
+      const eqStub = sinon.stub().returnsThis();
+      const chain = {
+        select() { return chain; },
+        eq: eqStub,
+        in() { return chain; },
+        then(resolve) { return Promise.resolve({ count: 3, error: null }).then(resolve); },
+      };
+      const client = { from: () => chain };
+      const stats = await fetchFilterDimensionsStats(
+        client,
+        'org-1',
+        'brand-1',
+        [],
+        catId,
+      );
+      expect(stats.distinct_prompt_count).to.equal(3);
+      expect(eqStub).to.have.been.calledWith('category_id', catId);
     });
   });
 

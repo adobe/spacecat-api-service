@@ -645,14 +645,15 @@ const CONFIG_FILTER_ORIGINS = Object.freeze([
 ]);
 
 /**
- * Optional query param only: siteId / site_id.
+ * Optional query params: siteId / site_id, categoryId / category_id.
  * @param {Object} context
- * @returns {{ siteId: string|undefined }}
+ * @returns {{ siteId: string|undefined, categoryId: string|undefined }}
  */
 function parseFilterDimensionsSiteQuery(context) {
   const q = context.data || {};
   return {
     siteId: q.siteId || q.site_id,
+    categoryId: q.categoryId || q.category_id,
   };
 }
 
@@ -875,16 +876,43 @@ export async function fetchCategoriesForConfig(client, organizationId) {
  * Topics for org, optionally scoped to brand_ids from config brands (includes brand_id NULL).
  * @internal Exported for tests
  */
-export async function fetchTopicsForConfig(client, organizationId, brandOptions) {
+export async function fetchTopicsForConfig(
+  client,
+  organizationId,
+  brandOptions,
+  categoryId = null,
+) {
   const brandIdSet = new Set(
     brandOptions.map((b) => b.id).filter((id) => hasText(id)),
   );
-  const { data, error } = await client
+
+  let topicIdFilter = null;
+  if (categoryId) {
+    const { data: tcRows, error: tcError } = await client
+      .from('topic_categories')
+      .select('topic_id')
+      .eq('category_id', categoryId)
+      .limit(QUERY_LIMIT);
+    if (tcError || !tcRows?.length) {
+      return [];
+    }
+    topicIdFilter = tcRows.map((r) => r.topic_id).filter(Boolean);
+    if (!topicIdFilter.length) {
+      return [];
+    }
+  }
+
+  let query = client
     .from('topics')
     .select('id, name, brand_id')
     .eq('organization_id', organizationId)
-    .in('status', ['pending', 'active'])
-    .limit(QUERY_LIMIT);
+    .in('status', ['pending', 'active']);
+
+  if (topicIdFilter) {
+    query = query.in('id', topicIdFilter);
+  }
+
+  const { data, error } = await query.limit(QUERY_LIMIT);
   if (error || !data?.length) {
     return [];
   }
@@ -898,6 +926,7 @@ const PROMPT_STATUS_FOR_CONFIG_STATS = ['pending', 'active'];
 
 /**
  * Counts `prompts` rows for the same brand scope as filter-dimensions dimensions.
+ * When `categoryId` is provided, restricts the count to prompts in that category.
  * @internal Exported for tests
  */
 export async function fetchDistinctPromptCountForConfig(
@@ -905,14 +934,19 @@ export async function fetchDistinctPromptCountForConfig(
   organizationId,
   filterByBrandId,
   brandOptions,
+  categoryId = null,
 ) {
   if (filterByBrandId) {
-    const { count, error } = await client
+    let query = client
       .from('prompts')
       .select('id', { count: 'exact', head: true })
       .eq('organization_id', organizationId)
       .eq('brand_id', filterByBrandId)
       .in('status', PROMPT_STATUS_FOR_CONFIG_STATS);
+    if (categoryId) {
+      query = query.eq('category_id', categoryId);
+    }
+    const { count, error } = await query;
     if (error) {
       return 0;
     }
@@ -926,12 +960,18 @@ export async function fetchDistinctPromptCountForConfig(
   for (let i = 0; i < brandIds.length; i += IN_FILTER_CHUNK_SIZE) {
     chunks.push(brandIds.slice(i, i + IN_FILTER_CHUNK_SIZE));
   }
-  const rows = await Promise.all(chunks.map((chunk) => client
-    .from('prompts')
-    .select('id', { count: 'exact', head: true })
-    .eq('organization_id', organizationId)
-    .in('brand_id', chunk)
-    .in('status', PROMPT_STATUS_FOR_CONFIG_STATS)));
+  const rows = await Promise.all(chunks.map((chunk) => {
+    let query = client
+      .from('prompts')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', organizationId)
+      .in('brand_id', chunk)
+      .in('status', PROMPT_STATUS_FOR_CONFIG_STATS);
+    if (categoryId) {
+      query = query.eq('category_id', categoryId);
+    }
+    return query;
+  }));
   let total = 0;
   for (const { count, error } of rows) {
     if (error) {
@@ -952,12 +992,14 @@ export async function fetchFilterDimensionsStats(
   organizationId,
   filterByBrandId,
   brandOptions,
+  categoryId = null,
 ) {
   const distinctPromptCount = await fetchDistinctPromptCountForConfig(
     client,
     organizationId,
     filterByBrandId,
     brandOptions,
+    categoryId,
   );
   return {
     distinct_prompt_count: distinctPromptCount,
@@ -980,7 +1022,7 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
     'filter-dimensions',
     async (ctx, client) => {
       const { spaceCatId, brandId } = ctx.params;
-      const { siteId: siteFilter } = parseFilterDimensionsSiteQuery(ctx);
+      const { siteId: siteFilter, categoryId } = parseFilterDimensionsSiteQuery(ctx);
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
@@ -1006,12 +1048,13 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
       }
 
       const [topics, stats] = await Promise.all([
-        fetchTopicsForConfig(client, organizationId, brandOptions),
+        fetchTopicsForConfig(client, organizationId, brandOptions, categoryId),
         fetchFilterDimensionsStats(
           client,
           organizationId,
           filterByBrandId,
           brandOptions,
+          categoryId,
         ),
       ]);
       const origins = [...CONFIG_FILTER_ORIGINS];
