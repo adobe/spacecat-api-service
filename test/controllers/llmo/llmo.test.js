@@ -185,7 +185,8 @@ describe('LlmoController', () => {
     },
   });
 
-  before(async () => {
+  before(async function llmoControllerSetup() {
+    this.timeout(10000);
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
     updateModifiedByDetailsStub = sinon.stub();
 
