@@ -354,6 +354,7 @@ describe('grant-suggestions-handler', () => {
           .resolves(null)
           .onSecondCall()
           .resolves(createdToken),
+        findLastCreatedBySiteIdAndTokenType: sandbox.stub().resolves(null),
       };
       const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub().resolves({
@@ -414,6 +415,7 @@ describe('grant-suggestions-handler', () => {
       };
       const Token = {
         findBySiteIdAndTokenType: sandbox.stub(),
+        findLastCreatedBySiteIdAndTokenType: sandbox.stub().resolves(null),
       };
       Token.findBySiteIdAndTokenType
         .onFirstCall().resolves(null)
@@ -505,6 +507,7 @@ describe('grant-suggestions-handler', () => {
           });
         const Token = {
           findBySiteIdAndTokenType: sandbox.stub(),
+          findLastCreatedBySiteIdAndTokenType: sandbox.stub().resolves(null),
         };
         Token.findBySiteIdAndTokenType
           .onFirstCall()
@@ -545,6 +548,7 @@ describe('grant-suggestions-handler', () => {
         };
         const Token = {
           findBySiteIdAndTokenType: sandbox.stub(),
+          findLastCreatedBySiteIdAndTokenType: sandbox.stub().resolves(null),
         };
         Token.findBySiteIdAndTokenType
           .onFirstCall().resolves(null)
@@ -592,6 +596,7 @@ describe('grant-suggestions-handler', () => {
           });
         const Token = {
           findBySiteIdAndTokenType: sandbox.stub(),
+          findLastCreatedBySiteIdAndTokenType: sandbox.stub().resolves(null),
         };
         Token.findBySiteIdAndTokenType
           .onFirstCall().resolves(null)
@@ -606,6 +611,58 @@ describe('grant-suggestions-handler', () => {
         expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
         // Re-grant of grantedIds + grant of remaining
         expect(SuggestionGrant.grantSuggestions.callCount).to.be.greaterThan(0);
+      });
+
+      it('runs handleExistingTokenCycle on previous token before creating new token', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+        const prevToken = { getId: () => 'prev-tok', getRemaining: () => 0 };
+        const createdToken = { getRemaining: () => 3 };
+        const prevOutdatedSugg = {
+          getId: () => 'prev-sugg-1', getStatus: () => 'OUTDATED',
+        };
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [prevOutdatedSugg],
+            unprocessed: [],
+          }),
+        };
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            { getSuggestionId: () => 'prev-sugg-1', getGrantId: () => 'prev-g1' },
+          ]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+          findLastCreatedBySiteIdAndTokenType: sandbox.stub().resolves(prevToken),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall()
+          .resolves(null) // no current cycle token
+          .onSecondCall()
+          .resolves(prevToken) // refreshed prev token after revoke
+          .onThirdCall()
+          .resolves(createdToken); // new token created
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // Previous token's stale grant should have been revoked
+        expect(SuggestionGrant.allByIndexKeys).to.have.been.calledOnce;
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('prev-g1');
+        // New token created and new suggestion granted
+        expect(Token.findLastCreatedBySiteIdAndTokenType).to.have.been.calledOnce;
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       });
 
       it('returns early after re-grant if token is null on re-fetch', async () => {
@@ -630,6 +687,7 @@ describe('grant-suggestions-handler', () => {
         };
         const Token = {
           findBySiteIdAndTokenType: sandbox.stub(),
+          findLastCreatedBySiteIdAndTokenType: sandbox.stub().resolves(null),
         };
         Token.findBySiteIdAndTokenType
           .onFirstCall()
@@ -705,6 +763,7 @@ describe('grant-suggestions-handler', () => {
             .resolves(null)
             .onSecondCall()
             .resolves(createdToken),
+          findLastCreatedBySiteIdAndTokenType: sandbox.stub().resolves(null),
         };
         const dataAccess = { Suggestion, SuggestionGrant, Token };
 
