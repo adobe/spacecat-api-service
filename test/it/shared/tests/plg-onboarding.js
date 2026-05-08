@@ -365,7 +365,7 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
           expect(res.body.reviews).to.be.an('array').with.lengthOf(1);
           expect(res.body.reviews[0].decision).to.equal('OFFBOARDED');
           expect(res.body.reviews[0].justification).to.equal('Offboarding domain at customer request');
-          expect(res.body.reviews[0].reason).to.include('site1.example.com');
+          expect(res.body.reviews[0].reason).to.be.null;
           expect(res.body.reviews[0].reviewedBy).to.be.a('string');
           expectISOTimestamp(res.body.reviews[0].reviewedAt, 'reviewedAt');
         });
@@ -382,7 +382,7 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
           expect(res.body.reviews).to.be.an('array').with.lengthOf(1);
           expect(res.body.reviews[0].decision).to.equal('REOPENED');
           expect(res.body.reviews[0].justification).to.equal('Re-opening rejected domain for new attempt');
-          expect(res.body.reviews[0].reason).to.include('rejected-plg-it.example.com');
+          expect(res.body.reviews[0].reason).to.be.null;
           expect(res.body.reviews[0].reviewedBy).to.be.a('string');
           expectISOTimestamp(res.body.reviews[0].reviewedAt, 'reviewedAt');
         });
