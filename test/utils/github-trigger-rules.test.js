@@ -59,7 +59,7 @@ describe('github-trigger-rules', () => {
     });
 
     describe('labeled trigger', () => {
-      it('returns null when label matches', () => {
+      it('returns null when label matches the default trigger', () => {
         const data = {
           ...baseData,
           action: 'labeled',
@@ -76,6 +76,37 @@ describe('github-trigger-rules', () => {
         };
         const reason = getSkipReason(data, 'labeled', defaultEnv);
         expect(reason).to.include('bug');
+      });
+
+      it('honors env-configured trigger label', () => {
+        // Dev/prod can use different labels so a single label-add against a
+        // repo with both bots installed routes to only one env's worker.
+        const devEnv = {
+          ...defaultEnv,
+          MYSTICAT_REVIEW_LABEL: 'mysticat-dev:review-requested',
+        };
+        const data = {
+          ...baseData,
+          action: 'labeled',
+          label: { name: 'mysticat-dev:review-requested' },
+        };
+        expect(getSkipReason(data, 'labeled', devEnv)).to.be.null;
+      });
+
+      it('skips the canonical label when env overrides to a different one', () => {
+        // Mirror of the above: the canonical prod label must NOT trigger
+        // a dev-configured worker.
+        const devEnv = {
+          ...defaultEnv,
+          MYSTICAT_REVIEW_LABEL: 'mysticat-dev:review-requested',
+        };
+        const data = {
+          ...baseData,
+          action: 'labeled',
+          label: { name: 'mysticat:review-requested' },
+        };
+        const reason = getSkipReason(data, 'labeled', devEnv);
+        expect(reason).to.include('mysticat:review-requested');
       });
     });
 

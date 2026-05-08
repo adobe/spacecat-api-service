@@ -47,10 +47,17 @@ export function getSkipReason(data, action, env) {
     }
   }
 
-  // Label-based trigger: label must match
+  // Label-based trigger: label must match the env-configured trigger label.
+  //
+  // Without an env-specific label, dev and prod GitHub App installations on
+  // the same repo would both react to a single label-add (each App fires the
+  // webhook to its own URL → its own env's worker → duplicate review). The
+  // env var lets dev configure `mysticat-dev:review-requested` while prod
+  // keeps the canonical `mysticat:review-requested`.
   if (action === 'labeled') {
+    const expectedLabel = env.MYSTICAT_REVIEW_LABEL || 'mysticat:review-requested';
     const label = data.label?.name;
-    if (label !== 'mysticat:review-requested') {
+    if (label !== expectedLabel) {
       return `label ${label} does not match trigger`;
     }
   }
