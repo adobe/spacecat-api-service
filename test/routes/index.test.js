@@ -925,6 +925,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/tokens',
       'GET /sites/:siteId/tokens/by-type/:tokenType',
       'GET /sites/:siteId/tokens/:tokenId/grants',
+      'DELETE /sites/:siteId/tokens/:tokenId',
       'DELETE /sites/:siteId/suggestions/grants/:grantId',
       'POST /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access',
