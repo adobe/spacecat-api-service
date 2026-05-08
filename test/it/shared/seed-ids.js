@@ -122,6 +122,7 @@ export const TRIAL_USER_ACTIVITY_1_ID = 'c2222222-2222-4222-a222-222222222222'; 
 // ── AsyncJobs (preflight) ──
 
 export const ASYNC_JOB_1_ID = 'eeee1111-1111-4111-b111-111111111111'; // COMPLETED preflight job
+export const ASYNC_JOB_2_ID = 'eeee2222-2222-4222-a222-222222222222'; // IN_PROGRESS site-detection job
 export const NON_EXISTENT_JOB_ID = 'eeee9999-9999-4999-b999-999999999999';
 
 // ── Consumers (S2S) ──
@@ -130,6 +131,13 @@ export const CONSUMER_1_ID = '11111111-1111-4111-b112-111111111111';
 export const CONSUMER_1_CLIENT_ID = '111111111111111111111111';
 export const CONSUMER_1_TECHNICAL_ACCOUNT_ID = '111111111111111111111111@techacct.adobe.com';
 export const CONSUMER_1_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
+
+// CONSUMER_2 — ACTIVE S2S consumer holding site:readAll + organization:readAll.
+// Used to exercise the readAll capability path through GET /sites and /organizations.
+export const CONSUMER_2_ID = '11111111-1111-4111-b112-222222222222';
+export const CONSUMER_2_CLIENT_ID = '222222222222222222222222';
+export const CONSUMER_2_TECHNICAL_ACCOUNT_ID = '222222222222222222222222@techacct.adobe.com';
+export const CONSUMER_2_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
 
 // ── PlgOnboardings ──
 

@@ -309,78 +309,114 @@ describe('LLMO Onboarding Functions', () => {
   };
 
   describe('generateDataFolder', () => {
-    it('should generate correct data folder name for production environment', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+    let generateDataFolder;
 
-      // Test parameters
-      const baseURL = 'https://test.com';
-      const env = 'prod';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result
-      expect(result).to.equal('test-com');
-    }).timeout(5000);
-
-    it('should generate correct data folder name for development environment', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
-
-      // Test parameters
-      const baseURL = 'https://test.com';
-      const env = 'dev';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result
-      expect(result).to.equal('dev/test-com');
+    before(async () => {
+      ({ generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {}));
     });
 
-    it('should handle complex domain names correctly', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
-
-      // Test with a complex domain
-      const baseURL = 'https://my-awesome-site.example.com';
-      const env = 'dev';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result
-      expect(result).to.equal('dev/my-awesome-site-example-com');
+    it('should generate correct data folder name for production environment', () => {
+      expect(generateDataFolder('https://test.com', 'prod')).to.equal('test-com');
     });
 
-    it('should handle domains with special characters', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
-
-      // Test with special characters
-      const baseURL = 'https://test-site.example.com:8080';
-      const env = 'prod';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result - should extract hostname and replace special chars with hyphens
-      expect(result).to.equal('test-site-example-com');
+    it('should generate correct data folder name for development environment', () => {
+      expect(generateDataFolder('https://test.com', 'dev')).to.equal('dev/test-com');
     });
 
-    it('should use default env as dev when not specified', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+    it('should handle complex domain names correctly', () => {
+      expect(generateDataFolder('https://my-awesome-site.example.com', 'dev'))
+        .to.equal('dev/my-awesome-site-example-com');
+    });
 
-      // Test parameters without env (should default to 'dev')
-      const baseURL = 'https://test.com';
+    it('should strip port from folder name', () => {
+      expect(generateDataFolder('https://test-site.example.com:8080', 'prod'))
+        .to.equal('test-site-example-com');
+    });
 
-      // Call the function
-      const result = generateDataFolder(baseURL);
+    it('should produce the same folder name for URLs differing only by port', () => {
+      expect(generateDataFolder('https://nba.com/kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com:8443/kings', 'prod'));
+    });
 
-      // Verify result
-      expect(result).to.equal('dev/test-com');
+    it('should use default env as dev when not specified', () => {
+      expect(generateDataFolder('https://test.com')).to.equal('dev/test-com');
+    });
+
+    it('should generate unique folder names for subpath sites on the same domain', () => {
+      expect(generateDataFolder('https://nba.com/kings', 'prod')).to.equal('nba-com--kings');
+      expect(generateDataFolder('https://nba.com/lakers', 'prod')).to.equal('nba-com--lakers');
+      expect(generateDataFolder('https://nba.com/kings', 'dev')).to.equal('dev/nba-com--kings');
+    });
+
+    it('should produce the same folder name for root domain with or without trailing slash', () => {
+      expect(generateDataFolder('https://nba.com', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/', 'prod'));
+    });
+
+    it('should produce the same folder name for subpath with or without trailing slash', () => {
+      expect(generateDataFolder('https://nba.com/kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings/', 'prod'));
+    });
+
+    it('should generate correct folder name for nested subpaths', () => {
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod')).to.equal('nba-com--us--kings');
+      expect(generateDataFolder('https://nba.com/us/kings', 'dev')).to.equal('dev/nba-com--us--kings');
+    });
+
+    it('should generate distinct folder names for paths that differ only by separator type', () => {
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/us-kings', 'prod'));
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/us..kings', 'prod'));
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/us--kings', 'prod'));
+    });
+
+    it('should not collide hostname with consecutive non-alnum chars and a subpath', () => {
+      expect(generateDataFolder('https://nba--com/', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba/com', 'prod'));
+    });
+
+    it('should handle malformed percent-encoded path segments without throwing', () => {
+      expect(() => generateDataFolder('https://a.com/%FF', 'prod')).to.not.throw();
+    });
+
+    it('should normalize percent-encoded path segments', () => {
+      expect(generateDataFolder('https://nba.com/k%C3%B6nig', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/könig', 'prod'));
+      expect(generateDataFolder('https://nba.com/k%C3%B6nig', 'prod'))
+        .to.match(/^nba-com--/);
+    });
+
+    it('should case-fold path segments so /Kings and /kings resolve to the same folder', () => {
+      expect(generateDataFolder('https://nba.com/Kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
+
+    it('should handle double slashes in paths correctly', () => {
+      expect(generateDataFolder('https://nba.com//kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
+
+    it('should ignore query strings and URL fragments', () => {
+      expect(generateDataFolder('https://nba.com/kings?utm=foo', 'prod'))
+        .to.equal('nba-com--kings');
+      expect(generateDataFolder('https://nba.com/kings#section', 'prod'))
+        .to.equal('nba-com--kings');
+    });
+
+    it('should drop degenerate path segments that sanitize to empty', () => {
+      expect(generateDataFolder('https://nba.com/-/kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
+
+    it('should throw on a malformed base URL', () => {
+      expect(() => generateDataFolder('not a url', 'prod')).to.throw(TypeError);
+    });
+
+    it('should throw when baseURL has no hostname', () => {
+      expect(() => generateDataFolder('file:///etc/passwd', 'prod'))
+        .to.throw(TypeError, 'hostname is required');
     });
   });
 
@@ -1685,7 +1721,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDetectCdnForDomain).to.have.been.calledWith('example.com');
     });
 
-    it('should store detectedCdn as other when CDN detection resolves but does not match', async () => {
+    it('should store detectedCdn as byocdn-other when CDN detection resolves but does not match a specific provider', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
@@ -1742,7 +1778,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockOctokit = createMockOctokit();
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
-      const mockDetectCdnForDomain = sinon.stub().resolves('other');
+      const mockDetectCdnForDomain = sinon.stub().resolves('byocdn-other');
 
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
@@ -1772,8 +1808,8 @@ describe('LLMO Onboarding Functions', () => {
         imsOrgId: 'ABC123@AdobeOrg',
       }, context);
 
-      expect(result.detectedCdn).to.equal('other');
-      expect(mockSiteConfig.updateLlmoDetectedCdn).to.have.been.calledWith('other');
+      expect(result.detectedCdn).to.equal('byocdn-other');
+      expect(mockSiteConfig.updateLlmoDetectedCdn).to.have.been.calledWith('byocdn-other');
     });
 
     it('should continue onboarding when CDN detection throws', async () => {
@@ -1947,8 +1983,455 @@ describe('LLMO Onboarding Functions', () => {
       }, context);
 
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.not.have.been.called;
-      // Prompt generation is deferred to DRS post-Brandalf, so no DRS submitJob call in v1 mode
+      // V1 mode does not trigger Brandalf, but it MUST trigger DRS prompt generation
+      // directly so the legacy LLMO config still gets prompts written (LLMO-4534).
       expect(mockDrsClient.createFrom().submitJob).to.not.have.been.called;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob.firstCall.args[0]).to.include({
+        brandName: 'Test Brand',
+        siteId: 'site123',
+        imsOrgId: 'ABC123@AdobeOrg',
+        audience: 'Tech-savvy professionals',
+      });
+      // LLMO-4683: when the caller does not supply a region, the V1 path must NOT
+      // pass `region` so the DRS client's existing default ('US') applies. This
+      // locks in additive behavior — non-US callers must opt in.
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob.firstCall.args[0])
+        .to.not.have.property('region');
+    }).timeout(10000);
+
+    it('should forward operator-supplied region to DRS prompt generation in v1 mode (LLMO-4683)', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns({ main_profile: { target_audience: 'General consumers in India' } }),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+      };
+
+      await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand IN',
+        imsOrgId: 'ABC123@AdobeOrg',
+        region: 'IN',
+      }, context);
+
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob.firstCall.args[0]).to.include({
+        brandName: 'Test Brand IN',
+        siteId: 'site123',
+        imsOrgId: 'ABC123@AdobeOrg',
+        region: 'IN',
+      });
+      expect(mockLog.info).to.have.been.calledWithMatch(
+        /Using operator-supplied region "IN" for v1 DRS prompt generation/,
+      );
+    }).timeout(10000);
+
+    it('should skip DRS prompt generation in v1 mode when DRS client is not configured', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      // DRS client not configured — v1 path should fall through the else branch and skip
+      // submitPromptGenerationJob, emitting a debug log instead.
+      const mockDrsClient = createMockDrsClient(sinon, { isConfigured: false });
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.not.have.been.called;
+      expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping prompt generation');
+    }).timeout(10000);
+
+    it('should handle DRS prompt generation failure gracefully in v1 mode', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      // DRS prompt generation throws — onboarding should swallow the error, log it,
+      // and warn via say() that a manual trigger is required (LLMO-4534).
+      const submitPromptGenerationJob = sinon.stub().rejects(new Error('drs unavailable'));
+      const mockDrsClient = createMockDrsClient(sinon, { submitPromptGenerationJob });
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const sayStub = sinon.stub();
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context, sayStub);
+
+      // Onboarding still completes despite DRS failure
+      expect(result.siteId).to.equal('site123');
+      expect(submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith('Failed to start DRS prompt generation: drs unavailable');
+      expect(sayStub).to.have.been.calledWith(':warning: Failed to start DRS prompt generation for site site123 (will need manual trigger)');
+    }).timeout(10000);
+
+    it('should use the English fallback audience when brand profile is missing in v1 mode', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          // Brand profile missing entirely — exercises the `||` fallback at the audience line.
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      // Caller passes brandName with whitespace to confirm trim is applied to BOTH the
+      // audience template and the DRS payload (consistency).
+      await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: '  Test Brand  ',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob.firstCall.args[0]).to.include({
+        brandName: 'Test Brand',
+        audience: 'General consumers interested in Test Brand products and services',
+        siteId: 'site123',
+        imsOrgId: 'ABC123@AdobeOrg',
+      });
+    }).timeout(10000);
+
+    it('should treat a DRS response missing job_id as a failure in v1 mode', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      // DRS resolves without a job_id — onboarding must NOT log/say a fake success;
+      // it must throw into the catch and emit the `:warning:` instead.
+      const submitPromptGenerationJob = sinon.stub().resolves({});
+      const mockDrsClient = createMockDrsClient(sinon, { submitPromptGenerationJob });
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const sayStub = sinon.stub();
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context, sayStub);
+
+      expect(result.siteId).to.equal('site123');
+      expect(submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith('Failed to start DRS prompt generation: DRS submitPromptGenerationJob returned no job_id');
+      expect(sayStub).to.have.been.calledWith(':warning: Failed to start DRS prompt generation for site site123 (will need manual trigger)');
+      // The success log/say must NOT have been emitted with `undefined`
+      expect(mockLog.info).to.not.have.been.calledWith('Started DRS prompt generation: job=undefined');
+      expect(sayStub).to.not.have.been.calledWith(':robot_face: Started DRS prompt generation job: undefined');
     }).timeout(10000);
 
     it('should skip DRS prompt generation when DRS client is not configured', async () => {
@@ -4210,6 +4693,66 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/Publish failed.*502.*body: $/),
       );
+    });
+  });
+
+  // Round-trip every token the shared Joi schema accepts. Anchored against
+  // `@adobe/spacecat-shared-data-access` >= 3.54.0, which aligned the enum
+  // with the canonical CDN_TYPES vocabulary (10 tokens) plus the legacy
+  // `other` token kept for back-compat with records written by the
+  // original Phase-1-only detector. If the detector ever starts emitting a
+  // token the schema doesn't know about, the config write at runtime will
+  // throw; surfacing that at unit-test time is the whole point of this
+  // block.
+  describe('detectedCdn Joi round-trip', () => {
+    const ACCEPTED_TOKENS = [
+      // Detector emits today
+      'aem-cs-fastly',
+      'commerce-fastly',
+      'byocdn-fastly',
+      'byocdn-akamai',
+      'byocdn-cloudflare',
+      'byocdn-imperva',
+      'byocdn-other',
+      // Reserved CDN_TYPES tokens — not emitted today but accepted so
+      // a future detector revision with AMS-aware signatures can land
+      // without a coupled shared release.
+      'byocdn-cloudfront',
+      'ams-cloudfront',
+      'ams-frontdoor',
+      // Legacy sentinel kept for back-compat; detector no longer emits it.
+      'other',
+    ];
+
+    let validateConfiguration;
+
+    before(async () => {
+      ({ validateConfiguration } = await import('@adobe/spacecat-shared-data-access/src/models/site/config.js'));
+    });
+
+    ACCEPTED_TOKENS.forEach((token) => {
+      it(`accepts detectedCdn = "${token}" via the shared Joi schema`, () => {
+        const config = {
+          llmo: {
+            dataFolder: '/test',
+            brand: 'test',
+            detectedCdn: token,
+          },
+        };
+        const validated = validateConfiguration(config);
+        expect(validated.llmo.detectedCdn).to.equal(token);
+      });
+    });
+
+    it('rejects an unknown detectedCdn token (regression guard for future detector additions)', () => {
+      const config = {
+        llmo: {
+          dataFolder: '/test',
+          brand: 'test',
+          detectedCdn: 'byocdn-unknown-provider',
+        },
+      };
+      expect(() => validateConfiguration(config)).to.throw(/detectedCdn/);
     });
   });
 });

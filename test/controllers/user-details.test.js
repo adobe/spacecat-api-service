@@ -98,6 +98,8 @@ describe('User Details Controller', () => {
     mockAccessControlUtil = {
       hasAccess: sandbox.stub().resolves(true),
       hasAdminAccess: sandbox.stub().returns(true),
+      hasAdminReadAccess: sandbox.stub().returns(true),
+      isAccessTypeJWT: sandbox.stub().returns(true),
     };
 
     sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
@@ -190,7 +192,7 @@ describe('User Details Controller', () => {
         organizationId,
         externalUserId: 'not-found-user@AdobeOrg',
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
 
       const result = await controller.getUserDetailsByExternalUserId(context);
 
@@ -210,7 +212,7 @@ describe('User Details Controller', () => {
         organizationId,
         externalUserId: 'not-found-user@AdobeOrg',
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
       mockImsClient.getImsAdminProfile.rejects(new Error('IMS error'));
 
       const result = await controller.getUserDetailsByExternalUserId(context);
@@ -231,7 +233,7 @@ describe('User Details Controller', () => {
         organizationId,
         externalUserId: 'incomplete-user@AdobeOrg',
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
       mockImsClient.getImsAdminProfile.resolves({
         userId: 'incomplete-user-123',
         // first_name, last_name, email are missing/null
@@ -254,7 +256,7 @@ describe('User Details Controller', () => {
         organizationId,
         externalUserId: 'not-found-user@AdobeOrg',
       };
-      mockAccessControlUtil.hasAdminAccess.returns(false);
+      mockAccessControlUtil.hasAdminReadAccess.returns(false);
 
       const result = await controller.getUserDetailsByExternalUserId(context);
 
@@ -368,7 +370,7 @@ describe('User Details Controller', () => {
       context.data = {
         userIds: [externalUserId, 'not-found-user@AdobeOrg'],
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
 
       const result = await controller.getUserDetailsInBulk(context);
 
@@ -393,7 +395,7 @@ describe('User Details Controller', () => {
       context.data = {
         userIds: [externalUserId, 'not-found-user@AdobeOrg'],
       };
-      mockAccessControlUtil.hasAdminAccess.returns(false);
+      mockAccessControlUtil.hasAdminReadAccess.returns(false);
 
       const result = await controller.getUserDetailsInBulk(context);
 
@@ -416,7 +418,7 @@ describe('User Details Controller', () => {
       context.data = {
         userIds: ['not-found-user-1@AdobeOrg', 'not-found-user-2@AdobeOrg'],
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
       mockImsClient.getImsAdminProfile.rejects(new Error('IMS error'));
 
       const result = await controller.getUserDetailsInBulk(context);
@@ -440,7 +442,7 @@ describe('User Details Controller', () => {
       context.data = {
         userIds: ['incomplete-user@AdobeOrg'],
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
       mockImsClient.getImsAdminProfile.resolves({
         userId: 'incomplete-user-123',
         first_name: null,
@@ -466,6 +468,113 @@ describe('User Details Controller', () => {
       mockDataAccess.TrialUser.allByOrganizationId.rejects(new Error('Database error'));
 
       const result = await controller.getUserDetailsInBulk(context);
+
+      expect(result.status).to.equal(500);
+      expect(mockLog.error).to.have.been.called;
+    });
+  });
+
+  describe('resolveUser', () => {
+    it('should return forbidden when requestor is not admin', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+      context.params = { userId: 'user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(403);
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    it('should return forbidden when caller is not using JWT auth', async () => {
+      mockAccessControlUtil.isAccessTypeJWT.returns(false);
+      context.params = { userId: 'user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(403);
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    it('should return bad request when userId param is missing', async () => {
+      context.params = {};
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(400);
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    it('should return bad request for invalid userId format', async () => {
+      context.params = { userId: 'not-a-valid-ims-id!' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(400);
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    it('should return resolved user profile for a valid userId', async () => {
+      context.params = { userId: 'user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({
+        firstName: 'IMS',
+        lastName: 'User',
+        email: 'imsuser@example.com',
+      });
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledWith('user@AdobeOrg');
+    });
+
+    it('should log successful resolution for audit purposes', async () => {
+      context.params = { userId: 'user@AdobeOrg' };
+
+      await controller.resolveUser(context);
+
+      expect(mockLog.info).to.have.been.calledWithMatch(/user@AdobeOrg/);
+    });
+
+    it('should use fallback values when IMS returns incomplete profile', async () => {
+      mockImsClient.getImsAdminProfile.resolves({
+        first_name: null,
+        last_name: undefined,
+        email: null,
+      });
+      context.params = { userId: 'user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({ firstName: '-', lastName: '-', email: '' });
+    });
+
+    it('should return 404 when IMS reports user does not exist', async () => {
+      mockImsClient.getImsAdminProfile.rejects(new Error('IMS getAdminProfile request failed with status: 404'));
+      context.params = { userId: 'user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('should return 400 when IMS reports invalid userId (non-404 4xx)', async () => {
+      mockImsClient.getImsAdminProfile.rejects(new Error('IMS getAdminProfile request failed with status: 400'));
+      context.params = { userId: 'user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(400);
+      expect(mockLog.error).to.have.been.called;
+    });
+
+    it('should return 500 when IMS call fails with server error', async () => {
+      mockImsClient.getImsAdminProfile.rejects(new Error('IMS unavailable'));
+      context.params = { userId: 'user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
 
       expect(result.status).to.equal(500);
       expect(mockLog.error).to.have.been.called;

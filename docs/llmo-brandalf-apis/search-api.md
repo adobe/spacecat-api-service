@@ -52,6 +52,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?q
   "topicDetails": [
     {
       "topic": "PDF Editing",
+      "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "matchType": "topic",
       "promptCount": 47,
       "brandMentions": 312,
@@ -64,6 +65,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?q
     },
     {
       "topic": "Image Tools",
+      "topicId": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
       "matchType": "prompt",
       "promptCount": 12,
       "brandMentions": 45,
@@ -79,11 +81,14 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?q
 }
 ```
 
+Each item includes **`topicId`** when matching executions carry a non-null `topic_id` (same per-topic pick as `rpc_brand_presence_topics`: greatest UUID string in the group); otherwise **`null`**.
+
 ### Topic Object Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `topic` | string | Topic/keyword name |
+| `topicId` | string \| null | Stable topic UUID for downstream `…/topics/:topicId/...` routes when present; `null` if all matching rows lack `topic_id` |
 | `matchType` | string | `"topic"` if the topic name matched the query; `"prompt"` if only prompts within the topic matched |
 | `promptCount` | number | For `matchType:"topic"`: all unique prompts. For `matchType:"prompt"`: only prompts whose text matched the query (case-insensitive). |
 | `brandMentions` | number | Total mention count across all execution rows |
@@ -99,7 +104,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?q
 ## Search Logic
 
 1. **PostgREST query**: Uses `.or()` with double-quoted, escaped ILIKE patterns for case-insensitive substring matching on both topic name and prompt text. SQL ILIKE metacharacters (`%`, `_`) and PostgREST filter syntax characters (`,`, `.`, `(`, `)`, `"`) are escaped to prevent injection.
-2. **Aggregation**: Reuses the same `aggregateTopicData()` function as the topics endpoint (counts mentions/citations/sources from all execution rows, deduplicates prompts for `promptCount`)
+2. **Aggregation**: `aggregateTopicData()` over matching execution rows (with `topic_id` selected); counts mentions/citations/sources from all rows, deduplicates prompts for `promptCount`, and sets **`topicId`** per topic group (max `topic_id`, same rule as the topics RPC)
 3. **matchType tagging**: After aggregation, each topic is tagged:
    - `"topic"` — topic name contains the query string (case-insensitive). `promptCount` includes all unique prompts.
    - `"prompt"` — topic name does NOT match, but at least one prompt within it does. `promptCount` is adjusted to only count unique prompts whose text matched the query.

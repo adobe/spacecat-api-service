@@ -26,6 +26,7 @@ import {
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
+  createAgenticTrafficHasDataHandler,
 } from '../../../src/controllers/llmo/llmo-agentic-traffic.js';
 
 use(sinonChai);
@@ -385,6 +386,188 @@ describe('llmo-agentic-traffic', () => {
     });
   });
 
+  // ── agentTypes additive inclusion list ────────────────────────────────────
+
+  describe('agentTypes inclusion list', () => {
+    it('forwards a comma-separated list to kpis-trend as canonical TEXT[]', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'Chatbots,Research' },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('forwards an array passed directly without re-splitting', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: ['Chatbots', 'Research'] },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('drops unknown agent types silently and dedupes case-insensitively', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agentTypes: 'chatbots, RESEARCH , unknown ,Chatbots',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('ignores non-string entries when an array is passed directly', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        // Defensive coercion: if a caller hands us an array with a
+        // non-string element (e.g. a serialiser bug or a rogue middleware),
+        // we drop it silently instead of throwing.
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: ['Chatbots', 42, 'Research'] },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('skips empty tokens (e.g. trailing or repeated commas) without dropping the rest', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          // Repeated comma + whitespace-only token must not collapse the
+          // inclusion list to null; this exercises the empty-key branch
+          // in parseAgentTypes alongside two valid values.
+          agentTypes: 'Chatbots,, ,Research,',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('omits p_agent_types entirely when the parameter is missing', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      // The key must be absent (not null) so PostgREST falls back to the RPC's
+      // own DEFAULT NULL — same back-compat contract every other consumer relies on.
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('accepts the snake_case alias agent_types and trims whitespace', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agent_types: ' Chatbots , Training bots ',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Training bots'],
+      });
+    });
+
+    it('collapses an all-unknown list to omitted (null behaviour)', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'foo,bar' },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('forwards p_agent_types to by-url alongside paging/sort params', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_by_url: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agentTypes: 'Chatbots,Research',
+          pageSize: 25,
+          sortBy: 'success_rate',
+          sortOrder: 'asc',
+        },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_agent_types: ['Chatbots', 'Research'],
+        p_page_limit: 25,
+        p_sort_by: 'success_rate',
+        p_sort_order: 'asc',
+      });
+    });
+
+    it('does not leak p_agent_types into RPCs that do not accept it', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'Chatbots,Research' },
+      });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      // kpis (non-trend) hasn't been extended yet so the key must still be absent.
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+  });
+
   // ── By Region ──────────────────────────────────────────────────────────────
 
   describe('createAgenticTrafficByRegionHandler', () => {
@@ -557,7 +740,11 @@ describe('llmo-agentic-traffic', () => {
       const client = createMockClient({
         rpc_agentic_traffic_by_user_agent: {
           data: [{
-            page_type: 'article', agent_type: 'Chatbots', unique_agents: 5, total_hits: 200,
+            page_type: 'article',
+            agent_type: 'Chatbots',
+            unique_agents: 5,
+            unique_agent_names: ['ChatGPT-User', 'GPTBot'],
+            total_hits: 200,
           }],
           error: null,
         },
@@ -569,13 +756,18 @@ describe('llmo-agentic-traffic', () => {
       expect(body[0].pageType).to.equal('article');
       expect(body[0].agentType).to.equal('Chatbots');
       expect(body[0].uniqueAgents).to.equal(5);
+      expect(body[0].uniqueAgentNames).to.deep.equal(['ChatGPT-User', 'GPTBot']);
     });
 
     it('handles null row fields with safe defaults', async () => {
       const client = createMockClient({
         rpc_agentic_traffic_by_user_agent: {
           data: [{
-            page_type: null, agent_type: null, unique_agents: null, total_hits: null,
+            page_type: null,
+            agent_type: null,
+            unique_agents: null,
+            unique_agent_names: null,
+            total_hits: null,
           }],
           error: null,
         },
@@ -588,6 +780,7 @@ describe('llmo-agentic-traffic', () => {
       expect(body[0].agentType).to.equal('');
       expect(body[0].uniqueAgents).to.equal(0);
       expect(body[0].totalHits).to.equal(0);
+      expect(body[0].uniqueAgentNames).to.deep.equal([]);
     });
 
     it('does not include p_user_agent in the RPC call', async () => {
@@ -644,6 +837,7 @@ describe('llmo-agentic-traffic', () => {
             total_count: 1,
             total_hits: 150,
             unique_agents: 3,
+            unique_agent_names: ['ChatGPT-User', 'GPTBot'],
             top_agent: 'ChatGPT-User',
             top_agent_type: 'Chatbots',
             response_codes: [200, 301],
@@ -663,10 +857,44 @@ describe('llmo-agentic-traffic', () => {
       expect(body.totalCount).to.equal(1);
       expect(body.rows[0].host).to.equal('example.com');
       expect(body.rows[0].urlPath).to.equal('/page');
+      expect(body.rows[0].uniqueAgentNames).to.deep.equal(['ChatGPT-User', 'GPTBot']);
       expect(body.rows[0].topAgent).to.equal('ChatGPT-User');
       expect(body.rows[0].topAgentType).to.equal('Chatbots');
       expect(body.rows[0].responseCodes).to.deep.equal([200, 301]);
       expect(body.rows[0].deployedAtEdge).to.equal(true);
+    });
+
+    it('maps hits_trend points to camelCase and coerces missing values to 0', async () => {
+      // Covers the truthy branch of `Array.isArray(row.hits_trend)`: the
+      // RPC returns a [{week_start, value}] series and the controller
+      // forwards it to the UI as [{weekStart, value}] so the URL Inspector
+      // PG dashboard can derive its sparkline + WoW + dialog chart from
+      // the same per-URL series.
+      const client = createMockClient({
+        rpc_agentic_traffic_by_url: {
+          data: [{
+            host: 'example.com',
+            url_path: '/page',
+            total_count: 1,
+            total_hits: 42,
+            hits_trend: [
+              { week_start: '2026-01-05', value: 30 },
+              { week_start: '2026-01-12', value: null },
+              { week_start: '2026-01-19', value: 12 },
+            ],
+          }],
+          error: null,
+        },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(body.rows[0].hitsTrend).to.deep.equal([
+        { weekStart: '2026-01-05', value: 30 },
+        { weekStart: '2026-01-12', value: 0 },
+        { weekStart: '2026-01-19', value: 12 },
+      ]);
     });
 
     it('caps limit at 500 via legacy "limit" param', async () => {
@@ -795,6 +1023,7 @@ describe('llmo-agentic-traffic', () => {
             url_path: null,
             total_hits: null,
             unique_agents: null,
+            unique_agent_names: null,
             top_agent: null,
             top_agent_type: null,
             response_codes: null,
@@ -813,6 +1042,7 @@ describe('llmo-agentic-traffic', () => {
       const body = await res.json();
       expect(body.rows[0].host).to.equal('');
       expect(body.rows[0].urlPath).to.equal('');
+      expect(body.rows[0].uniqueAgentNames).to.deep.equal([]);
       expect(body.rows[0].topAgent).to.equal('');
       expect(body.rows[0].responseCodes).to.deep.equal([]);
       expect(body.rows[0].successRate).to.be.null;
@@ -1195,6 +1425,57 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── Has Data ───────────────────────────────────────────────────────────────
+
+  describe('createAgenticTrafficHasDataHandler', () => {
+    it('returns hasData: true when agentic_traffic has rows for the site', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: [{ traffic_date: '2026-01-05' }], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+    });
+
+    it('returns hasData: false when no rows exist for the site', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: [], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(false);
+    });
+
+    it('returns 500 when the PostgREST query errors', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: null, error: { message: 'db error' } },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(500);
+    });
+
+    it('queries the agentic_traffic table with the site id and a limit of 1', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: [], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.from).to.have.been.calledWith('agentic_traffic');
+      const chain = client.from.firstCall.returnValue;
+      expect(chain.eq).to.have.been.calledWith('site_id', SITE_ID);
+      expect(chain.limit).to.have.been.calledWith(1);
     });
   });
 });

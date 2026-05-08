@@ -16,7 +16,13 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import {
-  listBrands, getBrandById, upsertBrand, updateBrand, deleteBrand, listRegions,
+  listBrands,
+  getBrandById,
+  getBrandBySite,
+  upsertBrand,
+  updateBrand,
+  deleteBrand,
+  listRegions,
 } from '../../src/support/brands-storage.js';
 
 use(sinonChai);
@@ -57,6 +63,7 @@ describe('brands-storage', () => {
       brand_earned_sources: [],
       competitors: [],
       brand_sites: [],
+      brand_urls: [],
       created_at: '2026-01-01T00:00:00Z',
       created_by: 'system',
       updated_at: '2026-01-01',
@@ -98,7 +105,9 @@ describe('brands-storage', () => {
       expect(result[0].socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test', regions: ['US'] }]);
       expect(result[0].earnedContent).to.deep.equal([{ name: 'TechCrunch', url: 'https://techcrunch.com', regions: [] }]);
       expect(result[0].competitors).to.deep.equal([{ name: 'Rival', url: 'https://rival.com', regions: ['US'] }]);
-      expect(result[0].urls).to.deep.equal([{ value: 'https://test.com' }]);
+      expect(result[0].urls).to.deep.equal([
+        { value: 'https://test.com', onboarded: true, siteId: 'site-uuid-1' },
+      ]);
       expect(result[0].createdAt).to.equal('2026-01-01T00:00:00Z');
       expect(result[0].createdBy).to.equal('system');
       expect(result[0].updatedAt).to.equal('2026-01-01');
@@ -119,8 +128,8 @@ describe('brands-storage', () => {
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].urls).to.deep.equal([
-        { value: 'https://adobe.com/products' },
-        { value: 'https://adobe.com/help' },
+        { value: 'https://adobe.com/products', onboarded: true, siteId: 'site-1' },
+        { value: 'https://adobe.com/help', onboarded: true, siteId: 'site-1' },
       ]);
     });
 
@@ -139,8 +148,10 @@ describe('brands-storage', () => {
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].urls).to.deep.equal([
-        { value: 'https://adobe.com', type: 'base' },
-        { value: 'https://adobe.com/products' },
+        {
+          value: 'https://adobe.com', onboarded: true, siteId: 'site-1', type: 'base',
+        },
+        { value: 'https://adobe.com/products', onboarded: true, siteId: 'site-1' },
       ]);
     });
 
@@ -157,7 +168,9 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
-      expect(result[0].urls).to.deep.equal([{ value: 'https://adobe.com' }]);
+      expect(result[0].urls).to.deep.equal([
+        { value: 'https://adobe.com', onboarded: true, siteId: 'site-1' },
+      ]);
       expect(result[0].urls[0]).to.not.have.property('type');
     });
 
@@ -170,6 +183,7 @@ describe('brands-storage', () => {
         brand_social_accounts: null,
         brand_earned_sources: null,
         brand_sites: null,
+        brand_urls: null,
       });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
@@ -228,7 +242,9 @@ describe('brands-storage', () => {
       expect(result.brandAliases).to.deep.equal([{ name: 'TB', regions: ['US'] }]);
       expect(result.competitors).to.deep.equal([{ name: 'Rival', url: null, regions: [] }]);
       expect(result.siteIds).to.deep.equal(['site-uuid-1']);
-      expect(result.urls).to.deep.equal([{ value: 'https://example.com' }]);
+      expect(result.urls).to.deep.equal([
+        { value: 'https://example.com', onboarded: true, siteId: 'site-uuid-1' },
+      ]);
       expect(result.socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test', regions: ['US'] }]);
       expect(result.earnedContent).to.deep.equal([{ name: 'Blog', url: 'https://blog.example.com', regions: [] }]);
     });
@@ -266,7 +282,9 @@ describe('brands-storage', () => {
       expect(result.earnedContent).to.deep.equal([{ name: 'Blog', url: 'https://b.com', regions: [] }]);
       expect(result.brandAliases).to.deep.equal([{ name: 'TB', regions: [] }]);
       // site-2 skipped (no base_url); site-1 null paths → [] → no paths → base URL returned
-      expect(result.urls).to.deep.equal([{ value: 'https://x.com' }]);
+      expect(result.urls).to.deep.equal([
+        { value: 'https://x.com', onboarded: true, siteId: 'site-1' },
+      ]);
     });
 
     it('uses base_site join for baseSiteId and baseUrl when available', async () => {
@@ -296,6 +314,78 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(getBrandById(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to get brand');
+    });
+  });
+
+  describe('getBrandBySite', () => {
+    const SITE_ID = '33333333-3333-4333-8333-333333333333';
+
+    it('returns null when postgrestClient is missing', async () => {
+      expect(await getBrandBySite(ORG_ID, SITE_ID, null)).to.be.null;
+    });
+
+    it('returns null when postgrestClient has no from method', async () => {
+      expect(await getBrandBySite(ORG_ID, SITE_ID, {})).to.be.null;
+    });
+
+    it('returns null when organizationId is missing', async () => {
+      expect(await getBrandBySite('', SITE_ID, { from: () => {} })).to.be.null;
+    });
+
+    it('returns null when siteId is missing', async () => {
+      expect(await getBrandBySite(ORG_ID, '', { from: () => {} })).to.be.null;
+    });
+
+    it('returns brand from primary site_id match', async () => {
+      const dbRow = makeBrandRow({
+        site_id: SITE_ID,
+        brand_sites: [{ site_id: SITE_ID, paths: [], sites: { base_url: 'https://site.com' } }],
+      });
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient);
+      expect(result).to.include({ id: BRAND_ID, name: 'TestBrand', status: 'active' });
+    });
+
+    it('returns null when no brand has site_id matching the site', async () => {
+      // brand_sites is intentionally NOT used as a fallback (it stores
+      // citation entries too), so a brand with site_id=NULL never matches.
+      const query = createChainableQuery({ data: [], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      expect(await getBrandBySite(ORG_ID, SITE_ID, postgrestClient)).to.be.null;
+    });
+
+    it('returns the first row deterministically and warns when multiple matches violate LLMO-4592', async () => {
+      const r1 = makeBrandRow({ id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', name: 'A-Brand' });
+      const r2 = makeBrandRow({ id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'B-Brand' });
+      const query = createChainableQuery({ data: [r1, r2], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      const log = { warn: sinon.stub() };
+
+      const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient, log);
+      expect(result.id).to.equal('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa');
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.match(/LLMO-4592/);
+    });
+
+    it('logs nothing when log has no warn method (single match)', async () => {
+      const dbRow = makeBrandRow({ site_id: SITE_ID });
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      // No log argument at all — must not throw.
+      const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient);
+      expect(result.id).to.equal(BRAND_ID);
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      await expect(getBrandBySite(ORG_ID, SITE_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to resolve brand for site');
     });
   });
 
@@ -616,8 +706,8 @@ describe('brands-storage', () => {
       });
 
       expect(result.urls).to.deep.equal([
-        { value: 'https://adobe.com/products' },
-        { value: 'https://adobe.com/help' },
+        { value: 'https://adobe.com/products', onboarded: true, siteId: 'site-uuid-1' },
+        { value: 'https://adobe.com/help', onboarded: true, siteId: 'site-uuid-1' },
       ]);
     });
 
@@ -652,8 +742,8 @@ describe('brands-storage', () => {
       });
 
       expect(result.urls).to.deep.equal([
-        { value: 'https://adobe.com' },
-        { value: 'https://adobe.com/products' },
+        { value: 'https://adobe.com', onboarded: true, siteId: 'site-uuid-1' },
+        { value: 'https://adobe.com/products', onboarded: true, siteId: 'site-uuid-1' },
       ]);
     });
 
@@ -688,7 +778,9 @@ describe('brands-storage', () => {
       });
 
       expect(result.urls).to.deep.equal([
-        { value: 'https://adobe.com', type: 'base' },
+        {
+          value: 'https://adobe.com', onboarded: true, siteId: 'site-uuid-1', type: 'base',
+        },
       ]);
     });
 
@@ -725,8 +817,10 @@ describe('brands-storage', () => {
 
       // First type ('base') wins — 'localized' does not overwrite
       expect(result.urls).to.deep.equal([
-        { value: 'https://adobe.com', type: 'base' },
-        { value: 'https://adobe.com/fr' },
+        {
+          value: 'https://adobe.com', onboarded: true, siteId: 'site-uuid-1', type: 'base',
+        },
+        { value: 'https://adobe.com/fr', onboarded: true, siteId: 'site-uuid-1' },
       ]);
     });
 
@@ -883,9 +977,120 @@ describe('brands-storage', () => {
       });
 
       expect(result.urls).to.deep.equal([
-        { value: 'https://adobe.com/products' },
-        { value: 'https://adobe.com/help' },
+        { value: 'https://adobe.com/products', onboarded: true, siteId: 'site-1' },
+        { value: 'https://adobe.com/help', onboarded: true, siteId: 'site-1' },
       ]);
+    });
+
+    it('persists unresolved URLs to brand_urls and returns them with onboarded=false', async () => {
+      // Caller submits a URL with no matching site. The row should be persisted
+      // to brand_urls; the response should reflect onboarded=false with no siteId.
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [],
+        brand_urls: [{ url: 'https://yahoo.com' }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [], error: null },
+        brand_sites: { data: null, error: null },
+        brand_urls: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://yahoo.com' }] },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([{ value: 'https://yahoo.com', onboarded: false }]);
+      expect(result.siteIds).to.deep.equal([]);
+    });
+
+    it('returns mixed onboarded/external URLs when some resolve and some do not', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: [], sites: { base_url: 'https://adobe.com' } }],
+        brand_urls: [
+          { url: 'https://adobe.com' },
+          { url: 'https://yahoo.com' },
+        ],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://adobe.com' }], error: null },
+        brand_sites: { data: null, error: null },
+        brand_urls: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          urls: [{ value: 'https://adobe.com' }, { value: 'https://yahoo.com' }],
+        },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([
+        { value: 'https://adobe.com', onboarded: true, siteId: 'site-1' },
+        { value: 'https://yahoo.com', onboarded: false },
+      ]);
+    });
+
+    it('propagates brand_sites.type onto the matching brand_urls entry', async () => {
+      // A brand_sites row carries a pipeline-written type; the brand_urls
+      // entry whose base matches inherits it on the response (legacy
+      // read-side compatibility — brand_urls itself has no type column).
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-1', paths: ['/'], type: 'base', sites: { base_url: 'https://adobe.com' },
+        }],
+        brand_urls: [{ url: 'https://adobe.com' }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://adobe.com' }], error: null },
+        brand_sites: { data: null, error: null },
+        brand_urls: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://adobe.com' }] },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([
+        {
+          value: 'https://adobe.com', onboarded: true, siteId: 'site-1', type: 'base',
+        },
+      ]);
+    });
+
+    it('throws when brand_urls sync fails', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
+        sites: { data: [], error: null },
+        brand_sites: { data: null, error: null },
+        brand_urls: { data: null, error: { message: 'urls delete error' } },
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://yahoo.com' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to clear brand_urls: urls delete error');
     });
 
     it('skips syncBrandSites when urls resolve to no matching sites', async () => {
@@ -1278,7 +1483,9 @@ describe('brands-storage', () => {
       });
 
       expect(result.region).to.deep.equal(['US']);
-      expect(result.urls).to.deep.equal([{ value: 'https://new.com' }]);
+      expect(result.urls).to.deep.equal([
+        { value: 'https://new.com', onboarded: true, siteId: 'new-site-uuid' },
+      ]);
     });
 
     it('successfully updates socialAccounts and earnedContent', async () => {
@@ -1424,6 +1631,8 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID }, error: null },
           { data: fullBrandRow, error: null },
         ],
+        brand_sites: { data: null, error: null },
+        brand_urls: { data: null, error: null },
       });
 
       const result = await updateBrand({
@@ -1434,12 +1643,14 @@ describe('brands-storage', () => {
           competitors: null,
           socialAccounts: null,
           earnedContent: null,
+          urls: null,
         },
         postgrestClient,
       });
 
       expect(result.brandAliases).to.deep.equal([]);
       expect(result.competitors).to.deep.equal([]);
+      expect(result.urls).to.deep.equal([]);
     });
   });
 
