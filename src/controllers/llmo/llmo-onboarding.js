@@ -1439,7 +1439,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
             log.info(`Using operator-supplied region "${region}" for v1 DRS prompt generation`);
           }
           const drsJob = await drsClient.submitPromptGenerationJob({
-            baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
+            baseUrl: baseURL,
             brandName: trimmedBrand,
             audience,
             siteId: site.getId(),
