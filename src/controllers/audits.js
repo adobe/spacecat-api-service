@@ -310,6 +310,8 @@ function AuditsController(ctx) {
     if (hasUpdates) {
       const configObj = Config.toDynamoItem(siteConfig);
       if (newIncludedURLs !== undefined) {
+        // Config has no updateIncludedURLs setter, so we write directly to the serialised object.
+        // Shallow-copy handlers and the target handler slot to avoid mutating shared state.
         configObj.handlers = { ...(configObj.handlers || {}) };
         configObj.handlers[auditType] = { ...(configObj.handlers[auditType] || {}) };
         configObj.handlers[auditType].includedURLs = newIncludedURLs;
