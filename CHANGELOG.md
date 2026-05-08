@@ -1,3 +1,10 @@
+## [1.483.4](https://github.com/adobe/spacecat-api-service/compare/v1.483.3...v1.483.4) (2026-05-08)
+
+
+### Bug Fixes
+
+* **webhooks:** read headers from pathInfo and short-circuit unmapped events early ([#2366](https://github.com/adobe/spacecat-api-service/issues/2366)) ([f0e0d65](https://github.com/adobe/spacecat-api-service/commit/f0e0d6517beacff0143d3ed852388ef8f214cfbd))
+
 ## [1.483.3](https://github.com/adobe/spacecat-api-service/compare/v1.483.2...v1.483.3) (2026-05-07)
 
 
