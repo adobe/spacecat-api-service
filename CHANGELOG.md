@@ -1,3 +1,10 @@
+## [1.483.5](https://github.com/adobe/spacecat-api-service/compare/v1.483.4...v1.483.5) (2026-05-08)
+
+
+### Bug Fixes
+
+* **prompts:** replace denylist filter with in-loop allowlist gate for deleted prompts ([#2352](https://github.com/adobe/spacecat-api-service/issues/2352)) ([0fd2930](https://github.com/adobe/spacecat-api-service/commit/0fd293094c492656b4e4eb5c80804acb0b968ecc)), closes [#2349](https://github.com/adobe/spacecat-api-service/issues/2349)
+
 ## [1.483.4](https://github.com/adobe/spacecat-api-service/compare/v1.483.3...v1.483.4) (2026-05-08)
 
 
