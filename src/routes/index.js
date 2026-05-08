@@ -603,6 +603,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/tokens': tokensController.getAll,
     'GET /sites/:siteId/tokens/by-type/:tokenType': tokensController.getByTokenType,
     'GET /sites/:siteId/tokens/:tokenId/grants': tokensController.getGrants,
+    'DELETE /sites/:siteId/tokens/:tokenId': tokensController.deleteToken,
 
     // Suggestion grants
     'DELETE /sites/:siteId/suggestions/grants/:grantId': suggestionsController.revokeGrant,

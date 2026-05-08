@@ -12,6 +12,7 @@
 
 import {
   badRequest,
+  noContent,
   notFound,
   ok,
   forbidden,
@@ -194,10 +195,49 @@ function TokensController(ctx) {
     }
   };
 
+  /**
+   * Deletes a token by ID. Restricted to admin users.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} 204 No Content on success.
+   */
+  const deleteToken = async (context) => {
+    const { siteId, tokenId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(tokenId)) {
+      return badRequest('Token ID required');
+    }
+
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can delete tokens');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      const token = await Token.findById(tokenId);
+      if (!token || token.getSiteId() !== siteId) {
+        return notFound('Token not found');
+      }
+
+      await token.remove();
+      return noContent();
+    } catch (e) {
+      context.log.error(`Error deleting token ${tokenId} for site ${siteId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getAll,
     getByTokenType,
     getGrants,
+    deleteToken,
   };
 }
 
