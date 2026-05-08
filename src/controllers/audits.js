@@ -206,7 +206,7 @@ function AuditsController(ctx) {
       groupedURLs,
       replaceExcludedURLs = false,
       replaceIncludedURLs = false,
-    } = context.data;
+    } = context.data ?? {};
     let hasUpdates = false;
 
     const site = await Site.findById(siteId);
