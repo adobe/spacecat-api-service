@@ -1,3 +1,17 @@
+## [1.485.1](https://github.com/adobe/spacecat-api-service/compare/v1.485.0...v1.485.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **webhooks:** disable labeled trigger; only review_requested counts ([#2376](https://github.com/adobe/spacecat-api-service/issues/2376)) ([5108f02](https://github.com/adobe/spacecat-api-service/commit/5108f021ff753d238070e386c24046d29148a459))
+
+# [1.485.0](https://github.com/adobe/spacecat-api-service/compare/v1.484.0...v1.485.0) (2026-05-08)
+
+
+### Features
+
+* **webhooks:** env-configurable label trigger for dev/prod separation ([#2375](https://github.com/adobe/spacecat-api-service/issues/2375)) ([4a1b48d](https://github.com/adobe/spacecat-api-service/commit/4a1b48dcdb784538b31d1ef9309c719aa188b140))
+
 # [1.484.0](https://github.com/adobe/spacecat-api-service/compare/v1.483.5...v1.484.0) (2026-05-08)
 
 
