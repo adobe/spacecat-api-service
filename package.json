@@ -84,7 +84,7 @@
     "@adobe/spacecat-shared-athena-client": "1.9.11",
     "@adobe/spacecat-shared-brand-client": "1.1.41",
     "@adobe/spacecat-shared-content-client": "1.8.23",
-    "@adobe/spacecat-shared-data-access": "3.52.0",
+    "@adobe/spacecat-shared-data-access": "https://gist.github.com/tkotthakota-adobe/f80139563464ec6acb25c1bf0a21f6fb/raw/063d2d3fbc6743b36616062542d917718fc22948/adobe-spacecat-shared-data-access-3.59.0.tgz",
     "@adobe/spacecat-shared-data-access-v2": "npm:@adobe/spacecat-shared-data-access@2.109.0",
     "@adobe/spacecat-shared-drs-client": "1.4.2",
     "@adobe/spacecat-shared-gpt-client": "1.6.22",
