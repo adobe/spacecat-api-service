@@ -59,7 +59,11 @@ Key changes:
 - **No `organizationId` in the path.** `siteId` is a globally unique UUID, consistent with
   all other site-scoped resources in this service.
 
-The old `/preflight/*` routes are removed. Consumer migration is a separate coordination item.
+**`/preflight/beta/jobs` is replaced** by the new endpoints and removed as part of this work.
+
+**`/preflight/jobs` is deprecated**, not removed. It will remain functional until a future
+deletion milestone is agreed upon with consumers. A deprecation notice should be added to its
+OpenAPI spec entry and response headers.
 
 ## Consequences
 - API shape is consistent with the rest of the service; new consumers can discover preflight
@@ -67,6 +71,8 @@ The old `/preflight/*` routes are removed. Consumer migration is a separate coor
 - Server-side URL-to-site resolution is eliminated, reducing a class of failure.
 - Bulk preflight from the MFE is supported via multiple parallel requests — no API change
   needed as the feature grows.
-- Existing consumers of `/preflight/jobs` and `/preflight/beta/jobs` require migration.
+- Existing consumers of `/preflight/beta/jobs` require migration to the new endpoints.
+- Existing consumers of `/preflight/jobs` are unaffected for now; migration timeline to be
+  coordinated separately.
 - The `AsyncJob` model remains the backing store; `preflightId` maps to the underlying job ID
   internally.
