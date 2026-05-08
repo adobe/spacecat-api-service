@@ -1,3 +1,10 @@
+# [1.484.0](https://github.com/adobe/spacecat-api-service/compare/v1.483.5...v1.484.0) (2026-05-08)
+
+
+### Features
+
+* **backfill:** add refreshAgenticDailyExport to cdn-logs-report weekly backfill ([#2369](https://github.com/adobe/spacecat-api-service/issues/2369)) ([2a2650c](https://github.com/adobe/spacecat-api-service/commit/2a2650caaa7b46d76558a5686939aa8f352ed85e))
+
 ## [1.483.5](https://github.com/adobe/spacecat-api-service/compare/v1.483.4...v1.483.5) (2026-05-08)
 
 
