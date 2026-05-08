@@ -234,20 +234,31 @@ function LlmoOpportunitiesController(ctx) {
       }
 
       const brandName = brand.name;
+      const brandSiteIdSet = new Set(brand.siteIds || []);
 
       if (filterSiteId) {
-        const brandSiteIds = brand.siteIds || [];
-        if (!brandSiteIds.includes(filterSiteId)) {
-          return forbidden('Site does not belong to the organization or brand');
+        if (!brandSiteIdSet.has(filterSiteId)) {
+          return forbidden('Site does not belong to this brand');
         }
       }
 
       // Query opportunities directly by brand scope — avoids cross-brand contamination
-      // on sites shared by multiple brands (e.g. nba.com with kings and lakers brands)
+      // on sites shared by multiple brands (e.g. nba.com with kings and lakers brands).
+      // NOTE: allByScope is not yet published in @adobe/spacecat-shared-data-access; the
+      // test suite stubs this method. Remove this note once the published version ships.
       const allScopedOpps = await Opportunity.allByScope('brand', brandId);
+
+      // Detect orphans — opps whose siteId is no longer in the brand's canonical site list.
+      // These arise when a site is reassigned to a different brand without a scope cleanup.
+      const orphanedOpps = allScopedOpps.filter((opp) => !brandSiteIdSet.has(opp.getSiteId()));
+      if (orphanedOpps.length > 0) {
+        log.warn(`Brand ${brandId} has ${orphanedOpps.length} scoped opportunities with siteIds not in brand.siteIds`);
+      }
+
       const filteredOpps = allScopedOpps.filter(
         (opp) => isLlmoOpportunity(opp)
           && VALID_STATUSES.has(opp.getStatus())
+          && brandSiteIdSet.has(opp.getSiteId())
           && (!filterSiteId || opp.getSiteId() === filterSiteId),
       );
 
@@ -265,8 +276,12 @@ function LlmoOpportunitiesController(ctx) {
         }
       }, MAX_CONCURRENT_SITES);
 
+      // scopeType and scopeId are explicitly set here — this is the brand-scoped endpoint,
+      // values are validated and in scope. They are intentionally absent from OpportunityDto.
       const opportunities = filteredOpps.map((opp) => ({
         ...OpportunityDto.toJSON(opp),
+        scopeType: 'brand',
+        scopeId: brandId,
         siteBaseURL: siteMap.get(opp.getSiteId())?.getBaseURL() ?? null,
       }));
 

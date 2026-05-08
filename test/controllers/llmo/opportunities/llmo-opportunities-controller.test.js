@@ -862,5 +862,56 @@ describe('LlmoOpportunitiesController', () => {
       expect(body.total).to.equal(0);
       expect(body.opportunities).to.deep.equal([]);
     });
+
+    it('filters out orphaned opportunities whose siteId is not in brand.siteIds', async () => {
+      mockContext.params.brandId = 'brand-uuid';
+      const site = createMockSite({ id: 'site-1', baseURL: 'https://brand.com' });
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
+
+      const validOpp = createMockOpportunity({ id: 'opp-valid', siteId: 'site-1' });
+      const orphanOpp = createMockOpportunity({ id: 'opp-orphan', siteId: 'site-orphan' });
+      mockContext.dataAccess.Opportunity.allByScope
+        .withArgs('brand', 'brand-uuid').resolves([validOpp, orphanOpp]);
+
+      LlmoOpportunitiesController = await esmock(
+        '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
+        {
+          ...defaultMocks(sandbox.stub().resolves(true)),
+          '../../../../src/support/brands-storage.js': {
+            getBrandById: sandbox.stub().resolves({ name: 'MyBrand', siteIds: ['site-1'] }),
+          },
+        },
+      );
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
+      expect(body.opportunities[0].id).to.equal('opp-valid');
+      expect(mockContext.log.warn).to.have.been.calledWith(sinon.match(/not in brand\.siteIds/));
+    });
+
+    it('does not expose scopeType or scopeId in the all-brand (non-scoped) response', async () => {
+      mockContext.params.brandId = 'all';
+      const site = createMockSite({ id: 'site-1', baseURL: 'https://example.com' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site]);
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
+
+      const opp = createMockOpportunity({
+        id: 'opp-1', siteId: 'site-1', scopeType: 'brand', scopeId: 'some-brand-uuid',
+      });
+      mockContext.dataAccess.Opportunity.allBySiteId.withArgs('site-1').resolves([opp]);
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
+      expect(body.opportunities[0]).to.not.have.property('scopeType');
+      expect(body.opportunities[0]).to.not.have.property('scopeId');
+    });
   });
 });
