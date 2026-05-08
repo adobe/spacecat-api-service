@@ -16,6 +16,21 @@ This guide helps service teams request and integrate Service-to-Service (S2S) au
 
 ---
 
+## ⚠️ Host-driven product context
+
+**The Fastly edge sets the `x-product` request header based on the request `Host`. Any client-supplied `x-product` value is overwritten.** Choose the host that matches your product:
+
+| Consumer product | Production host | Dev / CI host |
+|---|---|---|
+| **LLMO** | `https://llmo.experiencecloud.live` | `https://llmo.experiencecloud.page` |
+| **ASO** (and everything else) | `https://spacecat.experiencecloud.live` | `https://spacecat.experiencecloud.live` |
+
+This affects every S2S call, including `/auth/s2s/login`. Mint your session token via the same host you intend to call APIs on. An LLMO consumer that mints a token via `spacecat.experiencecloud.live` receives an ASO-context JWT and will fail the per-product entitlement check on tenant-scoped reads even if the underlying org has a valid LLMO entitlement.
+
+The examples and URL table below use `spacecat.experiencecloud.live` for ASO consumers; LLMO consumers should substitute the LLMO host throughout.
+
+---
+
 ## Prerequisites
 
 Before requesting an S2S account, ensure you have:
@@ -665,10 +680,21 @@ curl -X GET https://spacecat.experiencecloud.live/api/ci/sites/${SITE_ID}/opport
 
 ### Environment URLs
 
+The host you call determines the `x-product` value at the edge — see [Host-driven product context](#️-host-driven-product-context).
+
+**ASO consumers (and everything that is not LLMO):**
+
 | Environment | IMS Token Endpoint | SpaceCat S2S Login | SpaceCat API Base |
 |-------------|-------------------|-------------------|-------------------|
 | **Development/Stage** | `https://ims-na1-stg1.adobelogin.com/ims/token/v3` | `https://spacecat.experiencecloud.live/api/ci/auth/s2s/login` | `https://spacecat.experiencecloud.live/api/ci` |
 | **Production** | `https://ims-na1.adobelogin.com/ims/token/v3` | `https://spacecat.experiencecloud.live/api/v1/auth/s2s/login` | `https://spacecat.experiencecloud.live/api/v1` |
+
+**LLMO consumers:**
+
+| Environment | IMS Token Endpoint | SpaceCat S2S Login | SpaceCat API Base |
+|-------------|-------------------|-------------------|-------------------|
+| **Development/Stage** | `https://ims-na1-stg1.adobelogin.com/ims/token/v3` | `https://llmo.experiencecloud.page/api/ci/auth/s2s/login` | `https://llmo.experiencecloud.page/api/ci` |
+| **Production** | `https://ims-na1.adobelogin.com/ims/token/v3` | `https://llmo.experiencecloud.live/api/v1/auth/s2s/login` | `https://llmo.experiencecloud.live/api/v1` |
 
 ### Token Lifetimes
 
