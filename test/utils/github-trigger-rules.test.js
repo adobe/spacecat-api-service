@@ -58,29 +58,23 @@ describe('github-trigger-rules', () => {
       });
     });
 
-    describe('labeled trigger', () => {
-      it('returns null when label matches the default trigger', () => {
+    describe('labeled trigger (disabled)', () => {
+      // Labeled triggers were disabled because GitHub does not count
+      // label-triggered reviews toward branch protection / merge
+      // requirements. All labeled events now fall through to the
+      // unsupported-action skip path.
+      it('returns unsupported-action skip reason regardless of label name', () => {
         const data = {
           ...baseData,
           action: 'labeled',
           label: { name: 'mysticat:review-requested' },
         };
-        expect(getSkipReason(data, 'labeled', defaultEnv)).to.be.null;
+        expect(getSkipReason(data, 'labeled', defaultEnv)).to.include('unsupported action');
       });
 
-      it('returns skip reason when label does not match', () => {
-        const data = {
-          ...baseData,
-          action: 'labeled',
-          label: { name: 'bug' },
-        };
-        const reason = getSkipReason(data, 'labeled', defaultEnv);
-        expect(reason).to.include('bug');
-      });
-
-      it('honors env-configured trigger label', () => {
-        // Dev/prod can use different labels so a single label-add against a
-        // repo with both bots installed routes to only one env's worker.
+      it('ignores MYSTICAT_REVIEW_LABEL env override', () => {
+        // The env hook is left in place for future re-enable but is
+        // currently a no-op.
         const devEnv = {
           ...defaultEnv,
           MYSTICAT_REVIEW_LABEL: 'mysticat-dev:review-requested',
@@ -90,23 +84,7 @@ describe('github-trigger-rules', () => {
           action: 'labeled',
           label: { name: 'mysticat-dev:review-requested' },
         };
-        expect(getSkipReason(data, 'labeled', devEnv)).to.be.null;
-      });
-
-      it('skips the canonical label when env overrides to a different one', () => {
-        // Mirror of the above: the canonical prod label must NOT trigger
-        // a dev-configured worker.
-        const devEnv = {
-          ...defaultEnv,
-          MYSTICAT_REVIEW_LABEL: 'mysticat-dev:review-requested',
-        };
-        const data = {
-          ...baseData,
-          action: 'labeled',
-          label: { name: 'mysticat:review-requested' },
-        };
-        const reason = getSkipReason(data, 'labeled', devEnv);
-        expect(reason).to.include('mysticat:review-requested');
+        expect(getSkipReason(data, 'labeled', devEnv)).to.include('unsupported action');
       });
     });
 
@@ -127,17 +105,12 @@ describe('github-trigger-rules', () => {
       });
     });
 
-    describe('skip rules (parametrized across review_requested and labeled)', () => {
+    describe('skip rules (review_requested only — labeled is disabled)', () => {
       const scenarios = [
         {
           name: 'review_requested',
           action: 'review_requested',
           matchFields: { requested_reviewer: { login: 'mysticat[bot]' } },
-        },
-        {
-          name: 'labeled',
-          action: 'labeled',
-          matchFields: { label: { name: 'mysticat:review-requested' } },
         },
       ];
 
