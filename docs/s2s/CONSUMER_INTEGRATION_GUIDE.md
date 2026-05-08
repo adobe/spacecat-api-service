@@ -559,15 +559,23 @@ curl -X POST 'https://ims-na1-stg1.adobelogin.com/ims/token/v3' \
 
 **Common Capability to Endpoint Mapping Examples**:
 ```
-GET /sites                              → site:read
+GET /sites                              → site:readAll        (cross-tenant LIST)
+GET /sites/{siteId}                     → site:read           (tenant-scoped READ)
 POST /sites                             → site:write
 GET /sites/{siteId}/audits              → audit:read
 POST /audits                            → audit:write
 GET /sites/{siteId}/opportunities       → opportunity:read
 POST /sites/{siteId}/opportunities      → opportunity:write
-GET /organizations                      → organization:read
+GET /organizations                      → organization:readAll (cross-tenant LIST)
+GET /organizations/{id}                 → organization:read    (tenant-scoped READ)
 PATCH /organizations/{id}               → organization:write
 ```
+
+> **`readAll` vs `read`**: list endpoints (`GET /sites`, `GET /organizations`) are
+> gated on the `readAll` capability; per-id reads (`GET /sites/{siteId}`,
+> `GET /organizations/{id}`) are gated on `read` and require a customer-scoped
+> S2S session token (one minted with the resource's owning `imsOrgId`).
+> See `READALL_CAPABILITY_DESIGN.md` for the trust model.
 
 ### Issue: Consumer Suspended
 
@@ -591,6 +599,35 @@ PATCH /organizations/{id}               → organization:write
 3. S2S Admin reviews and approves (or denies) request
 4. Test upgraded capabilities in dev first
 5. Request production upgrade after dev validation
+
+### Issue: `GET /sites` or `GET /organizations` returns 413 Payload Too Large
+
+**Symptoms**:
+```
+HTTP/2 413
+x-error: Response payload size exceeded maximum allowed payload size (6000000 bytes).
+```
+
+**Cause**: AWS Lambda caps response payloads at 6 MB. The full sites
+list (~7.5 MB uncompressed) and organizations list exceed that. The
+SpaceCat API Gateway honours `Accept-Encoding: gzip` and the
+gzipped responses are well under the cap (~900 KB and ~290 KB
+respectively).
+
+**Resolution**: send `Accept-Encoding: gzip` (or `gzip, deflate, br`)
+on every request to `/sites` and `/organizations`. Most HTTP clients
+do this transparently:
+
+| Client | Behaviour |
+|---|---|
+| `curl` | does **not** send `Accept-Encoding` by default — pass `--compressed` or `-H 'Accept-Encoding: gzip'` |
+| Python `requests` | sends `Accept-Encoding: gzip, deflate` automatically and decodes transparently |
+| Node `fetch` / `axios` | send `Accept-Encoding` automatically; check decompression handling |
+| JVM `HttpClient` | sends `Accept-Encoding` automatically since Java 11; older clients may need explicit configuration |
+
+If your client cannot send `Accept-Encoding: gzip`, file an S2S admin
+ticket — the long-term fix is server-side cursor pagination (see
+`READALL_CAPABILITY_DESIGN.md` "Operational Bounds").
 
 ---
 
