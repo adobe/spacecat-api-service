@@ -248,6 +248,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     mockSiteConfig = {
       getFetchConfig: sandbox.stub().returns({}),
       updateFetchConfig: sandbox.stub(),
+      updateRumConfig: sandbox.stub(),
       getImports: sandbox.stub().returns([]),
       enableImport: sandbox.stub(),
     };
