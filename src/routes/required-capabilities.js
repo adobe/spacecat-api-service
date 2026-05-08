@@ -38,12 +38,6 @@ export const INTERNAL_ROUTES = [
   // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
   'POST /webhooks/github',
 
-  // Preflight - CS/preflight flow not exposed to S2S consumers; end-user UI only
-  'POST /preflight/jobs',
-  'GET /preflight/jobs/:jobId',
-  'POST /preflight/beta/jobs',
-  'GET /preflight/beta/jobs/:jobId',
-
   // Suggestion edge ops (auto-fix, edge-deploy, etc.): not yet required by S2S
   // TODO: Add these back in when we have a S2S consumer that needs them
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
@@ -313,6 +307,12 @@ const routeRequiredCapabilities = {
   'GET /projects/:projectId/sites/primary-locale': 'site:read',
   'GET /projects/:projectId/sites': 'site:read',
   'GET /projects/by-project-name/:projectName/sites': 'site:read',
+
+  // preflight jobs
+  'POST /preflight/jobs': 'site:write',
+  'GET /preflight/jobs/:jobId': 'site:read',
+  'POST /preflight/beta/jobs': 'site:write',
+  'GET /preflight/beta/jobs/:jobId': 'site:read',
 
   // Sites
   // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
