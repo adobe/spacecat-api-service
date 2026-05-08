@@ -28,16 +28,20 @@ describe('approveSiteCandidate', () => {
 
   before(async () => {
     updateRumConfigStub = sinon.stub().resolves(true);
-    approveFriendsFamily = (await esmock('../../../../src/support/slack/actions/approve-friends-family.js', {
-      '../../../../src/support/rum-config-service.js': {
-        updateRumConfig: updateRumConfigStub,
-      },
-      '../../../../src/agents/org-detector/agent.js': {
-        default: {
-          fromContext: (ctx) => ctx.orgDetectorAgent || { detect: sinon.stub().resolves(null) },
+    approveFriendsFamily = (await esmock(
+      '../../../../src/support/slack/actions/approve-friends-family.js',
+      {},
+      {
+        '../../../../src/support/rum-config-service.js': {
+          updateRumConfig: updateRumConfigStub,
+        },
+        '../../../../src/agents/org-detector/agent.js': {
+          default: {
+            fromContext: (ctx) => ctx.orgDetectorAgent || { detect: sinon.stub().resolves(null) },
+          },
         },
       },
-    })).default;
+    )).default;
   });
 
   const baseURL = 'https://spacecat.com';

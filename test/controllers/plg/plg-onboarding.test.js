@@ -3005,6 +3005,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       siteWithOverride.getConfig.returns({
         getFetchConfig: () => fetchConfigWithOverride,
         updateFetchConfig: sandbox.stub(),
+        updateRumConfig: sandbox.stub(),
         getImports: () => [],
         enableImport: sandbox.stub(),
       });
