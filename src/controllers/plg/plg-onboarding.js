@@ -707,12 +707,13 @@ async function performAsoPlgOnboarding({
     ].includes(r.getStatus()),
   );
   await Promise.allSettled(waitlistedRecords.map(async (r) => {
+    const waitlistReason = r.getWaitlistReason();
     r.setStatus(STATUSES.OUTDATED);
     r.setWaitlistReason(null);
     r.setUpdatedBy('system');
     const existingReviews = r.getReviews() || [];
     r.setReviews([...existingReviews, {
-      reason: `A new onboarding was started for domain ${domain} in IMS org ${imsOrgId}, replacing this record.`,
+      reason: waitlistReason,
       decision: REVIEW_DECISIONS.CLOSED,
       reviewedBy: 'system',
       reviewedAt: new Date().toISOString(),
@@ -749,7 +750,7 @@ async function performAsoPlgOnboarding({
       alreadyOnboarded.setUpdatedBy('system');
       const existingAlreadyOnboardedReviews = alreadyOnboarded.getReviews() || [];
       alreadyOnboarded.setReviews([...existingAlreadyOnboardedReviews, {
-        reason: `Domain ${alreadyOnboarded.getDomain()} was replaced by ${domain} — it had no active suggestions and a new domain '${domain}' started onboarding for current org.`,
+        reason: null,
         decision: REVIEW_DECISIONS.OFFBOARDED,
         reviewedBy: 'system',
         reviewedAt: new Date().toISOString(),
@@ -1776,7 +1777,7 @@ function PlgOnboardingController(ctx) {
             // Add offboard review to old record
             const oldReviews = oldOnboarded.getReviews() || [];
             oldOnboarded.setReviews([...oldReviews, {
-              reason: `Domain ${oldOnboarded.getDomain()} was replaced by ${onboarding.getDomain()} for IMS org ${imsOrgId}.`,
+              reason: null,
               decision: REVIEW_DECISIONS.OFFBOARDED,
               reviewedBy,
               reviewedAt: reviewEntry.reviewedAt,
@@ -2142,7 +2143,7 @@ function PlgOnboardingController(ctx) {
     }
     const adminIdentity = getReviewerIdentity(context);
     const reviewEntry = {
-      reason: `Domain ${onboarding.getDomain()} manually transitioned from ${currentStatus} to ${targetStatus} by admin.`,
+      reason: null,
       decision,
       reviewedBy: adminIdentity,
       reviewedAt: new Date().toISOString(),

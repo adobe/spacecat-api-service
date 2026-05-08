@@ -3194,7 +3194,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(reviews).to.have.length(1);
       expect(reviews[0].decision).to.equal('CLOSED');
       expect(reviews[0].reviewedBy).to.equal('system');
-      expect(reviews[0].reason).to.match(/new onboarding was started for domain/);
+      expect(reviews[0].reason).to.equal('previous waitlist reason');
       expect(reviews[0].justification).to.match(/Automatically closed by system/);
       expect(staleWaitlisted.save).to.have.been.called;
 
@@ -5979,8 +5979,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(oldOnboardedRecord.setReviews).to.have.been.calledOnce;
         const oldReviews = oldOnboardedRecord.setReviews.firstCall.args[0];
         expect(oldReviews).to.have.length(1);
-        expect(oldReviews[0].reason)
-          .to.match(/was replaced by.*for IMS org/);
+        expect(oldReviews[0].reason).to.be.null;
         expect(oldReviews[0].decision).to.equal('OFFBOARDED');
         expect(oldReviews[0].justification)
           .to.equal('System action to start onboarding for new domain in the same IMS org.');
@@ -7408,7 +7407,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(reviews[0].decision).to.equal('CLOSED');
         expect(reviews[0].justification).to.equal('Manually closing old waitlist entry');
         expect(reviews[0].reviewedBy).to.equal('ese@adobe.com');
-        expect(reviews[0].reason).to.match(/manually transitioned from WAITLISTED to OUTDATED/);
+        expect(reviews[0].reason).to.be.null;
         expect(record.save).to.have.been.calledOnce;
       });
 
@@ -7429,7 +7428,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setStatus).to.have.been.calledWith('OUTDATED');
         const reviews = record.setReviews.firstCall.args[0];
         expect(reviews[0].decision).to.equal('REOPENED');
-        expect(reviews[0].reason).to.match(/manually transitioned from REJECTED to OUTDATED/);
+        expect(reviews[0].reason).to.be.null;
       });
 
       it('transitions ONBOARDED to OUTDATED with OFFBOARDED review and revokes ASO enrollments', async () => {
@@ -7458,7 +7457,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(mockEnrollment.remove).to.have.been.calledOnce;
         const reviews = record.setReviews.firstCall.args[0];
         expect(reviews[0].decision).to.equal('OFFBOARDED');
-        expect(reviews[0].reason).to.match(/manually transitioned from ONBOARDED to OUTDATED/);
+        expect(reviews[0].reason).to.be.null;
         expect(reviews[0].justification).to.equal('Offboarding at customer request');
       });
 
