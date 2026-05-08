@@ -345,9 +345,6 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   const newSuggestions = await Suggestion
     .allByOpportunityIdAndStatus(opptyId, SuggestionModel.STATUSES.NEW);
   const newSuggestionIds = newSuggestions.map((s) => s.getId());
-  if (!newSuggestionIds.length) {
-    return;
-  }
 
   const { grantedIds, grantIds, notGrantedIds } = await SuggestionGrant
     .splitSuggestionsByGrantStatus(newSuggestionIds);
