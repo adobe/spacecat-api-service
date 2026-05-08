@@ -1,3 +1,58 @@
+# [1.484.0](https://github.com/adobe/spacecat-api-service/compare/v1.483.5...v1.484.0) (2026-05-08)
+
+
+### Features
+
+* **backfill:** add refreshAgenticDailyExport to cdn-logs-report weekly backfill ([#2369](https://github.com/adobe/spacecat-api-service/issues/2369)) ([2a2650c](https://github.com/adobe/spacecat-api-service/commit/2a2650caaa7b46d76558a5686939aa8f352ed85e))
+
+## [1.483.5](https://github.com/adobe/spacecat-api-service/compare/v1.483.4...v1.483.5) (2026-05-08)
+
+
+### Bug Fixes
+
+* **prompts:** replace denylist filter with in-loop allowlist gate for deleted prompts ([#2352](https://github.com/adobe/spacecat-api-service/issues/2352)) ([0fd2930](https://github.com/adobe/spacecat-api-service/commit/0fd293094c492656b4e4eb5c80804acb0b968ecc)), closes [#2349](https://github.com/adobe/spacecat-api-service/issues/2349)
+
+## [1.483.4](https://github.com/adobe/spacecat-api-service/compare/v1.483.3...v1.483.4) (2026-05-08)
+
+
+### Bug Fixes
+
+* **webhooks:** read headers from pathInfo and short-circuit unmapped events early ([#2366](https://github.com/adobe/spacecat-api-service/issues/2366)) ([f0e0d65](https://github.com/adobe/spacecat-api-service/commit/f0e0d6517beacff0143d3ed852388ef8f214cfbd))
+
+## [1.483.3](https://github.com/adobe/spacecat-api-service/compare/v1.483.2...v1.483.3) (2026-05-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.7.1 ([#2365](https://github.com/adobe/spacecat-api-service/issues/2365)) ([8276003](https://github.com/adobe/spacecat-api-service/commit/8276003b2c91a36886e4ee7270e124f3de6bc904))
+
+## [1.483.2](https://github.com/adobe/spacecat-api-service/compare/v1.483.1...v1.483.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* Add new query pattern for getTokensBySiteIdByCycle ([#2298](https://github.com/adobe/spacecat-api-service/issues/2298)) ([368bf1c](https://github.com/adobe/spacecat-api-service/commit/368bf1ca8288f6d966a3cbf0cec7502e2a1200e1))
+* block llmo spreadsheet read for 59bdf35f-c0d4-4c51-9013-8a5b63d7… ([#2362](https://github.com/adobe/spacecat-api-service/issues/2362)) ([b067121](https://github.com/adobe/spacecat-api-service/commit/b067121766a503209b1a42da75383aa45d6295cd))
+
+## [1.483.1](https://github.com/adobe/spacecat-api-service/compare/v1.483.0...v1.483.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* chunk uploaded status report files to avoid Slack timeout ([#2358](https://github.com/adobe/spacecat-api-service/issues/2358)) ([d099588](https://github.com/adobe/spacecat-api-service/commit/d099588ebb1d8995b1a5b7ae36092bf0c35f29e5))
+
+# [1.483.0](https://github.com/adobe/spacecat-api-service/compare/v1.482.2...v1.483.0) (2026-05-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.59.0 ([#2361](https://github.com/adobe/spacecat-api-service/issues/2361)) ([2463626](https://github.com/adobe/spacecat-api-service/commit/24636260f577e355275753715842e49925ced4cf))
+
+
+### Features
+
+* **plg:** enrich onboarding Slack notifications with context notes ([#2360](https://github.com/adobe/spacecat-api-service/issues/2360)) ([c8707e1](https://github.com/adobe/spacecat-api-service/commit/c8707e176d0ef17ccea15e8323dbbc4ce01a9c32))
+
 ## [1.482.2](https://github.com/adobe/spacecat-api-service/compare/v1.482.1...v1.482.2) (2026-05-07)
 
 

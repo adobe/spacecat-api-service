@@ -918,7 +918,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.include('Internal Org');
       expect(message).to.include(TEST_DOMAIN);
+      expect(message).to.include('Onboarding requested on IMS Org');
       expect(message).to.include(TEST_IMS_ORG_ID);
+      expect(message).to.include('IMS Org Name');
+      expect(message).to.include('Test Org');
     });
 
     it('posts Slack notification when paid customer is rejected', async () => {
@@ -1024,7 +1027,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.include('Paid Customer');
       expect(message).to.include(TEST_DOMAIN);
+      expect(message).to.include('Onboarding requested on IMS Org');
       expect(message).to.include(TEST_IMS_ORG_ID);
+      expect(message).to.include('IMS Org Name');
+      expect(message).to.include('Test Org');
     });
 
     it('logs error and still returns 400 when rejection Slack notification fails', async () => {
@@ -2174,6 +2180,119 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.not.include('IMS Org Name');
       expect(message).to.include(TEST_ORG_ID);
       expect(message).to.include(TEST_SITE_ID);
+    });
+
+    it('posts notification with fast onboarded note via fast path (PRE_ONBOARDING + siteId)', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+        steps: { orgResolved: true },
+      });
+      // setStatus is a stub; make getStatus track the last set value so the
+      // notification function sees ONBOARDED when postPlgOnboardingNotification is called.
+      let currentStatus = 'PRE_ONBOARDING';
+      preonboardedOnboarding.getStatus = () => currentStatus;
+      preonboardedOnboarding.setStatus = (s) => {
+        currentStatus = s;
+      };
+
+      const ctx = {
+        data: { domain: TEST_DOMAIN },
+        dataAccess: {
+          ...mockDataAccess,
+          Organization: {
+            ...mockDataAccess.Organization,
+            findByImsOrgId: sandbox.stub().resolves(null),
+          },
+          PlgOnboarding: {
+            ...mockDataAccess.PlgOnboarding,
+            findByImsOrgIdAndDomain: sandbox.stub().resolves(preonboardedOnboarding),
+          },
+          Site: {
+            ...mockDataAccess.Site,
+            findById: sandbox.stub().resolves(createMockSite()),
+          },
+        },
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST',
+          SLACK_BOT_TOKEN: 'xoxb-test-token',
+        },
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        attributes: { authInfo: mockAuthInfo() },
+      };
+
+      await SlackController({ log: mockLog }).onboard(ctx);
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Notes:');
+      expect(message).to.include('Fast onboarding (pre-onboarded site)');
+    });
+
+    it('posts notification with org reassigned note when steps.siteOrgReassigned is set', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'ONBOARDED',
+        organizationId: TEST_ORG_ID,
+        siteId: TEST_SITE_ID,
+        steps: { siteOrgReassigned: true, entitlementCreated: true },
+      });
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Notes:');
+      expect(message).to.include('Site moved from internal org to customer org');
+    });
+
+    it('posts notification with author URL note when steps.authorUrlResolved is set', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'ONBOARDED',
+        organizationId: TEST_ORG_ID,
+        siteId: TEST_SITE_ID,
+        steps: { authorUrlResolved: true, entitlementCreated: true },
+      });
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Notes:');
+      expect(message).to.include('Author URL auto-resolved (AEM CS)');
+    });
+
+    it('posts notification with multiple notes when several steps are set', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'ONBOARDED',
+        organizationId: TEST_ORG_ID,
+        siteId: TEST_SITE_ID,
+        steps: { siteOrgReassigned: true, authorUrlResolved: true },
+      });
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Site moved from internal org to customer org');
+      expect(message).to.include('Author URL auto-resolved (AEM CS)');
+    });
+
+    it('posts notification without Notes section when no notable steps are set', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'ONBOARDED',
+        organizationId: TEST_ORG_ID,
+        siteId: TEST_SITE_ID,
+        steps: { entitlementCreated: true, orgResolved: true },
+      });
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.not.include('Notes:');
     });
 
     it('INACTIVE notification includes last review reason', async () => {
