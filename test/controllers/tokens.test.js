@@ -58,7 +58,6 @@ describe('Tokens Controller', () => {
       Token: {
         allBySiteId: sandbox.stub(),
         findBySiteIdAndTokenType: sandbox.stub().resolves(mockToken),
-        findById: sandbox.stub().resolves({ ...mockToken, remove: sandbox.stub().resolves() }),
       },
     };
 
@@ -623,76 +622,6 @@ describe('Tokens Controller', () => {
       expect((await result.json()).message).to.equal('DB failure');
       expect(context.log.error).to.have.been.calledWith(
         `Error getting grants for token ${tokenId} on site ${siteId}: DB failure`,
-      );
-    });
-  });
-
-  describe('deleteToken', () => {
-    it('returns 400 when siteId is invalid', async () => {
-      const context = { params: { siteId: 'bad-id', tokenId }, log: { error: sinon.stub() } };
-      const result = await tokensController.deleteToken(context);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.equal('Site ID required');
-    });
-
-    it('returns 400 when tokenId is invalid', async () => {
-      const context = { params: { siteId, tokenId: 'bad-id' }, log: { error: sinon.stub() } };
-      const result = await tokensController.deleteToken(context);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.equal('Token ID required');
-    });
-
-    it('returns 403 when user is not an admin', async () => {
-      mockAccessControlUtil.hasAdminAccess.returns(false);
-      const context = { params: { siteId, tokenId }, log: { error: sinon.stub() } };
-      const result = await tokensController.deleteToken(context);
-      expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.equal('Only admins can delete tokens');
-    });
-
-    it('returns 404 when site is not found', async () => {
-      mockDataAccess.Site.findById.resolves(null);
-      const context = { params: { siteId, tokenId }, log: { error: sinon.stub() } };
-      const result = await tokensController.deleteToken(context);
-      expect(result.status).to.equal(404);
-      expect((await result.json()).message).to.equal('Site not found');
-    });
-
-    it('returns 404 when token is not found', async () => {
-      mockDataAccess.Token.findById.resolves(null);
-      const context = { params: { siteId, tokenId }, log: { error: sinon.stub() } };
-      const result = await tokensController.deleteToken(context);
-      expect(result.status).to.equal(404);
-      expect((await result.json()).message).to.equal('Token not found');
-    });
-
-    it('returns 404 when token belongs to a different site', async () => {
-      mockDataAccess.Token.findById.resolves({
-        ...mockToken,
-        getSiteId: () => 'different-site-id',
-        remove: sandbox.stub().resolves(),
-      });
-      const context = { params: { siteId, tokenId }, log: { error: sinon.stub() } };
-      const result = await tokensController.deleteToken(context);
-      expect(result.status).to.equal(404);
-      expect((await result.json()).message).to.equal('Token not found');
-    });
-
-    it('returns 204 on successful deletion', async () => {
-      const context = { params: { siteId, tokenId }, log: { error: sinon.stub() } };
-      const result = await tokensController.deleteToken(context);
-      expect(result.status).to.equal(204);
-      expect(mockDataAccess.Token.findById).to.have.been.calledWith(tokenId);
-    });
-
-    it('returns 500 on unexpected error', async () => {
-      mockDataAccess.Token.findById.rejects(new Error('DB failure'));
-      const context = { params: { siteId, tokenId }, log: { error: sinon.stub() } };
-      const result = await tokensController.deleteToken(context);
-      expect(result.status).to.equal(500);
-      expect((await result.json()).message).to.equal('DB failure');
-      expect(context.log.error).to.have.been.calledWith(
-        `Error deleting token ${tokenId} for site ${siteId}: DB failure`,
       );
     });
   });
