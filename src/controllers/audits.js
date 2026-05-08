@@ -310,8 +310,8 @@ function AuditsController(ctx) {
     if (hasUpdates) {
       const configObj = Config.toDynamoItem(siteConfig);
       if (newIncludedURLs !== undefined) {
-        configObj.handlers = configObj.handlers || {};
-        configObj.handlers[auditType] = configObj.handlers[auditType] || {};
+        configObj.handlers = { ...(configObj.handlers || {}) };
+        configObj.handlers[auditType] = { ...(configObj.handlers[auditType] || {}) };
         configObj.handlers[auditType].includedURLs = newIncludedURLs;
       }
       site.setConfig(configObj);
