@@ -1243,6 +1243,10 @@ async function performAsoPlgOnboarding({
       site.setProjectId(project.getId());
     }
 
+    // Persist RUM availability using the result already captured in steps.rumVerified.
+    // No extra API call needed — we reuse what Step 2 already determined.
+    siteConfig.updateRumConfig(steps.rumVerified === true);
+
     // Save site with updated config
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();

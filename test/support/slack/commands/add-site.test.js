@@ -13,19 +13,29 @@
 import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 import nock from 'nock';
-
-import AddSiteCommand from '../../../../src/support/slack/commands/add-site.js';
 
 use(sinonChai);
 
 const validHelixDom = '<!doctype html><html lang="en"><head><script src="/scripts/aem.js"></script></head><body><header></header><main><div class="block hero" data-block-status="loaded"></div></main></body></html>';
 
 describe('AddSiteCommand', () => {
+  let AddSiteCommand;
+  let updateRumConfigStub;
   let context;
   let slackContext;
   let dataAccessStub;
   let sqsStub;
+
+  before(async () => {
+    updateRumConfigStub = sinon.stub().resolves(true);
+    AddSiteCommand = (await esmock('../../../../src/support/slack/commands/add-site.js', {
+      '../../../../src/support/rum-config-service.js': {
+        updateRumConfig: updateRumConfigStub,
+      },
+    })).default;
+  });
 
   beforeEach(() => {
     const configuration = {

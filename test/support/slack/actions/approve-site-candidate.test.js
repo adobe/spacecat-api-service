@@ -16,7 +16,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import approveSiteCandidate from '../../../../src/support/slack/actions/approve-site-candidate.js';
+import esmock from 'esmock';
 import {
   expectedAnnouncedMessage,
   expectedApprovedReply,
@@ -28,6 +28,23 @@ use(chaiAsPromised);
 use(sinonChai);
 
 describe('approveSiteCandidate', () => {
+  let approveSiteCandidate;
+  let updateRumConfigStub;
+
+  before(async () => {
+    updateRumConfigStub = sinon.stub().resolves(true);
+    approveSiteCandidate = (await esmock('../../../../src/support/slack/actions/approve-site-candidate.js', {
+      '../../../../src/support/rum-config-service.js': {
+        updateRumConfig: updateRumConfigStub,
+      },
+      '../../../../src/agents/org-detector/agent.js': {
+        default: {
+          fromContext: (ctx) => ctx.orgDetectorAgent || { detect: sinon.stub().resolves(null) },
+        },
+      },
+    })).default;
+  });
+
   const baseURL = 'https://spacecat.com';
   const hlxConfig = {
     hlxVersion: 4,

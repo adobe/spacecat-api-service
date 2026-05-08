@@ -17,6 +17,7 @@ import {
 } from '../../../utils/slack/base.js';
 
 import { findDeliveryType } from '../../utils.js';
+import { updateRumConfig } from '../../rum-config-service.js';
 
 import BaseCommand from './base.js';
 
@@ -91,6 +92,8 @@ function AddSiteCommand(context) {
         await say(':x: Problem adding the site. Please contact the admins.');
         return;
       }
+
+      await updateRumConfig(newSite, context);
 
       let message = `:white_check_mark: *Successfully added new site <${baseURL}|${baseURL}>*.\n`;
       message += `:delivrer: *Delivery type:* ${deliveryType}.\n`;
