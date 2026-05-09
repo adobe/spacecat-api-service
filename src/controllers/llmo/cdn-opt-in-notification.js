@@ -17,6 +17,7 @@
  * - Triggered only on the first opt-in (isNewlyOpted=true) — not on subsequent config updates.
  * - CDN type is read from llmo.cdnBucketConfig.cdnProvider (populated by llmo-config-wrapper
  *   in auth-service during provisioning).
+ * - AEM CS Fastly is excluded from this notification flow.
  * - Email failures never block the opt-in response — notification is fire-and-forget.
  * - Recipients must be set via OPT_IN_NOTIFICATION_RECIPIENTS in Vault (comma-separated
  *   @adobe.com addresses). If missing, notification is skipped with an error log.
@@ -30,6 +31,7 @@ import { CDN_TYPES, CDN_DISPLAY_NAMES } from './llmo-utils.js';
 
 const OPT_IN_NOTIFICATION_TEMPLATE = 'llmo_cdn_opt_in_notification';
 const EXCLUDED_MEMBER_STATUSES = new Set(['BLOCKED', 'DELETED']);
+const EXCLUDED_CDN_TYPES = new Set([CDN_TYPES.AEM_CS_FASTLY]);
 
 // Pre-encoded HTML entities — the Post Office template renders this string
 // as HTML, so raw < / > would be stripped or treated as a tag.
@@ -131,6 +133,11 @@ export async function notifyOptInIfNeeded(context, params) {
   } = params || {};
 
   try {
+    if (EXCLUDED_CDN_TYPES.has(cdnType)) {
+      log.info(`[cdn-opt-in-notification] Skipping notification for excluded cdnType="${cdnType}" site=${siteId}`);
+      return { sent: false, reason: 'excluded-cdn' };
+    }
+
     const recipients = parseRecipients(env?.OPT_IN_NOTIFICATION_RECIPIENTS);
     if (recipients.length === 0) {
       log.error('[cdn-opt-in-notification] OPT_IN_NOTIFICATION_RECIPIENTS is not configured — skipping notification');

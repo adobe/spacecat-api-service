@@ -249,13 +249,15 @@ describe('cdn-opt-in-notification', () => {
       expect(templateData.replyAllTeam).to.include('Customer CSE');
     });
 
-    it('flags aem-cs-fastly as adobe-managed with CSE reply-all team and commerceManaged=false', async () => {
-      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'aem-cs-fastly' });
+    it('skips notification for aem-cs-fastly', async () => {
+      const result = await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'aem-cs-fastly' });
 
-      const { templateData } = sendEmailStub.firstCall.args[1];
-      expect(templateData.adobeManaged).to.be.true;
-      expect(templateData.commerceManaged).to.be.false;
-      expect(templateData.replyAllTeam).to.include('Customer CSE');
+      expect(result.sent).to.be.false;
+      expect(result.reason).to.equal('excluded-cdn');
+      expect(sendEmailStub).to.not.have.been.called;
+      expect(mockContext.log.info).to.have.been.calledWithMatch(
+        /Skipping notification for excluded cdnType="aem-cs-fastly"/,
+      );
     });
 
     it('flags commerce-fastly as adobe-managed and commerceManaged=true with Commerce team reply-all', async () => {
