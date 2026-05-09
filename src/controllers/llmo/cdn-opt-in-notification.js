@@ -69,6 +69,10 @@ function parseRecipients(raw) {
   return raw.split(',').map((s) => s.trim()).filter((e) => /^[^@]+@adobe\.com$/.test(e));
 }
 
+function normalizeCdnType(cdnType) {
+  return typeof cdnType === 'string' ? cdnType.trim().toLowerCase() : '';
+}
+
 function formatOrgMembersCsv(trialUsers) {
   if (!Array.isArray(trialUsers) || trialUsers.length === 0) {
     return '';
@@ -133,8 +137,11 @@ export async function notifyOptInIfNeeded(context, params) {
   } = params || {};
 
   try {
-    if (EXCLUDED_CDN_TYPES.has(cdnType)) {
-      log.info(`[cdn-opt-in-notification] Skipping notification for excluded cdnType="${cdnType}" site=${siteId}`);
+    const normalizedCdnType = normalizeCdnType(cdnType);
+    log.info(`[cdn-opt-in-notification] Resolved cdnType="${cdnType ?? ''}" normalizedCdnType="${normalizedCdnType}" for site=${siteId}`);
+
+    if (EXCLUDED_CDN_TYPES.has(normalizedCdnType)) {
+      log.info(`[cdn-opt-in-notification] Skipping notification for excluded cdnType="${normalizedCdnType}" site=${siteId}`);
       return { sent: false, reason: 'excluded-cdn' };
     }
 
@@ -144,8 +151,8 @@ export async function notifyOptInIfNeeded(context, params) {
       return { sent: false, reason: 'no-recipients' };
     }
 
-    const cdnEntry = CDN_CONFIG[cdnType];
-    const cdnDisplayName = CDN_DISPLAY_NAMES[cdnType] || '';
+    const cdnEntry = CDN_CONFIG[normalizedCdnType];
+    const cdnDisplayName = CDN_DISPLAY_NAMES[normalizedCdnType] || '';
     const cdnKnown = Boolean(cdnDisplayName);
     const docLink = cdnEntry?.docLink || '';
     const adobeManaged = Boolean(cdnEntry?.adobeManaged);
@@ -154,7 +161,7 @@ export async function notifyOptInIfNeeded(context, params) {
     const orgMembers = await getOrgMembersCsv(context, orgId);
 
     if (!cdnKnown) {
-      log.warn(`[cdn-opt-in-notification] Unknown CDN type for site=${siteId} — sending notification without CDN-specific guidance (cdnType="${cdnType ?? ''}")`);
+      log.warn(`[cdn-opt-in-notification] Unknown CDN type for site=${siteId} — sending notification without CDN-specific guidance (cdnType="${normalizedCdnType || cdnType || ''}")`);
     }
 
     const templateData = {
@@ -169,7 +176,7 @@ export async function notifyOptInIfNeeded(context, params) {
       replyAllTeam,
     };
 
-    log.info(`[cdn-opt-in-notification] Sending ${OPT_IN_NOTIFICATION_TEMPLATE} for site=${siteId} cdnType=${cdnType} cdnKnown=${cdnKnown}`);
+    log.info(`[cdn-opt-in-notification] Sending ${OPT_IN_NOTIFICATION_TEMPLATE} for site=${siteId} cdnType=${normalizedCdnType || cdnType || ''} cdnKnown=${cdnKnown}`);
 
     const result = await sendEmail(context, {
       recipients,

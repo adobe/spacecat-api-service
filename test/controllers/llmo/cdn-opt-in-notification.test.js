@@ -260,6 +260,20 @@ describe('cdn-opt-in-notification', () => {
       );
     });
 
+    it('skips notification for aem-cs-fastly with mixed-case and spaces', async () => {
+      const result = await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: '  AeM-Cs-Fastly  ' });
+
+      expect(result.sent).to.be.false;
+      expect(result.reason).to.equal('excluded-cdn');
+      expect(sendEmailStub).to.not.have.been.called;
+      expect(mockContext.log.info).to.have.been.calledWithMatch(
+        /normalizedCdnType="aem-cs-fastly"/,
+      );
+      expect(mockContext.log.info).to.have.been.calledWithMatch(
+        /Skipping notification for excluded cdnType="aem-cs-fastly"/,
+      );
+    });
+
     it('flags commerce-fastly as adobe-managed and commerceManaged=true with Commerce team reply-all', async () => {
       await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'commerce-fastly' });
 
