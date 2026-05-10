@@ -47,16 +47,20 @@ export function getSkipReason(data, action, env) {
     }
   }
 
-  // Label-based trigger: label must match
-  if (action === 'labeled') {
-    const label = data.label?.name;
-    if (label !== 'mysticat:review-requested') {
-      return `label ${label} does not match trigger`;
-    }
-  }
-
-  // Only review_requested and labeled are supported in Phase 2
-  if (action !== 'review_requested' && action !== 'labeled') {
+  // Only review_requested is supported. Label-based triggers were disabled
+  // because GitHub does not count label-triggered reviews toward branch
+  // protection / merge requirements: an approval only counts when the
+  // reviewer was explicitly *requested* (Reviewers panel) or is listed in
+  // CODEOWNERS for the changed paths. A bot that posts a review off the
+  // back of a label add appears under "Reviewers whose approvals may not
+  // affect merge requirements" — visible but non-binding.
+  //
+  // The env-configurable label hook (env.MYSTICAT_REVIEW_LABEL) and its
+  // dev/prod-specific Vault values were left in place for now. If we ever
+  // re-enable label triggers (e.g., a "comment-only / advisory" mode that
+  // does not pretend to count), restore the matching block here without
+  // re-doing the env-separation work.
+  if (action !== 'review_requested') {
     return `unsupported action: ${action}`;
   }
 

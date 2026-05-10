@@ -58,24 +58,33 @@ describe('github-trigger-rules', () => {
       });
     });
 
-    describe('labeled trigger', () => {
-      it('returns null when label matches', () => {
+    describe('labeled trigger (disabled)', () => {
+      // Labeled triggers were disabled because GitHub does not count
+      // label-triggered reviews toward branch protection / merge
+      // requirements. All labeled events now fall through to the
+      // unsupported-action skip path.
+      it('returns unsupported-action skip reason regardless of label name', () => {
         const data = {
           ...baseData,
           action: 'labeled',
           label: { name: 'mysticat:review-requested' },
         };
-        expect(getSkipReason(data, 'labeled', defaultEnv)).to.be.null;
+        expect(getSkipReason(data, 'labeled', defaultEnv)).to.include('unsupported action');
       });
 
-      it('returns skip reason when label does not match', () => {
+      it('ignores MYSTICAT_REVIEW_LABEL env override', () => {
+        // The env hook is left in place for future re-enable but is
+        // currently a no-op.
+        const devEnv = {
+          ...defaultEnv,
+          MYSTICAT_REVIEW_LABEL: 'mysticat-dev:review-requested',
+        };
         const data = {
           ...baseData,
           action: 'labeled',
-          label: { name: 'bug' },
+          label: { name: 'mysticat-dev:review-requested' },
         };
-        const reason = getSkipReason(data, 'labeled', defaultEnv);
-        expect(reason).to.include('bug');
+        expect(getSkipReason(data, 'labeled', devEnv)).to.include('unsupported action');
       });
     });
 
@@ -96,17 +105,12 @@ describe('github-trigger-rules', () => {
       });
     });
 
-    describe('skip rules (parametrized across review_requested and labeled)', () => {
+    describe('skip rules (review_requested only — labeled is disabled)', () => {
       const scenarios = [
         {
           name: 'review_requested',
           action: 'review_requested',
           matchFields: { requested_reviewer: { login: 'mysticat[bot]' } },
-        },
-        {
-          name: 'labeled',
-          action: 'labeled',
-          matchFields: { label: { name: 'mysticat:review-requested' } },
         },
       ];
 
