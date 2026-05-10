@@ -47,8 +47,8 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
-import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 import { updateRumConfig } from '../support/rum-config-service.js';
+import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
