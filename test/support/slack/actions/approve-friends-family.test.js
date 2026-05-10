@@ -26,7 +26,8 @@ describe('approveSiteCandidate', () => {
   let approveFriendsFamily;
   let updateRumConfigStub;
 
-  before(async () => {
+  before(async function () {
+    this.timeout(10000);
     updateRumConfigStub = sinon.stub().resolves(true);
     approveFriendsFamily = (await esmock(
       '../../../../src/support/slack/actions/approve-friends-family.js',
