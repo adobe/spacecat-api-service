@@ -67,13 +67,19 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
 `createdBy` is derived server-side from the caller's IMS profile (`authInfo.getProfile().email`) and is never supplied by the client.
 
 **Response** `202 Accepted`:
+
+Headers:
+```
+Location: https://spacecat.experiencecloud.live/api/v1/sites/{siteId}/preflights/{preflightId}
+```
+
+Body:
 ```json
 {
   "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "status": "IN_PROGRESS",
   "createdAt": "2026-05-11T10:00:00.000Z",
-  "createdBy": "user@example.com",
-  "pollUrl": "https://spacecat.experiencecloud.live/api/v1/sites/{siteId}/preflights/{preflightId}"
+  "createdBy": "user@example.com"
 }
 ```
 
@@ -173,7 +179,9 @@ Key changes:
   status, result, and lifecycle. There is no batch endpoint — this keeps each preflight as a
   clean, independently pollable resource and avoids partial-failure complexity.
 - **`jobId` renamed to `preflightId`** in all responses.
-- **`pollUrl`** updated to point to `/sites/{siteId}/preflights/{preflightId}`.
+- **`pollUrl` removed from the response body.** Per RFC 7231 §6.3.3, the URL of the created
+  resource is communicated via the `Location` response header. Clients that need to poll for
+  completion read `Location` rather than a body field.
 - **`step`**, `mystiqueUrl` (dev-only), and `promiseToken` (cookie) are retained in the
   request body unchanged.
 - **`createdBy`** is captured server-side from the caller's IMS profile and stored in job
