@@ -1,3 +1,15 @@
+# [1.486.0](https://github.com/adobe/spacecat-api-service/compare/v1.485.2...v1.486.0) (2026-05-11)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.60.0 ([#2382](https://github.com/adobe/spacecat-api-service/issues/2382)) ([831c2b4](https://github.com/adobe/spacecat-api-service/commit/831c2b4504b672726ddbf680afe6b3b487bc1956))
+
+
+### Features
+
+* MSM/language copy relationship context validation for suggestions ([#2328](https://github.com/adobe/spacecat-api-service/issues/2328)) ([2e3ff85](https://github.com/adobe/spacecat-api-service/commit/2e3ff85f09aaa28aef10f556c6d7b0a0c39d68b7))
+
 ## [1.485.2](https://github.com/adobe/spacecat-api-service/compare/v1.485.1...v1.485.2) (2026-05-09)
 
 
