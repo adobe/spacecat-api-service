@@ -219,10 +219,12 @@ function AuditsController(ctx) {
     }
 
     const configuration = await Configuration.findLatest();
-    const registeredAudits = configuration.getHandlers();
-    if (!registeredAudits[auditType]) {
-      return notFound(`The "${auditType}" is not present in the configuration. List of allowed audits:`
-        + ` ${Object.keys(registeredAudits).join(', ')}.`);
+    if (configuration) {
+      const registeredAudits = configuration.getHandlers();
+      if (!registeredAudits[auditType]) {
+        return notFound(`The "${auditType}" is not present in the configuration. List of allowed audits:`
+          + ` ${Object.keys(registeredAudits).join(', ')}.`);
+      }
     }
 
     const siteConfig = site.getConfig();
