@@ -213,6 +213,7 @@ async function triggerBackfill(
           siteId,
           auditContext: {
             weekOffset,
+            refreshAgenticDailyExport: true,
           },
         };
         // eslint-disable-next-line no-await-in-loop
