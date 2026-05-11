@@ -60,15 +60,13 @@ consumers have migrated:
 **Request body** (`application/json`):
 ```json
 {
-  "url": "https://main--site--org.hlx.page/some-path",
-  "mystiqueUrl": "optional-ephemeral-host.stage.cloud.adobe.io"
+  "url": "https://main--site--org.hlx.page/some-path"
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `url` | string (URI) | Yes | The single page URL to analyze |
-| `mystiqueUrl` | string | No | Dev-only override for the Mysticat service URL |
 
 `promiseToken` is passed via cookie for authenticated CMS pages (CS/CS_CW/AMS sites); it is not part of the request body.
 
@@ -202,8 +200,7 @@ Key changes:
   resource is communicated via the `Location` response header. Clients that need to poll for
   completion read `Location` rather than a body field.
 - **`step` is removed.** Mysticat's agent always performs both identify and suggest as a single
-  flow, making the field redundant. `mystiqueUrl` (dev-only) and `promiseToken` (cookie) are
-  retained in the request body unchanged.
+  flow, making the field redundant. `promiseToken` (cookie) is retained unchanged.
 - **`createdBy`** is captured server-side from the caller's IMS profile and stored in job
   metadata. It surfaces in all three endpoint responses for audit purposes.
 - **No phantom jobs for rejected requests.** If the site is not found, the caller lacks access,
