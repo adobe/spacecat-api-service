@@ -176,37 +176,24 @@ Key changes:
 deletion milestone is agreed upon with consumers. A deprecation notice should be added to its
 OpenAPI spec entry and response headers.
 
-## Open Question: Data Model for GET /sites/:siteId/preflights
+## Data Model: Extending AsyncJob for Efficient siteId Queries
 
 The current implementation backs preflights with the generic `AsyncJob` model. `AsyncJob` has
-no top-level `siteId` field — `siteId` is buried inside the `metadata` JSON blob. The
-`AsyncJobCollection` exposes only `findById`; there is no `allBySiteId` or equivalent, and
-no DB index exists on `metadata->>'siteId'`.
+no top-level `siteId` field — `siteId` is buried inside the `metadata` JSON blob with no
+index. The `AsyncJobCollection` exposes only `findById`; there is no `allBySiteId` method.
 
-Supporting an efficient list endpoint requires one of the following approaches — **this is an
-open decision for the team to resolve before implementation begins**:
+The decision is to **extend `AsyncJob` in `spacecat-shared-data-access`**:
 
-**Option A — Extend `AsyncJob` in `spacecat-shared-data-access`**
-Add `siteId` as a top-level indexed attribute on `AsyncJob` and add an
-`allBySiteIdAndJobType(siteId, jobType)` collection method. Low friction, preserves the
-existing backing store, but adds preflight-specific concerns to a generic model.
+- Add `siteId` as a top-level indexed attribute on the `AsyncJob` schema
+- Add an `allBySiteIdAndJobType(siteId, jobType)` method to `AsyncJobCollection`
 
-**Option B — New `Preflight` entity in `spacecat-shared-data-access`**
-Introduce a purpose-built `Preflight` model with `siteId`, `url`, `step`, `status`,
-timestamps, and `result` as first-class fields — indexed for efficient lookup by `siteId`.
-More work upfront but the cleanest fit with the new REST design: if preflights are a
-first-class API resource, a first-class data model is the natural companion. The internal
-`AsyncJob` could remain as the execution mechanism, with `Preflight` as the queryable
-projection layer.
+This is the right approach because `AsyncJob` records are TTL-based and short-lived (~7 days).
+A purpose-built `Preflight` entity would require its own TTL and cleanup strategy, adding
+complexity for no real gain given the inherently transient nature of the data. Extending
+`AsyncJob` is low-friction and sufficient.
 
-**Option C — Raw metadata JSON query (not recommended)**
-Filter on `metadata->>'siteId'` and `metadata->>'jobType'` directly. No schema change
-required, but no index — equivalent to a full table scan as volume grows. Not viable for
-production use.
-
-**Recommendation**: Option B is preferred if the preflight resource is expected to grow
-(history, pagination, filtering by step or status). Option A is sufficient if the list
-endpoint is lightweight and low-volume.
+The `GET /sites/:siteId/preflights` controller will query by `siteId` and filter to
+`jobType: "preflight"` jobs only, then group results by `url` from the metadata.
 
 ## Consequences
 - API shape is consistent with the rest of the service; new consumers can discover preflight
