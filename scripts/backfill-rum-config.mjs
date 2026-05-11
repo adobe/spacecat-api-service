@@ -142,7 +142,9 @@ for (const site of toProcess) {
 
   // Rate-limit to avoid hammering the RUM API
   // eslint-disable-next-line no-await-in-loop
-  await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_MS));
+  await new Promise((resolve) => {
+    setTimeout(resolve, RATE_LIMIT_MS);
+  });
 }
 
 // ---------------------------------------------------------------------------
