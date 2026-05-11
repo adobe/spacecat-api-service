@@ -8551,3 +8551,291 @@ PromptExecutionStatusResponse:
       items:
         $ref: '#/PromptExecutionStatusItem'
   required: [items]
+
+# ── AI Visibility schemas ──────────────────────────────────────────────
+
+AiVisibilityServiceUnavailable:
+  type: object
+  description: Returned when the AI Visibility gRPC backend is not configured
+  properties:
+    error:
+      type: string
+      example: ai_visibility_not_configured
+    message:
+      type: string
+      example: Missing AI_SEO_CLIENT_ID
+  required: [error, message]
+
+AiVisibilityEngineBreakdown:
+  type: object
+  description: Per-LLM-engine numeric breakdown
+  properties:
+    all:
+      type: number
+    chatgpt:
+      type: number
+    gemini:
+      type: number
+    google_ai_mode:
+      type: number
+    google_ai_overview:
+      type: number
+
+AiVisibilityByDateEntry:
+  type: object
+  description: A single date-bucket in brand statistics
+  properties:
+    year:
+      type: integer
+    month:
+      type: integer
+    mentions:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    cited_pages:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    visibility_by_engine:
+      $ref: '#/AiVisibilityEngineBreakdown'
+
+AiVisibilityByCountryEntry:
+  type: object
+  description: Per-country breakdown row in brand statistics
+  properties:
+    country:
+      type: string
+    mentions:
+      type: integer
+    audience:
+      type: integer
+    cited_pages:
+      type: integer
+
+AiVisibilitySrFilters:
+  type: object
+  description: Available filter dimensions extracted from the response
+  properties:
+    markets:
+      type: array
+      items:
+        type: object
+        properties:
+          code:
+            type: string
+          name:
+            type: string
+    models:
+      type: array
+      items:
+        type: object
+        properties:
+          code:
+            type: string
+          name:
+            type: string
+
+AiVisibilityBrandStats:
+  type: object
+  description: Brand visibility statistics response
+  properties:
+    by_date:
+      type: array
+      items:
+        $ref: '#/AiVisibilityByDateEntry'
+    by_country:
+      type: array
+      items:
+        $ref: '#/AiVisibilityByCountryEntry'
+    sr_filters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityPaginatedResponse:
+  type: object
+  description: Generic paginated response for AI Visibility list endpoints
+  properties:
+    data:
+      type: array
+      items:
+        type: object
+        additionalProperties: true
+    total:
+      type: integer
+      description: Total number of results matching the query
+    offset:
+      type: integer
+    limit:
+      type: integer
+    sr_filters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityCompetitorsMetrics:
+  type: object
+  description: Competitor comparison time-series response
+  properties:
+    by_brand:
+      type: array
+      items:
+        type: object
+        properties:
+          brand:
+            type: object
+            properties:
+              domain:
+                type: string
+              name:
+                type: string
+          by_date:
+            type: array
+            items:
+              type: object
+              properties:
+                date:
+                  type: object
+                  properties:
+                    year:
+                      type: integer
+                    month:
+                      type: integer
+                    day:
+                      type: integer
+                visibility:
+                  type: number
+                mentions:
+                  type: number
+                audience:
+                  type: number
+                owned_sources:
+                  type: number
+    sr_filters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityGapPromptRow:
+  type: object
+  description: A single gap prompt row
+  properties:
+    id:
+      type: string
+    prompt:
+      type: string
+    engine:
+      type: string
+    topic:
+      type: string
+    topic_id:
+      type: string
+    topic_volume:
+      type: integer
+    mentioned:
+      type: boolean
+    brands:
+      type: integer
+    sources:
+      type: integer
+    prompt_hash:
+      type: string
+    serp_id:
+      type: string
+
+AiVisibilityGapPromptsResponse:
+  type: object
+  description: Normalized gap prompts response
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityGapPromptRow'
+    total:
+      type: integer
+    offset:
+      type: integer
+    limit:
+      type: integer
+    sr_filters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data, total, offset, limit]
+
+AiVisibilityMeta:
+  type: object
+  description: AI Visibility metadata including supported countries
+  properties:
+    countries:
+      type: array
+      items:
+        type: object
+        properties:
+          country_code:
+            type: string
+            description: ISO country code
+          name:
+            type: string
+          snapshots:
+            type: array
+            items:
+              type: string
+              description: Available snapshot dates
+    sr_filters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityTopicsResearchStats:
+  type: object
+  description: Aggregate statistics for topic research
+  properties:
+    topics_total:
+      type: integer
+      description: Total number of distinct topics matching the query
+    brands_total:
+      type: integer
+      description: Total number of brands across matching topics
+    source_domains_total:
+      type: integer
+      description: Total number of source domains across matching topics
+    intent_breakdown:
+      type: array
+      items:
+        type: object
+        properties:
+          intent:
+            type: string
+          count:
+            type: integer
+    related_topics_ai_volume:
+      type: integer
+      description: Aggregated AI volume for related topics
+    sr_filters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilitySourceDomainRow:
+  type: object
+  description: A source domain row in topic research
+  properties:
+    source_domain:
+      type: string
+    sources_count:
+      type: integer
+    mentions:
+      type: integer
+    organic_traffic:
+      type: integer
+    prompt_example:
+      type: string
+
+AiVisibilitySourceDomainsResponse:
+  type: object
+  description: Normalized source domains response
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySourceDomainRow'
+    total:
+      type: integer
+    offset:
+      type: integer
+    limit:
+      type: integer
+    sr_filters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data, total, offset, limit]
