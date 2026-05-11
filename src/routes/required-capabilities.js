@@ -194,6 +194,30 @@ export const INTERNAL_ROUTES = [
   // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
   'GET /v2/regions',
 
+  // Serenity AI Visibility - proxies to sr-grpc-adapter bridge Lambda; UI-only, no S2S consumers
+  'GET /apis/serenity/v1/ai-visibility/brands/stats',
+  'GET /apis/serenity/v1/ai-visibility/brands/topics',
+  'GET /apis/serenity/v1/ai-visibility/brands/prompts',
+  'GET /apis/serenity/v1/ai-visibility/brands/cited-pages',
+  'GET /apis/serenity/v1/ai-visibility/brands/topic-opportunities',
+  'GET /apis/serenity/v1/ai-visibility/brands/top-brands',
+  'GET /apis/serenity/v1/ai-visibility/brands/cited-sources',
+  'GET /apis/serenity/v1/ai-visibility/brands/source-opportunities',
+  'GET /apis/serenity/v1/ai-visibility/brands/competitors',
+  'GET /apis/serenity/v1/ai-visibility/competitors/metrics',
+  'GET /apis/serenity/v1/ai-visibility/competitors/gap-topics',
+  'GET /apis/serenity/v1/ai-visibility/competitors/gap-source-domains',
+  'GET /apis/serenity/v1/ai-visibility/competitors/gap-prompts',
+  'GET /apis/serenity/v1/ai-visibility/meta',
+  'GET /apis/serenity/v1/ai-visibility/prompts/responses',
+  'GET /apis/serenity/v1/ai-visibility/prompts/responses/latest',
+  'GET /apis/serenity/v1/ai-visibility/topics/research/stats',
+  'GET /apis/serenity/v1/ai-visibility/topics/research',
+  'GET /apis/serenity/v1/ai-visibility/topics/stats',
+  'GET /apis/serenity/v1/ai-visibility/topics/research/prompts',
+  'GET /apis/serenity/v1/ai-visibility/topics/research/brands',
+  'GET /apis/serenity/v1/ai-visibility/topics/research/source-domains',
+
   // Monitoring - DRS Brand Presence PostgREST audit proxy. Called by DRS monitoring workers
   // via admin x-api-key only (DRS runs in a separate AWS account and holds no S2S consumer
   // registration). Kept internal because reusing `audit:read` would silently broaden that

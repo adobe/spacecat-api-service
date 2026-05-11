@@ -98,6 +98,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
  * @param {Object} webhooksController - GitHub webhook handler controller.
+ * @param {Object} serenityController - The Serenity AI Visibility controller (bridge proxy).
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -153,6 +154,7 @@ export default function getRouteHandlers(
   plgOnboardingController,
   drsBpPgAuditController,
   webhooksController,
+  serenityController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -622,6 +624,30 @@ export default function getRouteHandlers(
 
     // Autofix checks (permission/capability validation before autofix deploy)
     'POST /sites/:siteId/autofix-checks': autofixChecksController.runChecks,
+
+    // Serenity AI Visibility (proxies to sr-grpc-adapter bridge Lambda)
+    'GET /apis/serenity/v1/ai-visibility/brands/stats': serenityController.getBrandsStats,
+    'GET /apis/serenity/v1/ai-visibility/brands/topics': serenityController.getBrandsTopics,
+    'GET /apis/serenity/v1/ai-visibility/brands/prompts': serenityController.getBrandsPrompts,
+    'GET /apis/serenity/v1/ai-visibility/brands/cited-pages': serenityController.getBrandsCitedPages,
+    'GET /apis/serenity/v1/ai-visibility/brands/topic-opportunities': serenityController.getBrandsTopicOpportunities,
+    'GET /apis/serenity/v1/ai-visibility/brands/top-brands': serenityController.getBrandsTopBrands,
+    'GET /apis/serenity/v1/ai-visibility/brands/cited-sources': serenityController.getBrandsCitedSources,
+    'GET /apis/serenity/v1/ai-visibility/brands/source-opportunities': serenityController.getBrandsSourceOpportunities,
+    'GET /apis/serenity/v1/ai-visibility/brands/competitors': serenityController.getBrandsCompetitors,
+    'GET /apis/serenity/v1/ai-visibility/competitors/metrics': serenityController.getCompetitorsMetrics,
+    'GET /apis/serenity/v1/ai-visibility/competitors/gap-topics': serenityController.getCompetitorsGapTopics,
+    'GET /apis/serenity/v1/ai-visibility/competitors/gap-source-domains': serenityController.getCompetitorsGapSourceDomains,
+    'GET /apis/serenity/v1/ai-visibility/competitors/gap-prompts': serenityController.getCompetitorsGapPrompts,
+    'GET /apis/serenity/v1/ai-visibility/meta': serenityController.getMeta,
+    'GET /apis/serenity/v1/ai-visibility/prompts/responses': serenityController.getPromptsResponses,
+    'GET /apis/serenity/v1/ai-visibility/prompts/responses/latest': serenityController.getPromptsResponsesLatest,
+    'GET /apis/serenity/v1/ai-visibility/topics/research/stats': serenityController.getTopicsResearchStats,
+    'GET /apis/serenity/v1/ai-visibility/topics/research': serenityController.getTopicsResearch,
+    'GET /apis/serenity/v1/ai-visibility/topics/stats': serenityController.getTopicsStats,
+    'GET /apis/serenity/v1/ai-visibility/topics/research/prompts': serenityController.getTopicsResearchPrompts,
+    'GET /apis/serenity/v1/ai-visibility/topics/research/brands': serenityController.getTopicsResearchBrands,
+    'GET /apis/serenity/v1/ai-visibility/topics/research/source-domains': serenityController.getTopicsResearchSourceDomains,
   };
 
   // Initialization of static and dynamic routes
