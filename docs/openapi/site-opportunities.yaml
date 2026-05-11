@@ -950,15 +950,14 @@ site-opportunity-suggestions-auto-fix:
                       type: array
                       x-experimental: true
                       description: |
-                        Experimental (meta-tags only). Optional override for fix-target grouping.
-                        When provided, suggestions
-                        are grouped by the given relationshipContext.fixTargetPageId instead of
-                        by each suggestion's detected page URL. The worker applies the fix to
-                        the specified page directly. Typically populated by the UI when the
-                        page-relationship dialog resolves a source (blueprint/language-master)
-                        page.
+                        Experimental (meta-tags and alt-text). Optional override for fix-target grouping.
+                        When provided, suggestions are grouped by the given relationshipContext
+                        instead of by each suggestion's detected page URL. The worker applies
+                        the fix according to the fixTargetMode: either at the source
+                        (blueprint/language-master) page or locally on the inheriting page.
 
-                        Effective only for AEM CS meta-tags autofix on the Content API path.
+                        Effective only for AEM CS autofix on the Content API path for
+                        meta-tags and alt-text opportunity types.
                         If meta-tags are routed to PSS (for example, disableContentApiForMetaTags=true),
                         this field is accepted but ignored.
 
@@ -981,33 +980,39 @@ site-opportunity-suggestions-auto-fix:
                             description: |
                               Experimental relationship metadata forwarded to the autofix worker.
                               Required for relationship-aware grouping.
-                              When fixTargetMode is source, appliedOnPagePath should be provided.
-                              Effective only on the AEM CS Content API path for meta-tags;
+                              fixTargetMode is required. When fixTargetMode is "source",
+                              appliedOnPagePath should be provided.
+                              Effective on the AEM CS Content API path for meta-tags and alt-text;
                               ignored when meta-tags are handled via PSS.
                             additionalProperties: false
                             required:
-                              - fixTargetPageId
+                              - fixTargetMode
                             properties:
                               fixTargetPageId:
                                 type: string
                                 minLength: 1
                                 description: |
-                                  Page identifier to apply this group to. For relationship-source
-                                  flows this is typically the source page ID resolved by the UI.
-                                  Used only on Content API meta-tags execution path.
+                                  Page identifier to apply this group to. Required when
+                                  fixTargetMode is "local" (the local page's content ID).
+                                  Optional when fixTargetMode is "source" (the worker resolves
+                                  the source page from suggestion data). When provided for
+                                  source mode, this is the source page ID resolved by the UI.
                                 example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
                               fixTargetMode:
                                 type: string
                                 enum: [source, local]
                                 description: |
-                                  Whether this group is being fixed at source or locally.
-                                  Used for Content API relationship-aware meta-tags flow.
+                                  Required. Whether this group is being fixed at source or locally.
+                                  "source" means the fix is applied to the blueprint/language-master
+                                  page; "local" means the fix is applied to the local inheriting page.
+                                  Used for Content API relationship-aware meta-tags and alt-text flows.
                               cancelInheritance:
                                 type: boolean
                                 description: |
                                   Experimental. Optional. When true, indicates the fix is intentionally
                                   applied at a local inheriting page and inheritance should remain cancelled.
-                                  Currently applied for Content API title/description flows only.
+                                  For meta-tags (title/description), cancels page-level property inheritance.
+                                  For alt-text, cancels component-level inheritance on the image component.
                               appliedOnPagePath:
                                 type: string
                                 minLength: 1
@@ -1019,7 +1024,6 @@ site-opportunity-suggestions-auto-fix:
                             - '2eb0ae0d-baa8-4668-abf5-8b22ef75b95f'
                             - '85d87ee0-5818-419a-863f-dcb90630ba11'
                           relationshipContext:
-                            fixTargetPageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
                             fixTargetMode: source
                             appliedOnPagePath: /content/wknd/language-masters/en/adventures/bali-surf-camp
                     customData:
