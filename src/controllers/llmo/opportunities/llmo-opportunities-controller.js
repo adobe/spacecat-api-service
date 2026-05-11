@@ -154,6 +154,13 @@ function LlmoOpportunitiesController(ctx) {
    * For a specific brandId, queries by scope_type='brand' AND scope_id=brandId directly —
    * this correctly handles the case where multiple brands share the same site (e.g. nba.com
    * with kings and lakers brands), since each opportunity is tagged with its specific brand.
+   *
+   * NOTE on `all` vs brand-specific divergence: the `all` path aggregates by isElmo tag
+   * across every org site, while brand-specific paths require an explicit scope_id row.
+   * An opportunity tagged isElmo but without a scope_id appears in the `all` response yet
+   * in none of the brand-specific responses. The paths are NOT additive — the sum of every
+   * per-brand response does not equal `all`. Consumers building coverage reports must
+   * account for this gap. The paths converge once every LLMO opportunity carries scope tags.
    */
   const getBrandOpportunities = async (context) => {
     const { dataAccess, log } = context;
@@ -225,7 +232,10 @@ function LlmoOpportunitiesController(ctx) {
       // Brand-specific query: validate brand belongs to org, then query by scope directly
       const postgrestClient = dataAccess?.services?.postgrestClient;
       if (!postgrestClient?.from) {
-        return badRequest('Brand data requires PostgreSQL data service');
+        // Client-safe message; reason logged server-side (the previous message leaked
+        // backend implementation details into the response body).
+        log.error('Brand lookup unavailable: PostgreSQL data service not configured');
+        return badRequest('Brand lookup service unavailable');
       }
 
       const brand = await getBrandById(orgId, brandId, postgrestClient);
@@ -278,6 +288,11 @@ function LlmoOpportunitiesController(ctx) {
 
       // scopeType and scopeId are explicitly set here — this is the brand-scoped endpoint,
       // values are validated and in scope. They are intentionally absent from OpportunityDto.
+      //
+      // IMPORTANT: scopeId here is the URL parameter (already validated against the brand
+      // by getBrandById above), NOT opp.getScopeId(). Do not change to opp data — that
+      // would allow row-level claims to override the endpoint's asserted scope and re-open
+      // the cross-brand contamination this controller exists to prevent.
       const opportunities = filteredOpps.map((opp) => ({
         ...OpportunityDto.toJSON(opp),
         scopeType: 'brand',

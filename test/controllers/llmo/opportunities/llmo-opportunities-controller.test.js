@@ -893,6 +893,75 @@ describe('LlmoOpportunitiesController', () => {
       expect(mockContext.log.warn).to.have.been.calledWith(sinon.match(/not in brand\.siteIds/));
     });
 
+    it('uses URL-param scopeId, not opp.getScopeId() (trust-boundary regression guard)', async () => {
+      // The endpoint asserts its own scope via the URL parameter; it must NOT echo
+      // back scope_id from the opp record (which may have drifted, been corrupted,
+      // or been written by a buggy producer). A future refactor that changes
+      // `scopeId: brandId` to `scopeId: opp.getScopeId()` would silently allow
+      // row claims to override the endpoint's asserted scope.
+      mockContext.params.brandId = 'correct-brand';
+      const site = createMockSite({ id: 'site-1', baseURL: 'https://example.com' });
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
+      // Opp has the "wrong" scopeId on the record — endpoint should ignore it.
+      const opp = createMockOpportunity({
+        id: 'opp-1', siteId: 'site-1', scopeType: 'brand', scopeId: 'wrong-brand',
+      });
+      mockContext.dataAccess.Opportunity.allByScope
+        .withArgs('brand', 'correct-brand').resolves([opp]);
+
+      LlmoOpportunitiesController = await esmock(
+        '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
+        {
+          ...defaultMocks(sandbox.stub().resolves(true)),
+          '../../../../src/support/brands-storage.js': {
+            getBrandById: sandbox.stub().resolves({ name: 'CorrectBrand', siteIds: ['site-1'] }),
+          },
+        },
+      );
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+      const body = await result.json();
+
+      expect(body.opportunities[0].scopeId).to.equal('correct-brand');
+      expect(body.opportunities[0].scopeId).to.not.equal('wrong-brand');
+    });
+
+    it('returns empty AND warns when brand has undefined siteIds and allByScope returns orphans', async () => {
+      // Fresh brand that hasn't been assigned sites yet. brand.siteIds is undefined
+      // (NOT empty array) — exercises the `|| []` fallback in `new Set(brand.siteIds || [])`.
+      // Every returned opp is therefore an orphan and must be filtered out with a warning.
+      mockContext.params.brandId = 'brand-uuid';
+      const site = createMockSite({ id: 'site-1', baseURL: 'https://example.com' });
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
+
+      const orphan = createMockOpportunity({
+        id: 'opp-1', siteId: 'site-1', scopeType: 'brand', scopeId: 'brand-uuid',
+      });
+      mockContext.dataAccess.Opportunity.allByScope
+        .withArgs('brand', 'brand-uuid').resolves([orphan]);
+
+      LlmoOpportunitiesController = await esmock(
+        '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
+        {
+          ...defaultMocks(sandbox.stub().resolves(true)),
+          '../../../../src/support/brands-storage.js': {
+            // Note the absence of `siteIds` — not `[]`, not `null`, undefined.
+            getBrandById: sandbox.stub().resolves({ name: 'NewBrand' }),
+          },
+        },
+      );
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(0);
+      expect(body.opportunities).to.deep.equal([]);
+      expect(mockContext.log.warn).to.have.been.calledWith(sinon.match(/not in brand\.siteIds/));
+    });
+
     it('does not expose scopeType or scopeId in the all-brand (non-scoped) response', async () => {
       mockContext.params.brandId = 'all';
       const site = createMockSite({ id: 'site-1', baseURL: 'https://example.com' });
