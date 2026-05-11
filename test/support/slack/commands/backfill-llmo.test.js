@@ -177,6 +177,7 @@ describe('BackfillLlmoCommand', () => {
       expect(message).to.have.property('siteId', 'test-site-id');
       expect(message).to.have.property('auditContext');
       expect(message.auditContext).to.have.property('weekOffset', -1);
+      expect(message.auditContext).to.have.property('refreshAgenticDailyExport', true);
     });
 
     it('sends correct SQS message structure for current week (weeks=0)', async () => {
@@ -192,6 +193,7 @@ describe('BackfillLlmoCommand', () => {
       expect(message).to.have.property('siteId', 'test-site-id');
       expect(message).to.have.property('auditContext');
       expect(message.auditContext).to.have.property('weekOffset', 0);
+      expect(message.auditContext).to.have.property('refreshAgenticDailyExport', true);
     });
 
     it('sends a cdn-logs-report daily DB import message using traffic date + 1 as auditContext.date', async () => {

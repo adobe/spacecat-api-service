@@ -713,9 +713,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
@@ -739,7 +737,7 @@ describe('prompts-storage', () => {
     it('updates existing prompts by id', async () => {
       const existingData = {
         data: [{
-          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [],
+          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [], status: 'active',
         }],
         error: null,
       };
@@ -750,10 +748,8 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    neq: () => ({
-                      ...thenable(existingData),
-                      in: () => thenable(existingData),
-                    }),
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
                   }),
                 }),
               }),
@@ -774,10 +770,12 @@ describe('prompts-storage', () => {
       expect(result.updated).to.equal(1);
     });
 
-    it('does not reactivate a deleted prompt matched by prompt_id', async () => {
-      // The existingQuery now filters out deleted rows (.neq('status', 'deleted')).
-      // So a deleted row is invisible to the lookup and the UPDATE branch is never reached.
-      const updateStub = sinon.stub().returns({ eq: () => ({ then: (r) => r({ error: null }) }) });
+    it('skips a deleted prompt matched by prompt_id without updating or inserting', async () => {
+      const deletedRow = {
+        id: 'row-uuid', prompt_id: 'del-1', text: 'Deleted text', regions: [], status: 'deleted',
+      };
+      const existingData = { data: [deletedRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -785,11 +783,8 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    // neq filters out deleted row; returns no results
-                    neq: () => ({
-                      ...thenable({ data: [], error: null }),
-                      in: () => thenable({ data: [], error: null }),
-                    }),
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
                   }),
                 }),
               }),
@@ -803,11 +798,49 @@ describe('prompts-storage', () => {
       const result = await upsertPrompts({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
-        prompts: [{ id: 'deleted-prompt-id', prompt: 'Deleted prompt text', regions: [] }],
+        prompts: [{ id: 'del-1', prompt: 'Deleted text', regions: [] }],
         postgrestClient: client,
       });
       expect(result.updated).to.equal(0);
+      expect(result.created).to.equal(0);
+      expect(result.skipped).to.equal(1);
       expect(updateStub.callCount).to.equal(0);
+    });
+
+    it('skips a deleted prompt matched by text+regions without inserting', async () => {
+      const deletedRow = {
+        id: 'row-uuid', prompt_id: 'del-2', text: 'Same text', regions: ['us'], status: 'deleted',
+      };
+      const existingData = { data: [deletedRow], error: null };
+      const insertSpy = sinon.stub().returns({
+        select: () => thenable({ data: [], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable(existingData),
+                }),
+              }),
+              insert: insertSpy,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      // Incoming prompt has no id but matches the deleted row by text+regions
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Same text', regions: ['us'] }],
+        postgrestClient: client,
+      });
+      expect(result.skipped).to.equal(1);
+      expect(result.created).to.equal(0);
+      expect(insertSpy.callCount).to.equal(0);
     });
 
     it('throws on insert error', async () => {
@@ -817,9 +850,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: null, error: { message: 'Insert failed' } }) }),
@@ -842,7 +873,7 @@ describe('prompts-storage', () => {
     it('throws on update error', async () => {
       const existingData = {
         data: [{
-          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [],
+          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [], status: 'active',
         }],
         error: null,
       };
@@ -853,10 +884,8 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    neq: () => ({
-                      ...thenable(existingData),
-                      in: () => thenable(existingData),
-                    }),
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
                   }),
                 }),
               }),
@@ -884,9 +913,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: null, error: null }) }),
@@ -912,9 +939,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
@@ -949,9 +974,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
@@ -1013,9 +1036,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
@@ -1073,9 +1094,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
@@ -1131,9 +1150,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
@@ -1186,9 +1203,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
@@ -1227,9 +1242,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
@@ -1268,9 +1281,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [], error: null }) }),
@@ -1309,9 +1320,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [], error: null }) }),
@@ -1345,7 +1354,7 @@ describe('prompts-storage', () => {
     it('handles existing prompts with null regions', async () => {
       const existingData = {
         data: [{
-          id: 'row-id', prompt_id: 'p1', text: 'existing', regions: null,
+          id: 'row-id', prompt_id: 'p1', text: 'existing', regions: null, status: 'active',
         }],
         error: null,
       };
@@ -1356,10 +1365,8 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    neq: () => ({
-                      ...thenable(existingData),
-                      in: () => thenable(existingData),
-                    }),
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
                   }),
                 }),
               }),
@@ -1388,10 +1395,8 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    neq: () => ({
-                      ...thenable({ data: null, error: null }),
-                      in: () => thenable({ data: null, error: null }),
-                    }),
+                    ...thenable({ data: null, error: null }),
+                    in: () => thenable({ data: null, error: null }),
                   }),
                 }),
               }),
@@ -1420,10 +1425,8 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    neq: () => ({
-                      ...thenable({ data: [], error: null }),
-                      in: () => thenable({ data: [], error: null }),
-                    }),
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
                   }),
                 }),
               }),
@@ -1467,10 +1470,8 @@ describe('prompts-storage', () => {
               select: () => ({
                 eq: () => ({
                   eq: () => ({
-                    neq: () => ({
-                      ...thenable({ data: [], error: null }),
-                      in: () => thenable({ data: [], error: null }),
-                    }),
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
                   }),
                 }),
               }),
@@ -1847,9 +1848,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
@@ -1877,9 +1876,7 @@ describe('prompts-storage', () => {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => ({
-                    neq: () => thenable({ data: [], error: null }),
-                  }),
+                  eq: () => thenable({ data: [], error: null }),
                 }),
               }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),

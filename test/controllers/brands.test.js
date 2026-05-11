@@ -776,9 +776,7 @@ describe('Brands Controller', () => {
           return {
             select: () => ({
               eq: () => ({
-                eq: () => ({
-                  neq: () => thenable({ data: [], error: null }),
-                }),
+                eq: () => thenable({ data: [], error: null }),
               }),
             }),
             insert: () => insertChain,

@@ -1,3 +1,64 @@
+# [1.486.0](https://github.com/adobe/spacecat-api-service/compare/v1.485.2...v1.486.0) (2026-05-11)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.60.0 ([#2382](https://github.com/adobe/spacecat-api-service/issues/2382)) ([831c2b4](https://github.com/adobe/spacecat-api-service/commit/831c2b4504b672726ddbf680afe6b3b487bc1956))
+
+
+### Features
+
+* MSM/language copy relationship context validation for suggestions ([#2328](https://github.com/adobe/spacecat-api-service/issues/2328)) ([2e3ff85](https://github.com/adobe/spacecat-api-service/commit/2e3ff85f09aaa28aef10f556c6d7b0a0c39d68b7))
+
+## [1.485.2](https://github.com/adobe/spacecat-api-service/compare/v1.485.1...v1.485.2) (2026-05-09)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2380](https://github.com/adobe/spacecat-api-service/issues/2380)) ([acb8df6](https://github.com/adobe/spacecat-api-service/commit/acb8df632f70248187cde277dc66d4c372173246))
+
+## [1.485.1](https://github.com/adobe/spacecat-api-service/compare/v1.485.0...v1.485.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **webhooks:** disable labeled trigger; only review_requested counts ([#2376](https://github.com/adobe/spacecat-api-service/issues/2376)) ([5108f02](https://github.com/adobe/spacecat-api-service/commit/5108f021ff753d238070e386c24046d29148a459))
+
+# [1.485.0](https://github.com/adobe/spacecat-api-service/compare/v1.484.0...v1.485.0) (2026-05-08)
+
+
+### Features
+
+* **webhooks:** env-configurable label trigger for dev/prod separation ([#2375](https://github.com/adobe/spacecat-api-service/issues/2375)) ([4a1b48d](https://github.com/adobe/spacecat-api-service/commit/4a1b48dcdb784538b31d1ef9309c719aa188b140))
+
+# [1.484.0](https://github.com/adobe/spacecat-api-service/compare/v1.483.5...v1.484.0) (2026-05-08)
+
+
+### Features
+
+* **backfill:** add refreshAgenticDailyExport to cdn-logs-report weekly backfill ([#2369](https://github.com/adobe/spacecat-api-service/issues/2369)) ([2a2650c](https://github.com/adobe/spacecat-api-service/commit/2a2650caaa7b46d76558a5686939aa8f352ed85e))
+
+## [1.483.5](https://github.com/adobe/spacecat-api-service/compare/v1.483.4...v1.483.5) (2026-05-08)
+
+
+### Bug Fixes
+
+* **prompts:** replace denylist filter with in-loop allowlist gate for deleted prompts ([#2352](https://github.com/adobe/spacecat-api-service/issues/2352)) ([0fd2930](https://github.com/adobe/spacecat-api-service/commit/0fd293094c492656b4e4eb5c80804acb0b968ecc)), closes [#2349](https://github.com/adobe/spacecat-api-service/issues/2349)
+
+## [1.483.4](https://github.com/adobe/spacecat-api-service/compare/v1.483.3...v1.483.4) (2026-05-08)
+
+
+### Bug Fixes
+
+* **webhooks:** read headers from pathInfo and short-circuit unmapped events early ([#2366](https://github.com/adobe/spacecat-api-service/issues/2366)) ([f0e0d65](https://github.com/adobe/spacecat-api-service/commit/f0e0d6517beacff0143d3ed852388ef8f214cfbd))
+
+## [1.483.3](https://github.com/adobe/spacecat-api-service/compare/v1.483.2...v1.483.3) (2026-05-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.7.1 ([#2365](https://github.com/adobe/spacecat-api-service/issues/2365)) ([8276003](https://github.com/adobe/spacecat-api-service/commit/8276003b2c91a36886e4ee7270e124f3de6bc904))
+
 ## [1.483.2](https://github.com/adobe/spacecat-api-service/compare/v1.483.1...v1.483.2) (2026-05-07)
 
 
