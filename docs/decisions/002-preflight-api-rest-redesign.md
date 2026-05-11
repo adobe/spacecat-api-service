@@ -41,9 +41,9 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | /sites/:siteId/preflights | Create a new preflight for a single URL |
-| GET | /sites/:siteId/preflights | List preflights for a site |
-| GET | /sites/:siteId/preflights/:preflightId | Get a preflight by ID |
+| POST | /sites/:siteId/preflights | Creates a new preflight job for a single URL |
+| GET | /sites/:siteId/preflights | Gets all preflight jobs for a site |
+| GET | /sites/:siteId/preflights/:preflightId | Gets a preflight job by ID |
 
 Key changes:
 
