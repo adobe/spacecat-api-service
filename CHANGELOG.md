@@ -1,3 +1,10 @@
+# [1.487.0](https://github.com/adobe/spacecat-api-service/compare/v1.486.0...v1.487.0) (2026-05-11)
+
+
+### Features
+
+* add ASO link to PLG onboarding Slack notifications ([#2381](https://github.com/adobe/spacecat-api-service/issues/2381)) ([323c0fa](https://github.com/adobe/spacecat-api-service/commit/323c0fac7b9ba5a2324b03f5e291a6ecd5f5a101)), closes [#spacecat-plg-onboardings](https://github.com/adobe/spacecat-api-service/issues/spacecat-plg-onboardings)
+
 # [1.486.0](https://github.com/adobe/spacecat-api-service/compare/v1.485.2...v1.486.0) (2026-05-11)
 
 
