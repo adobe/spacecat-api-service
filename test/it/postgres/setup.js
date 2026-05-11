@@ -14,9 +14,7 @@
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import {
-  S3Client, CreateBucketCommand, HeadBucketCommand, PutObjectCommand,
-} from '@aws-sdk/client-s3';
+import { S3Client, CreateBucketCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const COMPOSE_FILE = path.join(__dirname, 'docker-compose.yml');
@@ -89,60 +87,6 @@ async function ensureMinIoBucket() {
 }
 
 /**
- * Creates the MinIO config bucket and seeds the global SpaceCat configuration.
- * Configuration is stored in S3 (not PostgREST), so PATCH /sites/:id/:auditType
- * needs this object to resolve the registered handlers list.
- */
-async function ensureMinIOConfigBucket() {
-  const s3 = new S3Client({
-    region: 'us-east-1',
-    endpoint: `http://localhost:${MINIO_PORT}`,
-    forcePathStyle: true,
-    credentials: { accessKeyId: 'minioadmin', secretAccessKey: 'minioadmin' },
-  });
-
-  const bucket = 'dummy-config-bucket';
-  try {
-    await s3.send(new HeadBucketCommand({ Bucket: bucket }));
-  } catch {
-    await s3.send(new CreateBucketCommand({ Bucket: bucket }));
-  }
-
-  const handler = { enabledByDefault: true, productCodes: ['spacecat'] };
-  const config = {
-    handlers: {
-      'alt-text': handler,
-      apex: handler,
-      'broken-backlinks': handler,
-      canonical: handler,
-      cwv: handler,
-      faqs: handler,
-      headings: handler,
-      hreflang: handler,
-      'internal-links': handler,
-      'llm-blocked': handler,
-      'meta-tags': handler,
-      'missing-structured-data': handler,
-      prerender: handler,
-      readability: handler,
-      sitemap: handler,
-      'structured-data': handler,
-      summarization: handler,
-      toc: handler,
-    },
-    jobs: [],
-    queues: { auditJobsQueue: 'https://sqs.us-east-1.amazonaws.com/000000000000/dummy' },
-  };
-
-  await s3.send(new PutObjectCommand({
-    Bucket: bucket,
-    Key: 'config/spacecat/global-config.json',
-    Body: JSON.stringify(config),
-    ContentType: 'application/json',
-  }));
-}
-
-/**
  * Starts PostgreSQL + PostgREST + MinIO via docker compose and waits for readiness.
  *
  * @returns {Promise<string>} The PostgREST base URL
@@ -160,7 +104,6 @@ export async function startPostgres() {
   ]);
 
   await ensureMinIoBucket();
-  await ensureMinIOConfigBucket();
 
   return POSTGREST_URL;
 }
