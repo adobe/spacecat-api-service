@@ -44,6 +44,8 @@ import {
   resolveWwwUrl,
   updateCodeConfig,
   queueDeliveryConfigWriter,
+  parseCommaSeparatedEnvList,
+  isInternalOrg,
 } from '../../support/utils.js';
 import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
@@ -100,14 +102,6 @@ function deriveCheckKey(onboarding) {
   return null;
 }
 
-function parseCommaSeparatedEnvList(value) {
-  return (value || '').split(',').map((id) => id.trim()).filter(Boolean);
-}
-
-function isInternalOrg(orgId, env) {
-  return parseCommaSeparatedEnvList(env.ASO_PLG_EXCLUDED_ORGS).includes(orgId);
-}
-
 /**
  * Site IDs that must not use the internal-org waitlist bypass, even when the site lives in an
  * org listed in ASO_PLG_EXCLUDED_ORGS (e.g. customer demo sites in a shared internal org).
@@ -135,7 +129,7 @@ const PLG_STATUS_NOTIFICATION_CONFIG = {
  * @param {object} context - The request context containing env and log.
  * @returns {Promise<void>}
  */
-async function postPlgOnboardingNotification(onboarding, context) {
+async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
   const { env, log } = context;
   const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
   const token = env.SLACK_BOT_TOKEN;
@@ -198,6 +192,21 @@ async function postPlgOnboardingNotification(onboarding, context) {
   const error = onboarding.getError();
   if (error?.message) {
     message += `\n• *Error:* ${error.message}`;
+  }
+
+  const steps = onboarding.getSteps() || {};
+  const notes = [];
+  if (hints.fastOnboarded) {
+    notes.push(':rocket: Fast onboarding (pre-onboarded site)');
+  }
+  if (steps.siteOrgReassigned) {
+    notes.push(':arrows_counterclockwise: Site moved from internal org to customer org');
+  }
+  if (steps.authorUrlResolved) {
+    notes.push(':link: Author URL auto-resolved (AEM CS)');
+  }
+  if (notes.length > 0) {
+    message += `\n• *Notes:* ${notes.join(' · ')}`;
   }
 
   try {
@@ -848,7 +857,7 @@ async function performAsoPlgOnboarding({
           onboarding.setUpdatedBy(updatedBy);
         }
         await onboarding.save();
-        await postPlgOnboardingNotification(onboarding, context);
+        await postPlgOnboardingNotification(onboarding, context, { fastOnboarded: true });
         return onboarding;
       } catch (error) {
         if (error instanceof EntitlementWaitlistError) {
@@ -1051,14 +1060,15 @@ async function performAsoPlgOnboarding({
       if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_CS && presetAuthorUrl) {
         // Derive programId and environmentId from AEM CS author URL
         const csMatch = presetAuthorUrl.match(AEM_CS_AUTHOR_URL_PATTERN);
+        site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_CS);
         /* c8 ignore next */
         const [, programId, environmentId] = csMatch || [];
         site.setDeliveryConfig({
           ...existingDeliveryConfig,
           authorURL: presetAuthorUrl,
-          ...(programId && {
-            programId, environmentId, preferContentApi: true, enableDAMAltTextUpdate: true,
-          }),
+          preferContentApi: true,
+          enableDAMAltTextUpdate: true,
+          ...(programId && { programId, environmentId }),
           imsOrgId,
         });
         log.info(`Set AEM CS delivery config from preset author URL: ${presetAuthorUrl}`);
@@ -1113,6 +1123,7 @@ async function performAsoPlgOnboarding({
         // Only update deliveryConfig if authorURL is not already set
         const existingDeliveryConfig = site.getDeliveryConfig() || {};
         if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
+          site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_CS);
           site.setDeliveryConfig({
             ...existingDeliveryConfig,
             authorURL: resolvedConfig.authorURL,
@@ -1336,7 +1347,7 @@ const PLG_REJECTION_MESSAGES = {
   'paid-customer': { emoji: ':no_entry:', label: 'Rejected — Paid Customer' },
 };
 
-async function postPlgRejectionNotification(domain, imsOrgId, reason, context) {
+async function postPlgRejectionNotification(domain, imsOrgId, reason, context, org) {
   const { env, log } = context;
   const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
   const token = env.SLACK_BOT_TOKEN;
@@ -1351,9 +1362,14 @@ async function postPlgRejectionNotification(domain, imsOrgId, reason, context) {
     return;
   }
 
-  const message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+  let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
     + `• *Domain:* \`${domain}\`\n`
-    + `• *IMS Org:* \`${imsOrgId}\``;
+    + `• *Onboarding requested on IMS Org:* \`${imsOrgId}\``;
+
+  const orgName = org?.getName?.();
+  if (orgName) {
+    message += `\n• *IMS Org Name:* ${orgName}`;
+  }
 
   try {
     await postSlackMessage(channelId, message, token);
@@ -1433,7 +1449,7 @@ function PlgOnboardingController(ctx) {
       const existingOrg = await Organization.findByImsOrgId(imsOrgId);
       if (existingOrg) {
         if (isInternalOrg(existingOrg.getId(), context.env)) {
-          await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context);
+          await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context, existingOrg);
           return badRequest('PLG onboarding is not available for internal organizations');
         }
 
@@ -1443,7 +1459,7 @@ function PlgOnboardingController(ctx) {
             && e.getTier() === EntitlementModel.TIERS.PAID,
         );
         if (hasPaidEntitlement) {
-          await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context);
+          await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context, existingOrg);
           return badRequest('PLG onboarding is not available for paid customers');
         }
       }

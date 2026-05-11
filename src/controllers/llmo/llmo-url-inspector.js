@@ -48,6 +48,28 @@ import { cachedOk } from '../../support/cached-response.js';
  *   - `brandId === 'all'` or missing → no brand filter (`p_brand_id = NULL`).
  */
 
+// Mirror the referral controller's source whitelist (LLMO-4261).
+// Used by the owned-urls handler to forward `p_referral_source` to
+// `rpc_url_inspector_owned_urls` (LLMO-4729 Decision A pull-in). When the
+// caller supplies an unknown value we collapse it to `'optel'` for parity
+// with /url-inspector. When the caller does not supply a value at all we
+// return `undefined` so the handler can OMIT the parameter entirely — this
+// keeps the RPC contract back-compat with mysticat builds that pre-date
+// LLMO-4729 (the older 8/9-arg signature would 404 with PGRST202 on an
+// unknown 10th positional parameter), and PostgREST then applies the
+// function's own `DEFAULT 'optel'` on the new build. Mirrors the same
+// "omit when absent" pattern used for `p_agent_types` (LLMO-4526).
+const VALID_REFERRAL_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4']);
+const DEFAULT_REFERRAL_SOURCE = 'optel';
+
+function parseReferralSource(q) {
+  const raw = q.referralSource ?? q.referral_source;
+  if (!raw) {
+    return undefined;
+  }
+  return VALID_REFERRAL_SOURCES.has(raw) ? raw : DEFAULT_REFERRAL_SOURCE;
+}
+
 /**
  * Resolve platform/model from request. Returns null when absent (no default model).
  * When provided, validates against the llm_model enum.
@@ -201,6 +223,12 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
  * so owned URLs ranked beyond the top 500 silently showed `agenticHits = 0`.
  * Doing the JOIN in the RPC means the table can paginate 50 owned URLs at a
  * time without losing fidelity.
+ *
+ * Server-side referral merge (LLMO-4729 Decision A pull-in): each row also
+ * carries `referralHits` and `referralHitsTrend` joined from
+ * `referral_traffic_<source>` for the same site / date range, scoped by the
+ * `referralSource` query param (default `'optel'`). Replaces the always-N/A
+ * Referral Hits column the table used to render before this work landed.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
@@ -236,10 +264,15 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
       const offset = pagination.page * pagination.pageSize;
       const agentTypes = parseAgentTypes(q.agentTypes ?? q.agent_types);
+      const referralSource = parseReferralSource(q);
 
-      // Only forward p_agent_types when the caller actually supplied a value.
-      // Omitting the param keeps the RPC contract compatible with internal
-      // tooling that pre-dates the additive parameter (LLMO-4526).
+      // Only forward p_agent_types and p_referral_source when the caller
+      // actually supplied a value. Omitting them keeps the RPC contract
+      // compatible with internal tooling (and the integration-test image)
+      // that pre-dates the additive parameters (LLMO-4526 added
+      // p_agent_types; LLMO-4729 added p_referral_source). The new RPC has
+      // DEFAULT 'optel' on p_referral_source, so the omitted-param path
+      // still reads from referral_traffic_optel server-side.
       const rpcParams = {
         p_site_id: params.siteId,
         p_start_date: params.startDate || defaults.startDate,
@@ -253,6 +286,9 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
       };
       if (agentTypes) {
         rpcParams.p_agent_types = agentTypes;
+      }
+      if (referralSource !== undefined) {
+        rpcParams.p_referral_source = referralSource;
       }
 
       const { data, error } = await client.rpc('rpc_url_inspector_owned_urls', rpcParams);
@@ -276,6 +312,13 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
         agenticHits: Number(r.agentic_hits ?? 0),
         agenticHitsTrend: Array.isArray(r.agentic_hits_trend)
           ? r.agentic_hits_trend.map((point) => ({
+            weekStart: point.week_start ?? null,
+            value: Number(point.value ?? 0),
+          }))
+          : [],
+        referralHits: Number(r.referral_hits ?? 0),
+        referralHitsTrend: Array.isArray(r.referral_hits_trend)
+          ? r.referral_hits_trend.map((point) => ({
             weekStart: point.week_start ?? null,
             value: Number(point.value ?? 0),
           }))
