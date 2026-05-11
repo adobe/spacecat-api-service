@@ -83,6 +83,19 @@ Body:
 }
 ```
 
+**Error responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `400 Bad Request` | `url` or `step` is missing or invalid |
+| `403 Forbidden` | Caller does not have access to the site, or preflight is not enabled / no preflight audits are enabled for the site |
+| `404 Not Found` | `siteId` does not exist |
+| `500 Internal Server Error` | Mysticat call failed or unexpected error |
+
+No job record is created for `400`, `403`, or `404` responses. The current `/preflight/beta/jobs`
+behavior of creating a job and immediately setting it to `CANCELLED` when preflight is disabled
+is not carried forward — a `403` is returned immediately, keeping the job store clean.
+
 ---
 
 ### GET /sites/:siteId/preflights
@@ -186,6 +199,10 @@ Key changes:
   request body unchanged.
 - **`createdBy`** is captured server-side from the caller's IMS profile and stored in job
   metadata. It surfaces in all three endpoint responses for audit purposes.
+- **No phantom jobs for rejected requests.** If the site is not found, the caller lacks access,
+  or preflight is not enabled for the site, the endpoint returns an error immediately without
+  creating a job record. The previous behavior of creating a `CANCELLED` job in these cases
+  is removed.
 - **No `organizationId` in the path.** `siteId` is a globally unique UUID, consistent with
   all other site-scoped resources in this service.
 
@@ -238,3 +255,6 @@ controller work in this repo.
   coordinated separately.
 - The `AsyncJob` model remains the backing store; `preflightId` maps to the underlying job ID
   internally.
+- Job records are only created for requests that pass validation and access checks, keeping the
+  job store clean. Callers that previously relied on polling a `CANCELLED` job to detect a
+  disabled-preflight condition must handle `403` instead.
