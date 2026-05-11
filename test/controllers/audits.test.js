@@ -601,6 +601,21 @@ describe('Audits Controller', () => {
       expect(error).to.have.property('message', 'No updates provided');
     });
 
+    it('returns bad request when context.data is null (no request body)', async () => {
+      const auditType = 'broken-backlinks';
+
+      const context = {
+        params: { siteId, auditType },
+        data: null,
+      };
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'No updates provided');
+    });
+
     it('returns bad request if excludedURLs is not an array', async () => {
       const auditType = 'broken-backlinks';
       const excludedURLs = 'http://valid-url.com';
