@@ -191,6 +191,8 @@ function SuggestionsController(ctx, sqs, env) {
     return data?.isDomainWide === true;
   };
 
+  const isPathSuggestion = (suggestion) => !!suggestion.getData()?.pathType;
+
   const {
     Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
   } = dataAccess;
