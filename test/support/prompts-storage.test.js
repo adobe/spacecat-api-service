@@ -441,20 +441,7 @@ describe('prompts-storage', () => {
       expect(result.items[0].status).to.equal('pending');
     });
 
-    it('skips category filter when categoryId not found', async () => {
-      const row = {
-        prompt_id: PROMPT_ID,
-        name: 'Test',
-        text: 'Prompt',
-        regions: [],
-        status: 'active',
-        origin: 'human',
-        updated_at: '2026-01-01T00:00:00Z',
-        updated_by: 'system',
-        brands: { id: BRAND_UUID, name: 'Brand' },
-        categories: null,
-        topics: null,
-      };
+    it('returns empty when categoryId not found', async () => {
       const client = {
         from: (table) => {
           if (table === 'brands') {
@@ -463,7 +450,7 @@ describe('prompts-storage', () => {
           if (table === 'categories') {
             return makeChain({ data: null, error: null });
           }
-          return makeChain({ data: [row], error: null, count: 1 });
+          throw new Error(`unexpected table ${table}`);
         },
       };
       const result = await listPrompts({
@@ -472,7 +459,30 @@ describe('prompts-storage', () => {
         categoryId: 'nonexistent-category',
         postgrestClient: client,
       });
-      expect(result.items).to.have.lengthOf(1);
+      expect(result.items).to.deep.equal([]);
+      expect(result.total).to.equal(0);
+    });
+
+    it('returns empty when topicId not found', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: null, error: null });
+          }
+          throw new Error(`unexpected table ${table}`);
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        topicId: 'nonexistent-topic',
+        postgrestClient: client,
+      });
+      expect(result.items).to.deep.equal([]);
+      expect(result.total).to.equal(0);
     });
 
     it('applies categoryId and topicId filters when provided', async () => {

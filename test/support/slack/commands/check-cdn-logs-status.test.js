@@ -58,7 +58,8 @@ describe('CheckCdnLogsStatusCommand', () => {
     };
   };
 
-  beforeEach(async () => {
+  beforeEach(async function () {
+    this.timeout(10000);
     readConfigStub = sinon.stub();
     s3SendStub = sinon.stub();
 

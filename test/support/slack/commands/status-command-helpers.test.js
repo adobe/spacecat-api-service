@@ -17,6 +17,7 @@ import nock from 'nock';
 
 import {
   appendLimitedDetails,
+  getUtcYMD,
   parseStatusCommandArgs,
   parseUtcDateArg,
   postReport,
@@ -28,6 +29,50 @@ use(sinonChai);
 describe('status command helpers', () => {
   it('returns null when parseUtcDateArg receives a non-date token', () => {
     expect(parseUtcDateArg('not-a-date')).to.equal(null);
+  });
+
+  describe('getUtcYMD', () => {
+    it('returns zero-padded year/month/day from a UTC date', () => {
+      const date = new Date('2026-03-05T00:00:00Z');
+      expect(getUtcYMD(date)).to.deep.equal({ year: '2026', month: '03', day: '05' });
+    });
+
+    it('pads single-digit month and day', () => {
+      const date = new Date('2026-01-07T00:00:00Z');
+      const { month, day } = getUtcYMD(date);
+      expect(month).to.equal('01');
+      expect(day).to.equal('07');
+    });
+  });
+
+  it('skips empty argument tokens', () => {
+    expect(parseStatusCommandArgs(['', '2026-04-22', ''])).to.deep.equal({ dateArg: '2026-04-22' });
+  });
+
+  it('rejects duplicate siteId= key arguments', () => {
+    const id1 = '11111111-2222-3333-4444-555555555555';
+    const id2 = '22222222-3333-4444-5555-666666666666';
+    expect(parseStatusCommandArgs([`siteId=${id1}`, `siteId=${id2}`])).to.deep.equal({
+      error: ':warning: Duplicate siteId argument.',
+    });
+  });
+
+  it('rejects empty siteId= value', () => {
+    expect(parseStatusCommandArgs(['siteId='])).to.deep.equal({
+      error: ':warning: siteId must not be empty.',
+    });
+  });
+
+  it('rejects duplicate date arguments', () => {
+    expect(parseStatusCommandArgs(['2026-04-22', '2026-04-23'])).to.deep.equal({
+      error: ':warning: Duplicate date argument.',
+    });
+  });
+
+  it('rejects unrecognized argument tokens', () => {
+    expect(parseStatusCommandArgs(['gibberish'])).to.deep.equal({
+      error: ':warning: Unrecognized argument. Expected YYYY-MM-DD, siteId=<UUID>, or baseUrl=<URL>.',
+    });
   });
 
   it('rejects a duplicate bare UUID after a siteId key argument', () => {
@@ -104,6 +149,15 @@ describe('status command helpers', () => {
       'row 7',
       '2 omitted',
     ]);
+  });
+
+  it('chunks say calls when a single line exceeds REPORT_CHUNK_LIMIT', async () => {
+    const longLine = 'x'.repeat(3000);
+    const slackContext = { say: sinon.stub().resolves() };
+    await postReport(slackContext, [longLine]);
+    const allArgs = slackContext.say.getCalls().map((c) => c.args[0]);
+    expect(allArgs.length).to.be.greaterThan(1);
+    expect(allArgs.join('')).to.equal(longLine);
   });
 
   it('warns when full report upload fails', async () => {

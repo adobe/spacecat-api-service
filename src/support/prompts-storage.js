@@ -270,8 +270,8 @@ function mapRowToPrompt(row) {
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
  * @param {string} [params.brandId] - Filter by brand (uuid or config id)
- * @param {string} [params.categoryId] - Filter by category business key
- * @param {string} [params.topicId] - Filter by topic business key
+ * @param {string} [params.categoryId] - Filter by category business key (unknown key → empty list)
+ * @param {string} [params.topicId] - Filter by topic business key (unknown key → empty list)
  * @param {string} [params.status] - Filter by status (active, pending, deleted)
  * @param {string} [params.search] - Free-text search across prompt text, name,
  * topic name, category name
@@ -319,6 +319,27 @@ export async function listPrompts({
   }
   const pageNum = Math.max(1, Number(page) || 1);
   const offset = (pageNum - 1) * limitNum;
+
+  // Resolve category/topic business keys before touching `prompts`. If a filter is
+  // requested but the row does not exist, return an empty page (do not drop the filter).
+  let resolvedCategoryUuid = null;
+  if (hasText(categoryId)) {
+    resolvedCategoryUuid = await resolveCategoryUuid(organizationId, categoryId, postgrestClient);
+    if (!resolvedCategoryUuid) {
+      return {
+        items: [], total: 0, limit: limitNum, page: pageNum,
+      };
+    }
+  }
+  let resolvedTopicUuid = null;
+  if (hasText(topicId)) {
+    resolvedTopicUuid = await resolveTopicUuid(organizationId, topicId, postgrestClient);
+    if (!resolvedTopicUuid) {
+      return {
+        items: [], total: 0, limit: limitNum, page: pageNum,
+      };
+    }
+  }
 
   const select = `
     id,
@@ -385,19 +406,11 @@ export async function listPrompts({
     baseQuery = baseQuery.or(`text.ilike.${term},name.ilike.${term}`);
   }
 
-  if (hasText(categoryId) || hasText(topicId)) {
-    const categoryUuid = hasText(categoryId)
-      ? await resolveCategoryUuid(organizationId, categoryId, postgrestClient)
-      : null;
-    const topicUuid = hasText(topicId)
-      ? await resolveTopicUuid(organizationId, topicId, postgrestClient)
-      : null;
-    if (categoryUuid) {
-      baseQuery = baseQuery.eq('category_id', categoryUuid);
-    }
-    if (topicUuid) {
-      baseQuery = baseQuery.eq('topic_id', topicUuid);
-    }
+  if (resolvedCategoryUuid) {
+    baseQuery = baseQuery.eq('category_id', resolvedCategoryUuid);
+  }
+  if (resolvedTopicUuid) {
+    baseQuery = baseQuery.eq('topic_id', resolvedTopicUuid);
   }
 
   const { data: rows, error, count } = await baseQuery.range(offset, offset + limitNum - 1);

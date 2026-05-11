@@ -465,6 +465,31 @@ describe('getRouteHandlers', () => {
     processGitHubWebhook: sinon.stub(),
   };
 
+  const mockSerenityController = {
+    getBrandsStats: sinon.stub(),
+    getBrandsTopics: sinon.stub(),
+    getBrandsPrompts: sinon.stub(),
+    getBrandsCitedPages: sinon.stub(),
+    getBrandsTopicOpportunities: sinon.stub(),
+    getBrandsTopBrands: sinon.stub(),
+    getBrandsCitedSources: sinon.stub(),
+    getBrandsSourceOpportunities: sinon.stub(),
+    getBrandsCompetitors: sinon.stub(),
+    getCompetitorsMetrics: sinon.stub(),
+    getCompetitorsGapTopics: sinon.stub(),
+    getCompetitorsGapSourceDomains: sinon.stub(),
+    getCompetitorsGapPrompts: sinon.stub(),
+    getMeta: sinon.stub(),
+    getPromptsResponses: sinon.stub(),
+    getPromptsResponsesLatest: sinon.stub(),
+    getTopicsResearchStats: sinon.stub(),
+    getTopicsResearch: sinon.stub(),
+    getTopicsStats: sinon.stub(),
+    getTopicsResearchPrompts: sinon.stub(),
+    getTopicsResearchBrands: sinon.stub(),
+    getTopicsResearchSourceDomains: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -519,6 +544,7 @@ describe('getRouteHandlers', () => {
       mockPlgOnboardingController,
       mockDrsBpPgAuditController,
       mockWebhooksController,
+      mockSerenityController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -564,6 +590,28 @@ describe('getRouteHandlers', () => {
       'POST /consumers/register',
       'POST /ephemeral-run/batch',
       'GET /v2/regions',
+      'GET /apis/serenity/v1/ai-visibility/brands/stats',
+      'GET /apis/serenity/v1/ai-visibility/brands/topics',
+      'GET /apis/serenity/v1/ai-visibility/brands/prompts',
+      'GET /apis/serenity/v1/ai-visibility/brands/cited-pages',
+      'GET /apis/serenity/v1/ai-visibility/brands/topic-opportunities',
+      'GET /apis/serenity/v1/ai-visibility/brands/top-brands',
+      'GET /apis/serenity/v1/ai-visibility/brands/cited-sources',
+      'GET /apis/serenity/v1/ai-visibility/brands/source-opportunities',
+      'GET /apis/serenity/v1/ai-visibility/brands/competitors',
+      'GET /apis/serenity/v1/ai-visibility/competitors/metrics',
+      'GET /apis/serenity/v1/ai-visibility/competitors/gap-topics',
+      'GET /apis/serenity/v1/ai-visibility/competitors/gap-source-domains',
+      'GET /apis/serenity/v1/ai-visibility/competitors/gap-prompts',
+      'GET /apis/serenity/v1/ai-visibility/meta',
+      'GET /apis/serenity/v1/ai-visibility/prompts/responses',
+      'GET /apis/serenity/v1/ai-visibility/prompts/responses/latest',
+      'GET /apis/serenity/v1/ai-visibility/topics/research/stats',
+      'GET /apis/serenity/v1/ai-visibility/topics/research',
+      'GET /apis/serenity/v1/ai-visibility/topics/stats',
+      'GET /apis/serenity/v1/ai-visibility/topics/research/prompts',
+      'GET /apis/serenity/v1/ai-visibility/topics/research/brands',
+      'GET /apis/serenity/v1/ai-visibility/topics/research/source-domains',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);

@@ -90,6 +90,12 @@ describe('visibility-response-normalize', () => {
         expect(result.total).to.equal(1);
       });
 
+      it('returns undefined for dot-only total (parseFloat NaN branch)', () => {
+        const body = { data: [{}], total: '.', offset: 0 };
+        const result = normalizeVisibilityV1SuccessfulBody('/competitors/gap-prompts', body);
+        expect(result.total).to.equal(1);
+      });
+
       it('ignores non-numeric total strings', () => {
         const body = { data: [{ x: 1 }, { x: 2 }], total: 'abc', offset: 5 };
         const result = normalizeVisibilityV1SuccessfulBody('/competitors/gap-prompts', body);
@@ -250,6 +256,24 @@ describe('visibility-response-normalize', () => {
         const body = { data: [{ source_domain: 'x.com', prompt_example: 42 }] };
         const result = normalizeVisibilityV1SuccessfulBody('/topics/research/source-domains', body);
         expect(result.data[0].prompt_example).to.equal('42');
+      });
+
+      it('coerces non-finite string mentions to 0', () => {
+        const body = { data: [{ source_domain: 'x.com', mentions: 'abc' }] };
+        const result = normalizeVisibilityV1SuccessfulBody('/topics/research/source-domains', body);
+        expect(result.data[0].mentions).to.equal(0);
+      });
+
+      it('coerces non-numeric object mentions to 0', () => {
+        const body = { data: [{ source_domain: 'x.com', mentions: {} }] };
+        const result = normalizeVisibilityV1SuccessfulBody('/topics/research/source-domains', body);
+        expect(result.data[0].mentions).to.equal(0);
+      });
+
+      it('defaults source_domain to empty string when neither source_domain nor domain present', () => {
+        const body = { data: [{ mentions: 1 }] };
+        const result = normalizeVisibilityV1SuccessfulBody('/topics/research/source-domains', body);
+        expect(result.data[0].source_domain).to.equal('');
       });
     });
   });

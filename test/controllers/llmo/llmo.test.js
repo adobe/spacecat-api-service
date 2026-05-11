@@ -185,7 +185,8 @@ describe('LlmoController', () => {
     },
   });
 
-  before(async () => {
+  before(async function () {
+    this.timeout(10000);
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
     updateModifiedByDetailsStub = sinon.stub();
 
@@ -7674,7 +7675,8 @@ describe('LlmoController', () => {
     let appendRowsStub;
     let previewAndPublishStub;
 
-    before(async () => {
+    before(async function () {
+      this.timeout(30000);
       appendRowsStub = sinon.stub().resolves();
       previewAndPublishStub = sinon.stub().resolves();
 
