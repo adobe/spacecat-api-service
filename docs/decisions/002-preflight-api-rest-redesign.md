@@ -78,26 +78,48 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
 
 ### GET /sites/:siteId/preflights
 
-**Response** `200 OK` — lightweight list, one entry per preflight:
+**Response** `200 OK` — grouped by URL, with a nested array of preflights per page. A site can have preflights for multiple URLs:
 ```json
 [
   {
-    "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "status": "COMPLETED",
-    "step": "identify",
     "url": "https://main--site--org.hlx.page/some-path",
-    "createdAt": "2026-05-11T10:00:00.000Z"
+    "preflights": [
+      {
+        "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "status": "COMPLETED",
+        "step": "identify",
+        "createdAt": "2026-05-11T10:00:00.000Z"
+      },
+      {
+        "preflightId": "7c9b1e32-1234-4abc-b3fc-9f8a7c6d5e4f",
+        "status": "COMPLETED",
+        "step": "suggest",
+        "createdAt": "2026-05-11T10:05:00.000Z"
+      }
+    ]
+  },
+  {
+    "url": "https://main--site--org.hlx.page/another-path",
+    "preflights": [
+      {
+        "preflightId": "a1b2c3d4-5678-4def-b3fc-0e1f2a3b4c5d",
+        "status": "IN_PROGRESS",
+        "step": "identify",
+        "createdAt": "2026-05-11T10:10:00.000Z"
+      }
+    ]
   }
 ]
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `preflightId` | UUID | Unique identifier for the preflight |
-| `status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
-| `step` | enum: `identify` \| `suggest` | Audit step that was performed |
 | `url` | string | The page URL that was analyzed |
-| `createdAt` | ISO 8601 | When the preflight was created |
+| `preflights` | array | Preflights run against this URL |
+| `preflights[].preflightId` | UUID | Unique identifier for the preflight |
+| `preflights[].status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
+| `preflights[].step` | enum: `identify` \| `suggest` | Audit step that was performed |
+| `preflights[].createdAt` | ISO 8601 | When the preflight was created |
 
 ---
 
