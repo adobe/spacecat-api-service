@@ -1,3 +1,10 @@
+## [1.488.1](https://github.com/adobe/spacecat-api-service/compare/v1.488.0...v1.488.1) (2026-05-11)
+
+
+### Bug Fixes
+
+* enable category filtering in filter-dimensions ([#2356](https://github.com/adobe/spacecat-api-service/issues/2356)) ([37938ef](https://github.com/adobe/spacecat-api-service/commit/37938ef3758879e76e0de16d451caf22b01647e3))
+
 # [1.488.0](https://github.com/adobe/spacecat-api-service/compare/v1.487.0...v1.488.0) (2026-05-11)
 
 
