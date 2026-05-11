@@ -6252,7 +6252,7 @@ describe('LlmoController', () => {
       await new Promise(setImmediate);
       expect(notifyOptInStub).to.not.have.been.called;
       expect(mockLog.info).to.have.been.calledWithMatch(
-        /step=email-skipped reason=aem-cs-fastly/,
+        /Email skipped for site=.* reason=aem-cs-fastly/,
       );
     });
 

@@ -1316,39 +1316,26 @@ function LlmoController(ctx) {
 
       // Kick off IMS + S3 in parallel with saveSiteConfig — all three are independent
       let notificationPrep = null;
-      let optInHandlerStart;
       if (isNewlyOpted) {
-        optInHandlerStart = Date.now();
         const imsUserId = profile?.email;
 
-        const imsStart = Date.now();
         const imsPromise = imsUserId && context.imsClient
           ? Promise.resolve(context.imsClient.getImsAdminProfile(imsUserId))
-            .then((r) => {
-              log.info(`[cdn-opt-in-notification] step=ims-resolved took=${Date.now() - imsStart}ms (site=${siteId})`);
-              return r;
-            })
             .catch((e) => {
-              log.warn(`[cdn-opt-in-notification] step=ims-failed took=${Date.now() - imsStart}ms (site=${siteId})`);
+              log.warn(`[cdn-opt-in-notification] IMS lookup failed for site=${siteId}: ${e.message}`);
               throw e;
             })
           : Promise.resolve(null);
 
-        const s3Start = Date.now();
         const s3Promise = s3?.s3Client
           ? Promise.resolve(readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket }))
-            .then((r) => {
-              log.info(`[cdn-opt-in-notification] step=s3-resolved took=${Date.now() - s3Start}ms (site=${siteId})`);
-              return r;
-            })
             .catch((e) => {
-              log.warn(`[cdn-opt-in-notification] step=s3-failed took=${Date.now() - s3Start}ms (site=${siteId})`);
+              log.warn(`[cdn-opt-in-notification] S3 LLMO config read failed for site=${siteId}: ${e.message}`);
               throw e;
             })
           : Promise.resolve(null);
 
         notificationPrep = Promise.allSettled([imsPromise, s3Promise]);
-        log.info(`[cdn-opt-in-notification] step=ims+s3-kicked-off elapsed=0ms (site=${siteId})`);
       }
 
       currentConfig.updateEdgeOptimizeConfig({
@@ -1360,8 +1347,6 @@ function LlmoController(ctx) {
 
       // Send Slack notification only when opted field is being added
       if (isNewlyOpted) {
-        log.info(`[cdn-opt-in-notification] step=save-config-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
-
         try {
           const llmoTeamUserIds = env.SLACK_LLMO_EDGE_OPTIMIZE_TEAM;
 
@@ -1381,12 +1366,8 @@ function LlmoController(ctx) {
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
         }
 
-        log.info(`[cdn-opt-in-notification] step=slack-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
-
         try {
-          const imsS3WaitStart = Date.now();
           const [adminProfile, llmoCfgResult] = await notificationPrep;
-          log.info(`[cdn-opt-in-notification] step=ims+s3-resolved wait=${Date.now() - imsS3WaitStart}ms elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
           let notificationCdnType;
           if (llmoCfgResult.status === 'fulfilled') {
             notificationCdnType = llmoCfgResult.value?.config?.cdnBucketConfig?.cdnProvider;
@@ -1398,7 +1379,7 @@ function LlmoController(ctx) {
           }
 
           if (notificationCdnType === CDN_TYPES.AEM_CS_FASTLY) {
-            log.info(`[cdn-opt-in-notification] step=email-skipped reason=aem-cs-fastly elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+            log.info(`[cdn-opt-in-notification] Email skipped for site=${siteId} reason=aem-cs-fastly`);
           } else {
             let optedBy;
             if (adminProfile.status === 'fulfilled') {
@@ -1414,13 +1395,10 @@ function LlmoController(ctx) {
               orgId: site.getOrganizationId?.(),
               optedBy,
             });
-            log.info(`[cdn-opt-in-notification] step=email-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
           }
         } catch (err) {
           log.error('[cdn-opt-in-notification] Unhandled error:', err);
         }
-
-        log.info(`[cdn-opt-in-notification] step=complete total=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
       }
 
       let cdnTypeNormalized = null;

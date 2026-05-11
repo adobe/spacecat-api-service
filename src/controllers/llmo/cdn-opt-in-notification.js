@@ -17,10 +17,9 @@
  * - Triggered only on the first opt-in (isNewlyOpted=true) — not on subsequent config updates.
  * - CDN type is read from llmo.cdnBucketConfig.cdnProvider (populated by llmo-config-wrapper
  *   in auth-service during provisioning).
- * - AEM CS Fastly opt-ins do not produce a notification email. The primary skip
- *   happens in the LLMO opt-in handler (llmo.js) so we also avoid the upstream
- *   org-members fetch; the guard here is defensive for any other caller.
- * - Email failures never block the opt-in response — notification is fire-and-forget.
+ * - AEM CS Fastly opt-ins are excluded upstream in the LLMO opt-in handler (llmo.js) and
+ *   never reach this function. Any new caller should apply the same exclusion.
+ * - Email failures never block the opt-in response — errors are logged and swallowed.
  * - Recipients must be set via OPT_IN_NOTIFICATION_RECIPIENTS in Vault (comma-separated
  *   @adobe.com addresses). If missing, notification is skipped with an error log.
  * - BYOCDN sites: customer-facing onboarding email (header shows To/cc with customer + org).
@@ -102,9 +101,7 @@ async function getOrgMembersCsv(context, orgId) {
   }
 
   try {
-    const start = Date.now();
     const trialUsers = await trialUserModel.allByOrganizationId(orgId);
-    context?.log?.info?.(`[cdn-opt-in-notification] step=org-members-resolved took=${Date.now() - start}ms org=${orgId}`);
     return formatOrgMembersCsv(trialUsers);
   } catch (error) {
     context?.log?.warn?.(
@@ -135,11 +132,6 @@ export async function notifyOptInIfNeeded(context, params) {
   } = params || {};
 
   try {
-    if (cdnType === CDN_TYPES.AEM_CS_FASTLY) {
-      log.info(`[cdn-opt-in-notification] Notification not sent for cdnType="${cdnType}" site=${siteId} (handled by AEM CS team)`);
-      return { sent: false, reason: 'aem-cs-fastly-excluded' };
-    }
-
     const recipients = parseRecipients(env?.OPT_IN_NOTIFICATION_RECIPIENTS);
     if (recipients.length === 0) {
       log.error('[cdn-opt-in-notification] OPT_IN_NOTIFICATION_RECIPIENTS is not configured — skipping notification');
