@@ -250,7 +250,8 @@ controller work in this repo.
 - Server-side URL-to-site resolution is eliminated, reducing a class of failure.
 - Bulk preflight from the MFE is supported via multiple parallel requests — no API change
   needed as the feature grows.
-- Existing consumers of `/preflight/beta/jobs` require migration to the new endpoints.
+- `/preflight/beta/jobs` was used exclusively by the internal team and has no external consumers,
+  so its removal carries no migration burden.
 - Existing consumers of `/preflight/jobs` are unaffected for now; migration timeline to be
   coordinated separately.
 - The `AsyncJob` model remains the backing store; `preflightId` maps to the underlying job ID
