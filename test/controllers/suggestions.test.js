@@ -7971,6 +7971,197 @@ describe('Suggestions Controller', () => {
     });
   });
 
+  describe('deploySuggestionToEdge - path-level suggestions', () => {
+    let pathSuggestion;
+    let prerenderOpportunity;
+    let tokowakaClientStub;
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
+      pathSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          allowedRegexPatterns: ['^/products'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      prerenderOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('prerender'),
+      };
+
+      site.getConfig = sandbox.stub().returns({
+        getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+      });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+
+      mockSuggestion.allByOpportunityId.resolves([pathSuggestion]);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(pathSuggestion);
+
+      tokowakaClientStub = {
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [pathSuggestion],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
+
+      context.env = {
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+      };
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+    });
+
+    it('classifies path suggestion separately from domain-wide and validSuggestions', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify it was routed through deployToEdge (path suggestion included in allTargetSuggestions)
+      expect(tokowakaClientStub.deployToEdge.calledOnce).to.be.true;
+      const { targetSuggestions } = tokowakaClientStub.deployToEdge.firstCall.args[0];
+      expect(targetSuggestions.map((s) => s.getId())).to.include(SUGGESTION_IDS[0]);
+    });
+
+    it('returns 400 for path suggestion missing allowedRegexPatterns', async () => {
+      const badPathSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          // allowedRegexPatterns intentionally omitted
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([badPathSuggestion]);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(badPathSuggestion);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(400);
+      expect(body.suggestions[0].message).to.equal('Path suggestion missing allowedRegexPatterns');
+    });
+
+    it('does not affect domain-wide or per-URL suggestions classification (regression)', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          isDomainWide: true,
+          allowedRegexPatterns: ['/*'],
+          url: 'https://example.com/* (All Domain URLs)',
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const perUrlSuggestion = {
+        getId: () => SUGGESTION_IDS[2],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 3,
+        getData: () => ({ url: 'https://example.com/page1' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      mockSuggestion.allByOpportunityId.resolves([
+        pathSuggestion, domainWideSuggestion, perUrlSuggestion,
+      ]);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[1]).resolves(domainWideSuggestion);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[2]).resolves(perUrlSuggestion);
+
+      tokowakaClientStub.deployToEdge.resolves({
+        succeededSuggestions: [pathSuggestion, domainWideSuggestion, perUrlSuggestion],
+        failedSuggestions: [],
+        coveredSuggestions: [],
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(3);
+      expect(body.metadata.failed).to.equal(0);
+    });
+  });
+
   describe('listGeoExperiments', () => {
     beforeEach(() => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
@@ -9354,6 +9545,437 @@ describe('Suggestions Controller', () => {
 
       // Verify error was logged
       expect(context.log.error.called).to.be.true;
+    });
+  });
+
+  describe('rollbackSuggestionFromEdge - path-level rollback', () => {
+    let pathSuggestion;
+    let coveredPerUrlSuggestion;
+    let prerenderOpportunity;
+    let tokowakaClientStub;
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
+      pathSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          allowedRegexPatterns: ['^/products'],
+          edgeDeployed: Date.now(),
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      coveredPerUrlSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/products/item',
+          edgeDeployed: Date.now(),
+          coveredByDomainWide: SUGGESTION_IDS[0],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      prerenderOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('prerender'),
+      };
+
+      site.getConfig = sandbox.stub().returns({
+        getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+      });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+
+      const allSuggestions = [pathSuggestion, coveredPerUrlSuggestion];
+      mockSuggestion.allByOpportunityId.resolves(allSuggestions);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(pathSuggestion);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[1]).resolves(coveredPerUrlSuggestion);
+
+      tokowakaClientStub = {
+        fetchMetaconfig: sandbox.stub().resolves({
+          prerender: {
+            allowList: ['/products', '/blog'],
+          },
+        }),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
+
+      context.env = {
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+      };
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+    });
+
+    it('removes pathPattern from allowList and clears edgeDeployed', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify metaconfig was updated with /products removed
+      expect(tokowakaClientStub.fetchMetaconfig.calledOnce).to.be.true;
+      expect(tokowakaClientStub.uploadMetaconfig.calledOnce).to.be.true;
+      const uploadedMetaconfig = tokowakaClientStub.uploadMetaconfig.firstCall.args[1];
+      expect(uploadedMetaconfig.prerender.allowList).to.deep.equal(['/blog']);
+
+      // Verify edgeDeployed was cleared on path suggestion
+      expect(pathSuggestion.setData.calledOnce).to.be.true;
+      const savedData = pathSuggestion.setData.firstCall.args[0];
+      expect(savedData).to.not.have.property('edgeDeployed');
+      expect(pathSuggestion.save.calledOnce).to.be.true;
+    });
+
+    it('deletes entire prerender key when allowList becomes empty after removal', async () => {
+      tokowakaClientStub.fetchMetaconfig.resolves({
+        prerender: { allowList: ['/products'] },
+      });
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+
+      const uploadedMetaconfig = tokowakaClientStub.uploadMetaconfig.firstCall.args[1];
+      expect(uploadedMetaconfig).to.not.have.property('prerender');
+    });
+
+    it('clears coveredByDomainWide on per-URL suggestions covered by this path', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+
+      // Verify coveredByDomainWide cleared on covered per-URL suggestion
+      expect(coveredPerUrlSuggestion.setData.calledOnce).to.be.true;
+      const coveredData = coveredPerUrlSuggestion.setData.firstCall.args[0];
+      expect(coveredData).to.not.have.property('coveredByDomainWide');
+      expect(coveredPerUrlSuggestion.setUpdatedBy.calledOnce).to.be.true;
+      expect(coveredPerUrlSuggestion.save.calledOnce).to.be.true;
+    });
+
+    it('handles error during path rollback and marks suggestion as failed', async () => {
+      tokowakaClientStub.fetchMetaconfig.rejects(new Error('Network timeout'));
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('Rollback failed');
+    });
+
+    it('handles TokowakaClient.createFrom failure and marks all path suggestions as failed', async () => {
+      TokowakaClient.createFrom.restore();
+      sandbox.stub(TokowakaClient, 'createFrom').throws(new Error('Client init failed'));
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('Path rollback failed: Internal server error');
+    });
+
+    it('uses fallback updatedBy for path suggestion and covered suggestions when profile email is missing', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(pathSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      expect(coveredPerUrlSuggestion.setUpdatedBy.calledWith('path-rollback')).to.be.true;
+    });
+  });
+
+  describe('rollbackSuggestionFromEdge - domain-wide cascade for path suggestions', () => {
+    let domainWideSuggestion;
+    let deployedPathSuggestion;
+    let pathCoveredSuggestion;
+    let prerenderOpportunity;
+    let tokowakaClientStub;
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
+      domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/* (All Domain URLs)',
+          isDomainWide: true,
+          allowedRegexPatterns: ['/*'],
+          pathPattern: '/*',
+          edgeDeployed: Date.now(),
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      deployedPathSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          allowedRegexPatterns: ['^/products'],
+          edgeDeployed: Date.now(),
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      pathCoveredSuggestion = {
+        getId: () => SUGGESTION_IDS[2],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 3,
+        getData: () => ({
+          url: 'https://example.com/products/item',
+          coveredByDomainWide: SUGGESTION_IDS[1],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      prerenderOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('prerender'),
+      };
+
+      site.getConfig = sandbox.stub().returns({
+        getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+      });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+
+      mockSuggestion.allByOpportunityId.resolves([
+        domainWideSuggestion, deployedPathSuggestion, pathCoveredSuggestion,
+      ]);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(domainWideSuggestion);
+
+      tokowakaClientStub = {
+        fetchMetaconfig: sandbox.stub().resolves({
+          prerender: { enabled: true, patterns: ['/*'] },
+        }),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
+
+      context.env = {
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+      };
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+    });
+
+    it('clears edgeDeployed on deployed path suggestions when domain-wide is rolled back', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+
+      // Deployed path suggestion must have edgeDeployed cleared via cascade
+      expect(deployedPathSuggestion.setData.calledOnce).to.be.true;
+      const pathData = deployedPathSuggestion.setData.firstCall.args[0];
+      expect(pathData).to.not.have.property('edgeDeployed');
+      expect(deployedPathSuggestion.setUpdatedBy.calledOnce).to.be.true;
+      expect(deployedPathSuggestion.save.calledOnce).to.be.true;
+
+      // Verify cascade log
+      expect(context.log.info.calledWithMatch('Domain-wide cascade')).to.be.true;
+    });
+
+    it('clears coveredByDomainWide on per-URL suggestions covered by the path during cascade', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+
+      expect(pathCoveredSuggestion.setData.calledOnce).to.be.true;
+      const coveredData = pathCoveredSuggestion.setData.firstCall.args[0];
+      expect(coveredData).to.not.have.property('coveredByDomainWide');
+      expect(pathCoveredSuggestion.setUpdatedBy.calledOnce).to.be.true;
+    });
+
+    it('uses fallback updatedBy for cascade path and its covered suggestions when profile email is missing', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      // domain-wide suggestion itself uses 'tokowaka-rollback' fallback
+      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      // cascade resets path suggestion with 'domain-wide-rollback-cascade' fallback
+      expect(deployedPathSuggestion.setUpdatedBy.calledWith('domain-wide-rollback-cascade')).to.be.true;
+      // cascade clears path-covered suggestion with same fallback
+      expect(pathCoveredSuggestion.setUpdatedBy.calledWith('domain-wide-rollback-cascade')).to.be.true;
+    });
+
+    it('is a no-op cascade when no path suggestions are deployed', async () => {
+      // Override: no path suggestion has edgeDeployed
+      const undeployedPathSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          allowedRegexPatterns: ['^/products'],
+          // no edgeDeployed
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, undeployedPathSuggestion]);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // Domain-wide rollback still succeeds
+      expect(body.metadata.success).to.equal(1);
+      // undeployedPathSuggestion.save must NOT have been called (cascade skipped)
+      expect(undeployedPathSuggestion.save.called).to.be.false;
+      // No cascade log
+      expect(context.log.info.calledWithMatch('Domain-wide cascade')).to.be.false;
     });
   });
 
