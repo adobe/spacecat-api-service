@@ -1,8 +1,6 @@
 #!/usr/bin/env node
-/* eslint-disable no-console */
-
 /*
- * Copyright 2026 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -12,6 +10,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
+/* eslint-disable no-console */
 
 /**
  * One-time backfill script: seeds rumConfig.hasDomainKey for existing sites
@@ -92,7 +92,9 @@ if (targetSiteIds?.length) {
   const results = await Promise.all(targetSiteIds.map((id) => Site.findById(id)));
   sites = results.filter(Boolean);
   const missing = targetSiteIds.length - sites.length;
-  if (missing > 0) log.warn(`${missing} site ID(s) not found`);
+  if (missing > 0) {
+    log.warn(`${missing} site ID(s) not found`);
+  }
 } else {
   log.info('Fetching all sites...');
   sites = await Site.all({}, { fetchAllPages: true });
@@ -140,7 +142,7 @@ for (const site of toProcess) {
 
   // Rate-limit to avoid hammering the RUM API
   // eslint-disable-next-line no-await-in-loop
-  await new Promise((resolve) => { setTimeout(resolve, RATE_LIMIT_MS); });
+  await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_MS));
 }
 
 // ---------------------------------------------------------------------------
