@@ -20,7 +20,8 @@ export default defineConfig([
     'coverage/*',
     'dist/*',
     'node_modules/*',
-    'test/*/fixtures/*'
+    'test/*/fixtures/*',
+    'third-party/*'
   ]),
   {
     extends: [ recommended ],
