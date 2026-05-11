@@ -45,6 +45,95 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
 | GET | /sites/:siteId/preflights | Gets all preflight jobs for a site |
 | GET | /sites/:siteId/preflights/:preflightId | Gets a preflight job by ID |
 
+### POST /sites/:siteId/preflights
+
+**Request body** (`application/json`):
+```json
+{
+  "url": "https://main--site--org.hlx.page/some-path",
+  "step": "identify",
+  "mystiqueUrl": "optional-ephemeral-host.stage.cloud.adobe.io"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `url` | string (URI) | Yes | The single page URL to analyze |
+| `step` | enum: `identify` \| `suggest` | Yes | Audit step to perform |
+| `mystiqueUrl` | string | No | Dev-only override for the Mysticat service URL |
+
+`promiseToken` is passed via cookie for authenticated CMS pages (CS/CS_CW/AMS sites); it is not part of the request body.
+
+**Response** `202 Accepted`:
+```json
+{
+  "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "status": "IN_PROGRESS",
+  "createdAt": "2026-05-11T10:00:00.000Z",
+  "pollUrl": "https://spacecat.experiencecloud.live/api/v1/sites/{siteId}/preflights/{preflightId}"
+}
+```
+
+---
+
+### GET /sites/:siteId/preflights
+
+**Response** `200 OK` — lightweight list, one entry per preflight:
+```json
+[
+  {
+    "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "status": "COMPLETED",
+    "step": "identify",
+    "url": "https://main--site--org.hlx.page/some-path",
+    "createdAt": "2026-05-11T10:00:00.000Z"
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `preflightId` | UUID | Unique identifier for the preflight |
+| `status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
+| `step` | enum: `identify` \| `suggest` | Audit step that was performed |
+| `url` | string | The page URL that was analyzed |
+| `createdAt` | ISO 8601 | When the preflight was created |
+
+---
+
+### GET /sites/:siteId/preflights/:preflightId
+
+**Response** `200 OK` — full detail:
+```json
+{
+  "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "status": "COMPLETED",
+  "step": "identify",
+  "url": "https://main--site--org.hlx.page/some-path",
+  "createdAt": "2026-05-11T10:00:00.000Z",
+  "updatedAt": "2026-05-11T10:00:05.000Z",
+  "startedAt": "2026-05-11T10:00:01.000Z",
+  "endedAt": "2026-05-11T10:00:05.000Z",
+  "result": {},
+  "error": null
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `preflightId` | UUID | Unique identifier for the preflight |
+| `status` | enum | `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` |
+| `step` | enum | `identify` \| `suggest` |
+| `url` | string | The page URL that was analyzed |
+| `createdAt` | ISO 8601 | When the preflight was created |
+| `updatedAt` | ISO 8601 | When the preflight was last updated |
+| `startedAt` | ISO 8601 | When processing began |
+| `endedAt` | ISO 8601 | When processing completed |
+| `result` | object \| null | Audit results written back by Mysticat |
+| `error` | object \| null | `{ code, message }` if the job failed |
+
+---
+
 Key changes:
 
 - **`siteId` moves to the path.** URL-to-site resolution logic is removed from the controller.
