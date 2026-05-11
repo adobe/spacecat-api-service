@@ -102,6 +102,7 @@ import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
+import AiVisibilityController from './controllers/ai-visibility.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -256,6 +257,7 @@ async function run(request, context) {
     const plgOnboardingController = PlgOnboardingController(context);
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
+    const aiVisibilityController = AiVisibilityController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -310,6 +312,7 @@ async function run(request, context) {
       plgOnboardingController,
       drsBpPgAuditController,
       webhooksController,
+      aiVisibilityController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

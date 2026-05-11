@@ -110,6 +110,7 @@
     "@langchain/langgraph": "0.4.9",
     "@langchain/openai": "0.6.17",
     "@octokit/rest": "22.0.1",
+    "@quazar/ai-seo-ts": "file:third-party/ai-seo-ts",
     "@slack/bolt": "4.7.2",
     "@slack/web-api": "7.15.2",
     "busboy": "1.6.0",
