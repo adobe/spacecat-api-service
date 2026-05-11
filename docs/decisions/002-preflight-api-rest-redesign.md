@@ -184,8 +184,14 @@ index. The `AsyncJobCollection` exposes only `findById`; there is no `allBySiteI
 
 The decision is to **extend `AsyncJob` in `spacecat-shared-data-access`**:
 
-- Add `siteId` as a top-level indexed attribute on the `AsyncJob` schema
+- Add `siteId` as an **optional** top-level indexed attribute on the `AsyncJob` schema
 - Add an `allBySiteIdAndJobType(siteId, jobType)` method to `AsyncJobCollection`
+
+`siteId` must be optional so that existing job creation paths (including the deprecated
+`/preflight/jobs` queue-based flow) continue to work unchanged — those jobs do not supply a
+top-level `siteId` today and must not be required to. The new endpoints populate `siteId` at
+job creation time and use the new collection method for list queries. Both workflows operate
+in parallel without interference.
 
 This is the right approach because `AsyncJob` records are TTL-based and short-lived (~7 days).
 A purpose-built `Preflight` entity would require its own TTL and cleanup strategy, adding
@@ -194,6 +200,9 @@ complexity for no real gain given the inherently transient nature of the data. E
 
 The `GET /sites/:siteId/preflights` controller will query by `siteId` and filter to
 `jobType: "preflight"` jobs only, then group results by `url` from the metadata.
+
+Note: the `spacecat-shared-data-access` change is a prerequisite and must land before the
+controller work in this repo.
 
 ## Consequences
 - API shape is consistent with the rest of the service; new consumers can discover preflight
