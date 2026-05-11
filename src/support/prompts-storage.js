@@ -507,10 +507,9 @@ export async function upsertPrompts({
 
   let existingQuery = postgrestClient
     .from('prompts')
-    .select('id,prompt_id,text,regions')
+    .select('id,prompt_id,text,regions,status')
     .eq('organization_id', organizationId)
-    .eq('brand_id', brandUuid)
-    .neq('status', 'deleted');
+    .eq('brand_id', brandUuid);
 
   if (incomingIds.length > 0) {
     existingQuery = existingQuery.in('prompt_id', incomingIds);
@@ -572,6 +571,11 @@ export async function upsertPrompts({
       updated_by: updatedBy,
     };
 
+    if (match && match.status !== 'active') {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
     if (match) {
       toUpdate.push({ ...row, id: match.id });
       processed.push({ ...row, prompt_id: promptId });
@@ -583,6 +587,7 @@ export async function upsertPrompts({
 
   let created = 0;
   let updated = 0;
+  const skipped = prompts.length - toInsert.length - toUpdate.length;
 
   if (toInsert.length > 0) {
     const { data: inserted, error } = await postgrestClient.from('prompts').insert(toInsert).select();
@@ -615,7 +620,9 @@ export async function upsertPrompts({
     updatedAt: r.updated_at,
   }));
 
-  return { created, updated, prompts: promptsOut };
+  return {
+    created, updated, skipped, prompts: promptsOut,
+  };
 }
 
 /**
