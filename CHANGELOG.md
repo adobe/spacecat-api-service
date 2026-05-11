@@ -1,3 +1,17 @@
+# [1.488.0](https://github.com/adobe/spacecat-api-service/compare/v1.487.0...v1.488.0) (2026-05-11)
+
+
+### Features
+
+* rejected status ([#2327](https://github.com/adobe/spacecat-api-service/issues/2327)) ([7fd98cd](https://github.com/adobe/spacecat-api-service/commit/7fd98cd4dce34729c19f07c399c0671a25d00c06))
+
+# [1.487.0](https://github.com/adobe/spacecat-api-service/compare/v1.486.0...v1.487.0) (2026-05-11)
+
+
+### Features
+
+* add ASO link to PLG onboarding Slack notifications ([#2381](https://github.com/adobe/spacecat-api-service/issues/2381)) ([323c0fa](https://github.com/adobe/spacecat-api-service/commit/323c0fac7b9ba5a2324b03f5e291a6ecd5f5a101)), closes [#spacecat-plg-onboardings](https://github.com/adobe/spacecat-api-service/issues/spacecat-plg-onboardings)
+
 # [1.486.0](https://github.com/adobe/spacecat-api-service/compare/v1.485.2...v1.486.0) (2026-05-11)
 
 
