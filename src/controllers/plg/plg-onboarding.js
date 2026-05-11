@@ -173,6 +173,11 @@ async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
   if (siteId) {
     message += `\n• *Site ID:* \`${siteId}\``;
   }
+  if (organizationId && siteId) {
+    const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
+    const asoUrl = `${experienceUrl}/?organizationId=${organizationId}#/sites-optimizer/sites/${siteId}`;
+    message += `\n• *ASO Link:* ${asoUrl}`;
+  }
 
   if ([STATUSES.WAITLISTED, STATUSES.WAITING_FOR_IP_ALLOWLISTING].includes(status)) {
     const waitlistReason = onboarding.getWaitlistReason();
