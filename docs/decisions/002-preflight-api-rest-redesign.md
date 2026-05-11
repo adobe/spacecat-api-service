@@ -61,7 +61,6 @@ consumers have migrated:
 ```json
 {
   "url": "https://main--site--org.hlx.page/some-path",
-  "step": "identify",
   "mystiqueUrl": "optional-ephemeral-host.stage.cloud.adobe.io"
 }
 ```
@@ -69,7 +68,6 @@ consumers have migrated:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `url` | string (URI) | Yes | The single page URL to analyze |
-| `step` | enum: `identify` \| `suggest` | Yes | Audit step to perform |
 | `mystiqueUrl` | string | No | Dev-only override for the Mysticat service URL |
 
 `promiseToken` is passed via cookie for authenticated CMS pages (CS/CS_CW/AMS sites); it is not part of the request body.
@@ -119,7 +117,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
       {
         "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
         "status": "COMPLETED",
-        "step": "identify",
         "createdAt": "2026-05-11T10:00:00.000Z",
         "updatedAt": "2026-05-11T10:00:05.000Z",
         "createdBy": "user@example.com"
@@ -127,7 +124,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
       {
         "preflightId": "7c9b1e32-1234-4abc-b3fc-9f8a7c6d5e4f",
         "status": "COMPLETED",
-        "step": "suggest",
         "createdAt": "2026-05-11T10:05:00.000Z",
         "updatedAt": "2026-05-11T10:05:04.000Z",
         "createdBy": "user@example.com"
@@ -140,7 +136,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
       {
         "preflightId": "a1b2c3d4-5678-4def-b3fc-0e1f2a3b4c5d",
         "status": "IN_PROGRESS",
-        "step": "identify",
         "createdAt": "2026-05-11T10:10:00.000Z",
         "updatedAt": "2026-05-11T10:10:00.000Z",
         "createdBy": "user@example.com"
@@ -156,7 +151,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `preflights` | array | Preflights run against this URL |
 | `preflights[].preflightId` | UUID | Unique identifier for the preflight |
 | `preflights[].status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
-| `preflights[].step` | enum: `identify` \| `suggest` | Audit step that was performed |
 | `preflights[].createdAt` | ISO 8601 | When the preflight was created |
 | `preflights[].updatedAt` | ISO 8601 | When the preflight was last updated |
 | `preflights[].createdBy` | string | IMS email of the user who triggered the preflight |
@@ -170,7 +164,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 {
   "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "status": "COMPLETED",
-  "step": "identify",
   "url": "https://main--site--org.hlx.page/some-path",
   "createdAt": "2026-05-11T10:00:00.000Z",
   "createdBy": "user@example.com",
@@ -186,7 +179,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 |-------|------|-------------|
 | `preflightId` | UUID | Unique identifier for the preflight |
 | `status` | enum | `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` |
-| `step` | enum | `identify` \| `suggest` |
 | `url` | string | The page URL that was analyzed |
 | `createdAt` | ISO 8601 | When the preflight was created |
 | `createdBy` | string | IMS email of the user who triggered the preflight |
@@ -209,8 +201,9 @@ Key changes:
 - **`pollUrl` removed from the response body.** Per RFC 7231 §6.3.3, the URL of the created
   resource is communicated via the `Location` response header. Clients that need to poll for
   completion read `Location` rather than a body field.
-- **`step`**, `mystiqueUrl` (dev-only), and `promiseToken` (cookie) are retained in the
-  request body unchanged.
+- **`step` is removed.** Mysticat's agent always performs both identify and suggest as a single
+  flow, making the field redundant. `mystiqueUrl` (dev-only) and `promiseToken` (cookie) are
+  retained in the request body unchanged.
 - **`createdBy`** is captured server-side from the caller's IMS profile and stored in job
   metadata. It surfaces in all three endpoint responses for audit purposes.
 - **No phantom jobs for rejected requests.** If the site is not found, the caller lacks access,
