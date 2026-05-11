@@ -121,6 +121,7 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
         "status": "COMPLETED",
         "step": "identify",
         "createdAt": "2026-05-11T10:00:00.000Z",
+        "updatedAt": "2026-05-11T10:00:05.000Z",
         "createdBy": "user@example.com"
       },
       {
@@ -128,6 +129,7 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
         "status": "COMPLETED",
         "step": "suggest",
         "createdAt": "2026-05-11T10:05:00.000Z",
+        "updatedAt": "2026-05-11T10:05:04.000Z",
         "createdBy": "user@example.com"
       }
     ]
@@ -140,6 +142,7 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
         "status": "IN_PROGRESS",
         "step": "identify",
         "createdAt": "2026-05-11T10:10:00.000Z",
+        "updatedAt": "2026-05-11T10:10:00.000Z",
         "createdBy": "user@example.com"
       }
     ]
@@ -155,6 +158,7 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `preflights[].status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
 | `preflights[].step` | enum: `identify` \| `suggest` | Audit step that was performed |
 | `preflights[].createdAt` | ISO 8601 | When the preflight was created |
+| `preflights[].updatedAt` | ISO 8601 | When the preflight was last updated |
 | `preflights[].createdBy` | string | IMS email of the user who triggered the preflight |
 
 ---
