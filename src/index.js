@@ -97,7 +97,7 @@ import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
-import routeRequiredCapabilities from './routes/required-capabilities.js';
+import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
@@ -384,7 +384,10 @@ const AUTH_HANDLERS = [
 ];
 
 const wrappedMain = wrap(run)
-  .with(readOnlyAdminWrapper, { routeCapabilities: routeRequiredCapabilities })
+  .with(readOnlyAdminWrapper, {
+    routeCapabilities: routeRequiredCapabilities,
+    internalRoutes: INTERNAL_ROUTES,
+  })
   .with(authWrapper, { authHandlers: AUTH_HANDLERS })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
