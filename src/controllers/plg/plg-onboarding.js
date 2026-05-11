@@ -176,7 +176,9 @@ async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
   if (organizationId && siteId) {
     const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
     const asoUrl = `${experienceUrl}/?organizationId=${organizationId}#/sites-optimizer/sites/${siteId}`;
+    const backofficeUrl = `${experienceUrl}/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/plg-sites`;
     message += `\n• *ASO Link:* ${asoUrl}`;
+    message += `\n• *Backoffice Link:* ${backofficeUrl}`;
   }
 
   if ([STATUSES.WAITLISTED, STATUSES.WAITING_FOR_IP_ALLOWLISTING].includes(status)) {
