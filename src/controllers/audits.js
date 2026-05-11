@@ -218,7 +218,12 @@ function AuditsController(ctx) {
       return forbidden('User does not have access to this site');
     }
 
-    const configuration = await Configuration.findLatest();
+    let configuration;
+    try {
+      configuration = await Configuration.findLatest();
+    } catch {
+      // Configuration unavailable — skip audit-type registration check
+    }
     if (configuration) {
       const registeredAudits = configuration.getHandlers();
       if (!registeredAudits[auditType]) {

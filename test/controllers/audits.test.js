@@ -856,6 +856,23 @@ describe('Audits Controller', () => {
       );
     });
 
+    it('proceeds without audit-type check when Configuration.findLatest throws', async () => {
+      mockDataAccess.Configuration.findLatest.rejects(new Error('S3 bucket not found'));
+      const auditType = 'broken-backlinks';
+
+      const context = {
+        params: { siteId, auditType },
+        data: {},
+      };
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      // S3 unavailability must not surface as 500 — controller continues and hits normal validation
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'No updates provided');
+    });
+
     it('merges manual overwrites correctly', async () => {
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
