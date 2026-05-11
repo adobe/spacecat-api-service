@@ -27,11 +27,22 @@ import {
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
   createAgenticTrafficHasDataHandler,
+  createAgenticTrafficUrlsExportHandler,
+  createAgenticTrafficUrlsExportStatusHandler,
 } from '../../../src/controllers/llmo/llmo-agentic-traffic.js';
 
 use(sinonChai);
 
 const SITE_ID = '11111111-1111-1111-1111-111111111111';
+const EXPORT_ID = 'a'.repeat(64);
+
+function ListObjectsV2Command(input) {
+  this.input = input;
+}
+
+function GetObjectCommand(input) {
+  this.input = input;
+}
 
 /**
  * Minimal chainable PostgREST client mock.
@@ -80,6 +91,47 @@ function makeContext(overrides = {}) {
     log: { error: sinon.stub(), info: sinon.stub() },
     ...overrides.context,
   };
+}
+
+function makeExportContext(overrides = {}) {
+  const send = sinon.stub().callsFake((command) => {
+    if (command instanceof ListObjectsV2Command) {
+      return Promise.resolve({ Contents: [], NextContinuationToken: undefined });
+    }
+    const error = new Error('not found');
+    error.name = 'NoSuchKey';
+    return Promise.reject(error);
+  });
+  const s3 = {
+    s3Client: { send },
+    s3Bucket: 'default-bucket',
+    ListObjectsV2Command,
+    GetObjectCommand,
+    getSignedUrl: sinon.stub().resolves('https://signed.example.com/export.csv'),
+    ...overrides.s3,
+  };
+  const sqs = {
+    sendMessage: sinon.stub().resolves(),
+    ...overrides.sqs,
+  };
+  return makeContext({
+    ...overrides,
+    context: {
+      ...overrides.context,
+      s3,
+      sqs,
+      env: {
+        REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/report-jobs',
+        S3_REPORT_BUCKET: 'report-bucket',
+        ...overrides.context?.env,
+      },
+      runtime: { region: 'us-east-1', ...overrides.context?.runtime },
+      attributes: {
+        authInfo: { profile: { email: 'user@example.com' } },
+        ...overrides.context?.attributes,
+      },
+    },
+  });
 }
 
 // Resolves with the same shape as the real getSiteAndValidateAccess so that
@@ -1087,6 +1139,184 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── URL Export ─────────────────────────────────────────────────────────────
+
+  describe('createAgenticTrafficUrlsExportHandler', () => {
+    it('returns a cached download URL when the CSV already exists', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({
+            Contents: [{ Key: command.input.Prefix }],
+          });
+        }
+        return Promise.resolve({
+          Body: { transformToString: () => Promise.resolve('{"status":"success","rowCount":2}') },
+        });
+      });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      expect(body.exportId).to.match(/^[a-f0-9]{64}$/);
+      expect(body.downloadUrls).to.deep.equal(['https://signed.example.com/export.csv']);
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('queues an export job when no cached CSV exists', async () => {
+      const ctx = makeExportContext();
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(202);
+      expect(body.status).to.equal('processing');
+      expect(body.exportId).to.match(/^[a-f0-9]{64}$/);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, message] = ctx.sqs.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('https://sqs.example.com/report-jobs');
+      expect(message.type).to.equal('agentic-traffic-urls-export');
+      expect(message.data.filters.platform).to.equal(null);
+      expect(message.data.s3Key).to.include(`/v1/${body.exportId}/urls.csv`);
+      expect(message.data.requestedBy).to.equal('user@example.com');
+    });
+
+    it('does not queue another job while an export is already processing', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        return Promise.resolve({
+          Body: { transformToString: () => Promise.resolve('{"status":"processing"}') },
+        });
+      });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(202);
+      expect(body.status).to.equal('processing');
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('maps UI platform code before hashing and queueing', async () => {
+      const ctx = makeExportContext({ data: { platform: 'chatgpt' } });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const message = ctx.sqs.sendMessage.firstCall.args[1];
+      expect(message.data.filters.platform).to.equal('ChatGPT');
+    });
+
+    it('returns 400 when export infrastructure is not configured', async () => {
+      const ctx = makeContext({ context: { s3: null, sqs: null } });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+    });
+  });
+
+  describe('createAgenticTrafficUrlsExportStatusHandler', () => {
+    it('returns processing when no CSV or metadata exists', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body).to.deep.equal({ exportId: EXPORT_ID, status: 'processing' });
+    });
+
+    it('returns ready with presigned URLs for split CSV parts', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({
+            Contents: [
+              { Key: `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv_part2` },
+              { Key: `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv` },
+            ],
+          });
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve('{"status":"success","rowCount":10,"filesUploaded":2,"bytesUploaded":1000}'),
+          },
+        });
+      });
+      ctx.s3.getSignedUrl = sinon.stub()
+        .onFirstCall()
+        .resolves('https://signed.example.com/part1')
+        .onSecondCall()
+        .resolves('https://signed.example.com/part2');
+
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      expect(body.downloadUrls).to.deep.equal([
+        'https://signed.example.com/part1',
+        'https://signed.example.com/part2',
+      ]);
+      expect(body.rowCount).to.equal(10);
+      expect(body.filesUploaded).to.equal(2);
+      expect(body.bytesUploaded).to.equal(1000);
+    });
+
+    it('keeps returning processing while CSV objects exist but metadata is not successful yet', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({
+            Contents: [
+              { Key: `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv` },
+            ],
+          });
+        }
+        return Promise.resolve({
+          Body: { transformToString: () => Promise.resolve('{"status":"processing"}') },
+        });
+      });
+
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body).to.deep.equal({ exportId: EXPORT_ID, status: 'processing' });
+      expect(ctx.s3.getSignedUrl).to.not.have.been.called;
+    });
+
+    it('returns failed when metadata reports a failed export', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        return Promise.resolve({
+          Body: { transformToString: () => Promise.resolve('{"status":"failed","failureReason":"db error"}') },
+        });
+      });
+
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body).to.deep.equal({
+        exportId: EXPORT_ID,
+        status: 'failed',
+        failureReason: 'db error',
+      });
+    });
+
+    it('rejects invalid export ids', async () => {
+      const ctx = makeExportContext({ params: { exportId: 'not-a-hash' } });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
     });
   });
 

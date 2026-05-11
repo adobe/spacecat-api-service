@@ -11,9 +11,10 @@
  */
 
 import {
-  badRequest, forbidden, internalServerError,
+  accepted, badRequest, forbidden, internalServerError, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import crypto from 'crypto';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 import { parseAgentTypes } from './llmo-agent-types.js';
 import { cachedOk } from '../../support/cached-response.js';
@@ -36,6 +37,9 @@ const ERR_NOT_FOUND = 'not found';
 const VALID_INTERVALS = new Set(['day', 'week', 'month']);
 const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
 const VALID_SUCCESS_RATE_BUCKETS = new Set(['high', 'medium', 'low']);
+const EXPORT_VERSION = 'v1';
+const EXPORT_TYPE = 'agentic-traffic-urls-export';
+const EXPORT_ID_PATTERN = /^[a-f0-9]{64}$/;
 // Allowlists mirror the CASE whitelists in the DB RPCs — unknown values are already
 // rejected server-side, but we validate here too for defence-in-depth.
 // `parseAgentTypes` and the canonical agent-type list now live in
@@ -108,6 +112,7 @@ function parseAgenticTrafficParams(context) {
     agentTypes: parseAgentTypes(q.agentTypes ?? q.agent_types),
     userAgent: q.userAgent || q.user_agent || null,
     contentType: q.contentType || q.content_type || null,
+    urlPathSearch: q.urlPathSearch || q.url_path_search || null,
     // Normalise to null for unknown buckets — mirrors how PLATFORM_CODE_TO_DB handles
     // unknown platform codes, preventing a DB exception (500) for invalid input.
     successRate: VALID_SUCCESS_RATE_BUCKETS.has(q.successRate || q.success_rate)
@@ -131,6 +136,127 @@ function buildRpcParams(siteId, parsed) {
     p_content_type: parsed.contentType,
     p_success_rate: parsed.successRate,
   };
+}
+
+function canonicalizeExportPayload(siteId, parsed) {
+  return {
+    version: EXPORT_VERSION,
+    siteId,
+    startDate: parsed.startDate,
+    endDate: parsed.endDate,
+    platform: parsed.platform,
+    categoryName: parsed.categoryName,
+    agentType: parsed.agentType,
+    userAgent: parsed.userAgent,
+    contentType: parsed.contentType,
+    successRate: parsed.successRate,
+    urlPathSearch: parsed.urlPathSearch,
+    format: 'csv',
+  };
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function buildExportId(payload) {
+  return crypto.createHash('sha256').update(stableStringify(payload)).digest('hex');
+}
+
+function buildExportKeys(siteId, exportId) {
+  const prefix = `agentic-traffic/url-exports/${siteId}/${EXPORT_VERSION}/${exportId}`;
+  return {
+    csvKey: `${prefix}/urls.csv`,
+    metadataKey: `${prefix}/metadata.json`,
+  };
+}
+
+function getExportConfig(ctx) {
+  const s3Bucket = ctx.env?.AGENTIC_TRAFFIC_EXPORT_BUCKET
+    || ctx.env?.S3_REPORT_BUCKET
+    || ctx.s3?.s3Bucket;
+  const queueUrl = ctx.env?.AGENTIC_TRAFFIC_EXPORT_QUEUE_URL
+    || ctx.env?.REPORT_JOBS_QUEUE_URL;
+  const s3Region = ctx.env?.AGENTIC_TRAFFIC_EXPORT_REGION
+    || ctx.runtime?.region
+    || 'us-east-1';
+  return { s3Bucket, queueUrl, s3Region };
+}
+
+async function listExportCsvObjects(ctx, bucket, csvKey) {
+  const { s3 } = ctx;
+  const objects = [];
+  let ContinuationToken;
+  do {
+    const command = new s3.ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: csvKey,
+      ContinuationToken,
+    });
+    // eslint-disable-next-line no-await-in-loop
+    const result = await s3.s3Client.send(command);
+    objects.push(...(result.Contents || [])
+      .filter((item) => item.Key === csvKey || item.Key?.match(new RegExp(`^${csvKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}_part\\d+$`)))
+      .map((item) => item.Key));
+    ContinuationToken = result.NextContinuationToken;
+  } while (ContinuationToken);
+
+  return [...new Set(objects)].sort((left, right) => {
+    const part = (key) => (key === csvKey ? 1 : Number(key.match(/_part(\d+)$/)?.[1] || 1));
+    return part(left) - part(right);
+  });
+}
+
+async function getExportMetadata(ctx, bucket, metadataKey) {
+  const { s3 } = ctx;
+  try {
+    const command = new s3.GetObjectCommand({ Bucket: bucket, Key: metadataKey });
+    const result = await s3.s3Client.send(command);
+    const body = await result.Body.transformToString();
+    return JSON.parse(body);
+  } catch (error) {
+    if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function buildExportReadyResponse(ctx, bucket, exportId, csvKeys, metadata = null) {
+  const expiresIn = 60 * 60 * 24 * 7;
+  const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+  const downloadUrls = await Promise.all(csvKeys.map(async (key) => {
+    const command = new ctx.s3.GetObjectCommand({ Bucket: bucket, Key: key });
+    return ctx.s3.getSignedUrl(ctx.s3.s3Client, command, { expiresIn });
+  }));
+
+  return ok({
+    exportId,
+    status: 'ready',
+    downloadUrls,
+    expiresAt,
+    rowCount: metadata?.rowCount ?? null,
+    filesUploaded: metadata?.filesUploaded ?? csvKeys.length,
+    bytesUploaded: metadata?.bytesUploaded ?? null,
+  });
+}
+
+function isExportReady(csvKeys, metadata) {
+  return csvKeys.length > 0 && (!metadata || metadata.status === 'success');
+}
+
+function isExportFailed(metadata) {
+  return metadata?.status === 'failed';
+}
+
+function isExportProcessing(metadata) {
+  return metadata?.status === 'processing';
 }
 
 /**
@@ -504,6 +630,149 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
               : [],
           })),
         });
+      },
+    );
+  };
+}
+
+/**
+ * POST /sites/:siteId/agentic-traffic/urls/export
+ *
+ * Creates or reuses a deterministic S3-backed URL export. The API does not run
+ * the database export inline; it returns a cached download URL when present or
+ * queues a reporting-worker job that calls the data-service DB-to-S3 RPC.
+ */
+export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) {
+  return async function exportAgenticTrafficUrls(context) {
+    return withAgenticTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'urls-export',
+      async (ctx, _client, siteId) => {
+        const { s3, sqs } = ctx;
+        if (!s3?.s3Client || !s3?.ListObjectsV2Command || !s3?.GetObjectCommand
+          || !s3?.getSignedUrl || !sqs?.sendMessage) {
+          return badRequest('Agentic traffic export requires S3 and SQS configuration');
+        }
+
+        const { s3Bucket, queueUrl, s3Region } = getExportConfig(ctx);
+        if (!hasText(s3Bucket) || !hasText(queueUrl)) {
+          return badRequest('Agentic traffic export is not configured');
+        }
+
+        const parsed = parseAgenticTrafficParams(ctx);
+        const payload = canonicalizeExportPayload(siteId, parsed);
+        const exportId = buildExportId(payload);
+        const { csvKey, metadataKey } = buildExportKeys(siteId, exportId);
+
+        try {
+          const [csvKeys, metadata] = await Promise.all([
+            listExportCsvObjects(ctx, s3Bucket, csvKey),
+            getExportMetadata(ctx, s3Bucket, metadataKey),
+          ]);
+
+          if (isExportReady(csvKeys, metadata)) {
+            return buildExportReadyResponse(ctx, s3Bucket, exportId, csvKeys, metadata);
+          }
+
+          if (isExportFailed(metadata)) {
+            return ok({
+              exportId,
+              status: 'failed',
+              failureReason: metadata.failureReason || 'Export failed',
+            });
+          }
+
+          if (isExportProcessing(metadata)) {
+            return accepted({
+              exportId,
+              status: 'processing',
+            });
+          }
+
+          await sqs.sendMessage(queueUrl, {
+            type: EXPORT_TYPE,
+            data: {
+              siteId,
+              exportId,
+              filters: payload,
+              s3Bucket,
+              s3Key: csvKey,
+              metadataKey,
+              s3Region,
+              requestedBy: ctx.attributes?.authInfo?.profile?.email || 'unknown',
+            },
+          });
+
+          return accepted({
+            exportId,
+            status: 'processing',
+          });
+        } catch (error) {
+          ctx.log.error(`Agentic traffic URLs export error: ${error.message}`);
+          return internalServerError('Failed to start agentic traffic URL export');
+        }
+      },
+    );
+  };
+}
+
+/**
+ * GET /sites/:siteId/agentic-traffic/urls/export/:exportId
+ *
+ * Polls S3 metadata and export objects for a deterministic export id.
+ */
+export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAccess) {
+  return async function getAgenticTrafficUrlsExportStatus(context) {
+    return withAgenticTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'urls-export-status',
+      async (ctx, _client, siteId) => {
+        const { exportId } = ctx.params;
+        if (!EXPORT_ID_PATTERN.test(exportId || '')) {
+          return badRequest('Valid exportId is required');
+        }
+
+        const { s3 } = ctx;
+        if (!s3?.s3Client || !s3?.ListObjectsV2Command || !s3?.GetObjectCommand
+          || !s3?.getSignedUrl) {
+          return badRequest('Agentic traffic export requires S3 configuration');
+        }
+
+        const { s3Bucket } = getExportConfig(ctx);
+        if (!hasText(s3Bucket)) {
+          return badRequest('Agentic traffic export is not configured');
+        }
+
+        const { csvKey, metadataKey } = buildExportKeys(siteId, exportId);
+
+        try {
+          const [csvKeys, metadata] = await Promise.all([
+            listExportCsvObjects(ctx, s3Bucket, csvKey),
+            getExportMetadata(ctx, s3Bucket, metadataKey),
+          ]);
+
+          if (isExportReady(csvKeys, metadata)) {
+            return buildExportReadyResponse(ctx, s3Bucket, exportId, csvKeys, metadata);
+          }
+
+          if (isExportFailed(metadata)) {
+            return ok({
+              exportId,
+              status: 'failed',
+              failureReason: metadata.failureReason || 'Export failed',
+            });
+          }
+
+          return ok({
+            exportId,
+            status: 'processing',
+          });
+        } catch (error) {
+          ctx.log.error(`Agentic traffic URLs export status error: ${error.message}`);
+          return internalServerError('Failed to fetch agentic traffic URL export status');
+        }
       },
     );
   };
