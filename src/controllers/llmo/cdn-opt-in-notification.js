@@ -17,6 +17,7 @@
  * - Triggered only on the first opt-in (isNewlyOpted=true) — not on subsequent config updates.
  * - CDN type is read from llmo.cdnBucketConfig.cdnProvider (populated by llmo-config-wrapper
  *   in auth-service during provisioning).
+ * - AEM CS Fastly opt-ins do not produce a notification email
  * - Email failures never block the opt-in response — notification is fire-and-forget.
  * - Recipients must be set via OPT_IN_NOTIFICATION_RECIPIENTS in Vault (comma-separated
  *   @adobe.com addresses). If missing, notification is skipped with an error log.
@@ -56,7 +57,6 @@ const CDN_CONFIG = {
   [CDN_TYPES.BYOCDN_OTHER]: { adobeManaged: false },
   [CDN_TYPES.AMS_CLOUDFRONT]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
   [CDN_TYPES.AMS_FRONTDOOR]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
-  [CDN_TYPES.AEM_CS_FASTLY]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
   [CDN_TYPES.COMMERCE_FASTLY]: { adobeManaged: true, replyAllTeam: 'Adobe Commerce team', commerceManaged: true },
 };
 
@@ -133,6 +133,11 @@ export async function notifyOptInIfNeeded(context, params) {
   } = params || {};
 
   try {
+    if (cdnType === CDN_TYPES.AEM_CS_FASTLY) {
+      log.info(`[cdn-opt-in-notification] Notification not sent for cdnType="${cdnType}" site=${siteId} (handled by AEM CS team)`);
+      return { sent: false, reason: 'aem-cs-fastly-excluded' };
+    }
+
     const recipients = parseRecipients(env?.OPT_IN_NOTIFICATION_RECIPIENTS);
     if (recipients.length === 0) {
       log.error('[cdn-opt-in-notification] OPT_IN_NOTIFICATION_RECIPIENTS is not configured — skipping notification');
