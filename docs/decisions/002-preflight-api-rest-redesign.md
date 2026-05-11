@@ -64,12 +64,15 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
 
 `promiseToken` is passed via cookie for authenticated CMS pages (CS/CS_CW/AMS sites); it is not part of the request body.
 
+`createdBy` is derived server-side from the caller's IMS profile (`authInfo.getProfile().email`) and is never supplied by the client.
+
 **Response** `202 Accepted`:
 ```json
 {
   "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "status": "IN_PROGRESS",
   "createdAt": "2026-05-11T10:00:00.000Z",
+  "createdBy": "user@example.com",
   "pollUrl": "https://spacecat.experiencecloud.live/api/v1/sites/{siteId}/preflights/{preflightId}"
 }
 ```
@@ -88,13 +91,15 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
         "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
         "status": "COMPLETED",
         "step": "identify",
-        "createdAt": "2026-05-11T10:00:00.000Z"
+        "createdAt": "2026-05-11T10:00:00.000Z",
+        "createdBy": "user@example.com"
       },
       {
         "preflightId": "7c9b1e32-1234-4abc-b3fc-9f8a7c6d5e4f",
         "status": "COMPLETED",
         "step": "suggest",
-        "createdAt": "2026-05-11T10:05:00.000Z"
+        "createdAt": "2026-05-11T10:05:00.000Z",
+        "createdBy": "user@example.com"
       }
     ]
   },
@@ -105,7 +110,8 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
         "preflightId": "a1b2c3d4-5678-4def-b3fc-0e1f2a3b4c5d",
         "status": "IN_PROGRESS",
         "step": "identify",
-        "createdAt": "2026-05-11T10:10:00.000Z"
+        "createdAt": "2026-05-11T10:10:00.000Z",
+        "createdBy": "user@example.com"
       }
     ]
   }
@@ -120,6 +126,7 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
 | `preflights[].status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
 | `preflights[].step` | enum: `identify` \| `suggest` | Audit step that was performed |
 | `preflights[].createdAt` | ISO 8601 | When the preflight was created |
+| `preflights[].createdBy` | string | IMS email of the user who triggered the preflight |
 
 ---
 
@@ -133,6 +140,7 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
   "step": "identify",
   "url": "https://main--site--org.hlx.page/some-path",
   "createdAt": "2026-05-11T10:00:00.000Z",
+  "createdBy": "user@example.com",
   "updatedAt": "2026-05-11T10:00:05.000Z",
   "startedAt": "2026-05-11T10:00:01.000Z",
   "endedAt": "2026-05-11T10:00:05.000Z",
@@ -148,6 +156,7 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
 | `step` | enum | `identify` \| `suggest` |
 | `url` | string | The page URL that was analyzed |
 | `createdAt` | ISO 8601 | When the preflight was created |
+| `createdBy` | string | IMS email of the user who triggered the preflight |
 | `updatedAt` | ISO 8601 | When the preflight was last updated |
 | `startedAt` | ISO 8601 | When processing began |
 | `endedAt` | ISO 8601 | When processing completed |
@@ -167,6 +176,8 @@ Key changes:
 - **`pollUrl`** updated to point to `/sites/{siteId}/preflights/{preflightId}`.
 - **`step`**, `mystiqueUrl` (dev-only), and `promiseToken` (cookie) are retained in the
   request body unchanged.
+- **`createdBy`** is captured server-side from the caller's IMS profile and stored in job
+  metadata. It surfaces in all three endpoint responses for audit purposes.
 - **No `organizationId` in the path.** `siteId` is a globally unique UUID, consistent with
   all other site-scoped resources in this service.
 
@@ -200,6 +211,10 @@ complexity for no real gain given the inherently transient nature of the data. E
 
 The `GET /sites/:siteId/preflights` controller will query by `siteId` and filter to
 `jobType: "preflight"` jobs only, then group results by `url` from the metadata.
+
+`createdBy` is stored as a top-level metadata field at job creation time, derived from
+`authInfo.getProfile().email` (the IMS email of the authenticated caller). It is never
+supplied by the client. This enables lightweight audit trails without a separate audit log.
 
 Note: the `spacecat-shared-data-access` change is a prerequisite and must land before the
 controller work in this repo.
