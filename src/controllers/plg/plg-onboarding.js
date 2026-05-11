@@ -173,11 +173,13 @@ async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
   if (siteId) {
     message += `\n• *Site ID:* \`${siteId}\``;
   }
-  if (organizationId && siteId) {
+  if (organizationId) {
     const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
-    const asoUrl = `${experienceUrl}/?organizationId=${organizationId}#/sites-optimizer/sites/${siteId}`;
+    if (siteId) {
+      const asoUrl = `${experienceUrl}/?organizationId=${organizationId}#/sites-optimizer/sites/${siteId}`;
+      message += `\n• *ASO Link:* ${asoUrl}`;
+    }
     const backofficeUrl = `${experienceUrl}/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/plg-sites`;
-    message += `\n• *ASO Link:* ${asoUrl}`;
     message += `\n• *Backoffice Link:* ${backofficeUrl}`;
   }
 

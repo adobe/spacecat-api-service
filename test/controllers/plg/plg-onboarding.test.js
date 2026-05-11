@@ -2156,7 +2156,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.include('Waitlisted');
       expect(message).to.not.include('IMS Org Name');
       expect(message).to.not.include('ASO Link');
-      expect(message).to.not.include('Backoffice Link');
+      expect(message).to.include('https://experience.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/plg-sites');
       expect(mockLog.warn).to.have.been.calledWith(
         sinon.match(/Failed to look up org name for onboarding notification/),
       );
