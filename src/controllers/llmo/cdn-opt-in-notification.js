@@ -17,7 +17,9 @@
  * - Triggered only on the first opt-in (isNewlyOpted=true) — not on subsequent config updates.
  * - CDN type is read from llmo.cdnBucketConfig.cdnProvider (populated by llmo-config-wrapper
  *   in auth-service during provisioning).
- * - AEM CS Fastly opt-ins do not produce a notification email
+ * - AEM CS Fastly opt-ins do not produce a notification email. The primary skip
+ *   happens in the LLMO opt-in handler (llmo.js) so we also avoid the upstream
+ *   org-members fetch; the guard here is defensive for any other caller.
  * - Email failures never block the opt-in response — notification is fire-and-forget.
  * - Recipients must be set via OPT_IN_NOTIFICATION_RECIPIENTS in Vault (comma-separated
  *   @adobe.com addresses). If missing, notification is skipped with an error log.

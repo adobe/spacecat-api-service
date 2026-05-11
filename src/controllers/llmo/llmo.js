@@ -55,6 +55,7 @@ import {
   applyExclusions,
   applyGroups,
   applyMappings,
+  CDN_TYPES,
   LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
@@ -1386,14 +1387,6 @@ function LlmoController(ctx) {
           const imsS3WaitStart = Date.now();
           const [adminProfile, llmoCfgResult] = await notificationPrep;
           log.info(`[cdn-opt-in-notification] step=ims+s3-resolved wait=${Date.now() - imsS3WaitStart}ms elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
-
-          let optedBy;
-          if (adminProfile.status === 'fulfilled') {
-            optedBy = adminProfile.value?.email;
-          } else {
-            log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${adminProfile.reason?.message}`);
-          }
-
           let notificationCdnType;
           if (llmoCfgResult.status === 'fulfilled') {
             notificationCdnType = llmoCfgResult.value?.config?.cdnBucketConfig?.cdnProvider;
@@ -1404,14 +1397,25 @@ function LlmoController(ctx) {
             notificationCdnType = cdnType;
           }
 
-          await notifyOptInIfNeeded(context, {
-            siteId,
-            siteBaseURL: baseURL,
-            cdnType: notificationCdnType,
-            orgId: site.getOrganizationId?.(),
-            optedBy,
-          });
-          log.info(`[cdn-opt-in-notification] step=email-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+          if (notificationCdnType === CDN_TYPES.AEM_CS_FASTLY) {
+            log.info(`[cdn-opt-in-notification] step=email-skipped reason=aem-cs-fastly elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+          } else {
+            let optedBy;
+            if (adminProfile.status === 'fulfilled') {
+              optedBy = adminProfile.value?.email;
+            } else {
+              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${adminProfile.reason?.message}`);
+            }
+
+            await notifyOptInIfNeeded(context, {
+              siteId,
+              siteBaseURL: baseURL,
+              cdnType: notificationCdnType,
+              orgId: site.getOrganizationId?.(),
+              optedBy,
+            });
+            log.info(`[cdn-opt-in-notification] step=email-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+          }
         } catch (err) {
           log.error('[cdn-opt-in-notification] Unhandled error:', err);
         }
