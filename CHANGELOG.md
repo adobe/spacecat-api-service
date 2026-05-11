@@ -1,3 +1,36 @@
+# [1.486.0](https://github.com/adobe/spacecat-api-service/compare/v1.485.2...v1.486.0) (2026-05-11)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.60.0 ([#2382](https://github.com/adobe/spacecat-api-service/issues/2382)) ([831c2b4](https://github.com/adobe/spacecat-api-service/commit/831c2b4504b672726ddbf680afe6b3b487bc1956))
+
+
+### Features
+
+* MSM/language copy relationship context validation for suggestions ([#2328](https://github.com/adobe/spacecat-api-service/issues/2328)) ([2e3ff85](https://github.com/adobe/spacecat-api-service/commit/2e3ff85f09aaa28aef10f556c6d7b0a0c39d68b7))
+
+## [1.485.2](https://github.com/adobe/spacecat-api-service/compare/v1.485.1...v1.485.2) (2026-05-09)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2380](https://github.com/adobe/spacecat-api-service/issues/2380)) ([acb8df6](https://github.com/adobe/spacecat-api-service/commit/acb8df632f70248187cde277dc66d4c372173246))
+
+## [1.485.1](https://github.com/adobe/spacecat-api-service/compare/v1.485.0...v1.485.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **webhooks:** disable labeled trigger; only review_requested counts ([#2376](https://github.com/adobe/spacecat-api-service/issues/2376)) ([5108f02](https://github.com/adobe/spacecat-api-service/commit/5108f021ff753d238070e386c24046d29148a459))
+
+# [1.485.0](https://github.com/adobe/spacecat-api-service/compare/v1.484.0...v1.485.0) (2026-05-08)
+
+
+### Features
+
+* **webhooks:** env-configurable label trigger for dev/prod separation ([#2375](https://github.com/adobe/spacecat-api-service/issues/2375)) ([4a1b48d](https://github.com/adobe/spacecat-api-service/commit/4a1b48dcdb784538b31d1ef9309c719aa188b140))
+
 # [1.484.0](https://github.com/adobe/spacecat-api-service/compare/v1.483.5...v1.484.0) (2026-05-08)
 
 
