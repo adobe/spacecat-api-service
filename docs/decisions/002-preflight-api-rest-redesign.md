@@ -45,6 +45,16 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
 | GET | /sites/:siteId/preflights | Gets all preflight jobs for a site |
 | GET | /sites/:siteId/preflights/:preflightId | Gets a preflight job by ID |
 
+The existing endpoints are deprecated in the same change and remain functional in parallel until
+consumers have migrated:
+
+| Endpoint | Action |
+|----------|--------|
+| POST /preflight/beta/jobs | **Deprecated** — internal use only; no external consumers |
+| GET /preflight/beta/jobs/:jobId | **Deprecated** — internal use only; no external consumers |
+| POST /preflight/jobs | **Deprecated** — queue-based; migration timeline to be coordinated with consumers |
+| GET /preflight/jobs/:jobId | **Deprecated** — queue-based; migration timeline to be coordinated with consumers |
+
 ### POST /sites/:siteId/preflights
 
 **Request body** (`application/json`):
@@ -206,11 +216,10 @@ Key changes:
 - **No `organizationId` in the path.** `siteId` is a globally unique UUID, consistent with
   all other site-scoped resources in this service.
 
-**`/preflight/beta/jobs` is replaced** by the new endpoints and removed as part of this work.
-
-**`/preflight/jobs` is deprecated**, not removed. It will remain functional until a future
-deletion milestone is agreed upon with consumers. A deprecation notice should be added to its
-OpenAPI spec entry and response headers.
+**Both existing endpoint pairs are deprecated**, not removed. They will remain functional in
+parallel with the new endpoints until the MFE has migrated and a deletion milestone is agreed
+upon. Deprecation notices should be added to their OpenAPI spec entries and response headers
+(`Deprecation: true`, `Sunset: <date-tbd>`).
 
 ## Data Model: Extending AsyncJob for Efficient siteId Queries
 
@@ -250,8 +259,9 @@ controller work in this repo.
 - Server-side URL-to-site resolution is eliminated, reducing a class of failure.
 - Bulk preflight from the MFE is supported via multiple parallel requests — no API change
   needed as the feature grows.
-- `/preflight/beta/jobs` was used exclusively by the internal team and has no external consumers,
-  so its removal carries no migration burden.
+- `/preflight/beta/jobs` was used exclusively by the internal team. It is deprecated alongside
+  the new endpoints and removed once the MFE has migrated — no external consumer coordination
+  required.
 - Existing consumers of `/preflight/jobs` are unaffected for now; migration timeline to be
   coordinated separately.
 - The `AsyncJob` model remains the backing store; `preflightId` maps to the underlying job ID
