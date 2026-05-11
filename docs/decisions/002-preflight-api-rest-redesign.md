@@ -93,11 +93,11 @@ Body:
 
 | Status | `errorCode` | Condition |
 |--------|-------------|-----------|
-| `400 Bad Request` | `INVALID_REQUEST` | `url` is missing or invalid |
-| `403 Forbidden` | `SITE_ACCESS_DENIED` | Caller does not have access to the site |
+| `400 Bad Request` | `PREFLIGHT_INVALID_REQUEST` | `url` is missing or invalid |
+| `403 Forbidden` | `PREFLIGHT_ACCESS_DENIED` | Caller does not have access to the site |
 | `403 Forbidden` | `PREFLIGHT_NOT_ENABLED` | Preflight is not enabled for the site |
-| `404 Not Found` | `SITE_NOT_FOUND` | `siteId` does not exist |
-| `500 Internal Server Error` | `INTERNAL_ERROR` | Mysticat call failed or unexpected error |
+| `404 Not Found` | `PREFLIGHT_SITE_NOT_FOUND` | `siteId` does not exist |
+| `500 Internal Server Error` | `PREFLIGHT_INTERNAL_ERROR` | Mysticat call failed or unexpected error |
 
 Error response body:
 ```json
