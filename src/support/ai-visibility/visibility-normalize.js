@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable max-statements-per-line -- normalization helpers */
+
 function coerceGapPromptsListTotal(value) {
   if (typeof value === 'number' && Number.isFinite(value)) { return Math.trunc(value); }
   if (typeof value === 'string') {
@@ -30,10 +32,11 @@ function extractGapPromptsResponseTotal(body) {
   }
   const nested = [body.meta, body.pagination, body.page];
   for (const block of nested) {
-    if (block == null || typeof block !== 'object' || Array.isArray(block)) { continue; }
-    for (const k of topLevelKeys) {
-      const n = coerceGapPromptsListTotal(block[k]);
-      if (n !== undefined) { return n; }
+    if (block != null && typeof block === 'object' && !Array.isArray(block)) {
+      for (const k of topLevelKeys) {
+        const n = coerceGapPromptsListTotal(block[k]);
+        if (n !== undefined) { return n; }
+      }
     }
   }
   return undefined;
@@ -54,9 +57,14 @@ function normalizeGapPromptsBody(body) {
   const data = Array.isArray(body.data) ? body.data : [];
   const offsetRaw = body.offset;
   const limitRaw = body.limit;
-  const offset = typeof offsetRaw === 'number' && !Number.isNaN(offsetRaw)
-    ? offsetRaw
-    : Number.isFinite(Number(offsetRaw)) ? Number(offsetRaw) : 0;
+  let offset;
+  if (typeof offsetRaw === 'number' && !Number.isNaN(offsetRaw)) {
+    offset = offsetRaw;
+  } else if (Number.isFinite(Number(offsetRaw))) {
+    offset = Number(offsetRaw);
+  } else {
+    offset = 0;
+  }
   let limit;
   if (typeof limitRaw === 'number' && !Number.isNaN(limitRaw)) {
     limit = limitRaw;
@@ -83,7 +91,7 @@ function nonEmptyTrimmedString(v) {
 
 function extractSourceDomainExamplePrompt(s) {
   const candidates = [
-    s.prompt_example, s.example_prompt, s.examplePrompt,
+    s.promptExample, s.prompt_example, s.example_prompt, s.examplePrompt,
     s.sample_prompt, s.samplePrompt, s.example_prompt_text, s.examplePromptText,
   ];
   for (const v of candidates) {
@@ -110,12 +118,12 @@ function normalizeSourceDomainRow(raw) {
     && !(typeof otRaw === 'number' && !Number.isFinite(otRaw));
   const pe = extractSourceDomainExamplePrompt(raw);
   const row = {
-    source_domain: String(raw.source_domain ?? raw.domain ?? '').trim(),
-    sources_count: sourcesCount,
+    sourceDomain: String(raw.sourceDomain ?? raw.source_domain ?? raw.domain ?? '').trim(),
+    sourcesCount,
     mentions,
   };
-  row.organic_traffic = hasUpstreamOrganic ? numN(otRaw) : 0;
-  if (pe) { row.prompt_example = pe; }
+  row.organicTraffic = hasUpstreamOrganic ? numN(otRaw) : 0;
+  if (pe) { row.promptExample = pe; }
   return row;
 }
 

@@ -38,14 +38,15 @@ describe('visibility-filters', () => {
   describe('SR_VISIBILITY_MARKETS_CATALOG', () => {
     it('starts with WW followed by all supported market codes', () => {
       expect(SR_VISIBILITY_MARKETS_CATALOG[0]).to.equal('WW');
-      expect(SR_VISIBILITY_MARKETS_CATALOG.slice(1)).to.deep.equal(SR_AI_SEO_SUPPORTED_MARKET_CODES);
+      const tail = SR_VISIBILITY_MARKETS_CATALOG.slice(1);
+      expect(tail).to.deep.equal(SR_AI_SEO_SUPPORTED_MARKET_CODES);
     });
   });
 
   describe('SR_VISIBILITY_MODELS_CATALOG', () => {
     it('lists the expected models', () => {
       expect(SR_VISIBILITY_MODELS_CATALOG).to.deep.equal([
-        'all', 'chatgpt', 'gemini', 'google_ai_mode', 'google_ai_overview',
+        'all', 'chatgpt', 'gemini', 'googleAiMode', 'googleAiOverview',
       ]);
     });
   });
@@ -143,16 +144,18 @@ describe('visibility-filters', () => {
     it('maps known engines', () => {
       expect(normalizeEngineFromQuery('chatgpt')).to.equal('chatgpt');
       expect(normalizeEngineFromQuery('gemini')).to.equal('gemini');
-      expect(normalizeEngineFromQuery('aimode')).to.equal('google_ai_mode');
-      expect(normalizeEngineFromQuery('overview')).to.equal('google_ai_overview');
-      expect(normalizeEngineFromQuery('google_ai_mode')).to.equal('google_ai_mode');
-      expect(normalizeEngineFromQuery('google_ai_overview')).to.equal('google_ai_overview');
+      expect(normalizeEngineFromQuery('aimode')).to.equal('googleAiMode');
+      expect(normalizeEngineFromQuery('overview')).to.equal('googleAiOverview');
+      expect(normalizeEngineFromQuery('googleAiMode')).to.equal('googleAiMode');
+      expect(normalizeEngineFromQuery('googleAiOverview')).to.equal('googleAiOverview');
+      expect(normalizeEngineFromQuery('google_ai_mode')).to.equal('googleAiMode');
+      expect(normalizeEngineFromQuery('google_ai_overview')).to.equal('googleAiOverview');
     });
 
     it('is case-insensitive for known engines', () => {
       expect(normalizeEngineFromQuery('ChatGPT')).to.equal('chatgpt');
       expect(normalizeEngineFromQuery('GEMINI')).to.equal('gemini');
-      expect(normalizeEngineFromQuery('AiMode')).to.equal('google_ai_mode');
+      expect(normalizeEngineFromQuery('AiMode')).to.equal('googleAiMode');
     });
 
     it('returns trimmed original for unknown engines', () => {
@@ -185,62 +188,62 @@ describe('visibility-filters', () => {
       expect(attachSrFiltersToSuccessfulBody(200, 'string')).to.equal('string');
     });
 
-    it('attaches sr_filters with default catalogs for empty body', () => {
+    it('attaches srFilters with default catalogs for empty body', () => {
       const result = attachSrFiltersToSuccessfulBody(200, {});
-      expect(result).to.have.property('sr_filters');
-      expect(result.sr_filters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
-      expect(result.sr_filters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
-      expect(result.sr_filters.markets_catalog).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
-      expect(result.sr_filters.models_catalog).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
+      expect(result).to.have.property('srFilters');
+      expect(result.srFilters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
+      expect(result.srFilters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
+      expect(result.srFilters.marketsCatalog).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
+      expect(result.srFilters.modelsCatalog).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
     });
 
     it('extracts countries from nested data', () => {
       const body = { data: [{ country: 'DE' }, { country: 'JP' }] };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.markets).to.include('DE');
-      expect(result.sr_filters.markets).to.include('JP');
+      expect(result.srFilters.markets).to.include('DE');
+      expect(result.srFilters.markets).to.include('JP');
     });
 
     it('extracts engines from nested data', () => {
       const body = { data: [{ engine: 'chatgpt' }, { engine: 'gemini' }] };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.models).to.include('chatgpt');
-      expect(result.sr_filters.models).to.include('gemini');
+      expect(result.srFilters.models).to.include('chatgpt');
+      expect(result.srFilters.models).to.include('gemini');
     });
 
     it('extracts llm field as model', () => {
       const body = { data: [{ llm: 'chatgpt' }] };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.models).to.include('chatgpt');
+      expect(result.srFilters.models).to.include('chatgpt');
     });
 
     it('includes searchParams country in filters', () => {
       const sp = new URLSearchParams({ country: 'FR' });
       const result = attachSrFiltersToSuccessfulBody(200, {}, sp);
-      expect(result.sr_filters.markets).to.include('FR');
+      expect(result.srFilters.markets).to.include('FR');
     });
 
     it('includes searchParams engine in filters', () => {
       const sp = new URLSearchParams({ engine: 'gemini' });
       const result = attachSrFiltersToSuccessfulBody(200, {}, sp);
-      expect(result.sr_filters.models).to.include('gemini');
+      expect(result.srFilters.models).to.include('gemini');
     });
 
     it('does not add model when searchParams engine is "all"', () => {
       const sp = new URLSearchParams({ engine: 'all' });
       const result = attachSrFiltersToSuccessfulBody(200, {}, sp);
-      expect(result.sr_filters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
+      expect(result.srFilters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
     });
 
     it('handles null searchParams', () => {
       const result = attachSrFiltersToSuccessfulBody(200, {}, null);
-      expect(result.sr_filters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
+      expect(result.srFilters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
     });
 
     it('returns sorted unique markets when body has countries', () => {
       const body = { data: [{ country: 'JP' }, { country: 'DE' }, { country: 'JP' }] };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      const { markets } = result.sr_filters;
+      const { markets } = result.srFilters;
       const sorted = [...markets].sort((a, b) => a.localeCompare(b));
       expect(markets).to.deep.equal(sorted);
     });
@@ -248,7 +251,7 @@ describe('visibility-filters', () => {
     it('returns sorted unique models when body has engines', () => {
       const body = { data: [{ engine: 'gemini' }, { engine: 'chatgpt' }, { engine: 'gemini' }] };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      const { models } = result.sr_filters;
+      const { models } = result.srFilters;
       const sorted = [...models].sort((a, b) => a.localeCompare(b));
       expect(models).to.deep.equal(sorted);
     });
@@ -264,34 +267,34 @@ describe('visibility-filters', () => {
         }],
       };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.models).to.include('chatgpt');
-      expect(result.sr_filters.models).to.include('gemini');
+      expect(result.srFilters.models).to.include('chatgpt');
+      expect(result.srFilters.models).to.include('gemini');
     });
 
-    it('extracts models from cited_pages breakdown objects', () => {
+    it('extracts models from citedPages breakdown objects', () => {
       const body = {
         data: [{
-          cited_pages: {
+          citedPages: {
             all: 20,
-            google_ai_mode: 10,
-            google_ai_overview: 10,
+            googleAiMode: 10,
+            googleAiOverview: 10,
           },
         }],
       };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.models).to.include('google_ai_mode');
-      expect(result.sr_filters.models).to.include('google_ai_overview');
+      expect(result.srFilters.models).to.include('googleAiMode');
+      expect(result.srFilters.models).to.include('googleAiOverview');
     });
 
-    it('skips non-object mentions/cited_pages (null, array, primitive)', () => {
+    it('skips non-object mentions/citedPages (null, array, primitive)', () => {
       const body = {
         data: [{
           mentions: null,
-          cited_pages: [1, 2],
+          citedPages: [1, 2],
         }],
       };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
+      expect(result.srFilters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
     });
 
     it('skips "all" key in breakdown objects', () => {
@@ -301,28 +304,28 @@ describe('visibility-filters', () => {
         }],
       };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
+      expect(result.srFilters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
     });
 
     it('ignores non-string country/engine values in addMarket/addModel', () => {
       const body = { data: [{ country: 123, engine: 456 }] };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
-      expect(result.sr_filters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
+      expect(result.srFilters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
+      expect(result.srFilters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
     });
 
     it('ignores empty-string country/engine values', () => {
       const body = { data: [{ country: '', engine: '' }] };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
-      expect(result.sr_filters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
+      expect(result.srFilters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
+      expect(result.srFilters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
     });
 
     it('ignores whitespace-only country/engine values', () => {
       const body = { data: [{ country: '   ', engine: '   ' }] };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
-      expect(result.sr_filters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
+      expect(result.srFilters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
+      expect(result.srFilters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
     });
 
     it('stops recursion for depth > 24', () => {
@@ -331,7 +334,7 @@ describe('visibility-filters', () => {
         nested = { child: nested };
       }
       const result = attachSrFiltersToSuccessfulBody(200, nested);
-      expect(result.sr_filters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
+      expect(result.srFilters.markets).to.deep.equal([...SR_VISIBILITY_MARKETS_CATALOG]);
     });
 
     it('handles deeply nested objects within the depth limit', () => {
@@ -340,33 +343,33 @@ describe('visibility-filters', () => {
         nested = { child: nested };
       }
       const result = attachSrFiltersToSuccessfulBody(200, nested);
-      expect(result.sr_filters.markets).to.include('JP');
+      expect(result.srFilters.markets).to.include('JP');
     });
 
-    it('preserves original body keys alongside sr_filters', () => {
+    it('preserves original body keys alongside srFilters', () => {
       const body = { foo: 'bar', baz: 42 };
       const result = attachSrFiltersToSuccessfulBody(200, body);
       expect(result.foo).to.equal('bar');
       expect(result.baz).to.equal(42);
-      expect(result).to.have.property('sr_filters');
+      expect(result).to.have.property('srFilters');
     });
 
     it('models catalog remains default when no engines found and no searchParams engine', () => {
       const result = attachSrFiltersToSuccessfulBody(200, { data: [{ country: 'DE' }] });
-      expect(result.sr_filters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
+      expect(result.srFilters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
     });
 
     it('handles engine "all" in addModel (normalize returns null, nothing added)', () => {
       const body = { data: [{ engine: 'all' }] };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
+      expect(result.srFilters.models).to.deep.equal([...SR_VISIBILITY_MODELS_CATALOG]);
     });
 
     it('handles circular-like references gracefully via WeakSet', () => {
       const inner = { country: 'FR' };
       const body = { a: inner, b: inner };
       const result = attachSrFiltersToSuccessfulBody(200, body);
-      expect(result.sr_filters.markets).to.include('FR');
+      expect(result.srFilters.markets).to.include('FR');
     });
   });
 });

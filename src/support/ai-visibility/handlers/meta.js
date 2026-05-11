@@ -10,15 +10,18 @@
  * governing permissions and limitations under the License.
  */
 
+import { MetaResponseSchema } from '@quazar/ai-seo-ts/ai-cr/messages_pb.js';
 import { COUNTRY_ENUM } from '../grpc-utils.js';
+import { messageToJson } from '../proto-json.js';
 
 export async function handleMeta(_sp, clients) {
   const raw = await clients.crMetaClient.meta({});
-  const countries = (raw.countries || []).map((c) => ({
-    country: COUNTRY_ENUM[c.country] || String(c.country),
+  const json = messageToJson(MetaResponseSchema, raw);
+  const countries = (json.countries || []).map((c) => ({
+    countryCode: COUNTRY_ENUM[c.country] || String(c.country),
     daily: c.daily || [],
     monthly: c.monthly || [],
-    is_coming_soon: Boolean(c.isComingSoon),
+    isComingSoon: Boolean(c.isComingSoon),
   }));
   return { status: 200, body: { countries } };
 }

@@ -272,11 +272,11 @@ describe('visibility-normalize', () => {
       };
       const result = normalizeVisibilityV1SuccessfulBody(REL, body);
       expect(result.data[0]).to.deep.equal({
-        source_domain: 'example.com',
-        sources_count: 5,
+        sourceDomain: 'example.com',
+        sourcesCount: 5,
         mentions: 10,
-        organic_traffic: 100,
-        prompt_example: 'test prompt',
+        organicTraffic: 100,
+        promptExample: 'test prompt',
       });
     });
 
@@ -288,13 +288,13 @@ describe('visibility-normalize', () => {
     it('uses sources_count field name variant', () => {
       const body = { data: [{ sources_count: 3 }] };
       const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-      expect(result.data[0].sources_count).to.equal(3);
+      expect(result.data[0].sourcesCount).to.equal(3);
     });
 
     it('prefers sourcesCount over sources_count', () => {
       const body = { data: [{ sourcesCount: 7, sources_count: 3 }] };
       const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-      expect(result.data[0].sources_count).to.equal(7);
+      expect(result.data[0].sourcesCount).to.equal(7);
     });
 
     it('uses overallMentions variant', () => {
@@ -318,62 +318,62 @@ describe('visibility-normalize', () => {
     it('uses domain field when source_domain is absent', () => {
       const body = { data: [{ domain: 'fallback.com' }] };
       const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-      expect(result.data[0].source_domain).to.equal('fallback.com');
+      expect(result.data[0].sourceDomain).to.equal('fallback.com');
     });
 
     it('trims source_domain', () => {
       const body = { data: [{ source_domain: '  example.com  ' }] };
       const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-      expect(result.data[0].source_domain).to.equal('example.com');
+      expect(result.data[0].sourceDomain).to.equal('example.com');
     });
 
     it('defaults source_domain to empty string when both missing', () => {
       const body = { data: [{}] };
       const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-      expect(result.data[0].source_domain).to.equal('');
+      expect(result.data[0].sourceDomain).to.equal('');
     });
 
     describe('organic_traffic handling', () => {
       it('uses organicTraffic variant', () => {
         const body = { data: [{ organicTraffic: 500 }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].organic_traffic).to.equal(500);
+        expect(result.data[0].organicTraffic).to.equal(500);
       });
 
       it('defaults to 0 when organic_traffic is undefined', () => {
         const body = { data: [{}] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].organic_traffic).to.equal(0);
+        expect(result.data[0].organicTraffic).to.equal(0);
       });
 
       it('defaults to 0 when organic_traffic is null', () => {
         const body = { data: [{ organic_traffic: null }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].organic_traffic).to.equal(0);
+        expect(result.data[0].organicTraffic).to.equal(0);
       });
 
       it('defaults to 0 when organic_traffic is empty string', () => {
         const body = { data: [{ organic_traffic: '' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].organic_traffic).to.equal(0);
+        expect(result.data[0].organicTraffic).to.equal(0);
       });
 
       it('defaults to 0 when organic_traffic is non-finite (NaN)', () => {
         const body = { data: [{ organic_traffic: NaN }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].organic_traffic).to.equal(0);
+        expect(result.data[0].organicTraffic).to.equal(0);
       });
 
       it('defaults to 0 when organic_traffic is Infinity', () => {
         const body = { data: [{ organic_traffic: Infinity }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].organic_traffic).to.equal(0);
+        expect(result.data[0].organicTraffic).to.equal(0);
       });
 
       it('normalizes string organic_traffic', () => {
         const body = { data: [{ organic_traffic: '1,234' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].organic_traffic).to.equal(1234);
+        expect(result.data[0].organicTraffic).to.equal(1234);
       });
     });
 
@@ -381,121 +381,121 @@ describe('visibility-normalize', () => {
       it('extracts from prompt_example field', () => {
         const body = { data: [{ prompt_example: 'hello' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('hello');
+        expect(result.data[0].promptExample).to.equal('hello');
       });
 
       it('extracts from example_prompt field', () => {
         const body = { data: [{ example_prompt: 'from example_prompt' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('from example_prompt');
+        expect(result.data[0].promptExample).to.equal('from example_prompt');
       });
 
       it('extracts from examplePrompt field', () => {
         const body = { data: [{ examplePrompt: 'from examplePrompt' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('from examplePrompt');
+        expect(result.data[0].promptExample).to.equal('from examplePrompt');
       });
 
       it('extracts from sample_prompt field', () => {
         const body = { data: [{ sample_prompt: 'from sample_prompt' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('from sample_prompt');
+        expect(result.data[0].promptExample).to.equal('from sample_prompt');
       });
 
       it('extracts from samplePrompt field', () => {
         const body = { data: [{ samplePrompt: 'from samplePrompt' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('from samplePrompt');
+        expect(result.data[0].promptExample).to.equal('from samplePrompt');
       });
 
       it('extracts from example_prompt_text field', () => {
         const body = { data: [{ example_prompt_text: 'from ept' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('from ept');
+        expect(result.data[0].promptExample).to.equal('from ept');
       });
 
       it('extracts from examplePromptText field', () => {
         const body = { data: [{ examplePromptText: 'from EPT' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('from EPT');
+        expect(result.data[0].promptExample).to.equal('from EPT');
       });
 
       it('extracts from example.prompt nested field', () => {
         const body = { data: [{ example: { prompt: 'nested prompt' } }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('nested prompt');
+        expect(result.data[0].promptExample).to.equal('nested prompt');
       });
 
       it('extracts from example.text nested field', () => {
         const body = { data: [{ example: { text: 'nested text' } }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('nested text');
+        expect(result.data[0].promptExample).to.equal('nested text');
       });
 
       it('extracts from example.example_prompt nested field', () => {
         const body = { data: [{ example: { example_prompt: 'nested ep' } }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('nested ep');
+        expect(result.data[0].promptExample).to.equal('nested ep');
       });
 
       it('extracts from example.examplePrompt nested field', () => {
         const body = { data: [{ example: { examplePrompt: 'nested EP' } }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('nested EP');
+        expect(result.data[0].promptExample).to.equal('nested EP');
       });
 
       it('does not set prompt_example when no candidate matches', () => {
         const body = { data: [{ source_domain: 'x.com' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0]).to.not.have.property('prompt_example');
+        expect(result.data[0]).to.not.have.property('promptExample');
       });
 
       it('skips null example object', () => {
         const body = { data: [{ example: null }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0]).to.not.have.property('prompt_example');
+        expect(result.data[0]).to.not.have.property('promptExample');
       });
 
       it('skips array example object', () => {
         const body = { data: [{ example: [1, 2] }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0]).to.not.have.property('prompt_example');
+        expect(result.data[0]).to.not.have.property('promptExample');
       });
 
       it('skips example object with no matching sub-fields', () => {
         const body = { data: [{ example: { irrelevant: 'nope' } }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0]).to.not.have.property('prompt_example');
+        expect(result.data[0]).to.not.have.property('promptExample');
       });
 
       it('trims prompt_example whitespace', () => {
         const body = { data: [{ prompt_example: '  spaced  ' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('spaced');
+        expect(result.data[0].promptExample).to.equal('spaced');
       });
 
       it('handles numeric prompt_example via nonEmptyTrimmedString', () => {
         const body = { data: [{ prompt_example: 42 }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('42');
+        expect(result.data[0].promptExample).to.equal('42');
       });
 
       it('skips non-finite numeric prompt_example', () => {
         const body = { data: [{ prompt_example: NaN }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0]).to.not.have.property('prompt_example');
+        expect(result.data[0]).to.not.have.property('promptExample');
       });
 
       it('skips Infinity prompt_example', () => {
         const body = { data: [{ prompt_example: Infinity }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0]).to.not.have.property('prompt_example');
+        expect(result.data[0]).to.not.have.property('promptExample');
       });
 
       it('prefers first matching candidate in priority order', () => {
         const body = { data: [{ prompt_example: 'first', example_prompt: 'second' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].prompt_example).to.equal('first');
+        expect(result.data[0].promptExample).to.equal('first');
       });
     });
 
@@ -514,43 +514,43 @@ describe('visibility-normalize', () => {
       it('returns 0 for null/undefined values', () => {
         const body = { data: [{ sourcesCount: null }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].sources_count).to.equal(0);
+        expect(result.data[0].sourcesCount).to.equal(0);
       });
 
       it('returns 0 for empty string', () => {
         const body = { data: [{ sourcesCount: '' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].sources_count).to.equal(0);
+        expect(result.data[0].sourcesCount).to.equal(0);
       });
 
       it('coerces comma-separated string numbers', () => {
         const body = { data: [{ sourcesCount: '1,000' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].sources_count).to.equal(1000);
+        expect(result.data[0].sourcesCount).to.equal(1000);
       });
 
       it('returns 0 for non-finite string values', () => {
         const body = { data: [{ sourcesCount: 'not-a-number' }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].sources_count).to.equal(0);
+        expect(result.data[0].sourcesCount).to.equal(0);
       });
 
       it('returns 0 for NaN number', () => {
         const body = { data: [{ sourcesCount: NaN }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].sources_count).to.equal(0);
+        expect(result.data[0].sourcesCount).to.equal(0);
       });
 
       it('returns 0 for Infinity', () => {
         const body = { data: [{ sourcesCount: Infinity }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].sources_count).to.equal(0);
+        expect(result.data[0].sourcesCount).to.equal(0);
       });
 
       it('coerces boolean-like values via Number()', () => {
         const body = { data: [{ sourcesCount: true }] };
         const result = normalizeVisibilityV1SuccessfulBody(REL, body);
-        expect(result.data[0].sources_count).to.equal(1);
+        expect(result.data[0].sourcesCount).to.equal(1);
       });
     });
   });

@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable max-len, no-await-in-loop -- AI Visibility controller tests */
+
 import { expect } from 'chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
@@ -267,7 +269,7 @@ describe('AiVisibilityController', () => {
       const [body, status] = mockCreateResponse.firstCall.args;
       expect(status).to.equal(503);
       expect(body).to.deep.equal({
-        error: 'ai_visibility_not_configured',
+        error: 'aiVisibilityNotConfigured',
         message: 'credentials missing',
       });
 

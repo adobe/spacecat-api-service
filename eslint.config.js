@@ -45,32 +45,4 @@ export default defineConfig([
       'func-names': 'off',
     },
   },
-  // Semrush AI Visibility proxy: wire-format snake_case, dense protobuf mapping, vendor-style loops.
-  {
-    files: [
-      'src/support/ai-visibility/**/*.js',
-      'src/controllers/ai-visibility.js',
-      'test/support/ai-visibility/**/*.js',
-      'test/controllers/ai-visibility.test.js',
-    ],
-    rules: {
-      camelcase: 'off',
-      'max-len': 'off',
-      'max-statements-per-line': 'off',
-      'no-await-in-loop': 'off',
-      'no-continue': 'off',
-      'no-nested-ternary': 'off',
-      'no-plusplus': 'off',
-      'no-return-await': 'off',
-      'no-underscore-dangle': 'off',
-      'no-use-before-define': 'off',
-      'no-unused-vars': ['error', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        caughtErrors: 'none',
-      }],
-      'object-curly-newline': 'off',
-      'prefer-promise-reject-errors': 'off',
-    },
-  },
 ]);

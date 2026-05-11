@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable max-statements-per-line -- filter walk helpers */
+
 export const SR_AI_SEO_SUPPORTED_MARKET_CODES = [
   'AE', 'AR', 'AT', 'AU', 'BE', 'BR', 'CA', 'CH', 'CL', 'CO',
   'DE', 'DK', 'ES', 'FI', 'FR', 'IE', 'IL', 'IN', 'IT', 'JP',
@@ -21,7 +23,7 @@ const SUPPORTED_MARKET = new Set(SR_AI_SEO_SUPPORTED_MARKET_CODES);
 export const SR_VISIBILITY_MARKETS_CATALOG = ['WW', ...SR_AI_SEO_SUPPORTED_MARKET_CODES];
 
 export const SR_VISIBILITY_MODELS_CATALOG = [
-  'all', 'chatgpt', 'gemini', 'google_ai_mode', 'google_ai_overview',
+  'all', 'chatgpt', 'gemini', 'googleAiMode', 'googleAiOverview',
 ];
 
 function sortUnique(xs) {
@@ -47,10 +49,12 @@ export function resolveVisibilityMarketFromSearchParams(sp) {
 const ENGINE_QUERY_MAP = {
   chatgpt: 'chatgpt',
   gemini: 'gemini',
-  aimode: 'google_ai_mode',
-  overview: 'google_ai_overview',
-  google_ai_mode: 'google_ai_mode',
-  google_ai_overview: 'google_ai_overview',
+  aimode: 'googleAiMode',
+  overview: 'googleAiOverview',
+  googleaimode: 'googleAiMode',
+  googleaioverview: 'googleAiOverview',
+  google_ai_mode: 'googleAiMode',
+  google_ai_overview: 'googleAiOverview',
 };
 
 export function normalizeEngineFromQuery(engine) {
@@ -72,13 +76,17 @@ function addModel(models, raw) {
 }
 
 function extractBreakdownModels(o, models) {
-  for (const blockKey of ['mentions', 'cited_pages']) {
+  for (const blockKey of ['mentions', 'citedPages']) {
     const block = o[blockKey];
-    if (block === null || typeof block !== 'object' || Array.isArray(block)) { continue; }
-    for (const k of Object.keys(block)) {
-      if (k === 'all') { continue; }
-      const n = normalizeEngineFromQuery(k);
-      if (n) { models.add(n); }
+    if (block === null || typeof block !== 'object' || Array.isArray(block)) {
+      /* skip */
+    } else {
+      for (const k of Object.keys(block)) {
+        if (k !== 'all') {
+          const n = normalizeEngineFromQuery(k);
+          if (n) { models.add(n); }
+        }
+      }
     }
   }
 }
@@ -123,11 +131,11 @@ export function attachSrFiltersToSuccessfulBody(status, body, searchParams) {
     : [...SR_VISIBILITY_MODELS_CATALOG];
   return {
     ...o,
-    sr_filters: {
+    srFilters: {
       markets: marketsList,
       models: modelsList,
-      markets_catalog: [...SR_VISIBILITY_MARKETS_CATALOG],
-      models_catalog: [...SR_VISIBILITY_MODELS_CATALOG],
+      marketsCatalog: [...SR_VISIBILITY_MARKETS_CATALOG],
+      modelsCatalog: [...SR_VISIBILITY_MODELS_CATALOG],
     },
   };
 }

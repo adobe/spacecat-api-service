@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable max-statements-per-line -- AI Visibility handler surface */
+
 import { PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
 import {
   num, brandTarget, parseLimitOffset, resolveCountryForFts, requiredLlmFromQuery,
@@ -52,17 +54,17 @@ export async function handlePromptsResponses(sp, clients) {
     const rel = relations[i]?.value ?? null;
     return {
       prompt: p.prompt,
-      prompt_hash: String(p.promptHash ?? ''),
-      serp_id: String(p.serpId ?? ''),
+      promptHash: String(p.promptHash ?? ''),
+      serpId: String(p.serpId ?? ''),
       topic: p.topicName,
-      topic_id: String(p.topicId ?? ''),
+      topicId: String(p.topicId ?? ''),
       engine: llmToEngine(p.llm || llm),
       response: rel?.response ?? p.briefResponse ?? '',
-      response_excerpt: p.briefResponse ?? '',
-      cited_pages: Array.isArray(rel?.sources) ? rel.sources : [],
-      mentioned_brands: (rel?.mentionedBrands ?? []).map(mentionedBrandRestLabel).filter(Boolean),
-      mentioned_brands_count: num(p.mentionedBrandsCount),
-      sources_count: num(p.sourcesCount),
+      responseExcerpt: p.briefResponse ?? '',
+      citedPages: Array.isArray(rel?.sources) ? rel.sources : [],
+      mentionedBrands: (rel?.mentionedBrands ?? []).map(mentionedBrandRestLabel).filter(Boolean),
+      mentionedBrandsCount: num(p.mentionedBrandsCount),
+      sourcesCount: num(p.sourcesCount),
     };
   });
   return {
@@ -74,11 +76,14 @@ export async function handlePromptsResponses(sp, clients) {
 }
 
 export async function handlePromptsResponsesLatest(sp, clients) {
-  const promptHash = sp.get('prompt_hash')?.trim();
-  const serpId = sp.get('serp_id')?.trim();
-  const topicId = sp.get('topic_id')?.trim();
+  const promptHash = sp.get('promptHash')?.trim();
+  const serpId = sp.get('serpId')?.trim();
+  const topicId = sp.get('topicId')?.trim();
   if (!promptHash || !serpId || !topicId) {
-    return { status: 400, body: { error: 'missing_params', message: 'prompt_hash, serp_id, and topic_id are required' } };
+    return {
+      status: 400,
+      body: { error: 'missing_params', message: 'promptHash, serpId, and topicId are required' },
+    };
   }
   const country = resolveCountryForFts(sp);
   const llm = requiredLlmFromQuery(sp);
@@ -93,10 +98,10 @@ export async function handlePromptsResponsesLatest(sp, clients) {
       data: {
         prompt: v.prompt,
         engine: llmToEngine(llm),
-        topic_id: topicId,
+        topicId,
         response: v.response,
-        cited_pages: Array.isArray(v.sources) ? v.sources : [],
-        mentioned_brands: (v.mentionedBrands ?? []).map(mentionedBrandRestLabel).filter(Boolean),
+        citedPages: Array.isArray(v.sources) ? v.sources : [],
+        mentionedBrands: (v.mentionedBrands ?? []).map(mentionedBrandRestLabel).filter(Boolean),
         date: v.date ?? null,
       },
     },

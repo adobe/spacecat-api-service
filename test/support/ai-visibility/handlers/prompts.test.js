@@ -103,9 +103,9 @@ describe('AI Visibility – prompts handlers', () => {
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
       expect(res.body.data[0].response).to.equal('Full response');
-      expect(res.body.data[0].cited_pages).to.have.length(1);
-      expect(res.body.data[0].mentioned_brands).to.have.length(1);
-      expect(res.body.data[0].response_excerpt).to.equal('excerpt');
+      expect(res.body.data[0].citedPages).to.have.length(1);
+      expect(res.body.data[0].mentionedBrands).to.have.length(1);
+      expect(res.body.data[0].responseExcerpt).to.equal('excerpt');
     });
 
     it('handles prompt filter', async () => {
@@ -137,7 +137,7 @@ describe('AI Visibility – prompts handlers', () => {
       const res = await handlePromptsResponses(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data[0].response).to.equal('');
-      expect(res.body.data[0].cited_pages).to.deep.equal([]);
+      expect(res.body.data[0].citedPages).to.deep.equal([]);
       expect(clients.prRelationsClient.prompt.called).to.be.false;
     });
 
@@ -224,9 +224,9 @@ describe('AI Visibility – prompts handlers', () => {
       });
       const sp = new URLSearchParams('domain=example.com');
       const res = await handlePromptsResponses(sp, clients);
-      expect(res.body.data[0].prompt_hash).to.equal('');
-      expect(res.body.data[0].serp_id).to.equal('');
-      expect(res.body.data[0].topic_id).to.equal('');
+      expect(res.body.data[0].promptHash).to.equal('');
+      expect(res.body.data[0].serpId).to.equal('');
+      expect(res.body.data[0].topicId).to.equal('');
     });
 
     it('handles rel?.response being null (falls to briefResponse)', async () => {
@@ -268,7 +268,7 @@ describe('AI Visibility – prompts handlers', () => {
       const sp = new URLSearchParams('domain=example.com');
       const res = await handlePromptsResponses(sp, clients);
       expect(res.body.data[0].response).to.equal('');
-      expect(res.body.data[0].response_excerpt).to.equal('');
+      expect(res.body.data[0].responseExcerpt).to.equal('');
     });
 
     it('handles empty mentionedBrands in relation', async () => {
@@ -289,7 +289,7 @@ describe('AI Visibility – prompts handlers', () => {
       });
       const sp = new URLSearchParams('domain=example.com');
       const res = await handlePromptsResponses(sp, clients);
-      expect(res.body.data[0].mentioned_brands).to.deep.equal(['brand.com']);
+      expect(res.body.data[0].mentionedBrands).to.deep.equal(['brand.com']);
     });
 
     it('handles non-array sources in relation', async () => {
@@ -310,7 +310,7 @@ describe('AI Visibility – prompts handlers', () => {
       });
       const sp = new URLSearchParams('domain=example.com');
       const res = await handlePromptsResponses(sp, clients);
-      expect(res.body.data[0].cited_pages).to.deep.equal([]);
+      expect(res.body.data[0].citedPages).to.deep.equal([]);
     });
 
     it('handles empty prompt filter returning all prompts', async () => {
@@ -348,7 +348,7 @@ describe('AI Visibility – prompts handlers', () => {
       });
       const sp = new URLSearchParams('domain=example.com');
       const res = await handlePromptsResponses(sp, clients);
-      expect(res.body.data[0].mentioned_brands).to.deep.equal([]);
+      expect(res.body.data[0].mentionedBrands).to.deep.equal([]);
     });
 
     it('uses prompt llm for relation request when available', async () => {
@@ -383,13 +383,13 @@ describe('AI Visibility – prompts handlers', () => {
     });
 
     it('returns 400 when only prompt_hash is provided', async () => {
-      const sp = new URLSearchParams('prompt_hash=h1');
+      const sp = new URLSearchParams('promptHash=h1');
       const res = await handlePromptsResponsesLatest(sp, clients);
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when topic_id is missing', async () => {
-      const sp = new URLSearchParams('prompt_hash=h1&serp_id=s1');
+      const sp = new URLSearchParams('promptHash=h1&serpId=s1');
       const res = await handlePromptsResponsesLatest(sp, clients);
       expect(res.status).to.equal(400);
     });
@@ -404,20 +404,20 @@ describe('AI Visibility – prompts handlers', () => {
           date: '2026-05-01',
         },
       });
-      const sp = new URLSearchParams('prompt_hash=h1&serp_id=s1&topic_id=t1');
+      const sp = new URLSearchParams('promptHash=h1&serpId=s1&topicId=t1');
       const res = await handlePromptsResponsesLatest(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data.prompt).to.equal('Test prompt');
       expect(res.body.data.response).to.equal('Full response text');
-      expect(res.body.data.cited_pages).to.have.length(1);
-      expect(res.body.data.mentioned_brands).to.have.length(2);
+      expect(res.body.data.citedPages).to.have.length(1);
+      expect(res.body.data.mentionedBrands).to.have.length(2);
       expect(res.body.data.date).to.equal('2026-05-01');
-      expect(res.body.data.topic_id).to.equal('t1');
+      expect(res.body.data.topicId).to.equal('t1');
     });
 
     it('returns { data: null } when value is null', async () => {
       clients.prRelationsClient.prompt.resolves({ value: null });
-      const sp = new URLSearchParams('prompt_hash=h1&serp_id=s1&topic_id=t1');
+      const sp = new URLSearchParams('promptHash=h1&serpId=s1&topicId=t1');
       const res = await handlePromptsResponsesLatest(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.be.null;
@@ -425,7 +425,7 @@ describe('AI Visibility – prompts handlers', () => {
 
     it('returns { data: null } when value is undefined', async () => {
       clients.prRelationsClient.prompt.resolves({});
-      const sp = new URLSearchParams('prompt_hash=h1&serp_id=s1&topic_id=t1');
+      const sp = new URLSearchParams('promptHash=h1&serpId=s1&topicId=t1');
       const res = await handlePromptsResponsesLatest(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.be.null;
@@ -437,9 +437,9 @@ describe('AI Visibility – prompts handlers', () => {
           prompt: 'Q', response: 'R', sources: 'bad', mentionedBrands: [], date: null,
         },
       });
-      const sp = new URLSearchParams('prompt_hash=h1&serp_id=s1&topic_id=t1');
+      const sp = new URLSearchParams('promptHash=h1&serpId=s1&topicId=t1');
       const res = await handlePromptsResponsesLatest(sp, clients);
-      expect(res.body.data.cited_pages).to.deep.equal([]);
+      expect(res.body.data.citedPages).to.deep.equal([]);
     });
 
     it('filters empty mentioned brand labels', async () => {
@@ -448,9 +448,9 @@ describe('AI Visibility – prompts handlers', () => {
           prompt: 'Q', response: 'R', sources: [], mentionedBrands: [{ name: '' }, { name: 'Real' }], date: null,
         },
       });
-      const sp = new URLSearchParams('prompt_hash=h1&serp_id=s1&topic_id=t1');
+      const sp = new URLSearchParams('promptHash=h1&serpId=s1&topicId=t1');
       const res = await handlePromptsResponsesLatest(sp, clients);
-      expect(res.body.data.mentioned_brands).to.deep.equal(['Real']);
+      expect(res.body.data.mentionedBrands).to.deep.equal(['Real']);
     });
 
     it('handles null mentionedBrands in latest response', async () => {
@@ -459,9 +459,9 @@ describe('AI Visibility – prompts handlers', () => {
           prompt: 'Q', response: 'R', sources: [], mentionedBrands: null, date: null,
         },
       });
-      const sp = new URLSearchParams('prompt_hash=h1&serp_id=s1&topic_id=t1');
+      const sp = new URLSearchParams('promptHash=h1&serpId=s1&topicId=t1');
       const res = await handlePromptsResponsesLatest(sp, clients);
-      expect(res.body.data.mentioned_brands).to.deep.equal([]);
+      expect(res.body.data.mentionedBrands).to.deep.equal([]);
     });
 
     it('handles undefined mentionedBrands in latest response', async () => {
@@ -470,9 +470,9 @@ describe('AI Visibility – prompts handlers', () => {
           prompt: 'Q', response: 'R', sources: [], date: null,
         },
       });
-      const sp = new URLSearchParams('prompt_hash=h1&serp_id=s1&topic_id=t1');
+      const sp = new URLSearchParams('promptHash=h1&serpId=s1&topicId=t1');
       const res = await handlePromptsResponsesLatest(sp, clients);
-      expect(res.body.data.mentioned_brands).to.deep.equal([]);
+      expect(res.body.data.mentionedBrands).to.deep.equal([]);
     });
 
     it('handles null date', async () => {
@@ -481,7 +481,7 @@ describe('AI Visibility – prompts handlers', () => {
           prompt: 'Q', response: 'R', sources: [], mentionedBrands: [], date: null,
         },
       });
-      const sp = new URLSearchParams('prompt_hash=h1&serp_id=s1&topic_id=t1');
+      const sp = new URLSearchParams('promptHash=h1&serpId=s1&topicId=t1');
       const res = await handlePromptsResponsesLatest(sp, clients);
       expect(res.body.data.date).to.be.null;
     });

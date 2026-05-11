@@ -8560,7 +8560,7 @@ AiVisibilityServiceUnavailable:
   properties:
     error:
       type: string
-      example: ai_visibility_not_configured
+      example: aiVisibilityNotConfigured
     message:
       type: string
       example: Missing AI_SEO_CLIENT_ID
@@ -8576,9 +8576,9 @@ AiVisibilityEngineBreakdown:
       type: number
     gemini:
       type: number
-    google_ai_mode:
+    googleAiMode:
       type: number
-    google_ai_overview:
+    googleAiOverview:
       type: number
 
 AiVisibilityByDateEntry:
@@ -8589,12 +8589,20 @@ AiVisibilityByDateEntry:
       type: integer
     month:
       type: integer
+    day:
+      type: integer
+    aiVisibility:
+      type: number
     mentions:
       $ref: '#/AiVisibilityEngineBreakdown'
-    cited_pages:
+    citedPages:
       $ref: '#/AiVisibilityEngineBreakdown'
-    visibility_by_engine:
+    visibilityByEngine:
       $ref: '#/AiVisibilityEngineBreakdown'
+    ownedSources:
+      type: integer
+    audience:
+      type: integer
 
 AiVisibilityByCountryEntry:
   type: object
@@ -8606,7 +8614,7 @@ AiVisibilityByCountryEntry:
       type: integer
     audience:
       type: integer
-    cited_pages:
+    citedPages:
       type: integer
 
 AiVisibilitySrFilters:
@@ -8636,15 +8644,25 @@ AiVisibilityBrandStats:
   type: object
   description: Brand visibility statistics response
   properties:
-    by_date:
+    visibility:
+      type: number
+    visibilityByEngine:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    audience:
+      type: integer
+    mentions:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    citedPages:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    byDate:
       type: array
       items:
         $ref: '#/AiVisibilityByDateEntry'
-    by_country:
+    byCountry:
       type: array
       items:
         $ref: '#/AiVisibilityByCountryEntry'
-    sr_filters:
+    srFilters:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
@@ -8664,7 +8682,7 @@ AiVisibilityPaginatedResponse:
       type: integer
     limit:
       type: integer
-    sr_filters:
+    srFilters:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
@@ -8672,7 +8690,7 @@ AiVisibilityCompetitorsMetrics:
   type: object
   description: Competitor comparison time-series response
   properties:
-    by_brand:
+    byBrand:
       type: array
       items:
         type: object
@@ -8684,7 +8702,7 @@ AiVisibilityCompetitorsMetrics:
                 type: string
               name:
                 type: string
-          by_date:
+          byDate:
             type: array
             items:
               type: object
@@ -8704,9 +8722,9 @@ AiVisibilityCompetitorsMetrics:
                   type: number
                 audience:
                   type: number
-                owned_sources:
+                ownedSources:
                   type: number
-    sr_filters:
+    srFilters:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
@@ -8722,9 +8740,9 @@ AiVisibilityGapPromptRow:
       type: string
     topic:
       type: string
-    topic_id:
+    topicId:
       type: string
-    topic_volume:
+    topicVolume:
       type: integer
     mentioned:
       type: boolean
@@ -8732,9 +8750,9 @@ AiVisibilityGapPromptRow:
       type: integer
     sources:
       type: integer
-    prompt_hash:
+    promptHash:
       type: string
-    serp_id:
+    serpId:
       type: string
 
 AiVisibilityGapPromptsResponse:
@@ -8751,7 +8769,7 @@ AiVisibilityGapPromptsResponse:
       type: integer
     limit:
       type: integer
-    sr_filters:
+    srFilters:
       $ref: '#/AiVisibilitySrFilters'
   required: [data, total, offset, limit]
 
@@ -8764,17 +8782,20 @@ AiVisibilityMeta:
       items:
         type: object
         properties:
-          country_code:
+          countryCode:
             type: string
             description: ISO country code
-          name:
-            type: string
-          snapshots:
+          daily:
             type: array
             items:
-              type: string
-              description: Available snapshot dates
-    sr_filters:
+              type: object
+          monthly:
+            type: array
+            items:
+              type: object
+          isComingSoon:
+            type: boolean
+    srFilters:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
@@ -8782,16 +8803,16 @@ AiVisibilityTopicsResearchStats:
   type: object
   description: Aggregate statistics for topic research
   properties:
-    topics_total:
+    topicsTotal:
       type: integer
       description: Total number of distinct topics matching the query
-    brands_total:
+    brandsTotal:
       type: integer
       description: Total number of brands across matching topics
-    source_domains_total:
+    sourceDomainsTotal:
       type: integer
       description: Total number of source domains across matching topics
-    intent_breakdown:
+    intentBreakdown:
       type: array
       items:
         type: object
@@ -8800,10 +8821,10 @@ AiVisibilityTopicsResearchStats:
             type: string
           count:
             type: integer
-    related_topics_ai_volume:
+    relatedTopicsAiVolume:
       type: integer
       description: Aggregated AI volume for related topics
-    sr_filters:
+    srFilters:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
@@ -8811,15 +8832,15 @@ AiVisibilitySourceDomainRow:
   type: object
   description: A source domain row in topic research
   properties:
-    source_domain:
+    sourceDomain:
       type: string
-    sources_count:
+    sourcesCount:
       type: integer
     mentions:
       type: integer
-    organic_traffic:
+    organicTraffic:
       type: integer
-    prompt_example:
+    promptExample:
       type: string
 
 AiVisibilitySourceDomainsResponse:
@@ -8836,6 +8857,6 @@ AiVisibilitySourceDomainsResponse:
       type: integer
     limit:
       type: integer
-    sr_filters:
+    srFilters:
       $ref: '#/AiVisibilitySrFilters'
   required: [data, total, offset, limit]

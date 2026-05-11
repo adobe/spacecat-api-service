@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable max-len, max-statements-per-line, object-curly-newline, no-plusplus, prefer-promise-reject-errors -- AI Visibility brands tests */
+
 import { expect } from 'chai';
 import sinon from 'sinon';
 import { ConnectError, Code } from '@connectrpc/connect';
@@ -84,7 +86,7 @@ describe('AI Visibility – brands handlers', () => {
     it('returns empty top-level when data is empty', () => {
       const result = mapStatsByLLM({ llm: [] });
       expect(result.visibility).to.equal(0);
-      expect(result.by_date).to.deep.equal([]);
+      expect(result.byDate).to.deep.equal([]);
     });
 
     it('maps LLM breakdown rows with dateRange', () => {
@@ -100,7 +102,7 @@ describe('AI Visibility – brands handlers', () => {
       };
       const dateRange = { from: { year: 2026, month: 3, day: 1 }, till: { year: 2026, month: 3, day: 1 } };
       const result = mapStatsByLLM(data, dateRange);
-      expect(result.by_date).to.have.length(1);
+      expect(result.byDate).to.have.length(1);
       expect(result.visibility).to.equal(50);
       expect(result.mentions.chatgpt).to.equal(5);
     });
@@ -117,28 +119,28 @@ describe('AI Visibility – brands handlers', () => {
         ],
       };
       const result = mapStatsByLLM(data);
-      expect(result.by_date).to.have.length(2);
-      expect(result.by_date[0].month).to.equal(1);
-      expect(result.by_date[1].month).to.equal(2);
+      expect(result.byDate).to.have.length(2);
+      expect(result.byDate[0].month).to.equal(1);
+      expect(result.byDate[1].month).to.equal(2);
     });
 
     it('skips rows with zero YM', () => {
       const data = { llm: [{ date: { year: 0, month: 0 } }] };
       const result = mapStatsByLLM(data);
-      expect(result.by_date).to.have.length(0);
+      expect(result.byDate).to.have.length(0);
     });
 
     it('handles data.llm being undefined', () => {
       const result = mapStatsByLLM({});
-      expect(result.by_date).to.deep.equal([]);
+      expect(result.byDate).to.deep.equal([]);
     });
 
     it('handles dateRange crossing year boundary', () => {
       const dateRange = { from: { year: 2025, month: 11, day: 1 }, till: { year: 2026, month: 2, day: 1 } };
       const result = mapStatsByLLM({ llm: [] }, dateRange);
-      expect(result.by_date).to.have.length(4);
-      expect(result.by_date[0].month).to.equal(11);
-      expect(result.by_date[3].month).to.equal(2);
+      expect(result.byDate).to.have.length(4);
+      expect(result.byDate[0].month).to.equal(11);
+      expect(result.byDate[3].month).to.equal(2);
     });
 
     it('uses first slice entry when no aggregate row', () => {
@@ -150,7 +152,7 @@ describe('AI Visibility – brands handlers', () => {
         ],
       };
       const result = mapStatsByLLM(data);
-      expect(result.by_date[0].ai_visibility).to.equal(30);
+      expect(result.byDate[0].aiVisibility).to.equal(30);
     });
   });
 
@@ -173,23 +175,23 @@ describe('AI Visibility – brands handlers', () => {
       };
       const row = mapGrpcPromptToBrandPromptRow(p, 'chatgpt', undefined);
       expect(row.prompt).to.equal('Test prompt');
-      expect(row.prompt_hash).to.equal('123');
-      expect(row.serp_id).to.equal('456');
+      expect(row.promptHash).to.equal('123');
+      expect(row.serpId).to.equal('456');
       expect(row.engine).to.equal('chatgpt');
-      expect(row.topic_volume).to.equal(10000);
-      expect(row.response_excerpt).to.equal('excerpt...');
-      expect(row._tv).to.equal(10000);
+      expect(row.topicVolume).to.equal(10000);
+      expect(row.responseExcerpt).to.equal('excerpt...');
+      expect(row.topicVolumeSortKey).to.equal(10000);
     });
 
     it('handles missing optional fields', () => {
       const p = { prompt: 'Q', llm: LLM_ENUM.GEMINI };
       const row = mapGrpcPromptToBrandPromptRow(p, null, undefined);
-      expect(row.prompt_hash).to.equal('');
-      expect(row.serp_id).to.equal('');
+      expect(row.promptHash).to.equal('');
+      expect(row.serpId).to.equal('');
       expect(row.engine).to.equal('gemini');
-      expect(row).to.not.have.property('topic_volume');
-      expect(row).to.not.have.property('response_excerpt');
-      expect(row._tv).to.equal(-1);
+      expect(row).to.not.have.property('topicVolume');
+      expect(row).to.not.have.property('responseExcerpt');
+      expect(row.topicVolumeSortKey).to.equal(-1);
     });
 
     it('omits country when no country info available', () => {
@@ -213,8 +215,8 @@ describe('AI Visibility – brands handlers', () => {
     it('handles topicVolume of empty string', () => {
       const p = { prompt: 'Q', topicVolume: '' };
       const row = mapGrpcPromptToBrandPromptRow(p, 'chatgpt', undefined);
-      expect(row).to.not.have.property('topic_volume');
-      expect(row._tv).to.equal(-1);
+      expect(row).to.not.have.property('topicVolume');
+      expect(row.topicVolumeSortKey).to.equal(-1);
     });
   });
 
@@ -245,11 +247,11 @@ describe('AI Visibility – brands handlers', () => {
           },
         ],
       });
-      const sp = new URLSearchParams('domain=example.com&window_months=2');
+      const sp = new URLSearchParams('domain=example.com&windowMonths=2');
       const res = await handleBrandStats(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.by_country).to.have.length(1);
-      expect(res.body.by_date).to.be.an('array');
+      expect(res.body.byCountry).to.have.length(1);
+      expect(res.body.byDate).to.be.an('array');
     });
 
     it('uses explicit month param for date range', async () => {
@@ -263,7 +265,7 @@ describe('AI Visibility – brands handlers', () => {
     it('clamps window_months between 1 and 6', async () => {
       clients.brandClient.statsByLLM.resolves({ llm: [] });
       clients.brandClient.statsByCountry.resolves({ byCountry: [] });
-      const sp = new URLSearchParams('domain=example.com&window_months=99');
+      const sp = new URLSearchParams('domain=example.com&windowMonths=99');
       const res = await handleBrandStats(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -273,7 +275,7 @@ describe('AI Visibility – brands handlers', () => {
       clients.brandClient.statsByCountry.resolves({});
       const sp = new URLSearchParams('domain=example.com');
       const res = await handleBrandStats(sp, clients);
-      expect(res.body.by_country).to.deep.equal([]);
+      expect(res.body.byCountry).to.deep.equal([]);
     });
 
     it('falls back through country mapping chain to String(country)', async () => {
@@ -285,7 +287,7 @@ describe('AI Visibility – brands handlers', () => {
       });
       const sp = new URLSearchParams('domain=example.com');
       const res = await handleBrandStats(sp, clients);
-      expect(res.body.by_country[0].country).to.equal('99999');
+      expect(res.body.byCountry[0].country).to.equal('99999');
     });
   });
 
@@ -362,13 +364,13 @@ describe('AI Visibility – brands handlers', () => {
       const sp = new URLSearchParams('domain=example.com&engine=chatgpt');
       const res = await handleBrandPrompts(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.data[0]).to.not.have.property('_tv');
+      expect(res.body.data[0]).to.not.have.property('topicVolumeSortKey');
     });
 
     it('single LLM path passes topic_ids filter', async () => {
       clients.promptClient.promptsTotals.resolves({ total: 0 });
       clients.promptClient.prompts.resolves({ prompts: [] });
-      const sp = new URLSearchParams('domain=example.com&engine=chatgpt&topic_ids=111&topic_ids=222');
+      const sp = new URLSearchParams('domain=example.com&engine=chatgpt&topicIds=111&topicIds=222');
       const res = await handleBrandPrompts(sp, clients);
       expect(res.status).to.equal(200);
       const call = clients.promptClient.prompts.firstCall.args[0];
@@ -379,7 +381,7 @@ describe('AI Visibility – brands handlers', () => {
     it('single LLM path passes single topic_ids filter', async () => {
       clients.promptClient.promptsTotals.resolves({ total: 0 });
       clients.promptClient.prompts.resolves({ prompts: [] });
-      const sp = new URLSearchParams('domain=example.com&engine=chatgpt&topic_ids=111');
+      const sp = new URLSearchParams('domain=example.com&engine=chatgpt&topicIds=111');
       const res = await handleBrandPrompts(sp, clients);
       expect(res.status).to.equal(200);
       const call = clients.promptClient.prompts.firstCall.args[0];
@@ -400,7 +402,7 @@ describe('AI Visibility – brands handlers', () => {
       expect(res.status).to.equal(200);
       expect(res.body.total).to.equal(FTS_LLMS.length);
       expect(res.body.data.length).to.be.greaterThan(0);
-      res.body.data.forEach((d) => expect(d).to.not.have.property('_tv'));
+      res.body.data.forEach((d) => expect(d).to.not.have.property('topicVolumeSortKey'));
     });
 
     it('all-LLM fan-out handles gRPC errors gracefully', async () => {
@@ -419,7 +421,7 @@ describe('AI Visibility – brands handlers', () => {
         clients.promptClient.promptsTotals.withArgs(sinon.match({ llm })).resolves({ total: 0 });
         clients.promptClient.prompts.withArgs(sinon.match({ llm })).resolves({ prompts: [] });
       }
-      const sp = new URLSearchParams('domain=example.com&topic_ids=111');
+      const sp = new URLSearchParams('domain=example.com&topicIds=111');
       const res = await handleBrandPrompts(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -545,7 +547,7 @@ describe('AI Visibility – brands handlers', () => {
       const sp = new URLSearchParams('domain=example.com');
       const res = await handleBrandCitedPages(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.data[0].page_url).to.equal('https://example.com/page');
+      expect(res.body.data[0].pageUrl).to.equal('https://example.com/page');
       expect(res.body.total).to.equal(10);
     });
 
@@ -984,7 +986,7 @@ describe('AI Visibility – brands handlers', () => {
       const sp = new URLSearchParams('domain=example.com');
       const res = await handleBrandCitedSources(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.data[0].source_domain).to.equal('source.com');
+      expect(res.body.data[0].sourceDomain).to.equal('source.com');
       expect(res.body.total).to.equal(20);
     });
 
@@ -1022,7 +1024,7 @@ describe('AI Visibility – brands handlers', () => {
       clients.voSourcesClient.domainsTotals.resolves({ totals: [] });
       const sp = new URLSearchParams('domain=example.com');
       const res = await handleBrandCitedSources(sp, clients);
-      expect(res.body.data[0].organic_traffic).to.equal(5000);
+      expect(res.body.data[0].organicTraffic).to.equal(5000);
     });
 
     it('excludes organic_traffic when NaN/Infinity', async () => {
@@ -1034,7 +1036,7 @@ describe('AI Visibility – brands handlers', () => {
       clients.voSourcesClient.domainsTotals.resolves({ totals: [] });
       const sp = new URLSearchParams('domain=example.com');
       const res = await handleBrandCitedSources(sp, clients);
-      expect(res.body.data[0]).to.not.have.property('organic_traffic');
+      expect(res.body.data[0]).to.not.have.property('organicTraffic');
     });
 
     it('filters out empty source_domain entries', async () => {
@@ -1085,12 +1087,12 @@ describe('AI Visibility – brands handlers', () => {
       const sp = new URLSearchParams('domain=example.com');
       const res = await handleBrandSourceOpportunities(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.data[0].source_domain).to.equal('gap.com');
+      expect(res.body.data[0].sourceDomain).to.equal('gap.com');
     });
 
     it('returns empty when competitors list is empty and gap kinds need competitors', async () => {
       clients.brandClient.topBrandsByDomain.resolves({ brands: [] });
-      const sp = new URLSearchParams('domain=example.com&gap_kinds=MISSING');
+      const sp = new URLSearchParams('domain=example.com&gapKinds=MISSING');
       const res = await handleBrandSourceOpportunities(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.deep.equal([]);
@@ -1129,7 +1131,7 @@ describe('AI Visibility – brands handlers', () => {
       });
       clients.sourceClient.gapSourceDomains.resolves({ domains: [] });
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 0 });
-      const sp = new URLSearchParams('domain=example.com&gap_snapshot_date=2026-03-15');
+      const sp = new URLSearchParams('domain=example.com&gapSnapshotDate=2026-03-15');
       const res = await handleBrandSourceOpportunities(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -1140,7 +1142,7 @@ describe('AI Visibility – brands handlers', () => {
       });
       clients.sourceClient.gapSourceDomains.resolves({ domains: [] });
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 0 });
-      const sp = new URLSearchParams('domain=example.com&gap_kinds=SHARED,WEAK');
+      const sp = new URLSearchParams('domain=example.com&gapKinds=SHARED,WEAK');
       const res = await handleBrandSourceOpportunities(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -1157,7 +1159,7 @@ describe('AI Visibility – brands handlers', () => {
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com');
       const res = await handleBrandSourceOpportunities(sp, clients);
-      expect(res.body.data[0].source_domain).to.equal('stripped.com');
+      expect(res.body.data[0].sourceDomain).to.equal('stripped.com');
     });
 
     it('filters out focal brand from competitors', async () => {
@@ -1173,7 +1175,7 @@ describe('AI Visibility – brands handlers', () => {
 
     it('handles topBrandsByDomain failure gracefully', async () => {
       clients.brandClient.topBrandsByDomain.rejects(new Error('fail'));
-      const sp = new URLSearchParams('domain=example.com&gap_kinds=MISSING');
+      const sp = new URLSearchParams('domain=example.com&gapKinds=MISSING');
       const res = await handleBrandSourceOpportunities(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.deep.equal([]);
@@ -1199,7 +1201,7 @@ describe('AI Visibility – brands handlers', () => {
       clients.brandClient.topBrandsByDomain.resolves({ brands: [] });
       clients.sourceClient.gapSourceDomains.resolves({ domains: [] });
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 0 });
-      const sp = new URLSearchParams('domain=example.com&gap_kinds=ALL');
+      const sp = new URLSearchParams('domain=example.com&gapKinds=ALL');
       const res = await handleBrandSourceOpportunities(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -1284,8 +1286,8 @@ describe('AI Visibility – brands handlers', () => {
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 3 });
       const sp = new URLSearchParams('domain=example.com');
       const res = await handleBrandSourceOpportunities(sp, clients);
-      expect(res.body.data[0].source_domain).to.equal('hname.com');
-      expect(res.body.data[1].source_domain).to.equal('h.com');
+      expect(res.body.data[0].sourceDomain).to.equal('hname.com');
+      expect(res.body.data[1].sourceDomain).to.equal('h.com');
       expect(res.body.data).to.have.length(2);
     });
 
@@ -1320,7 +1322,7 @@ describe('AI Visibility – brands handlers', () => {
       clients.brandClient.topBrandsByDomain.resolves({});
       clients.sourceClient.gapSourceDomains.resolves({ domains: [] });
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 0 });
-      const sp = new URLSearchParams('domain=example.com&gap_kinds=ALL');
+      const sp = new URLSearchParams('domain=example.com&gapKinds=ALL');
       const res = await handleBrandSourceOpportunities(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -1331,7 +1333,7 @@ describe('AI Visibility – brands handlers', () => {
       });
       clients.sourceClient.gapSourceDomains.resolves({ domains: [] });
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 0 });
-      const sp = new URLSearchParams('domain=example.com&gap_kinds=ALL');
+      const sp = new URLSearchParams('domain=example.com&gapKinds=ALL');
       const res = await handleBrandSourceOpportunities(sp, clients);
       expect(res.status).to.equal(200);
     });

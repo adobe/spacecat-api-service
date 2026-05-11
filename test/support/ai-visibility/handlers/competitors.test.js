@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable prefer-promise-reject-errors -- AI Visibility competitors tests */
+
 import { expect } from 'chai';
 import sinon from 'sinon';
 import { ConnectError, Code } from '@connectrpc/connect';
@@ -101,9 +103,9 @@ describe('AI Visibility – competitors handlers', () => {
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsMetrics(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.by_brand).to.have.length(1);
-      expect(res.body.by_brand[0].brand.domain).to.equal('comp.com');
-      expect(res.body.by_brand[0].by_date[0].visibility).to.equal(50);
+      expect(res.body.byBrand).to.have.length(1);
+      expect(res.body.byBrand[0].brand.domain).to.equal('comp.com');
+      expect(res.body.byBrand[0].byDate[0].visibility).to.equal(50);
     });
 
     it('returns empty by_brand on ConnectError NotFound', async () => {
@@ -111,7 +113,7 @@ describe('AI Visibility – competitors handlers', () => {
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsMetrics(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.by_brand).to.deep.equal([]);
+      expect(res.body.byBrand).to.deep.equal([]);
     });
 
     it('returns empty by_brand on message-pattern NotFound', async () => {
@@ -119,7 +121,7 @@ describe('AI Visibility – competitors handlers', () => {
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsMetrics(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.by_brand).to.deep.equal([]);
+      expect(res.body.byBrand).to.deep.equal([]);
     });
 
     it('rethrows non-NotFound errors', async () => {
@@ -135,7 +137,7 @@ describe('AI Visibility – competitors handlers', () => {
 
     it('passes engine filter and snapshot date', async () => {
       clients.crMetricsClient.stats.resolves({ byBrand: [] });
-      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&engine=chatgpt&gap_snapshot_date=2026-03-15');
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&engine=chatgpt&gapSnapshotDate=2026-03-15');
       const res = await handleCompetitorsMetrics(sp, clients);
       expect(res.status).to.equal(200);
       const call = clients.crMetricsClient.stats.firstCall.args[0];
@@ -145,7 +147,7 @@ describe('AI Visibility – competitors handlers', () => {
 
     it('passes metrics_snapshot_date when gap_snapshot_date is absent', async () => {
       clients.crMetricsClient.stats.resolves({ byBrand: [] });
-      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&metrics_snapshot_date=2026-04-01');
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&metricsSnapshotDate=2026-04-01');
       const res = await handleCompetitorsMetrics(sp, clients);
       expect(res.status).to.equal(200);
       const call = clients.crMetricsClient.stats.firstCall.args[0];
@@ -163,7 +165,7 @@ describe('AI Visibility – competitors handlers', () => {
       });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsMetrics(sp, clients);
-      expect(res.body.by_brand[0].brand.name).to.equal('comp.com');
+      expect(res.body.byBrand[0].brand.name).to.equal('comp.com');
     });
 
     it('maps brand with missing brand object', async () => {
@@ -172,8 +174,8 @@ describe('AI Visibility – competitors handlers', () => {
       });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsMetrics(sp, clients);
-      expect(res.body.by_brand[0].brand.domain).to.equal('');
-      expect(res.body.by_brand[0].brand.name).to.equal('');
+      expect(res.body.byBrand[0].brand.domain).to.equal('');
+      expect(res.body.byBrand[0].brand.name).to.equal('');
     });
 
     it('maps brand with missing byDate', async () => {
@@ -182,7 +184,7 @@ describe('AI Visibility – competitors handlers', () => {
       });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsMetrics(sp, clients);
-      expect(res.body.by_brand[0].by_date).to.deep.equal([]);
+      expect(res.body.byBrand[0].byDate).to.deep.equal([]);
     });
 
     it('handles error with no message property', async () => {
@@ -206,7 +208,7 @@ describe('AI Visibility – competitors handlers', () => {
       clients.crMetricsClient.stats.resolves({});
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsMetrics(sp, clients);
-      expect(res.body.by_brand).to.deep.equal([]);
+      expect(res.body.byBrand).to.deep.equal([]);
     });
 
     it('handles repeated competitor= params', async () => {
@@ -250,8 +252,8 @@ describe('AI Visibility – competitors handlers', () => {
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapTopics(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.data[0].gap_mentions).to.have.length(1);
-      expect(res.body.data[0].topic_id).to.equal('123');
+      expect(res.body.data[0].gapMentions).to.have.length(1);
+      expect(res.body.data[0].topicId).to.equal('123');
     });
 
     it('NotFound error returns empty results', async () => {
@@ -303,7 +305,7 @@ describe('AI Visibility – competitors handlers', () => {
     it('passes gap_snapshot_date when provided', async () => {
       clients.topicClient.gapTopics.resolves({ topics: [] });
       clients.topicClient.gapTopicsTotals.resolves({ total: 0 });
-      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&gap_snapshot_date=2026-05-01');
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&gapSnapshotDate=2026-05-01');
       const res = await handleCompetitorsGapTopics(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -345,7 +347,7 @@ describe('AI Visibility – competitors handlers', () => {
       clients.topicClient.gapTopicsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapTopics(sp, clients);
-      expect(res.body.data[0].gap_mentions).to.deep.equal([]);
+      expect(res.body.data[0].gapMentions).to.deep.equal([]);
     });
 
     it('handles rejection with reason object lacking message property', async () => {
@@ -390,12 +392,12 @@ describe('AI Visibility – competitors handlers', () => {
       clients.topicClient.gapTopicsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapTopics(sp, clients);
-      expect(res.body.data[0].topic_id).to.equal('');
+      expect(res.body.data[0].topicId).to.equal('');
       expect(res.body.data[0].topic).to.equal('');
-      expect(res.body.data[0].gap_mentions).to.have.length(3);
-      expect(res.body.data[0].gap_mentions[0].name).to.equal('c.com');
-      expect(res.body.data[0].gap_mentions[1].domain).to.equal('');
-      expect(res.body.data[0].gap_mentions[2].domain).to.equal('');
+      expect(res.body.data[0].gapMentions).to.have.length(3);
+      expect(res.body.data[0].gapMentions[0].name).to.equal('c.com');
+      expect(res.body.data[0].gapMentions[1].domain).to.equal('');
+      expect(res.body.data[0].gapMentions[2].domain).to.equal('');
     });
   });
 
@@ -425,8 +427,8 @@ describe('AI Visibility – competitors handlers', () => {
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapSourceDomains(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.data[0].source_domain).to.equal('gap.com');
-      expect(res.body.data[0].organic_traffic).to.equal(1000);
+      expect(res.body.data[0].sourceDomain).to.equal('gap.com');
+      expect(res.body.data[0].organicTraffic).to.equal(1000);
     });
 
     it('NotFound error returns empty', async () => {
@@ -489,7 +491,7 @@ describe('AI Visibility – competitors handlers', () => {
     it('passes gap_snapshot_date', async () => {
       clients.sourceClient.gapSourceDomains.resolves({ domains: [] });
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 0 });
-      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&gap_snapshot_date=2026-01-15');
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&gapSnapshotDate=2026-01-15');
       const res = await handleCompetitorsGapSourceDomains(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -503,7 +505,7 @@ describe('AI Visibility – competitors handlers', () => {
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapSourceDomains(sp, clients);
-      expect(res.body.data[0]).to.not.have.property('organic_traffic');
+      expect(res.body.data[0]).to.not.have.property('organicTraffic');
     });
 
     it('detects NotFound via message pattern', async () => {
@@ -524,7 +526,7 @@ describe('AI Visibility – competitors handlers', () => {
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapSourceDomains(sp, clients);
-      expect(res.body.data[0].source_domain).to.equal('host.com');
+      expect(res.body.data[0].sourceDomain).to.equal('host.com');
     });
 
     it('falls back to host when domain and hostname missing', async () => {
@@ -536,7 +538,7 @@ describe('AI Visibility – competitors handlers', () => {
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapSourceDomains(sp, clients);
-      expect(res.body.data[0].source_domain).to.equal('h.com');
+      expect(res.body.data[0].sourceDomain).to.equal('h.com');
       expect(res.body.data[0].mentions).to.equal(2);
     });
 
@@ -561,7 +563,7 @@ describe('AI Visibility – competitors handlers', () => {
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapSourceDomains(sp, clients);
-      expect(res.body.data[0]).to.not.have.property('organic_traffic');
+      expect(res.body.data[0]).to.not.have.property('organicTraffic');
     });
 
     it('detects NotFound via \\bNotFound\\b regex in gap source domains', async () => {
@@ -637,7 +639,7 @@ describe('AI Visibility – competitors handlers', () => {
       clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapSourceDomains(sp, clients);
-      expect(res.body.data[0]).to.not.have.property('organic_traffic');
+      expect(res.body.data[0]).to.not.have.property('organicTraffic');
     });
 
     it('handles all domain/hostname/host being null', async () => {
@@ -747,7 +749,7 @@ describe('AI Visibility – competitors handlers', () => {
     it('passes gap_snapshot_date', async () => {
       clients.promptClient.gapPrompts.resolves({ prompts: [] });
       clients.promptClient.gapPromptsTotals.resolves({ total: 0 });
-      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&gap_snapshot_date=2026-02-10');
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&gapSnapshotDate=2026-02-10');
       const res = await handleCompetitorsGapPrompts(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -809,9 +811,9 @@ describe('AI Visibility – competitors handlers', () => {
       clients.promptClient.gapPromptsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapPrompts(sp, clients);
-      expect(res.body.data[0].prompt_hash).to.equal('');
-      expect(res.body.data[0].serp_id).to.equal('');
-      expect(res.body.data[0].topic_id).to.equal('');
+      expect(res.body.data[0].promptHash).to.equal('');
+      expect(res.body.data[0].serpId).to.equal('');
+      expect(res.body.data[0].topicId).to.equal('');
       expect(res.body.data[0].mentioned).to.equal(0);
     });
 
@@ -833,8 +835,8 @@ describe('AI Visibility – competitors handlers', () => {
       clients.promptClient.gapPromptsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapPrompts(sp, clients);
-      expect(res.body.data[0].prompt_hash).to.equal('');
-      expect(res.body.data[0].serp_id).to.equal('');
+      expect(res.body.data[0].promptHash).to.equal('');
+      expect(res.body.data[0].serpId).to.equal('');
     });
 
     it('maps gap prompt with empty string promptHash', async () => {
@@ -855,8 +857,8 @@ describe('AI Visibility – competitors handlers', () => {
       clients.promptClient.gapPromptsTotals.resolves({ total: 1 });
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapPrompts(sp, clients);
-      expect(res.body.data[0].prompt_hash).to.equal('');
-      expect(res.body.data[0].serp_id).to.equal('');
+      expect(res.body.data[0].promptHash).to.equal('');
+      expect(res.body.data[0].serpId).to.equal('');
     });
 
     it('detects NotFound via Code: NotFound regex in gap prompts', async () => {

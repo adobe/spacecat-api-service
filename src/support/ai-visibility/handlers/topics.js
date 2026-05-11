@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable max-statements-per-line, max-len -- AI Visibility handler surface */
+
 import { TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM, BRAND_TOPICS_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
 import { PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
 import { BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/brand/enums_pb.js';
@@ -28,9 +30,10 @@ const DISTINCT_TOPIC_IDS_MAX_PAGES = 200;
 async function countTopicRowsByTopicsByFtsPaging(country, query, llm, clients) {
   const q = String(query || '').trim();
   if (!q) { return 0; }
-  let offset = 0;
-  let total = 0;
-  for (let page = 0; page < DISTINCT_TOPIC_IDS_MAX_PAGES; page++) {
+  async function pull(offset, total, pagesLeft) {
+    if (pagesLeft <= 0) {
+      return total;
+    }
     const raw = await clients.topicClient.topicsByFTS({
       country,
       llm,
@@ -39,33 +42,37 @@ async function countTopicRowsByTopicsByFtsPaging(country, query, llm, clients) {
       range: { limit: DISTINCT_TOPIC_IDS_PAGE, offset },
     }).catch(() => ({ topics: [] }));
     const topics = raw.topics || [];
-    if (topics.length === 0) { break; }
-    total += topics.length;
-    offset += topics.length;
+    if (topics.length === 0) {
+      return total;
+    }
+    return pull(offset + topics.length, total + topics.length, pagesLeft - 1);
   }
-  return total;
+  return pull(0, 0, DISTINCT_TOPIC_IDS_MAX_PAGES);
 }
 
 async function countDistinctTopicIdsAcrossFtsLlms(country, query, clients) {
   const q = String(query || '').trim();
   if (!q) { return 0; }
   const seen = new Set();
-  await Promise.all(FTS_LLMS.map(async (llm) => {
-    let offset = 0;
-    for (let page = 0; page < DISTINCT_TOPIC_IDS_MAX_PAGES; page++) {
-      const raw = await clients.topicClient.topicsByFTS({
-        country,
-        llm,
-        query: q,
-        order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME },
-        range: { limit: DISTINCT_TOPIC_IDS_PAGE, offset },
-      }).catch(() => ({ topics: [] }));
-      const topics = raw.topics || [];
-      if (topics.length === 0) { break; }
-      for (const t of topics) { seen.add(String(t.id)); }
-      offset += topics.length;
+  async function pullForLlm(llm, offset, pagesLeft) {
+    if (pagesLeft <= 0) {
+      return;
     }
-  }));
+    const raw = await clients.topicClient.topicsByFTS({
+      country,
+      llm,
+      query: q,
+      order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME },
+      range: { limit: DISTINCT_TOPIC_IDS_PAGE, offset },
+    }).catch(() => ({ topics: [] }));
+    const topics = raw.topics || [];
+    if (topics.length === 0) {
+      return;
+    }
+    for (const t of topics) { seen.add(String(t.id)); }
+    await pullForLlm(llm, offset + topics.length, pagesLeft - 1);
+  }
+  await Promise.all(FTS_LLMS.map((llm) => pullForLlm(llm, 0, DISTINCT_TOPIC_IDS_MAX_PAGES)));
   return seen.size;
 }
 
@@ -87,7 +94,20 @@ async function fetchRelatedTopicsAiVolumeMetrics(country, query, llm, clients) {
 
 function attachRelatedTopicsAiVolume(body, v) {
   if (v == null) { return body; }
-  return { ...body, related_topics_ai_volume: v };
+  return { ...body, relatedTopicsAiVolume: v };
+}
+
+function stripVolumeSortKey(row) {
+  const next = { ...row };
+  delete next.volumeSortKey;
+  return next;
+}
+
+function stripPromptDedupeKeys(row) {
+  const next = { ...row };
+  delete next.mentionSortKey;
+  delete next.promptNormKey;
+  return next;
 }
 
 /* c8 ignore next 12 -- intent breakdown parsing with defensive guards */
@@ -96,10 +116,10 @@ function intentBreakdownFromMetricsByFtsRaw(raw) {
   const out = [];
   for (const item of raw.intents || []) {
     const slug = TOPIC_INTENT_SLUG[item.intent];
-    if (!slug) { continue; }
-    const w = num(item.weight);
-    if (w <= 0) { continue; }
-    out.push({ intent: slug, count: w });
+    const w = slug ? num(item.weight) : 0;
+    if (slug && w > 0) {
+      out.push({ intent: slug, count: w });
+    }
   }
   return out;
 }
@@ -107,45 +127,51 @@ function intentBreakdownFromMetricsByFtsRaw(raw) {
 function mergeIntentBreakdownsFromPerLlmMetrics(rawRows) {
   const merged = new Map();
   for (const raw of rawRows) {
-    if (!raw) { continue; }
-    for (const row of intentBreakdownFromMetricsByFtsRaw(raw)) {
-      merged.set(row.intent, (merged.get(row.intent) ?? 0) + row.count);
+    if (raw) {
+      for (const row of intentBreakdownFromMetricsByFtsRaw(raw)) {
+        merged.set(row.intent, (merged.get(row.intent) ?? 0) + row.count);
+      }
     }
   }
   return [...merged.entries()].map(([intent, count]) => ({ intent, count }));
 }
 
 /* c8 ignore start -- all-models metrics with per-LLM fallback */
-async function brandsAndSourceDomainsMetricsByFtsAllModels(country, query, clients) {
+async function sumBrandsAndSourceDomainsMetricsByFtsAcrossLlmsFallback(country, query, clients) {
   const q = String(query || '').trim();
-  if (!q) { return { brands_total: 0, source_domains_total: 0, intent_breakdown: [] }; }
+  if (!q) { return { brandsTotal: 0, sourceDomainsTotal: 0, intentBreakdown: [] }; }
   try {
-    const raw = await clients.topicClient.metricsByFTS({ country, llm: LLM_ENUM.ALL, query: q });
+    const rows = await Promise.all(FTS_LLMS.map((l) => clients.topicClient.metricsByFTS({ country, llm: l, query: q }).catch(() => null)));
+    let brandsTotal = 0;
+    let sourceDomainsTotal = 0;
+    for (const raw of rows) {
+      if (raw) {
+        brandsTotal += num(raw.brandsCount);
+        sourceDomainsTotal += num(raw.sourceDomainsCount);
+      }
+    }
     return {
-      brands_total: num(raw.brandsCount),
-      source_domains_total: num(raw.sourceDomainsCount),
-      intent_breakdown: intentBreakdownFromMetricsByFtsRaw(raw),
+      brandsTotal,
+      sourceDomainsTotal,
+      intentBreakdown: mergeIntentBreakdownsFromPerLlmMetrics(rows),
     };
   } catch {
-    return sumBrandsAndSourceDomainsMetricsByFtsAcrossLlmsFallback(country, q, clients);
+    return { brandsTotal: 0, sourceDomainsTotal: 0, intentBreakdown: [] };
   }
 }
 
-async function sumBrandsAndSourceDomainsMetricsByFtsAcrossLlmsFallback(country, query, clients) {
+async function brandsAndSourceDomainsMetricsByFtsAllModels(country, query, clients) {
   const q = String(query || '').trim();
-  if (!q) { return { brands_total: 0, source_domains_total: 0, intent_breakdown: [] }; }
+  if (!q) { return { brandsTotal: 0, sourceDomainsTotal: 0, intentBreakdown: [] }; }
   try {
-    const rows = await Promise.all(FTS_LLMS.map((l) => clients.topicClient.metricsByFTS({ country, llm: l, query: q }).catch(() => null)));
-    let brands_total = 0;
-    let source_domains_total = 0;
-    for (const raw of rows) {
-      if (!raw) { continue; }
-      brands_total += num(raw.brandsCount);
-      source_domains_total += num(raw.sourceDomainsCount);
-    }
-    return { brands_total, source_domains_total, intent_breakdown: mergeIntentBreakdownsFromPerLlmMetrics(rows) };
+    const raw = await clients.topicClient.metricsByFTS({ country, llm: LLM_ENUM.ALL, query: q });
+    return {
+      brandsTotal: num(raw.brandsCount),
+      sourceDomainsTotal: num(raw.sourceDomainsCount),
+      intentBreakdown: intentBreakdownFromMetricsByFtsRaw(raw),
+    };
   } catch {
-    return { brands_total: 0, source_domains_total: 0, intent_breakdown: [] };
+    return sumBrandsAndSourceDomainsMetricsByFtsAcrossLlmsFallback(country, q, clients);
   }
 }
 /* c8 ignore stop */
@@ -155,15 +181,15 @@ function mapPromptRow(p) {
   const tv = p.topicVolume;
   return {
     prompt: p.prompt,
-    prompt_hash: String(p.promptHash ?? ''),
-    serp_id: String(p.serpId ?? ''),
+    promptHash: String(p.promptHash ?? ''),
+    serpId: String(p.serpId ?? ''),
     topic: p.topicName,
-    topic_id: String(p.topicId ?? ''),
+    topicId: String(p.topicId ?? ''),
     engine: llmToEngine(p.llm),
     mentions: num(p.mentionedBrandsCount),
-    cited_pages: num(p.sourcesCount),
-    ...(tv != null && tv !== '' ? { topic_volume: num(tv) } : {}),
-    ...(p.briefResponse ? { response_excerpt: p.briefResponse } : {}),
+    citedPages: num(p.sourcesCount),
+    ...(tv != null && tv !== '' ? { topicVolume: num(tv) } : {}),
+    ...(p.briefResponse ? { responseExcerpt: p.briefResponse } : {}),
   };
 }
 
@@ -174,9 +200,9 @@ function mapBrandsByTopicFtsRow(b) {
     domain: b.domain || '',
     name: String(b.name ?? '').trim(),
     mentions: num(b.mentions),
-    cited_pages: sourceDomains,
-    source_domains_count: sourceDomains,
-    prompt_example: String(b.examplePrompt ?? '').trim(),
+    citedPages: sourceDomains,
+    sourceDomainsCount: sourceDomains,
+    promptExample: String(b.examplePrompt ?? '').trim(),
   };
 }
 
@@ -184,16 +210,18 @@ function mapBrandsByTopicFtsRow(b) {
 function extractSourceDomainExamplePrompt(s) {
   if (!s || typeof s !== 'object') { return ''; }
   for (const v of [s.examplePrompt, s.promptExample]) {
-    if (v == null || v === '') { continue; }
-    const t = String(v).trim();
-    if (t) { return t; }
+    if (v != null && v !== '') {
+      const t = String(v).trim();
+      if (t) { return t; }
+    }
   }
   const ex = s.example;
   if (ex != null && typeof ex === 'object' && !Array.isArray(ex)) {
     for (const v of [ex.prompt, ex.text, ex.examplePrompt]) {
-      if (v == null || v === '') { continue; }
-      const t = String(v).trim();
-      if (t) { return t; }
+      if (v != null && v !== '') {
+        const t = String(v).trim();
+        if (t) { return t; }
+      }
     }
   }
   return '';
@@ -206,28 +234,33 @@ function mapSourceDomainsByTopicFtsRow(s) {
   const otRaw = s.organicTraffic;
   const hasUpstreamOrganic = otRaw !== undefined && otRaw !== null && otRaw !== '' && !(typeof otRaw === 'number' && !Number.isFinite(otRaw));
   const pe = extractSourceDomainExamplePrompt(s);
-  const row = { source_domain: s.domain || '', sources_count: sourcesCount, mentions };
-  if (hasUpstreamOrganic) { row.organic_traffic = num(otRaw); }
-  if (pe) { row.prompt_example = pe; }
+  const row = { sourceDomain: s.domain || '', sourcesCount, mentions };
+  if (hasUpstreamOrganic) { row.organicTraffic = num(otRaw); }
+  if (pe) { row.promptExample = pe; }
   return row;
 }
 
 export async function handleTopicsResearchStats(sp, clients) {
   const country = resolveCountryForFts(sp);
-  const q = (sp.get('search_query') ?? '').trim();
-  if (!q) { return { status: 400, body: { error: 'missing_search_query', message: 'search_query is required' } }; }
+  const q = (sp.get('searchQuery') ?? '').trim();
+  if (!q) {
+    return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
+  }
   const llm = optionalLlmFromQuery(sp);
   if (llm) {
-    const [topics_total, metricsRaw] = await Promise.all([
+    const [topicsTotal, metricsRaw] = await Promise.all([
       countTopicRowsByTopicsByFtsPaging(country, q, llm, clients),
       clients.topicClient.metricsByFTS({ country, llm, query: q }).catch(() => null),
     ]);
-    let metricsVolNum; let brands_total = 0; let source_domains_total = 0; let intent_breakdown = [];
+    let metricsVolNum;
+    let brandsTotal = 0;
+    let sourceDomainsTotal = 0;
+    let intentBreakdown = [];
     if (metricsRaw) {
       metricsVolNum = num(metricsRaw.volume);
-      brands_total = num(metricsRaw.brandsCount);
-      source_domains_total = num(metricsRaw.sourceDomainsCount);
-      intent_breakdown = intentBreakdownFromMetricsByFtsRaw(metricsRaw);
+      brandsTotal = num(metricsRaw.brandsCount);
+      sourceDomainsTotal = num(metricsRaw.sourceDomainsCount);
+      intentBreakdown = intentBreakdownFromMetricsByFtsRaw(metricsRaw);
     } else {
       const [volFallback, brandsTotalsRaw, sourcesTotalsRaw] = await Promise.all([
         fetchRelatedTopicsAiVolumeMetrics(country, q, llm, clients),
@@ -235,22 +268,28 @@ export async function handleTopicsResearchStats(sp, clients) {
         clients.sourceClient.sourceDomainsByTopicFTSTotals({ country, llm, query: q }),
       ]);
       metricsVolNum = volFallback;
-      brands_total = num(brandsTotalsRaw.total);
-      source_domains_total = num(sourcesTotalsRaw.total);
+      brandsTotal = num(brandsTotalsRaw.total);
+      sourceDomainsTotal = num(sourcesTotalsRaw.total);
     }
     const body = {
-      topics_total, brands_total, source_domains_total, ...(intent_breakdown.length ? { intent_breakdown } : {}),
+      topicsTotal,
+      brandsTotal,
+      sourceDomainsTotal,
+      ...(intentBreakdown.length ? { intentBreakdown } : {}),
     };
     return { status: 200, body: attachRelatedTopicsAiVolume(body, metricsVolNum) };
   }
-  const [topics_total, metricsVol, kpis] = await Promise.all([
+  const [topicsTotal, metricsVol, kpis] = await Promise.all([
     countDistinctTopicIdsAcrossFtsLlms(country, q, clients),
     fetchRelatedTopicsAiVolumeMetrics(country, q, null, clients),
     brandsAndSourceDomainsMetricsByFtsAllModels(country, q, clients),
   ]);
-  const { brands_total, source_domains_total, intent_breakdown = [] } = kpis;
+  const { brandsTotal, sourceDomainsTotal, intentBreakdown = [] } = kpis;
   const body = {
-    topics_total, brands_total, source_domains_total, ...(intent_breakdown.length ? { intent_breakdown } : {}),
+    topicsTotal,
+    brandsTotal,
+    sourceDomainsTotal,
+    ...(intentBreakdown.length ? { intentBreakdown } : {}),
   };
   return { status: 200, body: attachRelatedTopicsAiVolume(body, metricsVol) };
 }
@@ -258,8 +297,10 @@ export async function handleTopicsResearchStats(sp, clients) {
 export async function handleTopicsResearch(sp, clients) {
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
-  const q = (sp.get('search_query') ?? '').trim();
-  if (!q) { return { status: 400, body: { error: 'missing_search_query', message: 'search_query is required' } }; }
+  const q = (sp.get('searchQuery') ?? '').trim();
+  if (!q) {
+    return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
+  }
   const llm = optionalLlmFromQuery(sp);
   if (llm) {
     const [listTotal, raw] = await Promise.all([
@@ -270,7 +311,10 @@ export async function handleTopicsResearch(sp, clients) {
     ]);
     /* c8 ignore next */
     const data = (raw.topics || []).map((t) => ({
-      topic: t.name, topic_id: String(t.id), topic_volume: num(t.volume), prompts_count: num(t.promptsCount),
+      topic: t.name,
+      topicId: String(t.id),
+      topicVolume: num(t.volume),
+      promptsCount: num(t.promptsCount),
     }));
     return {
       status: 200,
@@ -292,14 +336,20 @@ export async function handleTopicsResearch(sp, clients) {
       const id = String(t.id);
       if (!seen.has(id)) {
         seen.set(id, {
-          topic: t.name, topic_id: id, topic_volume: num(t.volume), prompts_count: num(t.promptsCount), _sort: num(t.volume),
+          topic: t.name,
+          topicId: id,
+          topicVolume: num(t.volume),
+          promptsCount: num(t.promptsCount),
+          volumeSortKey: num(t.volume),
         });
       }
     }
   }
   /* c8 ignore next */
-  const merged = Array.from(seen.values()).sort((a, b) => b._sort - a._sort || a.topic.localeCompare(b.topic));
-  const data = merged.slice(0, limit).map(({ _sort, ...r }) => r);
+  const merged = Array.from(seen.values()).sort(
+    (a, b) => b.volumeSortKey - a.volumeSortKey || a.topic.localeCompare(b.topic),
+  );
+  const data = merged.slice(0, limit).map(stripVolumeSortKey);
   return {
     status: 200,
     body: {
@@ -309,8 +359,10 @@ export async function handleTopicsResearch(sp, clients) {
 }
 
 export async function handleTopicsStats(sp, clients) {
-  const topicId = sp.get('topic_id')?.trim();
-  if (!topicId) { return { status: 400, body: { error: 'missing_topic_id', message: 'topic_id is required' } }; }
+  const topicId = sp.get('topicId')?.trim();
+  if (!topicId) {
+    return { status: 400, body: { error: 'missing_topic_id', message: 'topicId is required' } };
+  }
   const domain = sp.get('domain')?.trim();
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
@@ -324,15 +376,22 @@ export async function handleTopicsStats(sp, clients) {
     status: 200,
     body: {
       data: [{
-        topic: t.name, topic_id: String(t.id), topic_volume: num(t.volume), domain, mentions: num(t.mentions), cited_pages: 0,
+        topic: t.name,
+        topicId: String(t.id),
+        topicVolume: num(t.volume),
+        domain,
+        mentions: num(t.mentions),
+        citedPages: 0,
       }],
     },
   };
 }
 
 export async function handleTopicsResearchPrompts(sp, clients) {
-  const searchQuery = sp.get('search_query')?.trim();
-  if (!searchQuery) { return { status: 400, body: { error: 'missing_search_query', message: 'search_query is required' } }; }
+  const searchQuery = sp.get('searchQuery')?.trim();
+  if (!searchQuery) {
+    return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
+  }
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
   const llm = optionalLlmFromQuery(sp);
@@ -362,29 +421,36 @@ export async function handleTopicsResearchPrompts(sp, clients) {
   const total = totalsResults.reduce((sum, r) => sum + num(r.total), 0);
   /* c8 ignore start -- all-LLM fan-out dedup/grouping */
   const seen = new Map();
-  for (let i = 0; i < FTS_LLMS.length; i++) {
+  for (let i = 0; i < FTS_LLMS.length; i += 1) {
     const engineSlug = llmToEngine(FTS_LLMS[i]);
-    for (const p of (listResults[i].prompts || [])) {
-      const row = mapPromptRow(p); row.engine = engineSlug || row.engine;
+    for (const p of (listResults[i]?.prompts || [])) {
+      const row = mapPromptRow(p);
+      row.engine = engineSlug || row.engine;
       const promptNorm = String(row.prompt ?? '').trim().toLowerCase();
-      const key = row.prompt_hash && row.serp_id ? `${row.topic_id}|${row.prompt_hash}|${row.serp_id}|${row.engine}|${promptNorm}` : `${row.topic_id}|${promptNorm}|${row.engine}`;
-      if (!seen.has(key)) { seen.set(key, { ...row, _sort: row.mentions, _promptNorm: promptNorm }); }
+      const key = row.promptHash && row.serpId
+        ? `${row.topicId}|${row.promptHash}|${row.serpId}|${row.engine}|${promptNorm}`
+        : `${row.topicId}|${promptNorm}|${row.engine}`;
+      if (!seen.has(key)) {
+        seen.set(key, { ...row, mentionSortKey: row.mentions, promptNormKey: promptNorm });
+      }
     }
   }
   /* c8 ignore stop */
   const byNorm = new Map();
   for (const row of seen.values()) {
-    const norm = row._promptNorm;
+    const norm = row.promptNormKey;
     if (!byNorm.has(norm)) { byNorm.set(norm, []); }
     byNorm.get(norm).push(row);
   }
   /* c8 ignore next 15 -- complex multi-engine grouping/sort logic */
   const groups = [...byNorm.values()].map((rows) => {
-    const sorted = [...rows].sort((a, b) => b._sort - a._sort || (a.prompt || '').localeCompare(b.prompt || ''));
-    const maxSort = sorted.length ? Math.max(...sorted.map((r) => r._sort)) : 0;
+    const sorted = [...rows].sort(
+      (a, b) => b.mentionSortKey - a.mentionSortKey || (a.prompt || '').localeCompare(b.prompt || ''),
+    );
+    const maxSort = sorted.length ? Math.max(...sorted.map((r) => r.mentionSortKey)) : 0;
     const multiEngine = new Set(sorted.map((r) => r.engine)).size > 1;
     return {
-      rows: sorted, maxSort, multiEngine, norm: sorted[0]?._promptNorm ?? '',
+      rows: sorted, maxSort, multiEngine, norm: sorted[0]?.promptNormKey ?? '',
     };
   });
   groups.sort((a, b) => b.maxSort - a.maxSort || (a.norm || '').localeCompare(b.norm || ''));
@@ -393,12 +459,17 @@ export async function handleTopicsResearchPrompts(sp, clients) {
   for (const g of groups) {
     if (g.multiEngine) {
       const n = g.rows.length;
-      if (n > FTS_LLMS.length) { continue; }
-      const nextLen = picked.length + n;
-      if (nextLen <= limit) { picked.push(...g.rows); } else if (picked.length < limit && nextLen <= overflowCap) { picked.push(...g.rows); }
+      if (n <= FTS_LLMS.length) {
+        const nextLen = picked.length + n;
+        if (nextLen <= limit) {
+          picked.push(...g.rows);
+        } else if (picked.length < limit && nextLen <= overflowCap) {
+          picked.push(...g.rows);
+        }
+      }
     } else if (picked.length < limit) { picked.push(g.rows[0]); }
   }
-  const data = picked.map(({ _sort, _promptNorm, ...r }) => r);
+  const data = picked.map(stripPromptDedupeKeys);
   return {
     status: 200,
     body: {
@@ -408,8 +479,10 @@ export async function handleTopicsResearchPrompts(sp, clients) {
 }
 
 export async function handleTopicsResearchBrands(sp, clients) {
-  const searchQuery = sp.get('search_query')?.trim();
-  if (!searchQuery) { return { status: 400, body: { error: 'missing_search_query', message: 'search_query is required' } }; }
+  const searchQuery = sp.get('searchQuery')?.trim();
+  if (!searchQuery) {
+    return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
+  }
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
   const llm = optionalLlmFromQuery(sp);
@@ -438,15 +511,18 @@ export async function handleTopicsResearchBrands(sp, clients) {
   const agg = new Map();
   for (const raw of listResults) {
     for (const b of (raw.brands || [])) {
-      const domain = b.domain || ''; if (!domain) { continue; }
-      const row = mapBrandsByTopicFtsRow(b);
-      const existing = agg.get(domain);
-      if (existing) {
-        existing.mentions += row.mentions; existing.cited_pages += row.cited_pages;
-        existing.source_domains_count = num(existing.source_domains_count) + num(row.source_domains_count);
-        if (!existing.name && row.name) { existing.name = row.name; }
-        if (!existing.prompt_example && row.prompt_example) { existing.prompt_example = row.prompt_example; }
-      } else { agg.set(domain, { ...row }); }
+      const domainKey = b.domain || '';
+      if (domainKey) {
+        const row = mapBrandsByTopicFtsRow(b);
+        const existing = agg.get(domainKey);
+        if (existing) {
+          existing.mentions += row.mentions;
+          existing.citedPages += row.citedPages;
+          existing.sourceDomainsCount = num(existing.sourceDomainsCount) + num(row.sourceDomainsCount);
+          if (!existing.name && row.name) { existing.name = row.name; }
+          if (!existing.promptExample && row.promptExample) { existing.promptExample = row.promptExample; }
+        } else { agg.set(domainKey, { ...row }); }
+      }
     }
   }
   const merged = Array.from(agg.values()).sort((a, b) => b.mentions - a.mentions || a.domain.localeCompare(b.domain));
@@ -460,8 +536,10 @@ export async function handleTopicsResearchBrands(sp, clients) {
 }
 
 export async function handleTopicsResearchSourceDomains(sp, clients) {
-  const searchQuery = sp.get('search_query')?.trim();
-  if (!searchQuery) { return { status: 400, body: { error: 'missing_search_query', message: 'search_query is required' } }; }
+  const searchQuery = sp.get('searchQuery')?.trim();
+  if (!searchQuery) {
+    return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
+  }
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
   const llm = optionalLlmFromQuery(sp);
@@ -490,18 +568,26 @@ export async function handleTopicsResearchSourceDomains(sp, clients) {
   const agg = new Map();
   for (const raw of listResults) {
     for (const s of sourceDomainsByTopicFtsRows(raw)) {
-      const domain = s.domain || ''; if (!domain) { continue; }
-      const row = mapSourceDomainsByTopicFtsRow(s);
-      const existing = agg.get(domain);
-      if (existing) {
-        existing.sources_count = num(existing.sources_count) + num(row.sources_count);
-        existing.mentions += row.mentions;
-        if (row.organic_traffic !== undefined) { existing.organic_traffic = num(existing.organic_traffic ?? 0) + num(row.organic_traffic); }
-        if (!existing.prompt_example && row.prompt_example) { existing.prompt_example = row.prompt_example; }
-      } else { agg.set(domain, { ...row }); }
+      const domainKey = s.domain || '';
+      if (domainKey) {
+        const row = mapSourceDomainsByTopicFtsRow(s);
+        const existing = agg.get(domainKey);
+        if (existing) {
+          existing.sourcesCount = num(existing.sourcesCount) + num(row.sourcesCount);
+          existing.mentions += row.mentions;
+          if (row.organicTraffic !== undefined) {
+            existing.organicTraffic = num(existing.organicTraffic ?? 0) + num(row.organicTraffic);
+          }
+          if (!existing.promptExample && row.promptExample) { existing.promptExample = row.promptExample; }
+        } else { agg.set(domainKey, { ...row }); }
+      }
     }
   }
-  const merged = Array.from(agg.values()).sort((a, b) => b.mentions - a.mentions || b.sources_count - a.sources_count || a.source_domain.localeCompare(b.source_domain));
+  const merged = Array.from(agg.values()).sort(
+    (a, b) => b.mentions - a.mentions
+      || b.sourcesCount - a.sourcesCount
+      || a.sourceDomain.localeCompare(b.sourceDomain),
+  );
   const data = merged.slice(0, limit);
   return {
     status: 200,

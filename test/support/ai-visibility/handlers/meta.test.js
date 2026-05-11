@@ -82,8 +82,8 @@ describe('AI Visibility – meta handler', () => {
       expect(res.body.countries).to.have.length(2);
       expect(res.body.countries[0].daily).to.deep.equal(['2026-05-01']);
       expect(res.body.countries[0].monthly).to.deep.equal(['2026-05']);
-      expect(res.body.countries[0].is_coming_soon).to.equal(false);
-      expect(res.body.countries[1].is_coming_soon).to.equal(true);
+      expect(res.body.countries[0].isComingSoon).to.equal(false);
+      expect(res.body.countries[1].isComingSoon).to.equal(true);
     });
 
     it('handles empty countries array', async () => {
@@ -104,7 +104,7 @@ describe('AI Visibility – meta handler', () => {
       const res = await handleMeta(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.countries).to.have.length(1);
-      expect(res.body.countries[0].country).to.equal('99999');
+      expect(res.body.countries[0].countryCode).to.equal('99999');
     });
 
     it('handles missing isComingSoon', async () => {
@@ -113,7 +113,7 @@ describe('AI Visibility – meta handler', () => {
       });
       const sp = new URLSearchParams('');
       const res = await handleMeta(sp, clients);
-      expect(res.body.countries[0].is_coming_soon).to.equal(false);
+      expect(res.body.countries[0].isComingSoon).to.equal(false);
     });
 
     it('maps known country enum to its string name', async () => {
@@ -124,7 +124,7 @@ describe('AI Visibility – meta handler', () => {
       });
       const sp = new URLSearchParams('');
       const res = await handleMeta(sp, clients);
-      expect(res.body.countries[0].country).to.be.a('string');
+      expect(res.body.countries[0].countryCode).to.be.a('string');
     });
 
     it('handles missing daily/monthly arrays', async () => {

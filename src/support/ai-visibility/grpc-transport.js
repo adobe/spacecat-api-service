@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable max-statements-per-line -- transport bootstrap */
+
 import { createClient } from '@connectrpc/connect';
 import { createGrpcTransport } from '@connectrpc/connect-node';
 import { BrandService } from '@quazar/ai-seo-ts/v2/brand/service_pb.js';

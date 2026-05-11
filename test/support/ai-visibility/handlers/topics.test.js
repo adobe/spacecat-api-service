@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable max-len, max-statements-per-line, object-curly-newline, no-plusplus -- AI Visibility topics tests */
+
 import { expect } from 'chai';
 import sinon from 'sinon';
 import {
@@ -92,14 +94,14 @@ describe('AI Visibility – topics handlers', () => {
         sourceDomainsCount: 20,
         intents: [{ intent: TOPIC_INTENT_ENUM.INFORMATIONAL, weight: 5 }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchStats(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.topics_total).to.equal(1);
-      expect(res.body.brands_total).to.equal(10);
-      expect(res.body.source_domains_total).to.equal(20);
-      expect(res.body.related_topics_ai_volume).to.equal(5000);
-      expect(res.body.intent_breakdown).to.have.length(1);
+      expect(res.body.topicsTotal).to.equal(1);
+      expect(res.body.brandsTotal).to.equal(10);
+      expect(res.body.sourceDomainsTotal).to.equal(20);
+      expect(res.body.relatedTopicsAiVolume).to.equal(5000);
+      expect(res.body.intentBreakdown).to.have.length(1);
     });
 
     it('single LLM fallback when metricsByFTS fails', async () => {
@@ -107,12 +109,12 @@ describe('AI Visibility – topics handlers', () => {
       clients.topicClient.metricsByFTS.rejects(new Error('fail'));
       clients.brandClient.brandsByTopicFTSTotals.resolves({ total: 3 });
       clients.sourceClient.sourceDomainsByTopicFTSTotals.resolves({ total: 7 });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchStats(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.brands_total).to.equal(3);
-      expect(res.body.source_domains_total).to.equal(7);
-      expect(res.body).to.not.have.property('intent_breakdown');
+      expect(res.body.brandsTotal).to.equal(3);
+      expect(res.body.sourceDomainsTotal).to.equal(7);
+      expect(res.body).to.not.have.property('intentBreakdown');
     });
 
     it('all LLMs path', async () => {
@@ -134,11 +136,11 @@ describe('AI Visibility – topics handlers', () => {
         sourceDomainsCount: 25,
         intents: [{ intent: TOPIC_INTENT_ENUM.TASK, weight: 3 }],
       });
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchStats(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.topics_total).to.be.a('number');
-      expect(res.body.related_topics_ai_volume).to.equal(300);
+      expect(res.body.topicsTotal).to.be.a('number');
+      expect(res.body.relatedTopicsAiVolume).to.equal(300);
     });
 
     it('all LLMs path falls back when metricsByFTS ALL fails', async () => {
@@ -152,21 +154,21 @@ describe('AI Visibility – topics handlers', () => {
       }
       clients.topicClient.metricsByFTSGroupedByLLM.resolves({ metricsByLlm: [] });
       clients.topicClient.metricsByFTS.withArgs(sinon.match({ llm: LLM_ENUM.ALL })).rejects(new Error('fail'));
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchStats(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.brands_total).to.be.greaterThan(0);
+      expect(res.body.brandsTotal).to.be.greaterThan(0);
     });
 
     it('all LLMs fallback returns zeros when all calls fail', async () => {
       clients.topicClient.topicsByFTS.resolves({ topics: [] });
       clients.topicClient.metricsByFTSGroupedByLLM.rejects(new Error('fail'));
       clients.topicClient.metricsByFTS.rejects(new Error('fail'));
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchStats(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.brands_total).to.equal(0);
-      expect(res.body.source_domains_total).to.equal(0);
+      expect(res.body.brandsTotal).to.equal(0);
+      expect(res.body.sourceDomainsTotal).to.equal(0);
     });
 
     it('single LLM with metricsByFTS catching error triggers fallback path', async () => {
@@ -175,12 +177,12 @@ describe('AI Visibility – topics handlers', () => {
       clients.topicClient.metricsByFTS.onSecondCall().resolves({ volume: 42 });
       clients.brandClient.brandsByTopicFTSTotals.resolves({ total: 0 });
       clients.sourceClient.sourceDomainsByTopicFTSTotals.resolves({ total: 0 });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchStats(sp, clients);
       expect(res.status).to.equal(200);
     });
 
-    it('intent_breakdown omits zero-weight intents', async () => {
+    it('intentBreakdown omits zero-weight intents', async () => {
       clients.topicClient.topicsByFTS.resolves({ topics: [] });
       clients.topicClient.metricsByFTS.resolves({
         volume: 0,
@@ -188,19 +190,19 @@ describe('AI Visibility – topics handlers', () => {
         sourceDomainsCount: 0,
         intents: [{ intent: TOPIC_INTENT_ENUM.TASK, weight: 0 }, { intent: TOPIC_INTENT_ENUM.INFORMATIONAL, weight: 5 }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchStats(sp, clients);
-      expect(res.body.intent_breakdown).to.have.length(1);
+      expect(res.body.intentBreakdown).to.have.length(1);
     });
 
-    it('omits intent_breakdown when empty', async () => {
+    it('omits intentBreakdown when empty', async () => {
       clients.topicClient.topicsByFTS.resolves({ topics: [] });
       clients.topicClient.metricsByFTS.resolves({
         volume: 0, brandsCount: 0, sourceDomainsCount: 0, intents: [],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchStats(sp, clients);
-      expect(res.body).to.not.have.property('intent_breakdown');
+      expect(res.body).to.not.have.property('intentBreakdown');
     });
 
     it('all LLMs fallback catch block when Promise.all throws', async () => {
@@ -210,11 +212,11 @@ describe('AI Visibility – topics handlers', () => {
       for (const llm of FTS_LLMS) {
         clients.topicClient.metricsByFTS.withArgs(sinon.match({ llm })).callsFake(() => { throw new Error('sync throw in map'); });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchStats(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.brands_total).to.equal(0);
-      expect(res.body.source_domains_total).to.equal(0);
+      expect(res.body.brandsTotal).to.equal(0);
+      expect(res.body.sourceDomainsTotal).to.equal(0);
     });
 
     it('handles paging for countTopicRowsByTopicsByFtsPaging', async () => {
@@ -227,10 +229,10 @@ describe('AI Visibility – topics handlers', () => {
       clients.topicClient.metricsByFTS.resolves({
         volume: 0, brandsCount: 0, sourceDomainsCount: 0, intents: [],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchStats(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.topics_total).to.equal(2000);
+      expect(res.body.topicsTotal).to.equal(2000);
     });
 
     it('all LLMs with metricsByFTSGroupedByLLM returning empty metricsByLlm', async () => {
@@ -239,10 +241,10 @@ describe('AI Visibility – topics handlers', () => {
       clients.topicClient.metricsByFTS.withArgs(sinon.match({ llm: LLM_ENUM.ALL })).resolves({
         brandsCount: 0, sourceDomainsCount: 0, intents: [],
       });
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchStats(sp, clients);
       expect(res.status).to.equal(200);
-      expect(res.body.related_topics_ai_volume).to.equal(0);
+      expect(res.body.relatedTopicsAiVolume).to.equal(0);
     });
 
     it('fetchRelatedTopicsAiVolumeMetrics with llm catches error', async () => {
@@ -253,7 +255,7 @@ describe('AI Visibility – topics handlers', () => {
       clients.topicClient.metricsByFTS.onSecondCall().rejects(new Error('fail'));
       clients.brandClient.brandsByTopicFTSTotals.resolves({ total: 0 });
       clients.sourceClient.sourceDomainsByTopicFTSTotals.resolves({ total: 0 });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchStats(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -279,11 +281,11 @@ describe('AI Visibility – topics handlers', () => {
         if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
         return Promise.resolve(topicData);
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearch(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
-      expect(res.body.data[0].topic_id).to.equal('1');
+      expect(res.body.data[0].topicId).to.equal('1');
     });
 
     it('all LLMs fan-out deduplicates by topic id', async () => {
@@ -295,7 +297,7 @@ describe('AI Visibility – topics handlers', () => {
           }],
         });
       });
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearch(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
@@ -303,7 +305,7 @@ describe('AI Visibility – topics handlers', () => {
 
     it('all LLMs fan-out handles individual errors', async () => {
       clients.topicClient.topicsByFTS.rejects(new Error('fail'));
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearch(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.deep.equal([]);
@@ -328,12 +330,29 @@ describe('AI Visibility – topics handlers', () => {
         }
         return Promise.resolve({ topics: [] });
       });
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearch(sp, clients);
-      expect(res.body.data[0].topic_id).to.equal('2');
+      expect(res.body.data[0].topicId).to.equal('2');
     });
 
-    it('strips internal _sort from output', async () => {
+    it('sorts all-LLM merged topics by name when volume ties', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.resolve({
+          topics: [
+            { id: '1', name: 'Zebra', volume: 100, promptsCount: 1 },
+            { id: '2', name: 'Alpha', volume: 100, promptsCount: 1 },
+          ],
+        });
+      });
+      const sp = new URLSearchParams('searchQuery=test&limit=10');
+      const res = await handleTopicsResearch(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data[0].topic).to.equal('Alpha');
+      expect(res.body.data[1].topic).to.equal('Zebra');
+    });
+
+    it('strips internal volumeSortKey from output', async () => {
       clients.topicClient.topicsByFTS.callsFake(({ range }) => {
         if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
         return Promise.resolve({
@@ -342,9 +361,9 @@ describe('AI Visibility – topics handlers', () => {
           }],
         });
       });
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearch(sp, clients);
-      expect(res.body.data[0]).to.not.have.property('_sort');
+      expect(res.body.data[0]).to.not.have.property('volumeSortKey');
     });
   });
 
@@ -360,7 +379,7 @@ describe('AI Visibility – topics handlers', () => {
     });
 
     it('returns 400 when domain is missing', async () => {
-      const sp = new URLSearchParams('topic_id=123');
+      const sp = new URLSearchParams('topicId=123');
       const res = await handleTopicsStats(sp, clients);
       expect(res.status).to.equal(400);
       expect(res.body.error).to.equal('missing_domain');
@@ -372,11 +391,11 @@ describe('AI Visibility – topics handlers', () => {
           id: '123', name: 'Topic', volume: 5000, mentions: 10,
         }],
       });
-      const sp = new URLSearchParams('topic_id=123&domain=example.com');
+      const sp = new URLSearchParams('topicId=123&domain=example.com');
       const res = await handleTopicsStats(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
-      expect(res.body.data[0].topic_id).to.equal('123');
+      expect(res.body.data[0].topicId).to.equal('123');
       expect(res.body.data[0].domain).to.equal('example.com');
     });
 
@@ -386,7 +405,7 @@ describe('AI Visibility – topics handlers', () => {
           id: '999', name: 'Other', volume: 100, mentions: 1,
         }],
       });
-      const sp = new URLSearchParams('topic_id=123&domain=example.com');
+      const sp = new URLSearchParams('topicId=123&domain=example.com');
       const res = await handleTopicsStats(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.deep.equal([]);
@@ -410,7 +429,7 @@ describe('AI Visibility – topics handlers', () => {
           prompt: 'Q', promptHash: 'h', serpId: 's', topicName: 'T', topicId: '1', llm: 1, mentionedBrandsCount: 2, sourcesCount: 1, topicVolume: 5000,
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
@@ -427,13 +446,13 @@ describe('AI Visibility – topics handlers', () => {
           }],
         });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.total).to.equal(FTS_LLMS.length);
       res.body.data.forEach((d) => {
-        expect(d).to.not.have.property('_sort');
-        expect(d).to.not.have.property('_promptNorm');
+        expect(d).to.not.have.property('mentionSortKey');
+        expect(d).to.not.have.property('promptNormKey');
       });
     });
 
@@ -442,7 +461,7 @@ describe('AI Visibility – topics handlers', () => {
         clients.promptClient.promptsByTopicFTSTotals.withArgs(sinon.match({ llm })).rejects(new Error('fail'));
         clients.promptClient.promptsByTopicFTS.withArgs(sinon.match({ llm })).rejects(new Error('fail'));
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.deep.equal([]);
@@ -469,7 +488,7 @@ describe('AI Visibility – topics handlers', () => {
         clients.promptClient.promptsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
         clients.promptClient.promptsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ prompts: [] });
       }
-      const sp = new URLSearchParams('search_query=test&limit=5');
+      const sp = new URLSearchParams('searchQuery=test&limit=5');
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.status).to.equal(200);
     });
@@ -492,7 +511,7 @@ describe('AI Visibility – topics handlers', () => {
         clients.promptClient.promptsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
         clients.promptClient.promptsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ prompts: [] });
       }
-      const sp = new URLSearchParams('search_query=test&limit=5');
+      const sp = new URLSearchParams('searchQuery=test&limit=5');
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data.length).to.equal(2);
@@ -517,7 +536,7 @@ describe('AI Visibility – topics handlers', () => {
           prompts: [promptData(llm, `e${i}`)],
         });
       }
-      const sp = new URLSearchParams('search_query=test&limit=2');
+      const sp = new URLSearchParams('searchQuery=test&limit=2');
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data.length).to.be.greaterThan(0);
@@ -526,7 +545,7 @@ describe('AI Visibility – topics handlers', () => {
     it('handles raw.prompts being undefined in single LLM path', async () => {
       clients.promptClient.promptsByTopicFTSTotals.resolves({ total: 0 });
       clients.promptClient.promptsByTopicFTS.resolves({});
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.body.data).to.deep.equal([]);
     });
@@ -538,10 +557,10 @@ describe('AI Visibility – topics handlers', () => {
           prompt: 'Q', llm: 1, mentionedBrandsCount: 1, sourcesCount: 1,
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchPrompts(sp, clients);
-      expect(res.body.data[0]).to.not.have.property('topic_volume');
-      expect(res.body.data[0]).to.not.have.property('response_excerpt');
+      expect(res.body.data[0]).to.not.have.property('topicVolume');
+      expect(res.body.data[0]).to.not.have.property('responseExcerpt');
     });
 
     it('all LLMs with mixed prompts: some with hash/serpId, some without', async () => {
@@ -562,7 +581,7 @@ describe('AI Visibility – topics handlers', () => {
         clients.promptClient.promptsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
         clients.promptClient.promptsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ prompts: [] });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.body.data.length).to.equal(2);
     });
@@ -577,7 +596,7 @@ describe('AI Visibility – topics handlers', () => {
           }],
         });
       }
-      const sp = new URLSearchParams(`search_query=test&limit=${FTS_LLMS.length}`);
+      const sp = new URLSearchParams(`searchQuery=test&limit=${FTS_LLMS.length}`);
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data.length).to.equal(FTS_LLMS.length);
@@ -601,7 +620,7 @@ describe('AI Visibility – topics handlers', () => {
         clients.promptClient.promptsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
         clients.promptClient.promptsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ prompts: [] });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.body.data).to.have.length(1);
     });
@@ -624,12 +643,12 @@ describe('AI Visibility – topics handlers', () => {
           domain: 'brand.com', name: 'Brand', mentions: 10, sourceDomainsCount: 5, examplePrompt: 'Q?',
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchBrands(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
       expect(res.body.data[0].domain).to.equal('brand.com');
-      expect(res.body.data[0].source_domains_count).to.equal(5);
+      expect(res.body.data[0].sourceDomainsCount).to.equal(5);
     });
 
     it('all LLMs fan-out with aggregation', async () => {
@@ -641,7 +660,7 @@ describe('AI Visibility – topics handlers', () => {
           }],
         });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchBrands(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
@@ -653,7 +672,7 @@ describe('AI Visibility – topics handlers', () => {
         clients.brandClient.brandsByTopicFTSTotals.withArgs(sinon.match({ llm })).rejects(new Error('fail'));
         clients.brandClient.brandsByTopicFTS.withArgs(sinon.match({ llm })).rejects(new Error('fail'));
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchBrands(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.deep.equal([]);
@@ -676,7 +695,7 @@ describe('AI Visibility – topics handlers', () => {
         clients.brandClient.brandsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
         clients.brandClient.brandsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ brands: [] });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchBrands(sp, clients);
       expect(res.body.data[0].name).to.equal('Brand Name');
     });
@@ -688,7 +707,7 @@ describe('AI Visibility – topics handlers', () => {
           domain: 'brand.com', name: null, mentions: 5, sourceDomainsCount: 2,
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchBrands(sp, clients);
       expect(res.body.data[0].name).to.equal('');
     });
@@ -696,7 +715,7 @@ describe('AI Visibility – topics handlers', () => {
     it('handles raw.brands being undefined in single LLM path', async () => {
       clients.brandClient.brandsByTopicFTSTotals.resolves({ total: 0 });
       clients.brandClient.brandsByTopicFTS.resolves({});
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchBrands(sp, clients);
       expect(res.body.data).to.deep.equal([]);
     });
@@ -706,7 +725,7 @@ describe('AI Visibility – topics handlers', () => {
         clients.brandClient.brandsByTopicFTSTotals.withArgs(sinon.match({ llm })).resolves({ total: 0 });
         clients.brandClient.brandsByTopicFTS.withArgs(sinon.match({ llm })).resolves({});
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchBrands(sp, clients);
       expect(res.body.data).to.deep.equal([]);
     });
@@ -720,7 +739,7 @@ describe('AI Visibility – topics handlers', () => {
           }],
         });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchBrands(sp, clients);
       expect(res.body.data).to.have.length(0);
     });
@@ -742,9 +761,9 @@ describe('AI Visibility – topics handlers', () => {
         clients.brandClient.brandsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
         clients.brandClient.brandsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ brands: [] });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchBrands(sp, clients);
-      expect(res.body.data[0].prompt_example).to.equal('Example Q');
+      expect(res.body.data[0].promptExample).to.equal('Example Q');
     });
   });
 
@@ -765,13 +784,13 @@ describe('AI Visibility – topics handlers', () => {
           domain: 'src.com', sourcesCount: 3, mentions: 10, organicTraffic: 5000, examplePrompt: 'Q?',
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
-      expect(res.body.data[0].source_domain).to.equal('src.com');
-      expect(res.body.data[0].organic_traffic).to.equal(5000);
-      expect(res.body.data[0].prompt_example).to.equal('Q?');
+      expect(res.body.data[0].sourceDomain).to.equal('src.com');
+      expect(res.body.data[0].organicTraffic).to.equal(5000);
+      expect(res.body.data[0].promptExample).to.equal('Q?');
     });
 
     it('all LLMs fan-out with aggregation', async () => {
@@ -783,12 +802,50 @@ describe('AI Visibility – topics handlers', () => {
           }],
         });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
       expect(res.body.data[0].mentions).to.equal(3 * FTS_LLMS.length);
-      expect(res.body.data[0].organic_traffic).to.equal(100 * FTS_LLMS.length);
+      expect(res.body.data[0].organicTraffic).to.equal(100 * FTS_LLMS.length);
+    });
+
+    it('all LLMs merged list sorts by mentions desc then sourcesCount desc', async () => {
+      clients.sourceClient.sourceDomainsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({ total: 2 });
+      clients.sourceClient.sourceDomainsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({
+        sourceDomains: [
+          { domain: 'a.com', sourcesCount: 2, mentions: 5 },
+          { domain: 'b.com', sourcesCount: 5, mentions: 5 },
+        ],
+      });
+      for (let i = 1; i < FTS_LLMS.length; i += 1) {
+        clients.sourceClient.sourceDomainsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
+        clients.sourceClient.sourceDomainsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ sourceDomains: [] });
+      }
+      const sp = new URLSearchParams('searchQuery=test&limit=10');
+      const res = await handleTopicsResearchSourceDomains(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data[0].sourceDomain).to.equal('b.com');
+      expect(res.body.data[1].sourceDomain).to.equal('a.com');
+    });
+
+    it('all LLMs merged list tie-breaks by sourceDomain when mentions and sourcesCount tie', async () => {
+      clients.sourceClient.sourceDomainsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({ total: 2 });
+      clients.sourceClient.sourceDomainsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({
+        sourceDomains: [
+          { domain: 'z.com', sourcesCount: 1, mentions: 3 },
+          { domain: 'a.com', sourcesCount: 1, mentions: 3 },
+        ],
+      });
+      for (let i = 1; i < FTS_LLMS.length; i += 1) {
+        clients.sourceClient.sourceDomainsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
+        clients.sourceClient.sourceDomainsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ sourceDomains: [] });
+      }
+      const sp = new URLSearchParams('searchQuery=test&limit=10');
+      const res = await handleTopicsResearchSourceDomains(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data[0].sourceDomain).to.equal('a.com');
+      expect(res.body.data[1].sourceDomain).to.equal('z.com');
     });
 
     it('all LLMs handles errors gracefully', async () => {
@@ -796,7 +853,7 @@ describe('AI Visibility – topics handlers', () => {
         clients.sourceClient.sourceDomainsByTopicFTSTotals.withArgs(sinon.match({ llm })).rejects(new Error('fail'));
         clients.sourceClient.sourceDomainsByTopicFTS.withArgs(sinon.match({ llm })).rejects(new Error('fail'));
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data).to.deep.equal([]);
@@ -809,7 +866,7 @@ describe('AI Visibility – topics handlers', () => {
           sourceDomains: [{ domain: '', sourcesCount: 1, mentions: 1 }],
         });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
       expect(res.body.data).to.have.length(0);
     });
@@ -829,9 +886,9 @@ describe('AI Visibility – topics handlers', () => {
         clients.sourceClient.sourceDomainsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
         clients.sourceClient.sourceDomainsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ sourceDomains: [] });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
-      expect(res.body.data[0].prompt_example).to.equal('Prompt example');
+      expect(res.body.data[0].promptExample).to.equal('Prompt example');
     });
 
     it('handles nested example with only text field', async () => {
@@ -841,9 +898,9 @@ describe('AI Visibility – topics handlers', () => {
           domain: 'src.com', sourcesCount: 1, mentions: 1, example: { text: 'text prompt' },
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
-      expect(res.body.data[0].prompt_example).to.equal('text prompt');
+      expect(res.body.data[0].promptExample).to.equal('text prompt');
     });
 
     it('handles nested example with examplePrompt field', async () => {
@@ -853,9 +910,9 @@ describe('AI Visibility – topics handlers', () => {
           domain: 'src.com', sourcesCount: 1, mentions: 1, example: { examplePrompt: 'nested example' },
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
-      expect(res.body.data[0].prompt_example).to.equal('nested example');
+      expect(res.body.data[0].promptExample).to.equal('nested example');
     });
 
     it('handles nested example with all empty fields', async () => {
@@ -865,9 +922,9 @@ describe('AI Visibility – topics handlers', () => {
           domain: 'src.com', sourcesCount: 1, mentions: 1, example: { prompt: '', text: '', examplePrompt: '' },
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
-      expect(res.body.data[0]).to.not.have.property('prompt_example');
+      expect(res.body.data[0]).to.not.have.property('promptExample');
     });
 
     it('handles array-shaped example (skipped)', async () => {
@@ -877,9 +934,9 @@ describe('AI Visibility – topics handlers', () => {
           domain: 'src.com', sourcesCount: 1, mentions: 1, example: ['not', 'an', 'object'],
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
-      expect(res.body.data[0]).to.not.have.property('prompt_example');
+      expect(res.body.data[0]).to.not.have.property('promptExample');
     });
 
     it('handles null/non-object extractSourceDomainExamplePrompt', async () => {
@@ -887,9 +944,9 @@ describe('AI Visibility – topics handlers', () => {
       clients.sourceClient.sourceDomainsByTopicFTS.resolves({
         sourceDomains: [{ domain: 'src.com', sourcesCount: 1, mentions: 1 }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
-      expect(res.body.data[0]).to.not.have.property('prompt_example');
+      expect(res.body.data[0]).to.not.have.property('promptExample');
     });
 
     it('handles organic_traffic from nested example.prompt', async () => {
@@ -903,10 +960,10 @@ describe('AI Visibility – topics handlers', () => {
           example: { prompt: 'nested prompt' },
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
-      expect(res.body.data[0]).to.not.have.property('organic_traffic');
-      expect(res.body.data[0].prompt_example).to.equal('nested prompt');
+      expect(res.body.data[0]).to.not.have.property('organicTraffic');
+      expect(res.body.data[0].promptExample).to.equal('nested prompt');
     });
 
     it('handles overallMentions fallback', async () => {
@@ -914,7 +971,7 @@ describe('AI Visibility – topics handlers', () => {
       clients.sourceClient.sourceDomainsByTopicFTS.resolves({
         sourceDomains: [{ domain: 'src.com', sourcesCount: 1, overallMentions: 42 }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
       expect(res.body.data[0].mentions).to.equal(42);
     });
@@ -926,9 +983,9 @@ describe('AI Visibility – topics handlers', () => {
           domain: 'src.com', sourcesCount: 1, mentions: 1, promptExample: 'promptExample field',
         }],
       });
-      const sp = new URLSearchParams('search_query=test&engine=chatgpt');
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
-      expect(res.body.data[0].prompt_example).to.equal('promptExample field');
+      expect(res.body.data[0].promptExample).to.equal('promptExample field');
     });
 
     it('aggregation handles undefined organic_traffic on first and defined on second', async () => {
@@ -946,9 +1003,9 @@ describe('AI Visibility – topics handlers', () => {
         clients.sourceClient.sourceDomainsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
         clients.sourceClient.sourceDomainsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ sourceDomains: [] });
       }
-      const sp = new URLSearchParams('search_query=test');
+      const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
-      expect(res.body.data[0].organic_traffic).to.equal(500);
+      expect(res.body.data[0].organicTraffic).to.equal(500);
     });
   });
 });

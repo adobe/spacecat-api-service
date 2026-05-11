@@ -1,6 +1,6 @@
 # AI Visibility (Semrush gRPC proxy) – 22 GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
-# Responses include an sr_filters block with available markets and models.
+# Responses include an srFilters block with available markets and models.
 
 # ── shared parameter fragments ──────────────────────────────────────────
 x-ai-vis-domain: &domainParam
@@ -34,10 +34,10 @@ x-ai-vis-engine: &engineParam
   name: engine
   in: query
   required: false
-  description: LLM engine slug (`chatgpt`, `gemini`, `google_ai_mode`, `google_ai_overview`). Omit or `all` for all models.
+  description: LLM engine slug (`chatgpt`, `gemini`, `googleAiMode`, `googleAiOverview`). Omit or `all` for all models.
   schema:
     type: string
-    enum: [chatgpt, gemini, google_ai_mode, google_ai_overview, all]
+    enum: [chatgpt, gemini, googleAiMode, googleAiOverview, all]
     example: chatgpt
 
 x-ai-vis-limit: &limitParam
@@ -71,7 +71,7 @@ x-ai-vis-month: &monthParam
     example: '2026-01'
 
 x-ai-vis-window-months: &windowMonthsParam
-  name: window_months
+  name: windowMonths
   in: query
   required: false
   description: Number of months to include in date-range aggregations
@@ -81,7 +81,7 @@ x-ai-vis-window-months: &windowMonthsParam
     example: 6
 
 x-ai-vis-search-query: &searchQueryParam
-  name: search_query
+  name: searchQuery
   in: query
   required: true
   description: Full-text search query for topic research
@@ -90,7 +90,7 @@ x-ai-vis-search-query: &searchQueryParam
     example: coffee
 
 x-ai-vis-topic-id: &topicIdParam
-  name: topic_id
+  name: topicId
   in: query
   required: true
   description: Topic identifier
@@ -384,14 +384,14 @@ ai-visibility-competitors-metrics:
       - *countryParam
       - *regionParam
       - *engineParam
-      - name: gap_snapshot_date
+      - name: gapSnapshotDate
         in: query
         required: false
         description: Pin to a specific snapshot date (`YYYY-MM-DD`)
         schema:
           type: string
           pattern: '^\d{4}-\d{2}-\d{2}$'
-      - name: metrics_snapshot_date
+      - name: metricsSnapshotDate
         in: query
         required: false
         description: Pin to a specific metrics snapshot date (`YYYY-MM-DD`)
@@ -425,7 +425,7 @@ ai-visibility-competitors-gap-topics:
       - *engineParam
       - *limitParam
       - *offsetParam
-      - name: gap_kinds
+      - name: gapKinds
         in: query
         required: false
         description: Comma-separated gap kinds (`ALL`, `MISSING`, `SHARED`, `UNIQUE`)
@@ -459,7 +459,7 @@ ai-visibility-competitors-gap-source-domains:
       - *engineParam
       - *limitParam
       - *offsetParam
-      - name: gap_kinds
+      - name: gapKinds
         in: query
         required: false
         description: Comma-separated gap kinds (`ALL`, `MISSING`, `SHARED`, `UNIQUE`)
@@ -495,14 +495,14 @@ ai-visibility-competitors-gap-prompts:
       - *engineParam
       - *limitParam
       - *offsetParam
-      - name: gap_kinds
+      - name: gapKinds
         in: query
         required: false
         description: Comma-separated gap kinds (`ALL`, `MISSING`, `SHARED`, `UNIQUE`)
         schema:
           type: string
           example: ALL
-      - name: prompt_tab
+      - name: promptTab
         in: query
         required: false
         description: Tab alias (`all-prompts`, `missing`, `shared`, `unique`)
@@ -512,7 +512,7 @@ ai-visibility-competitors-gap-prompts:
       - name: tab
         in: query
         required: false
-        description: Alternative tab parameter (same values as `prompt_tab`)
+        description: Alternative tab parameter (same values as `promptTab`)
         schema:
           type: string
     responses:
@@ -556,13 +556,13 @@ ai-visibility-prompts-responses-latest:
       Data from `PromptService/LastCrawledPromptByHash`.
     operationId: getAiVisibilityPromptsResponsesLatest
     parameters:
-      - name: prompt_hash
+      - name: promptHash
         in: query
         required: true
         description: Hash of the prompt to look up
         schema:
           type: string
-      - name: serp_id
+      - name: serpId
         in: query
         required: false
         description: SERP identifier for the prompt execution
@@ -671,7 +671,7 @@ ai-visibility-topics-stats:
     description: |
       Returns detailed statistics for a specific topic by ID,
       including brand mentions and visibility data.
-      Data from `TopicService/BrandTopics` filtered by `topic_id`.
+      Data from `TopicService/BrandTopics` filtered by `topicId`.
     operationId: getAiVisibilityTopicsStats
     parameters:
       - *domainParam
@@ -754,8 +754,8 @@ ai-visibility-topics-research-source-domains:
     description: |
       Returns source domains cited in LLM responses for a topic search query.
       Response is normalized to `{ data, total, offset, limit }` with rows
-      containing `source_domain`, `sources_count`, `mentions`, `organic_traffic`,
-      and optionally `prompt_example`.
+      containing `sourceDomain`, `sourcesCount`, `mentions`, `organicTraffic`,
+      and optionally `promptExample`.
       Data from `SourceService/SourceDomainsByTopicFTS` and `SourceDomainsByTopicFTSTotals`.
     operationId: getAiVisibilityTopicsResearchSourceDomains
     parameters:

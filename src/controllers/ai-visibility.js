@@ -90,7 +90,7 @@ function wrapHandler(handlerFn, relPath, log) {
       clients = getGrpcClients(context.env);
     } catch (e) {
       log.error('AI Visibility gRPC transport init failed', e);
-      return createResponse({ error: 'ai_visibility_not_configured', message: e.message }, 503);
+      return createResponse({ error: 'aiVisibilityNotConfigured', message: e.message }, 503);
     }
     const sp = extractSearchParams(context);
     try {
@@ -105,7 +105,7 @@ function wrapHandler(handlerFn, relPath, log) {
   };
 }
 
-function AiVisibilityController(context, log, _env) {
+function AiVisibilityController(context, log, _) {
   if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
   }

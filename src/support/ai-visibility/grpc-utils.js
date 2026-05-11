@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable max-statements-per-line, max-len, no-continue, no-nested-ternary -- dense Semrush gRPC helpers */
+
 import {
   COUNTRY_ENUM,
   LLM_ENUM,
@@ -21,8 +23,8 @@ export { COUNTRY_ENUM, LLM_ENUM, TOPIC_INTENT_ENUM };
 export const LLM_UI = {
   [LLM_ENUM.CHAT_GPT]: 'chatgpt',
   [LLM_ENUM.GEMINI]: 'gemini',
-  [LLM_ENUM.GOOGLE_AI_MODE]: 'google_ai_mode',
-  [LLM_ENUM.GOOGLE_AI_OVERVIEW]: 'google_ai_overview',
+  [LLM_ENUM.GOOGLE_AI_MODE]: 'googleAiMode',
+  [LLM_ENUM.GOOGLE_AI_OVERVIEW]: 'googleAiOverview',
 };
 
 export const FTS_LLMS = [
@@ -36,8 +38,8 @@ export const EMPTY_ENGINE_BREAKDOWN = () => ({
   all: 0,
   chatgpt: 0,
   gemini: 0,
-  google_ai_mode: 0,
-  google_ai_overview: 0,
+  googleAiMode: 0,
+  googleAiOverview: 0,
 });
 
 export const GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT = 100;
@@ -156,6 +158,8 @@ export function engineToLlm(engine) {
     gemini: LLM_ENUM.GEMINI,
     aimode: LLM_ENUM.GOOGLE_AI_MODE,
     overview: LLM_ENUM.GOOGLE_AI_OVERVIEW,
+    googleaimode: LLM_ENUM.GOOGLE_AI_MODE,
+    googleaioverview: LLM_ENUM.GOOGLE_AI_OVERVIEW,
     google_ai_mode: LLM_ENUM.GOOGLE_AI_MODE,
     google_ai_overview: LLM_ENUM.GOOGLE_AI_OVERVIEW,
   };
@@ -330,7 +334,9 @@ export function parseCompetitorDomainsList(sp) {
 
 export function parseGapKindEnumList(sp) {
   const tab = (
-    sp.get('topic_tab')
+    sp.get('topicTab')
+    || sp.get('topic_tab')
+    || sp.get('promptTab')
     || sp.get('prompt_tab')
     || sp.get('tab')
     || 'all-prompts'
@@ -346,7 +352,7 @@ export function parseGapKindEnumList(sp) {
     unique: [6],
   };
   if (tabMap[tab]) { return tabMap[tab]; }
-  const csv = sp.get('gap_kinds')?.trim();
+  const csv = (sp.get('gapKinds') ?? sp.get('gap_kinds'))?.trim();
   if (!csv) { return [1]; }
   const nameToN = {
     ALL: 1,

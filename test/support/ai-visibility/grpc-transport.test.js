@@ -18,11 +18,17 @@ import esmock from 'esmock';
 
 use(chaiAsPromised);
 
+/** Snapshot at load time so we can reset after other suites stub `globalThis.fetch`. */
+const ORIGINAL_FETCH = globalThis.fetch;
+
 /** Avoid "fetch is already stubbed" when another test leaves globalThis.fetch wrapped. */
 function restoreGlobalFetchIfStubbed() {
   const f = globalThis.fetch;
   if (f && typeof f.restore === 'function') {
     f.restore();
+  }
+  if (typeof ORIGINAL_FETCH === 'function') {
+    globalThis.fetch = ORIGINAL_FETCH;
   }
 }
 
@@ -64,7 +70,9 @@ describe('grpc-transport', () => {
   afterEach(() => {
     sandbox.restore();
     restoreGlobalFetchIfStubbed();
-    if (resetGrpcClients) { resetGrpcClients(); }
+    if (resetGrpcClients) {
+      resetGrpcClients();
+    }
   });
 
   describe('getGrpcClients', () => {
@@ -244,6 +252,13 @@ describe('grpc-transport', () => {
   });
 
   describe('createAuthInterceptor', () => {
+    function stubFetchForInterceptor() {
+      restoreGlobalFetchIfStubbed();
+      sandbox.stub(globalThis, 'fetch').resolves({
+        json: () => Promise.resolve({ access_token: 'tok-int' }),
+      });
+    }
+
     it('returns a function that sets Authorization header and calls next', async () => {
       stubFetchForInterceptor();
       const env = { AI_SEO_CLIENT_ID: 'id', AI_SEO_CLIENT_SECRET: 'sec' };
@@ -260,12 +275,5 @@ describe('grpc-transport', () => {
       expect(nextStub.firstCall.args[0]).to.equal(req);
       expect(result).to.equal('response');
     });
-
-    function stubFetchForInterceptor() {
-      restoreGlobalFetchIfStubbed();
-      sandbox.stub(globalThis, 'fetch').resolves({
-        json: () => Promise.resolve({ access_token: 'tok-int' }),
-      });
-    }
   });
 });

@@ -70,8 +70,8 @@ describe('grpc-utils', () => {
     it('LLM_UI maps known LLM enum values to UI strings', () => {
       expect(LLM_UI[LLM_ENUM.CHAT_GPT]).to.equal('chatgpt');
       expect(LLM_UI[LLM_ENUM.GEMINI]).to.equal('gemini');
-      expect(LLM_UI[LLM_ENUM.GOOGLE_AI_MODE]).to.equal('google_ai_mode');
-      expect(LLM_UI[LLM_ENUM.GOOGLE_AI_OVERVIEW]).to.equal('google_ai_overview');
+      expect(LLM_UI[LLM_ENUM.GOOGLE_AI_MODE]).to.equal('googleAiMode');
+      expect(LLM_UI[LLM_ENUM.GOOGLE_AI_OVERVIEW]).to.equal('googleAiOverview');
     });
 
     it('FTS_LLMS contains the four supported LLM values', () => {
@@ -87,7 +87,7 @@ describe('grpc-utils', () => {
       const a = EMPTY_ENGINE_BREAKDOWN();
       const b = EMPTY_ENGINE_BREAKDOWN();
       expect(a).to.deep.equal({
-        all: 0, chatgpt: 0, gemini: 0, google_ai_mode: 0, google_ai_overview: 0,
+        all: 0, chatgpt: 0, gemini: 0, googleAiMode: 0, googleAiOverview: 0,
       });
       expect(a).to.not.equal(b);
     });
@@ -402,11 +402,19 @@ describe('grpc-utils', () => {
       expect(engineToLlm('overview')).to.equal(LLM_ENUM.GOOGLE_AI_OVERVIEW);
     });
 
-    it('maps google_ai_mode', () => {
+    it('maps googleAiMode', () => {
+      expect(engineToLlm('googleAiMode')).to.equal(LLM_ENUM.GOOGLE_AI_MODE);
+    });
+
+    it('maps google_ai_mode (legacy slug)', () => {
       expect(engineToLlm('google_ai_mode')).to.equal(LLM_ENUM.GOOGLE_AI_MODE);
     });
 
-    it('maps google_ai_overview', () => {
+    it('maps googleAiOverview', () => {
+      expect(engineToLlm('googleAiOverview')).to.equal(LLM_ENUM.GOOGLE_AI_OVERVIEW);
+    });
+
+    it('maps google_ai_overview (legacy slug)', () => {
       expect(engineToLlm('google_ai_overview')).to.equal(LLM_ENUM.GOOGLE_AI_OVERVIEW);
     });
 
@@ -423,8 +431,8 @@ describe('grpc-utils', () => {
     it('maps known LLM values', () => {
       expect(llmToEngine(LLM_ENUM.CHAT_GPT)).to.equal('chatgpt');
       expect(llmToEngine(LLM_ENUM.GEMINI)).to.equal('gemini');
-      expect(llmToEngine(LLM_ENUM.GOOGLE_AI_MODE)).to.equal('google_ai_mode');
-      expect(llmToEngine(LLM_ENUM.GOOGLE_AI_OVERVIEW)).to.equal('google_ai_overview');
+      expect(llmToEngine(LLM_ENUM.GOOGLE_AI_MODE)).to.equal('googleAiMode');
+      expect(llmToEngine(LLM_ENUM.GOOGLE_AI_OVERVIEW)).to.equal('googleAiOverview');
     });
 
     it('lowercases unknown LLM numeric value', () => {

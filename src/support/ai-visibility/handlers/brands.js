@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable max-statements-per-line, max-len -- AI Visibility handler surface */
+
 import { ConnectError, Code } from '@connectrpc/connect';
 import { BRAND_TOPICS_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
 import { PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
@@ -62,30 +64,31 @@ import {
 function buildByDateEntry(year, month, slice) {
   const agg = (slice || []).find((r) => !r.llm) || slice?.[0];
   const mentions = EMPTY_ENGINE_BREAKDOWN();
-  const cited_pages = EMPTY_ENGINE_BREAKDOWN();
-  const visibility_by_engine = EMPTY_ENGINE_BREAKDOWN();
+  const citedPages = EMPTY_ENGINE_BREAKDOWN();
+  const visibilityByEngine = EMPTY_ENGINE_BREAKDOWN();
   mentions.all = num(agg?.mentions);
-  cited_pages.all = num(agg?.ownedSources);
-  visibility_by_engine.all = num(agg?.aiVisibility);
+  citedPages.all = num(agg?.ownedSources);
+  visibilityByEngine.all = num(agg?.aiVisibility);
   for (const r of slice || []) {
-    if (!r.llm) { continue; }
-    const engine = LLM_UI[r.llm];
-    if (engine) {
-      mentions[engine] = num(r.mentions);
-      cited_pages[engine] = num(r.ownedSources);
-      visibility_by_engine[engine] = num(r.aiVisibility);
+    if (r.llm) {
+      const engine = LLM_UI[r.llm];
+      if (engine) {
+        mentions[engine] = num(r.mentions);
+        citedPages[engine] = num(r.ownedSources);
+        visibilityByEngine[engine] = num(r.aiVisibility);
+      }
     }
   }
   return {
     year,
     month,
     day: num(agg?.date?.day) || 1,
-    ai_visibility: num(agg?.aiVisibility),
+    aiVisibility: num(agg?.aiVisibility),
     audience: num(agg?.audience),
     mentions,
-    cited_pages,
-    owned_sources: num(agg?.ownedSources),
-    visibility_by_engine,
+    citedPages,
+    ownedSources: num(agg?.ownedSources),
+    visibilityByEngine,
   };
 }
 
@@ -95,9 +98,10 @@ export function mapStatsByLLM(data, dateRange) {
   for (const r of rows) {
     const ym = num(r.date?.year) * 100 + num(r.date?.month);
     /* c8 ignore next */
-    if (ym === 0) { continue; }
-    if (!byYM.has(ym)) { byYM.set(ym, []); }
-    byYM.get(ym).push(r);
+    if (ym !== 0) {
+      if (!byYM.has(ym)) { byYM.set(ym, []); }
+      byYM.get(ym).push(r);
+    }
   }
   const sequence = [];
   if (dateRange) {
@@ -114,24 +118,24 @@ export function mapStatsByLLM(data, dateRange) {
       sequence.push({ year: Math.trunc(ym / 100), month: ym % 100 });
     }
   }
-  const by_date = sequence.map(({ year, month }) => buildByDateEntry(year, month, byYM.get(year * 100 + month) || []));
+  const byDate = sequence.map(({ year, month }) => buildByDateEntry(year, month, byYM.get(year * 100 + month) || []));
   const emptyTop = () => ({
     visibility: 0,
-    visibility_by_engine: EMPTY_ENGINE_BREAKDOWN(),
+    visibilityByEngine: EMPTY_ENGINE_BREAKDOWN(),
     audience: 0,
     mentions: EMPTY_ENGINE_BREAKDOWN(),
-    cited_pages: EMPTY_ENGINE_BREAKDOWN(),
-    by_date,
+    citedPages: EMPTY_ENGINE_BREAKDOWN(),
+    byDate,
   });
-  if (by_date.length === 0) { return emptyTop(); }
-  const latest = by_date[by_date.length - 1];
+  if (byDate.length === 0) { return emptyTop(); }
+  const latest = byDate[byDate.length - 1];
   return {
-    visibility: latest.ai_visibility,
-    visibility_by_engine: latest.visibility_by_engine,
+    visibility: latest.aiVisibility,
+    visibilityByEngine: latest.visibilityByEngine,
     audience: latest.audience,
     mentions: latest.mentions,
-    cited_pages: latest.cited_pages,
-    by_date,
+    citedPages: latest.citedPages,
+    byDate,
   };
 }
 
@@ -140,36 +144,36 @@ export function mapGrpcPromptToBrandPromptRow(p, engineSlug, requestCountryGrpc)
   const sliceCountry = restCountryFromPromptProto(p) ?? restCountryFromGrpcRequestCountry(requestCountryGrpc);
   return {
     prompt: p.prompt,
-    prompt_hash: String(p.promptHash ?? ''),
-    serp_id: String(p.serpId ?? ''),
+    promptHash: String(p.promptHash ?? ''),
+    serpId: String(p.serpId ?? ''),
     topic: p.topicName,
-    topic_id: String(p.topicId ?? ''),
+    topicId: String(p.topicId ?? ''),
     engine: engineSlug || llmToEngine(p.llm),
     mentions: mentionedBrandsCountFromPromptProto(p),
-    cited_pages: num(p.sourcesCount),
+    citedPages: num(p.sourcesCount),
     /* c8 ignore next 3 -- defensive ternary spreads */
     ...(sliceCountry ? { country: sliceCountry } : {}),
-    ...(tv != null && tv !== '' ? { topic_volume: num(tv) } : {}),
-    ...(p.briefResponse ? { response_excerpt: p.briefResponse } : {}),
-    _tv: tv != null && tv !== '' ? num(tv) : -1,
+    ...(tv != null && tv !== '' ? { topicVolume: num(tv) } : {}),
+    ...(p.briefResponse ? { responseExcerpt: p.briefResponse } : {}),
+    topicVolumeSortKey: tv != null && tv !== '' ? num(tv) : -1,
   };
 }
 
 function mapSourceRowToCitedPage(s, requestCountryGrpc) {
-  const page_url = String(s.url ?? '').trim();
+  const pageUrl = String(s.url ?? '').trim();
   const responses = num(s.promptsCount);
   const sliceCountry = restMarketFromSourceDomainCountryField(s) ?? restCountryFromGrpcRequestCountry(requestCountryGrpc);
   /* c8 ignore next */
-  return { page_url, responses, ...(sliceCountry ? { country: sliceCountry } : {}) };
+  return { pageUrl, responses, ...(sliceCountry ? { country: sliceCountry } : {}) };
 }
 
 /* c8 ignore next 2 */
 function mapSourceDomainRowToCitedSource(d) {
-  let source_domain = String(d.domain ?? d.hostname ?? d.host ?? '').trim().toLowerCase();
-  if (source_domain.startsWith('www.')) { source_domain = source_domain.slice(4); }
+  let sourceDomain = String(d.domain ?? d.hostname ?? d.host ?? '').trim().toLowerCase();
+  if (sourceDomain.startsWith('www.')) { sourceDomain = sourceDomain.slice(4); }
   const row = {
-    source_domain,
-    sources_count: num(d.sourcesCount),
+    sourceDomain,
+    sourcesCount: num(d.sourcesCount),
     responses: num(d.promptsCount),
     mentions: num(d.mentions),
   };
@@ -178,7 +182,7 @@ function mapSourceDomainRowToCitedSource(d) {
   const otRaw = d.organicTraffic;
   if (otRaw != null && otRaw !== '' && !(typeof otRaw === 'number' && !Number.isFinite(otRaw))) {
     const ot = num(otRaw);
-    if (Number.isFinite(ot)) { row.organic_traffic = ot; }
+    if (Number.isFinite(ot)) { row.organicTraffic = ot; }
   }
   return row;
 }
@@ -188,7 +192,7 @@ async function citedPagesOwnedCountFromStatsByLlmForMonth(country, target, month
   const dateRange = statsByLLMDateRange(monthYm.year, monthYm.month, 1);
   const raw = await clients.brandClient.statsByLLM({ country, target, dateRange });
   const mapped = mapStatsByLLM(raw, dateRange);
-  const cp = mapped.cited_pages;
+  const cp = mapped.citedPages;
   if (!cp || typeof cp !== 'object') { return null; }
   if (llmEnum === LLM_ENUM.ALL) {
     const v = num(cp.all);
@@ -205,14 +209,20 @@ async function citedPagesOwnedCountFromStatsByLlmForMonth(country, target, month
 /* c8 ignore stop */
 
 function isBrandTopicOpportunityRow(mapped) {
-  return mapped._tv >= 5000;
+  return mapped.topicVolumeSortKey >= 5000;
+}
+
+function stripTopicVolumeSortKey(row) {
+  const next = { ...row };
+  delete next.topicVolumeSortKey;
+  return next;
 }
 
 function sortTopicOpportunityRowsByBrandsDesc(rows) {
   /* c8 ignore next 5 -- multi-level sort tiebreakers */
   return [...rows].sort((a, b) => {
     const d = num(b.mentions) - num(a.mentions); if (d !== 0) { return d; }
-    const tv = num(b.topic_volume) - num(a.topic_volume); if (tv !== 0) { return tv; }
+    const tv = num(b.topicVolume) - num(a.topicVolume); if (tv !== 0) { return tv; }
     const cmp = String(a.prompt ?? '').localeCompare(String(b.prompt ?? '')); if (cmp !== 0) { return cmp; }
     return String(a.engine ?? '').localeCompare(String(b.engine ?? ''));
   });
@@ -226,9 +236,10 @@ function dedupeRawBrandPromptsForOpportunities(prompts) {
     const sid = String(p.serpId ?? '');
     const pr = String(p.prompt ?? '').trim().toLowerCase();
     const key = ph && sid ? `${ph}\u0000${sid}` : pr;
-    if (!key || seen.has(key)) { continue; }
-    seen.add(key);
-    out.push(p);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      out.push(p);
+    }
   }
   return out;
 }
@@ -236,16 +247,21 @@ function dedupeRawBrandPromptsForOpportunities(prompts) {
 async function fetchBrandPromptsPagesForOpportunities(country, domain, llm, maxPages, orderBy, clients) {
   const target = brandTarget(domain);
   const order = { by: orderBy };
-  const prompts = [];
-  for (let page = 0; page < maxPages; page += 1) {
+  async function pullPage(page, acc) {
+    if (page >= maxPages) {
+      return acc;
+    }
     const raw = await clients.promptClient.prompts({
       country, llm, target, order, range: { limit: 100, offset: page * 100 },
     }).catch(() => ({ prompts: [] }));
     const chunk = raw.prompts || [];
-    prompts.push(...chunk);
-    if (chunk.length < 100) { break; }
+    const next = [...acc, ...chunk];
+    if (chunk.length < 100) {
+      return next;
+    }
+    return pullPage(page + 1, next);
   }
-  return prompts;
+  return pullPage(0, []);
 }
 
 async function fetchTopicOpportunityRawPromptPoolForLlm(country, domain, llm, maxPages, clients) {
@@ -269,7 +285,7 @@ export async function handleBrandStats(sp, clients) {
   const now = new Date();
   const endYear = endMonth ? endMonth.year : now.getUTCFullYear();
   const endM = endMonth ? endMonth.month : now.getUTCMonth() + 1;
-  const windowMonths = Math.min(Math.max(Number(sp.get('window_months')) || 4, 1), 6);
+  const windowMonths = Math.min(Math.max(Number(sp.get('windowMonths')) || 4, 1), 6);
   const dateRange = statsByLLMDateRange(endYear, endM, windowMonths);
   const [rawLlm, rawByCountry] = await Promise.all([
     clients.brandClient.statsByLLM({ country, target, dateRange }),
@@ -277,12 +293,12 @@ export async function handleBrandStats(sp, clients) {
   ]);
   const body = mapStatsByLLM(rawLlm, dateRange);
   const bc = rawByCountry.byCountry || [];
-  body.by_country = bc.map((row) => ({
+  body.byCountry = bc.map((row) => ({
     country: restCountryFromGrpcRequestCountry(row.country) || COUNTRY_ENUM[row.country] || String(row.country),
     mentions: num(row.mentions),
     audience: num(row.audience),
-    cited_pages: num(row.ownedSources),
-  })).filter((r) => r.mentions > 0 || r.audience > 0 || r.cited_pages > 0);
+    citedPages: num(row.ownedSources),
+  })).filter((r) => r.mentions > 0 || r.audience > 0 || r.citedPages > 0);
   return { status: 200, body };
 }
 
@@ -305,11 +321,11 @@ export async function handleBrandTopics(sp, clients) {
   const topics = raw.topics || [];
   const data = topics.map((t) => ({
     topic: t.name,
-    topic_id: String(t.id),
-    topic_volume: num(t.volume),
+    topicId: String(t.id),
+    topicVolume: num(t.volume),
     responses: num(t.mentions),
     mentions: num(t.mentions),
-    cited_pages: 0,
+    citedPages: 0,
     engine: llm ? llmToEngine(llm) : 'all',
   }));
   const total = num(totalsRaw.total);
@@ -327,7 +343,7 @@ export async function handleBrandPrompts(sp, clients) {
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
   const llmSingle = optionalLlmFromQuery(sp);
-  const topicIds = sp.getAll('topic_ids').filter(Boolean);
+  const topicIds = sp.getAll('topicIds').filter(Boolean);
   let dimensionFilterQl = '';
   if (topicIds.length === 1) { dimensionFilterQl = `topic_hash = ${topicIds[0]}`; } else if (topicIds.length > 1) { dimensionFilterQl = topicIds.map((id) => `topic_hash = ${id}`).join(' OR '); }
   const target = brandTarget(domain);
@@ -347,8 +363,7 @@ export async function handleBrandPrompts(sp, clients) {
     const prompts = raw.prompts || [];
     const data = prompts.map((p) => {
       const row = mapGrpcPromptToBrandPromptRow(p, llmToEngine(llmSingle), country);
-      const { _tv, ...rest } = row;
-      return rest;
+      return stripTopicVolumeSortKey(row);
     });
     return {
       status: 200,
@@ -373,25 +388,25 @@ export async function handleBrandPrompts(sp, clients) {
 
   const total = totalsResults.reduce((sum, r) => sum + num(r.total), 0);
   const seen = new Map();
-  for (let i = 0; i < FTS_LLMS.length; i++) {
+  for (let i = 0; i < FTS_LLMS.length; i += 1) {
     const engineSlug = llmToEngine(FTS_LLMS[i]);
     for (const p of listResults[i]?.prompts || []) {
       const row = mapGrpcPromptToBrandPromptRow(p, engineSlug, country);
       const promptNorm = String(row.prompt ?? '').trim().toLowerCase();
-      const key = row.prompt_hash && row.serp_id
-        ? `${row.topic_id}|${row.prompt_hash}|${row.serp_id}|${row.engine}|${promptNorm}`
-        : `${row.topic_id}|${promptNorm}|${row.engine}`;
+      const key = row.promptHash && row.serpId
+        ? `${row.topicId}|${row.promptHash}|${row.serpId}|${row.engine}|${promptNorm}`
+        : `${row.topicId}|${promptNorm}|${row.engine}`;
       if (!seen.has(key)) { seen.set(key, row); }
     }
   }
 
   /* c8 ignore next 4 -- multi-level sort tiebreakers */
   const merged = [...seen.values()].sort((a, b) => {
-    const d = b._tv - a._tv; if (d !== 0) { return d; }
+    const d = b.topicVolumeSortKey - a.topicVolumeSortKey; if (d !== 0) { return d; }
     const cmp = String(a.prompt ?? '').localeCompare(String(b.prompt ?? '')); if (cmp !== 0) { return cmp; }
     return String(a.engine ?? '').localeCompare(String(b.engine ?? ''));
   });
-  const page = merged.slice(offset, offset + limit).map(({ _tv, ...rest }) => rest);
+  const page = merged.slice(offset, offset + limit).map(stripTopicVolumeSortKey);
   return {
     status: 200,
     body: {
@@ -418,11 +433,13 @@ export async function handleBrandCitedPages(sp, clients) {
 
   async function fetchSourcesListBody() {
     try {
-      return await clients.sourceClient.sources(listReq);
+      const first = await clients.sourceClient.sources(listReq);
+      return first;
     } catch (e) {
       if (listReq.targetDate) {
-        const { targetDate: _drop, ...rest } = listReq;
-        return await clients.sourceClient.sources(rest);
+        const rest = { ...listReq };
+        delete rest.targetDate;
+        return clients.sourceClient.sources(rest);
       }
       throw e;
     }
@@ -447,7 +464,7 @@ export async function handleBrandCitedPages(sp, clients) {
 
   const [raw, fromTotals] = await Promise.all([fetchSourcesListBody(), fromTotalsPromise]);
   const src = sourcesListFromSourcesResponse(raw);
-  const data = src.map((s) => mapSourceRowToCitedPage(s, country)).filter((r) => r.page_url);
+  const data = src.map((s) => mapSourceRowToCitedPage(s, country)).filter((r) => r.pageUrl);
   const floor = offset + src.length;
   const total = fromTotals != null && Number.isFinite(fromTotals) ? Math.max(fromTotals, floor) : floor;
   return {
@@ -473,14 +490,14 @@ export async function handleBrandTopicOpportunities(sp, clients) {
       for (const p of perLlmArrays[i] || []) {
         const row = mapGrpcPromptToBrandPromptRow(p, engineSlug, country);
         const promptNorm = String(row.prompt ?? '').trim().toLowerCase();
-        const key = row.prompt_hash && row.serp_id
-          ? `${row.topic_id}|${row.prompt_hash}|${row.serp_id}|${row.engine}|${promptNorm}`
-          : `${row.topic_id}|${promptNorm}|${row.engine}`;
+        const key = row.promptHash && row.serpId
+          ? `${row.topicId}|${row.promptHash}|${row.serpId}|${row.engine}|${promptNorm}`
+          : `${row.topicId}|${promptNorm}|${row.engine}`;
         if (!seen.has(key)) { seen.set(key, row); }
       }
     }
     return [...seen.values()].sort((a, b) => {
-      const d = b._tv - a._tv; if (d !== 0) { return d; }
+      const d = b.topicVolumeSortKey - a.topicVolumeSortKey; if (d !== 0) { return d; }
       const cmp = String(a.prompt ?? '').localeCompare(String(b.prompt ?? '')); if (cmp !== 0) { return cmp; }
       return String(a.engine ?? '').localeCompare(String(b.engine ?? ''));
     });
@@ -490,7 +507,7 @@ export async function handleBrandTopicOpportunities(sp, clients) {
   if (llmSingle) {
     const prompts = await fetchTopicOpportunityRawPromptPoolForLlm(country, domain, llmSingle, TOPIC_OPPORTUNITY_PROMPTS_MAX_PAGES, clients);
     const merged = dedupeMergePromptRows([prompts], () => llmToEngine(llmSingle));
-    const filtered = merged.filter(isBrandTopicOpportunityRow).map(({ _tv, ...rest }) => rest);
+    const filtered = merged.filter(isBrandTopicOpportunityRow).map(stripTopicVolumeSortKey);
     const ordered = sortTopicOpportunityRowsByBrandsDesc(filtered);
     const total = ordered.length;
     const page = ordered.slice(offset, offset + limit);
@@ -504,7 +521,7 @@ export async function handleBrandTopicOpportunities(sp, clients) {
 
   const perLlm = await Promise.all(FTS_LLMS.map((l) => fetchTopicOpportunityRawPromptPoolForLlm(country, domain, l, TOPIC_OPPORTUNITY_PROMPTS_MAX_PAGES, clients)));
   const merged = dedupeMergePromptRows(perLlm, (i) => llmToEngine(FTS_LLMS[i]));
-  const filtered = merged.filter(isBrandTopicOpportunityRow).map(({ _tv, ...rest }) => rest);
+  const filtered = merged.filter(isBrandTopicOpportunityRow).map(stripTopicVolumeSortKey);
   const ordered = sortTopicOpportunityRowsByBrandsDesc(filtered);
   const total = ordered.length;
   const page = ordered.slice(offset, offset + limit);
@@ -550,7 +567,7 @@ export async function handleBrandTopBrands(sp, clients) {
       name,
       mentions,
       visibility: Math.min(95, Math.round(Math.log10(mentions + 10) * 28)),
-      cited_pages: Math.min(500, Math.round(mentions / 200)),
+      citedPages: Math.min(500, Math.round(mentions / 200)),
       /* c8 ignore next */
       ...(sliceCountry ? { country: sliceCountry } : {}),
     };
@@ -586,7 +603,7 @@ export async function handleBrandCitedSources(sp, clients) {
 
   const raw = listOutcome.value;
   const domains = sourceDomainsListFromResponse(raw);
-  const data = domains.map(mapSourceDomainRowToCitedSource).filter((r) => r.source_domain);
+  const data = domains.map(mapSourceDomainRowToCitedSource).filter((r) => r.sourceDomain);
   const fromTotals = totalsOutcome.status === 'fulfilled' ? sumVoTotalBySourceCategoryCounts(totalsOutcome.value) : null;
   const floor = offset + data.length;
   const total = fromTotals != null && Number.isFinite(fromTotals) ? Math.max(fromTotals, floor) : floor;
@@ -607,7 +624,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   const nameToN = {
     ALL: 1, MISSING: 2, WEAK: 3, SHARED: 4, STRONG: 5, UNIQUE: 6,
   };
-  const gapKindsCsv = sp.get('gap_kinds')?.trim();
+  const gapKindsCsv = sp.get('gapKinds')?.trim();
   let kinds = [1];
   if (gapKindsCsv) {
     const parsed = gapKindsCsv.split(',').map((p) => nameToN[p.trim().toUpperCase()]).filter((n) => n != null);
@@ -615,7 +632,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   }
 
   let snapshotDate;
-  const explicit = sp.get('gap_snapshot_date')?.trim();
+  const explicit = sp.get('gapSnapshotDate')?.trim();
   const dm = explicit && /^(\d{4})-(\d{2})-(\d{1,2})$/.exec(explicit);
   if (dm) { snapshotDate = { year: Number(dm[1]), month: Number(dm[2]), day: Number(dm[3]) }; }
 
@@ -683,20 +700,22 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   const totalsRaw = totalsOutcome.status === 'fulfilled' ? totalsOutcome.value : null;
   const domainsRaw = rawResult.domains || [];
   const data = domainsRaw.map((d) => {
-    let source_domain = String(d.domain ?? d.hostname ?? d.host ?? '').trim().toLowerCase();
-    if (source_domain.startsWith('www.')) { source_domain = source_domain.slice(4); }
+    let sourceDomain = String(d.domain ?? d.hostname ?? d.host ?? '').trim().toLowerCase();
+    if (sourceDomain.startsWith('www.')) { sourceDomain = sourceDomain.slice(4); }
     const row = {
-      source_domain,
-      sources_count: num(d.sourcesCount),
+      sourceDomain,
+      sourcesCount: num(d.sourcesCount),
       responses: num(d.promptsCount),
       mentions: num(d.targetMentions ?? d.mentions ?? 0),
     };
     const mk = restMarketFromSourceDomainCountryField(d);
     if (mk) { row.country = mk; }
     const otRaw = d.organicTraffic;
-    if (otRaw != null && otRaw !== '' && !(typeof otRaw === 'number' && !Number.isFinite(otRaw))) { row.organic_traffic = num(otRaw); }
+    if (otRaw != null && otRaw !== '' && !(typeof otRaw === 'number' && !Number.isFinite(otRaw))) {
+      row.organicTraffic = num(otRaw);
+    }
     return row;
-  }).filter((r) => r.source_domain);
+  }).filter((r) => r.sourceDomain);
   const floor = offset + data.length;
   const apiTotal = aggregateGapPromptsTotalFromTotals(totalsRaw, kinds);
   const total = apiTotal != null ? Math.max(floor, apiTotal) : floor;
