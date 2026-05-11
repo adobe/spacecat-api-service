@@ -69,6 +69,17 @@ export default class ApiKeyImsHandler extends AdobeImsHandler {
     }
     const result = await super.checkAuth(request, context);
     if (result) {
+      // AdobeImsHandler.transformProfile sets profile.email to the IMS user_id
+      // (e.g. ABC123@AdobeID) and stashes the real address in profile.trial_email.
+      // For api-key ownership lookups we normalise to the real email so that the
+      // imsUserId stored on ApiKey records is identical to what JwtHandler surfaces.
+      // Without this, the same user gets a different identity on the IMS path vs
+      // the JWT path, causing their keys to appear lost after an org migrates to
+      // JWT (ASO-607).
+      const profile = result.getProfile?.();
+      if (profile?.trial_email) {
+        profile.email = profile.trial_email;
+      }
       // Operational signal for the IMS-to-JWT migration end-state. Once this
       // log stops firing in production over a sustained window, the handler
       // (and its registration in AUTH_HANDLERS) can be deleted - see ASO-607.

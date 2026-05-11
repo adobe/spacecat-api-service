@@ -31,10 +31,10 @@ async function loadHandler({ superCheckAuthStub } = {}) {
         AdobeImsHandler: class StubAdobeImsHandler {
           constructor(log) {
             this.name = 'ims';
-            // The real AbstractHandler installs `log` as a function-shaped
-            // logger (`this.log(message, level)`); preserve that shape so
-            // the subclass can call `this.log(...)` directly.
-            this.log = (message, level) => log?.[level || 'info']?.(message);
+            // Mirror the real AbstractHandler shape: `this.log(message, level)`
+            // calls `this.logger[level]('[<name>] <message>')`. The `[ims]`
+            // prefix must be present so assertions match production output.
+            this.log = (message, level) => log?.[level || 'info']?.(`[${this.name}] ${message}`);
           }
 
           // Stand-in for AdobeImsHandler.checkAuth; routes calls to the
@@ -84,11 +84,25 @@ describe('ApiKeyImsHandler', () => {
   });
 
   it('emits an info log when the scoped IMS auth succeeds (migration signal)', async () => {
-    superCheckAuthStub.resolves({ ok: true });
+    superCheckAuthStub.resolves({ getProfile: () => null });
     await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' } });
     expect(logStubs.info).to.have.been.calledOnceWithExactly(
-      'api-key request authenticated via scoped IMS handler - JWT migration pending',
+      '[ims] api-key request authenticated via scoped IMS handler - JWT migration pending',
     );
+  });
+
+  it('normalises profile.email to trial_email (real address) when present', async () => {
+    const profile = { email: 'ABC123@AdobeID', trial_email: 'real@adobe.com' };
+    superCheckAuthStub.resolves({ getProfile: () => profile });
+    await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' } });
+    expect(profile.email).to.equal('real@adobe.com');
+  });
+
+  it('leaves profile.email unchanged when trial_email is absent', async () => {
+    const profile = { email: 'ABC123@AdobeID' };
+    superCheckAuthStub.resolves({ getProfile: () => profile });
+    await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' } });
+    expect(profile.email).to.equal('ABC123@AdobeID');
   });
 
   it('does NOT emit the success log when super.checkAuth returns null (auth failed)', async () => {

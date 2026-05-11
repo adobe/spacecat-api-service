@@ -32,8 +32,9 @@ use(chaiAsPromised);
  * Builds a stub authInfo whose hasOrganization() returns true for the given orgId
  * and whose getProfile() returns the provided profile.
  */
-function makeAuthInfo({ profileEmail = 'test@example.com', orgs = ['test-org'] } = {}) {
+function makeAuthInfo({ profileEmail = 'test@example.com', orgs = ['test-org'], type = 'ims' } = {}) {
   return {
+    getType: () => type,
     getProfile: () => ({ email: profileEmail }),
     hasOrganization: (orgId) => orgs.includes(orgId),
   };
@@ -168,12 +169,32 @@ describe('ApiKeyController tests', () => {
 
     it('should throw an error if attributes.authInfo.getProfile() returns no email/user_id', async () => {
       context.attributes.authInfo = {
+        getType: () => 'ims',
         getProfile: () => ({}),
         hasOrganization: () => true,
       };
       apiKeyController = ApiKeyController(context);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_UNAUTHORIZED);
+    });
+
+    it('should return 401 for a non-IMS/JWT auth type (type whitelist)', async () => {
+      context.attributes.authInfo = makeAuthInfo({ type: 'legacy-api-key' });
+      apiKeyController = ApiKeyController(context);
+      const response = await apiKeyController.createApiKey({ ...requestContext });
+      expect(response.status).to.equal(STATUS_UNAUTHORIZED);
+      expect(response.headers.get('x-error')).to.equal('Unauthorized');
+    });
+
+    it('should return 500 when authInfo is missing hasOrganization', async () => {
+      context.attributes.authInfo = {
+        getType: () => 'ims',
+        getProfile: () => ({ email: 'user@adobe.com' }),
+        // hasOrganization deliberately absent to simulate a broken authInfo shape
+      };
+      apiKeyController = ApiKeyController(context);
+      const response = await apiKeyController.createApiKey({ ...requestContext });
+      expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
     });
 
     it('should create a new API key with a username prefix (JWT caller, real email)', async () => {
@@ -188,12 +209,11 @@ describe('ApiKeyController tests', () => {
       expect(responseJson.apiKey).to.match(/^test-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     });
 
-    it('should generate a GUID-style prefix for IMS callers (profile.email is user_id)', async () => {
-      // For IMS auth, AdobeImsHandler.transformProfile sets profile.email to
-      // payload.user_id, which looks like `ABC123@AdobeID`. The username
-      // prefix of the generated API key will therefore be the GUID portion,
-      // not the caller's real email - documented behavior change from the
-      // previous IMS-round-trip controller. See PR #2344.
+    it('should generate a GUID-style prefix when profile.email has GUID-style format', async () => {
+      // ApiKeyImsHandler normalises profile.email to the real address for IMS
+      // callers, so `ABC123@AdobeID` reaching the controller is a synthetic
+      // scenario (e.g. a future handler that doesn't normalise). The prefix
+      // logic must still derive `ABC123` correctly in that case.
       context.attributes.authInfo = makeAuthInfo({ profileEmail: 'ABC123@AdobeID' });
       apiKeyController = ApiKeyController(context);
       context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);

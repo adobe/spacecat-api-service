@@ -121,19 +121,30 @@ function ApiKeyController(context) {
       throw new ErrorWithStatusCode('Unauthorized: auth middleware did not populate authInfo', STATUS_UNAUTHORIZED);
     }
 
+    // Whitelist the handler types that are allowed to reach this controller.
+    // Other handlers (LegacyApiKeyHandler, ScopedApiKeyHandler) lack a real
+    // email on profile and must not silently fall through to the ownership
+    // lookup; a future schema addition to those handlers would otherwise
+    // grant unintended access.
+    const ALLOWED_AUTH_TYPES = ['ims', 'jwt'];
+    if (!ALLOWED_AUTH_TYPES.includes(authInfo.getType?.())) {
+      throw new ErrorWithStatusCode('Unauthorized', STATUS_UNAUTHORIZED);
+    }
+
     const profile = authInfo.getProfile?.();
-    // While the property is named 'profile.email', for IMS auth this is the
-    // user_id (set by AdobeImsHandler.transformProfile, e.g. ABC123@AdobeID);
-    // for JWT auth it is the actual email. Either way, it is the stable
-    // per-user identifier we store as imsUserId on the ApiKey record. The
-    // username prefix derived below therefore differs in shape between IMS
-    // and JWT callers - this is intentional and documented.
+    // profile.email is the caller's real email address. ApiKeyImsHandler
+    // normalises IMS auth to use the real email (overriding the user_id alias
+    // set by AdobeImsHandler.transformProfile), so both the IMS and JWT paths
+    // store the same stable identity on ApiKey records.
     const imsUserId = profile?.email;
     if (!hasText(imsUserId)) {
       throw new ErrorWithStatusCode('Invalid request: caller profile is missing email/user_id', STATUS_UNAUTHORIZED);
     }
 
-    if (!authInfo.hasOrganization?.(imsOrgId)) {
+    if (typeof authInfo.hasOrganization !== 'function') {
+      throw new ErrorWithStatusCode('Unauthorized: authInfo missing hasOrganization', STATUS_INTERNAL_SERVER_ERROR);
+    }
+    if (!authInfo.hasOrganization(imsOrgId)) {
       throw new ErrorWithStatusCode('Invalid request: Unable to find a reference to the Organization provided.', STATUS_UNAUTHORIZED);
     }
 
