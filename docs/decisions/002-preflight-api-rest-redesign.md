@@ -91,12 +91,23 @@ Body:
 
 **Error responses:**
 
-| Status | Condition |
-|--------|-----------|
-| `400 Bad Request` | `url` or `step` is missing or invalid |
-| `403 Forbidden` | Caller does not have access to the site, or preflight is not enabled / no preflight audits are enabled for the site |
-| `404 Not Found` | `siteId` does not exist |
-| `500 Internal Server Error` | Mysticat call failed or unexpected error |
+| Status | `errorCode` | Condition |
+|--------|-------------|-----------|
+| `400 Bad Request` | `INVALID_REQUEST` | `url` is missing or invalid |
+| `403 Forbidden` | `SITE_ACCESS_DENIED` | Caller does not have access to the site |
+| `403 Forbidden` | `PREFLIGHT_NOT_ENABLED` | Preflight is not enabled for the site |
+| `404 Not Found` | `SITE_NOT_FOUND` | `siteId` does not exist |
+| `500 Internal Server Error` | `INTERNAL_ERROR` | Mysticat call failed or unexpected error |
+
+Error response body:
+```json
+{
+  "errorCode": "PREFLIGHT_NOT_ENABLED",
+  "message": "Preflight is not enabled for this site"
+}
+```
+
+`errorCode` gives consumers a stable machine-readable contract; `message` is a human-readable hint and should not be parsed by clients.
 
 No job record is created for `400`, `403`, or `404` responses. The current `/preflight/beta/jobs`
 behavior of creating a job and immediately setting it to `CANCELLED` when preflight is disabled
