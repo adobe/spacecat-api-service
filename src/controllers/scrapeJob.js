@@ -22,6 +22,7 @@ import {
   isValidUrl,
   hasText,
 } from '@adobe/spacecat-shared-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 /**
  * Scrape controller. Provides methods to create, read, and fetch the result of scrape jobs.
@@ -47,7 +48,7 @@ function ScrapeJobController(context) {
 
   function createErrorResponse(error) {
     return createResponse({}, error.status || 500, {
-      [HEADER_ERROR]: error.message,
+      [HEADER_ERROR]: cleanupHeaderValue(error.message),
     });
   }
 

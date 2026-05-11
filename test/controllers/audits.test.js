@@ -408,6 +408,29 @@ describe('Audits Controller', () => {
       const result = await controller.getAllLatest({ params: { auditType } });
       expect(result.status).to.equal(403);
     });
+
+    it('allows read-only admin to get all latest audits', async () => {
+      const authContextReadOnlyAdmin = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false, is_read_only_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextReadOnlyAdmin,
+      });
+
+      const auditType = 'security';
+      mockDataAccess.LatestAudit.allByAuditType.resolves(mockLatestAudits);
+
+      const result = await controller.getAllLatest({ params: { auditType } });
+      expect(result.status).to.equal(200);
+    });
   });
 
   describe('getAllLatestForSite', () => {
