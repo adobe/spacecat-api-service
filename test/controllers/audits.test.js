@@ -859,10 +859,12 @@ describe('Audits Controller', () => {
     it('proceeds without audit-type check when Configuration.findLatest throws', async () => {
       mockDataAccess.Configuration.findLatest.rejects(new Error('S3 bucket not found'));
       const auditType = 'broken-backlinks';
+      const log = { warn: sinon.stub() };
 
       const context = {
         params: { siteId, auditType },
         data: {},
+        log,
       };
 
       const result = await auditsController.patchAuditForSite(context);
@@ -871,6 +873,8 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(400);
       const error = await result.json();
       expect(error).to.have.property('message', 'No updates provided');
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.include('S3 bucket not found');
     });
 
     it('merges manual overwrites correctly', async () => {

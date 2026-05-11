@@ -221,8 +221,8 @@ function AuditsController(ctx) {
     let configuration;
     try {
       configuration = await Configuration.findLatest();
-    } catch {
-      // Configuration unavailable — skip audit-type registration check
+    } catch (err) {
+      context.log.warn(`Failed to load configuration, skipping audit-type check: ${err.message}`);
     }
     if (configuration) {
       const registeredAudits = configuration.getHandlers();
