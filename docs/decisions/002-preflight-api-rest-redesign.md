@@ -105,7 +105,8 @@ Body:
 | `403 Forbidden` | `PREFLIGHT_ACCESS_DENIED` | Caller does not have access to the site |
 | `403 Forbidden` | `PREFLIGHT_NOT_ENABLED` | Preflight is not enabled for the site |
 | `404 Not Found` | `PREFLIGHT_SITE_NOT_FOUND` | `siteId` does not exist |
-| `500 Internal Server Error` | `PREFLIGHT_INTERNAL_ERROR` | Mysticat call failed or unexpected error |
+| `502 Bad Gateway` | `PREFLIGHT_UPSTREAM_ERROR` | Mysticat returned a 5xx response |
+| `500 Internal Server Error` | `PREFLIGHT_INTERNAL_ERROR` | Unexpected error within this service |
 
 Error response body:
 ```json
