@@ -8160,6 +8160,48 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(3);
       expect(body.metadata.failed).to.equal(0);
     });
+
+    it('re-deploy of already-deployed path suggestion is a no-op (short-circuit via edgeDeployed check)', async () => {
+      const alreadyDeployedPathSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          allowedRegexPatterns: ['^/products'],
+          edgeDeployed: 1700000000000,
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      mockSuggestion.allByOpportunityId.resolves([alreadyDeployedPathSuggestion]);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(alreadyDeployedPathSuggestion);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.equal('Path suggestion already deployed');
+      expect(body.suggestions[0].statusCode).to.equal(400);
+      // deployToEdge must NOT be called — the short-circuit happens before it
+      expect(tokowakaClientStub.deployToEdge.called).to.be.false;
+    });
   });
 
   describe('listGeoExperiments', () => {

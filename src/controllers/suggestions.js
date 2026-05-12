@@ -1718,7 +1718,15 @@ function SuggestionsController(ctx, sqs, env) {
         }
       } else if (isPathSuggestion(suggestion)) {
         const data = suggestion.getData();
-        if (isNonEmptyArray(data.allowedRegexPatterns)) {
+        if (data?.edgeDeployed) {
+          context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, path suggestion ${suggestionId} is already deployed`);
+          failedSuggestions.push({
+            uuid: suggestionId,
+            index,
+            message: 'Path suggestion already deployed',
+            statusCode: 400,
+          });
+        } else if (isNonEmptyArray(data.allowedRegexPatterns)) {
           pathSuggestions.push({ suggestion, allowedRegexPatterns: data.allowedRegexPatterns });
         } else {
           context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, path suggestion ${suggestionId} missing allowedRegexPatterns`);
