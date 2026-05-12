@@ -14,6 +14,8 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 const DEFAULT_BASE_URL = 'https://www.semrush.com';
 const API_PREFIX = '/enterprise/projects/api';
+// Default UA matches the Python tooling — Semrush's edge will 403 a Node-style UA.
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 export class SerenityTransportError extends Error {
   constructor(status, message, body) {
@@ -28,9 +30,30 @@ function baseUrl(env) {
   return (env?.SEMRUSH_PROJECTS_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
 }
 
-function buildHeaders(imsToken) {
+/**
+ * Two auth modes. When `SEMRUSH_COOKIE` is configured the proxy forwards a
+ * shared logged-in browser session (containing `sso_token`); Semrush's edge
+ * translates it into the `Auth-Data-Jwt` the backend wants. Otherwise we
+ * pass the caller's IMS bearer through unchanged.
+ *
+ * The cookie mode mirrors the auth in `feat-serenity/.../semrush_*.py` and is
+ * the hackathon-friendly path until Adobe ↔ Semrush IMS trust is in place.
+ */
+function buildHeaders(env, imsToken) {
+  const cookie = (env?.SEMRUSH_COOKIE || '').trim();
+  if (cookie) {
+    return {
+      Cookie: cookie,
+      'User-Agent': env?.SEMRUSH_USER_AGENT || DEFAULT_USER_AGENT,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    };
+  }
   if (!hasText(imsToken)) {
-    throw new SerenityTransportError(401, 'Missing IMS bearer token for Semrush passthrough');
+    throw new SerenityTransportError(
+      401,
+      'Missing IMS bearer token and SEMRUSH_COOKIE is not configured',
+    );
   }
   return {
     'Auth-Data-Jwt': imsToken,
@@ -51,10 +74,10 @@ async function parseBody(response) {
   }
 }
 
-async function request(method, url, imsToken, body) {
+async function request(method, url, env, imsToken, body) {
   const init = {
     method,
-    headers: buildHeaders(imsToken),
+    headers: buildHeaders(env, imsToken),
   };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
@@ -86,7 +109,7 @@ export function createSerenityTransport({ env, imsToken }) {
      */
     async listPromptsByTags(workspaceId, projectId, body) {
       const url = `${root}${projectPath(workspaceId, projectId, '/by_tags')}`;
-      return request('POST', url, imsToken, {
+      return request('POST', url, env, imsToken, {
         tag_ids: body?.tag_ids ?? [],
         page: body?.page ?? 1,
         limit: body?.limit ?? 200,
@@ -104,7 +127,7 @@ export function createSerenityTransport({ env, imsToken }) {
      */
     async createTaggedPrompts(workspaceId, projectId, promptsByTag) {
       const url = `${root}${projectPath(workspaceId, projectId, '/tagged')}`;
-      return request('POST', url, imsToken, { prompts: promptsByTag });
+      return request('POST', url, env, imsToken, { prompts: promptsByTag });
     },
 
     /**
@@ -113,7 +136,7 @@ export function createSerenityTransport({ env, imsToken }) {
      */
     async deletePromptsByIds(workspaceId, projectId, ids) {
       const url = `${root}${projectPath(workspaceId, projectId, '')}`;
-      return request('DELETE', url, imsToken, { ids });
+      return request('DELETE', url, env, imsToken, { ids });
     },
   };
 }
