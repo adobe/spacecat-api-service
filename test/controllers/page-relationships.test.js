@@ -577,13 +577,18 @@ describe('Page Relationships Controller', () => {
       expect(body.errors['row-2'].error).to.equal('HTTP 404');
     });
 
-    it('keeps absolute URL for lookup when suggestion host differs from site host', async () => {
+    it('normalizes to pathname when suggestion host differs from site host (e.g. www vs no-www)', async () => {
+      // Regression: previously returned the full URL on host mismatch, which
+      // downstream resolvePageIds would concatenate with the site base URL
+      // producing https://example.com/https://www.example.com/... — see PR linked
+      // in the function comment for the original report.
       isAEMAuthoredSiteStub.returns(true);
+      mockSite.getBaseURL.returns('https://example.com');
       requestContext.data = {
-        pages: [{ key: 'row-external', pageUrl: 'https://external.example.com/us/en/page1', suggestionType: 'Missing Title' }],
+        pages: [{ key: 'row-www', pageUrl: 'https://www.example.com/us/en/page1', suggestionType: 'Missing Title' }],
       };
       resolvePageIdsStub.resolves([
-        { url: 'https://external.example.com/us/en/page1', pageId: 'pg-1' },
+        { url: '/us/en/page1', pageId: 'pg-1' },
       ]);
       fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
         results: {
@@ -600,20 +605,23 @@ describe('Page Relationships Controller', () => {
       const body = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['https://external.example.com/us/en/page1']);
-      expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('row-external');
-      expect(body.relationships).to.have.property('row-external');
-      expect(body.relationships['row-external'].pagePath).to.equal('https://external.example.com/us/en/page1');
-      expect(body.relationships['row-external'].pageId).to.equal('pg-1');
+      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['/us/en/page1']);
+      expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('row-www');
+      expect(body.relationships).to.have.property('row-www');
+      expect(body.relationships['row-www'].pagePath).to.equal('/us/en/page1');
+      expect(body.relationships['row-www'].pageId).to.equal('pg-1');
     });
 
-    it('keeps absolute URL when normalization cannot parse site base URL', async () => {
+    it('normalizes to pathname even when site base URL is unparseable', async () => {
+      // site baseURL is no longer parsed by normalizePageUrlForLookup; the
+      // function works off the suggestion URL alone. An invalid baseURL must
+      // not block normalization.
       isAEMAuthoredSiteStub.returns(true);
       mockSite.getBaseURL.returns('invalid-site-url');
       requestContext.data = {
         pages: [{ key: 'row-invalid-base', pageUrl: 'https://example.com/us/en/page1', suggestionType: 'Missing Title' }],
       };
-      resolvePageIdsStub.resolves([{ url: 'https://example.com/us/en/page1', pageId: 'pg-1' }]);
+      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-1' }]);
       fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
         results: {
           [items[0].key]: {
@@ -629,10 +637,10 @@ describe('Page Relationships Controller', () => {
       const body = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['https://example.com/us/en/page1']);
+      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['/us/en/page1']);
       expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('row-invalid-base');
       expect(body.relationships).to.have.property('row-invalid-base');
-      expect(body.relationships['row-invalid-base'].pagePath).to.equal('https://example.com/us/en/page1');
+      expect(body.relationships['row-invalid-base'].pagePath).to.equal('/us/en/page1');
       expect(body.relationships['row-invalid-base'].pageId).to.equal('pg-1');
     });
 
