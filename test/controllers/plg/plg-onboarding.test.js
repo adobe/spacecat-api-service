@@ -4368,6 +4368,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           siteResolved: true,
           configUpdated: true,
           entitlementCreated: true,
+          preOnboarded: true,
         }),
       );
       // Fast path walks entitlement siblings to enforce one-enrollment-per-org.
@@ -4396,7 +4397,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(response.status).to.equal(200);
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ entitlementCreated: true });
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith(
+        { entitlementCreated: true, preOnboarded: true },
+      );
     });
 
     it('falls through to full onboarding when preonboarded site not found', async () => {
