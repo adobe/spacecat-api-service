@@ -211,6 +211,10 @@ async function listExportCsvObjects(ctx, bucket, csvKey) {
   } while (ContinuationToken);
 
   return [...new Set(objects)].sort((left, right) => {
+    // The `|| 1` fallback is defensive — `listExportCsvObjects` only ever
+    // returns keys that equal csvKey or end in _partN, so the match
+    // always succeeds for the non-csvKey branch.
+    /* c8 ignore next */
     const part = (key) => (key === csvKey ? 1 : Number(key.match(/_part(\d+)$/)?.[1] || 1));
     return part(left) - part(right);
   });

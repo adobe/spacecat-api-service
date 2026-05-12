@@ -1244,6 +1244,66 @@ describe('llmo-agentic-traffic', () => {
       expect(ctx.log.error).to.have.been.calledWithMatch(/Agentic traffic URLs export error/);
     });
 
+    it('defaults s3Region to us-east-1 and requestedBy to unknown when env / authInfo are missing', async () => {
+      // Covers two fallbacks at once:
+      //   - getExportConfig's `|| 'us-east-1'` when no region in env / runtime
+      //   - the SQS message's `requestedBy` `|| 'unknown'` when authInfo absent
+      const ctx = makeExportContext();
+      delete ctx.env.AGENTIC_TRAFFIC_EXPORT_REGION;
+      delete ctx.runtime;
+      delete ctx.attributes;
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      const message = ctx.sqs.sendMessage.firstCall.args[1];
+      expect(message.data.s3Region).to.equal('us-east-1');
+      expect(message.data.requestedBy).to.equal('unknown');
+    });
+
+    it('handles ListObjectsV2 response without Contents (result.Contents || [])', async () => {
+      // AWS sometimes returns an empty result without the Contents field
+      // at all (vs Contents: []). The `|| []` fallback should keep the
+      // listing flow working.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({}); // no Contents key at all
+        }
+        const err = new Error('not found');
+        err.name = 'NoSuchKey';
+        return Promise.reject(err);
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('returns ready when metadata lacks count fields (rowCount ?? null path)', async () => {
+      // metadata.rowCount / filesUploaded / bytesUploaded all missing —
+      // build-ready response uses `?? null` and `?? csvKeys.length` as
+      // fallbacks instead of crashing on undefined.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({
+            Contents: [{ Key: command.input.Prefix }],
+          });
+        }
+        return Promise.resolve({
+          Body: { transformToString: () => Promise.resolve('{"status":"success"}') },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      expect(body.rowCount).to.equal(null);
+      expect(body.bytesUploaded).to.equal(null);
+      expect(body.filesUploaded).to.equal(1); // falls back to csvKeys.length
+    });
+
     it('re-enqueues when a prior attempt failed (failed metadata is retriable)', async () => {
       // POST is the user's "I want this export" signal — a previously
       // failed attempt with the same filters shouldn't permanently lock
@@ -1360,6 +1420,58 @@ describe('llmo-agentic-traffic', () => {
         status: 'failed',
         failureReason: 'db error',
       });
+    });
+
+    it('returns failed with default reason when metadata has no failureReason', async () => {
+      // metadata.failureReason || 'Export failed' fallback when the worker
+      // wrote a 'failed' record without explaining why.
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        return Promise.resolve({
+          Body: { transformToString: () => Promise.resolve('{"status":"failed"}') },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(body).to.deep.equal({
+        exportId: EXPORT_ID,
+        status: 'failed',
+        failureReason: 'Export failed',
+      });
+    });
+
+    it('rejects undefined exportId in params (exportId || "" fallback)', async () => {
+      // ctx.params.exportId is undefined → EXPORT_ID_PATTERN.test('') is
+      // false → 400. Distinct from the 'not-a-hash' test, which has a
+      // truthy value.
+      const ctx = makeExportContext({ params: {} });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('handles GetObject error with $metadata.httpStatusCode = 404 (NoSuchKey via different shape)', async () => {
+      // Aurora's S3 SDK sometimes returns 404s without setting error.name
+      // = 'NoSuchKey' — the fallback branch uses error.$metadata?.
+      // httpStatusCode === 404 to treat them the same way.
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        const err = new Error('not found');
+        err.$metadata = { httpStatusCode: 404 };
+        return Promise.reject(err);
+      });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      // No metadata → still processing
+      expect(body.status).to.equal('processing');
     });
 
     it('rejects invalid export ids', async () => {
