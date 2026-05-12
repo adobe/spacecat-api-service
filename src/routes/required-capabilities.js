@@ -536,6 +536,30 @@ const routeRequiredCapabilities = {
   'GET /llmo/agentic-traffic/global': 'report:read',
   'POST /llmo/agentic-traffic/global': 'report:write',
 
+  // AI Visibility (Semrush proxy): gated like GET /llmo/agentic-traffic/global (report:read)
+  'GET /llmo/ai-visibility/brands/stats': 'report:read',
+  'GET /llmo/ai-visibility/brands/topics': 'report:read',
+  'GET /llmo/ai-visibility/brands/prompts': 'report:read',
+  'GET /llmo/ai-visibility/brands/cited-pages': 'report:read',
+  'GET /llmo/ai-visibility/brands/topic-opportunities': 'report:read',
+  'GET /llmo/ai-visibility/brands/top-brands': 'report:read',
+  'GET /llmo/ai-visibility/brands/cited-sources': 'report:read',
+  'GET /llmo/ai-visibility/brands/source-opportunities': 'report:read',
+  'GET /llmo/ai-visibility/brands/competitors': 'report:read',
+  'GET /llmo/ai-visibility/competitors/metrics': 'report:read',
+  'GET /llmo/ai-visibility/competitors/gap-topics': 'report:read',
+  'GET /llmo/ai-visibility/competitors/gap-source-domains': 'report:read',
+  'GET /llmo/ai-visibility/competitors/gap-prompts': 'report:read',
+  'GET /llmo/ai-visibility/meta': 'report:read',
+  'GET /llmo/ai-visibility/prompts/responses/latest': 'report:read',
+  'GET /llmo/ai-visibility/prompts/responses': 'report:read',
+  'GET /llmo/ai-visibility/topics/research/stats': 'report:read',
+  'GET /llmo/ai-visibility/topics/research/prompts': 'report:read',
+  'GET /llmo/ai-visibility/topics/research/brands': 'report:read',
+  'GET /llmo/ai-visibility/topics/research/source-domains': 'report:read',
+  'GET /llmo/ai-visibility/topics/research': 'report:read',
+  'GET /llmo/ai-visibility/topics/stats': 'report:read',
+
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
 
