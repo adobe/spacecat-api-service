@@ -1808,13 +1808,8 @@ function SuggestionsController(ctx, sqs, env) {
 
         context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_STARTED`);
 
-        // Append an Atomic Strategy entry to the site's LLMO strategy blob
-        // BEFORE any irreversible engine activation (DRS schedule) or
-        // suggestion mutation. The new UI treats the Atomic strategy as a
-        // required UI projection of the experiment — without it, "View
-        // Strategy" / progress stepper have nowhere to bind. Running the
-        // strategy write here makes failure cheap: only the GeoExperiment
-        // row exists, and the outer catch already rolls it back.
+        // Create the Atomic strategy before DRS / suggestion-marking so a
+        // failure rolls back cheaply via the outer catch.
         await createAtomicStrategy({
           siteId,
           geoExperimentId,
@@ -1916,10 +1911,7 @@ function SuggestionsController(ctx, sqs, env) {
             context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
           }
         }
-        // Compensating action: if the Atomic strategy was already written
-        // before this failure, delete it so we don't leave an orphan strategy
-        // pointing at a now-removed GeoExperiment (the symmetric failure mode
-        // to an orphan experiment with no UI projection).
+        // Delete the strategy if it was created so we don't leave an orphan.
         if (atomicStrategyCreated) {
           try {
             await deleteAtomicStrategy({
