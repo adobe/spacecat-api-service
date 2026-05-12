@@ -141,7 +141,7 @@ function LlmoOpportunitiesController(ctx) {
       return ok({ total, bySite });
     } catch (error) {
       log.error(`Error counting opportunities: ${error.message}`);
-      return internalServerError(error.message);
+      return internalServerError('An internal error occurred while counting opportunities');
     }
   };
 
@@ -305,7 +305,7 @@ function LlmoOpportunitiesController(ctx) {
       });
     } catch (error) {
       log.error(`Error fetching brand opportunities: ${error.message}`);
-      return internalServerError(error.message);
+      return internalServerError('An internal error occurred while fetching brand opportunities');
     }
   };
 
