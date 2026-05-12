@@ -381,6 +381,55 @@ describe('AI Visibility – topics handlers', () => {
       const res = await handleTopicsResearch(sp, clients);
       expect(res.body.data[0]).to.not.have.property('volumeSortKey');
     });
+
+    it('single LLM maps relevanceScore from gRPC field', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.resolve({
+          topics: [{
+            id: '1', name: 'T', volume: 100, promptsCount: 5, relevanceScore: 72,
+          }],
+        });
+      });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearch(sp, clients);
+      expect(res.body.data[0].relevanceScore).to.equal(72);
+    });
+
+    it('single LLM defaults relevanceScore to 0 when absent', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.resolve({
+          topics: [{
+            id: '1', name: 'T', volume: 100, promptsCount: 5,
+          }],
+        });
+      });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearch(sp, clients);
+      expect(res.body.data[0].relevanceScore).to.equal(0);
+    });
+
+    it('all LLMs keeps max relevanceScore when same topic_id appears from multiple LLMs', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ llm: l, range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        if (l === FTS_LLMS[0]) {
+          return Promise.resolve({
+            topics: [{ id: 'x', name: 'T', volume: 100, promptsCount: 1, relevanceScore: 40 }],
+          });
+        }
+        if (l === FTS_LLMS[1]) {
+          return Promise.resolve({
+            topics: [{ id: 'x', name: 'T', volume: 100, promptsCount: 1, relevanceScore: 85 }],
+          });
+        }
+        return Promise.resolve({ topics: [] });
+      });
+      const sp = new URLSearchParams('searchQuery=test');
+      const res = await handleTopicsResearch(sp, clients);
+      expect(res.body.data).to.have.length(1);
+      expect(res.body.data[0].relevanceScore).to.equal(85);
+    });
   });
 
   /* ------------------------------------------------------------------ */

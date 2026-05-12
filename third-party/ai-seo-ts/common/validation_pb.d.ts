@@ -3,7 +3,7 @@
 /* eslint-disable */
 
 import type { GenExtension, GenFile } from "@bufbuild/protobuf/codegenv2";
-import type { StringRules } from "../deps/buf/validate/validate_pb";
+import type { StringRules } from "../deps/buf/validate/validate_pb.js";
 
 /**
  * Describes the file common/validation.proto.
