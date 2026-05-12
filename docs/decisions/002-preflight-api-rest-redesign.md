@@ -126,7 +126,7 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 
 ### GET /sites/:siteId/preflights
 
-**Response** `200 OK` — grouped by URL, with a nested array of preflights per page. A site can have preflights for multiple URLs:
+**Response** `200 OK` — grouped by URL, with a nested array of preflights per page. A site can have preflights for multiple URLs. Results are capped at the 50 most recent preflights per site (sorted by `createdAt` descending across all URLs before grouping). Given the 7-day TTL on `AsyncJob` records the natural upper bound is low; full cursor-based pagination is deferred until there is evidence of consumers hitting the cap.
 ```json
 [
   {
