@@ -103,6 +103,7 @@ import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
 import AiVisibilityController from './controllers/ai-visibility.js';
+import SerenityPromptsController from './controllers/serenity-prompts.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -258,6 +259,7 @@ async function run(request, context) {
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
     const aiVisibilityController = AiVisibilityController(context, log, context.env);
+    const serenityPromptsController = SerenityPromptsController(context, log);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -313,6 +315,7 @@ async function run(request, context) {
       drsBpPgAuditController,
       webhooksController,
       aiVisibilityController,
+      serenityPromptsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

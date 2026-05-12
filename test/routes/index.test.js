@@ -490,6 +490,13 @@ describe('getRouteHandlers', () => {
     getTopicsStats: sinon.stub(),
   };
 
+  const mockSerenityPromptsController = {
+    listPrompts: sinon.stub(),
+    createPrompts: sinon.stub(),
+    updatePrompt: sinon.stub(),
+    bulkDeletePrompts: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -545,6 +552,7 @@ describe('getRouteHandlers', () => {
       mockDrsBpPgAuditController,
       mockWebhooksController,
       mockAiVisibilityController,
+      mockSerenityPromptsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -703,6 +711,10 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:promptId',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete',
       'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',

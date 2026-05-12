@@ -1,0 +1,289 @@
+# Serenity prompts (Semrush REST passthrough) — 4 endpoints
+# All endpoints live under /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts*
+# and forward the caller's IMS bearer to Semrush as the `Auth-Data-Jwt` header.
+#
+# Project assignment is matrix-driven: each (brand, category, market, language)
+# tuple resolves to one Semrush project. A prompt with N regions fans out into
+# N projects sharing the same logical id.
+
+x-serenity-spaceCatId: &spaceCatIdParam
+  name: spaceCatId
+  in: path
+  required: true
+  description: SpaceCat organization id (UUID)
+  schema:
+    type: string
+    format: uuid
+
+x-serenity-brandId: &brandIdParam
+  name: brandId
+  in: path
+  required: true
+  description: Brand id within the organization
+  schema:
+    type: string
+
+x-serenity-promptId: &promptIdParam
+  name: promptId
+  in: path
+  required: true
+  description: Opaque logical prompt id (base64url JSON of brand/category/language/text)
+  schema:
+    type: string
+
+LogicalPrompt: &LogicalPrompt
+  type: object
+  required: [id, brandId, text, category, language, regions, projects]
+  properties:
+    id:
+      type: string
+      description: base64url-encoded JSON descriptor; stable for the same (brand, category, language, text).
+    brandId:
+      type: string
+    text:
+      type: string
+    category:
+      type: string
+    language:
+      type: string
+      description: Lowercased ISO 639-1 code.
+    topic:
+      type: [string, "null"]
+      description: First tag name on the underlying Semrush prompt, used as the display topic.
+    regions:
+      type: array
+      items:
+        type: string
+        description: Uppercased ISO 3166-1 alpha-2 market code.
+    projects:
+      type: array
+      description: Per-project Semrush prompt ids. Required by PATCH/bulk-delete callers.
+      items:
+        type: object
+        properties:
+          projectId:
+            type: string
+          market:
+            type: string
+          semrushPromptId:
+            type: string
+
+serenity-prompts:
+  get:
+    operationId: listSerenityPrompts
+    tags: [prompts]
+    summary: List Semrush-backed prompts for a brand (proxied)
+    description: |
+      Aggregates `POST /aio/prompts/by_tags` across every matrix project for the
+      brand, then groups identical text/language/category occurrences into a
+      single logical prompt with a `regions` array and per-project Semrush ids.
+    security:
+      - ims_key: []
+    parameters:
+      - *spaceCatIdParam
+      - *brandIdParam
+      - name: page
+        in: query
+        schema: { type: integer, minimum: 1, default: 1 }
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      - name: search
+        in: query
+        schema: { type: string }
+      - name: region
+        in: query
+        description: Filter to a single ISO market (case-insensitive).
+        schema: { type: string }
+      - name: language
+        in: query
+        schema: { type: string }
+      - name: category
+        in: query
+        schema: { type: string }
+    responses:
+      '200':
+        description: Paginated list of logical prompts.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items: *LogicalPrompt
+                total: { type: integer }
+                page: { type: integer }
+                limit: { type: integer }
+                errors:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      message: { type: string }
+      '401': { description: Missing IMS bearer }
+      '503': { description: Matrix not configured for this deployment }
+  post:
+    operationId: createSerenityPrompts
+    tags: [prompts]
+    summary: Create one or more Semrush-backed prompts (fan-out)
+    description: |
+      Each prompt fans out to every matrix project matching its (category, region,
+      language). Per-project results (`semrushPromptId` or `error`) are returned
+      under `created[].projects` so callers can surface partial failures.
+    security:
+      - ims_key: []
+    parameters:
+      - *spaceCatIdParam
+      - *brandIdParam
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [prompts]
+            properties:
+              prompts:
+                type: array
+                items:
+                  type: object
+                  required: [text, category, language, regions]
+                  properties:
+                    text: { type: string }
+                    category: { type: string }
+                    language: { type: string }
+                    regions:
+                      type: array
+                      items: { type: string }
+                    topic:
+                      type: string
+                      description: Optional override for the Semrush tag; defaults to category.
+    responses:
+      '201':
+        description: Per-prompt results with fan-out projects.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                created:
+                  type: array
+                  items: *LogicalPrompt
+                errors:
+                  type: array
+                  items:
+                    type: object
+      '401': { description: Missing IMS bearer }
+      '503': { description: Matrix not configured for this deployment }
+
+serenity-prompt-by-id:
+  patch:
+    operationId: updateSerenityPrompt
+    tags: [prompts]
+    summary: Edit a Semrush-backed prompt (delete + recreate)
+    description: |
+      Semrush exposes no per-prompt PUT, so edits are implemented by deleting the
+      provided per-project ids and creating fresh prompts on the projects that
+      match the updated (category, regions, language). Callers must pass the
+      `projects` array from a prior list response so the proxy knows which
+      Semrush rows to retire.
+    security:
+      - ims_key: []
+    parameters:
+      - *spaceCatIdParam
+      - *brandIdParam
+      - *promptIdParam
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [projects]
+            properties:
+              projects:
+                type: array
+                description: Existing per-project ids from a prior list response.
+                items:
+                  type: object
+                  required: [projectId, semrushPromptId]
+                  properties:
+                    projectId: { type: string }
+                    semrushPromptId: { type: string }
+                    market: { type: string }
+              text: { type: string }
+              category: { type: string }
+              language: { type: string }
+              topic: { type: string }
+              regions:
+                type: array
+                items: { type: string }
+    responses:
+      '200':
+        description: New logical prompt + per-project delete results.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                updated: *LogicalPrompt
+                deleted:
+                  type: array
+                  items:
+                    type: object
+                errors:
+                  type: array
+                  items:
+                    type: object
+      '400': { description: invalidLogicalId or missingProjects }
+      '503': { description: Matrix not configured for this deployment }
+
+serenity-prompts-bulk-delete:
+  post:
+    operationId: bulkDeleteSerenityPrompts
+    tags: [prompts]
+    summary: Bulk-delete Semrush-backed prompts (per-project ids)
+    description: |
+      Groups the provided `(projectId, semrushPromptId)` pairs by project and
+      calls Semrush DELETE /aio/prompts once per project. Returns the per-project
+      tally and any upstream errors.
+    security:
+      - ims_key: []
+    parameters:
+      - *spaceCatIdParam
+      - *brandIdParam
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [targets]
+            properties:
+              targets:
+                type: array
+                items:
+                  type: object
+                  required: [projectId, semrushPromptId]
+                  properties:
+                    projectId: { type: string }
+                    semrushPromptId: { type: string }
+    responses:
+      '200':
+        description: Aggregated delete tally.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deleted: { type: integer }
+                results:
+                  type: array
+                  items:
+                    type: object
+                errors:
+                  type: array
+                  items:
+                    type: object
+      '503': { description: Matrix not configured for this deployment }

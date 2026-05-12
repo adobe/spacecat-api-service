@@ -628,6 +628,13 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-brands'
   /llmo/ai-visibility/topics/research/source-domains:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
+# Serenity prompts (Semrush REST passthrough)
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts:
+    $ref: './serenity-prompts-api.yaml#/serenity-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/{promptId}:
+    $ref: './serenity-prompts-api.yaml#/serenity-prompt-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
+    $ref: './serenity-prompts-api.yaml#/serenity-prompts-bulk-delete'
 
 components:
   securitySchemes:
