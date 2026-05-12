@@ -741,11 +741,15 @@ export function onboardSiteModal(lambdaContext) {
         log.info(`Bot blocker result for ${siteUrl}: crawlable=${botProtectionResult.crawlable}, type=${botProtectionResult.type}`);
       } catch (e) {
         log.warn(`Bot blocker detection failed for ${siteUrl}, proceeding with onboarding`, e);
-        await client.chat.postMessage({
-          channel: responseChannel,
-          text: `:warning: Bot protection detection skipped for ${siteUrl} — audits may be affected if the site has bot protection.`,
-          thread_ts: responseThreadTs,
-        });
+        try {
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: `:warning: Bot protection detection skipped for ${siteUrl} — audits may be affected if the site has bot protection.`,
+            thread_ts: responseThreadTs,
+          });
+        } catch (slackErr) {
+          log.warn(`Failed to post bot-blocker warning for ${siteUrl}`, slackErr);
+        }
       }
 
       // Send warning if bot protection is detected
@@ -840,7 +844,7 @@ ${deliveryConfigInfo}${previewConfigInfo}
           await client.chat.postMessage({
             channel: responseChannel,
             text: `:x: Onboarding failed for \`${siteUrl || 'unknown site'}\``
-              + `\n*Triggered by:* ${user?.name || 'unknown'} | *Profile:* ${profile || 'unknown'}`
+              + `\n*Triggered by:* ${user?.name || 'unknown'} | *Profile:* ${profile || 'unknown'} | *IMS Org:* ${imsOrgId || 'unknown'}`
               + `\n*Error:* ${safeMessage}`,
             thread_ts: responseThreadTs,
           });

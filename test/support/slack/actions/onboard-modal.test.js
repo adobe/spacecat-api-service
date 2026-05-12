@@ -951,7 +951,7 @@ describe('onboard-modal', () => {
       }));
     });
 
-    it('should use safe defaults when error has no message and siteUrl is not yet parsed', async () => {
+    it('should fall back to "unknown error" when error has no message', async () => {
       const mockedModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
         '../../../../src/utils/slack/base.js': {
           loadProfileConfig: sinon.stub().resolves({ audits: ['cwv'], imports: ['organic-traffic'] }),
@@ -979,7 +979,7 @@ describe('onboard-modal', () => {
       await modalAction({ ack: ackMock, body, client: clientMock });
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith(sinon.match({
-        text: sinon.match('unknown site').or(sinon.match('unknown error')),
+        text: sinon.match('unknown error'),
       }));
     });
 
@@ -992,6 +992,9 @@ describe('onboard-modal', () => {
       expect(ackMock).to.have.been.calledWith(sinon.match({
         response_action: 'errors',
         errors: { site_url_input: 'There was an error processing the onboarding request.' },
+      }));
+      expect(clientMock.chat.postMessage).to.not.have.been.calledWith(sinon.match({
+        text: sinon.match(':x: Onboarding failed'),
       }));
     });
 
@@ -1485,6 +1488,47 @@ describe('onboard-modal', () => {
         expect(context.log.warn).to.have.been.called;
 
         const successMessage = clientMock.chat.postMessage.getCalls()
+          .find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
+        expect(successMessage).to.exist;
+      });
+
+      it('should continue onboarding when detectBotBlocker throws and Slack warning post also fails', async () => {
+        const onboardStub = sinon.stub().resolves({ siteId: 'site123', errors: [] });
+        // The first postMessage is "Starting onboarding..."; the second is the bot-blocker warning.
+        // Reject on the second call to simulate Slack failure on the warning post only.
+        const postMessageStub = sinon.stub();
+        postMessageStub.onSecondCall().rejects(new Error('channel_not_found'));
+        postMessageStub.resolves({ ok: true });
+
+        const testModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+          '../../../../src/utils/slack/base.js': {
+            loadProfileConfig: sinon.stub().resolves({ audits: ['scrape-top-pages'], imports: ['organic-traffic'] }),
+          },
+          '../../../../src/support/utils.js': {
+            onboardSingleSite: onboardStub,
+          },
+          '../../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: sinon.stub().resolves('exec-123'),
+          },
+          '@adobe/spacecat-shared-utils': {
+            isValidUrl: () => true,
+            detectBotBlocker: sinon.stub().rejects(new Error('connection timeout')),
+          },
+        });
+
+        const clientWithFailingPost = { ...clientMock, chat: { postMessage: postMessageStub } };
+        const modalAction = testModule.onboardSiteModal(context);
+
+        // Should not throw — Slack warning failure must not bubble to outer error handler
+        await modalAction({ ack: ackMock, body, client: clientWithFailingPost });
+
+        // Onboarding should still complete
+        expect(onboardStub.calledOnce).to.be.true;
+
+        // Slack failure should be logged, not thrown
+        expect(context.log.warn).to.have.been.called;
+
+        const successMessage = postMessageStub.getCalls()
           .find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
         expect(successMessage).to.exist;
       });
