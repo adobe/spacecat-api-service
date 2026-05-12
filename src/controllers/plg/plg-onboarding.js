@@ -897,7 +897,6 @@ async function performAsoPlgOnboarding({
         const steps = {
           ...(onboarding.getSteps() || {}),
           entitlementCreated: true,
-          preOnboarded: true,
         };
         if (needsOrgReassignment) {
           steps.siteOrgReassigned = true;
