@@ -155,6 +155,7 @@ export default function getRouteHandlers(
   drsBpPgAuditController,
   webhooksController,
   serenityController,
+  serenityPromptsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -205,6 +206,10 @@ export default function getRouteHandlers(
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.updatePromptByBrandAndId,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.deletePromptByBrandAndId,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': brandsController.bulkDeletePromptsByBrand,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityPromptsController.listPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityPromptsController.createPrompts,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:promptId': serenityPromptsController.updatePrompt,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityPromptsController.bulkDeletePrompts,
     'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': brandsController.triggerConfigSync,
     'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': brandsController.getBrandForOrgSite,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
