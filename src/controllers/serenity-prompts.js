@@ -69,7 +69,8 @@ function SerenityPromptsController(context, log) {
 
   function buildTransport(ctx) {
     const imsToken = getImsToken(ctx);
-    if (!imsToken) {
+    const hasCookie = Boolean((ctx?.env?.SEMRUSH_COOKIE || '').trim());
+    if (!imsToken && !hasCookie) {
       return null;
     }
     return createSerenityTransport({ env: ctx.env, imsToken });
@@ -79,7 +80,7 @@ function SerenityPromptsController(context, log) {
     const brandId = ctx?.params?.brandId;
     const transport = buildTransport(ctx);
     if (!transport) {
-      return badRequest('Missing IMS bearer token');
+      return badRequest('Missing IMS bearer token and SEMRUSH_COOKIE is not configured');
     }
     try {
       const result = await handleListPrompts(transport, ctx.env, brandId, extractQuery(ctx));
@@ -93,7 +94,7 @@ function SerenityPromptsController(context, log) {
     const brandId = ctx?.params?.brandId;
     const transport = buildTransport(ctx);
     if (!transport) {
-      return badRequest('Missing IMS bearer token');
+      return badRequest('Missing IMS bearer token and SEMRUSH_COOKIE is not configured');
     }
     try {
       const result = await handleCreatePrompts(transport, ctx.env, brandId, ctx.data || {});
@@ -111,7 +112,7 @@ function SerenityPromptsController(context, log) {
     }
     const transport = buildTransport(ctx);
     if (!transport) {
-      return badRequest('Missing IMS bearer token');
+      return badRequest('Missing IMS bearer token and SEMRUSH_COOKIE is not configured');
     }
     try {
       const result = await handleUpdatePrompt(
@@ -131,7 +132,7 @@ function SerenityPromptsController(context, log) {
     const brandId = ctx?.params?.brandId;
     const transport = buildTransport(ctx);
     if (!transport) {
-      return badRequest('Missing IMS bearer token');
+      return badRequest('Missing IMS bearer token and SEMRUSH_COOKIE is not configured');
     }
     try {
       const result = await handleBulkDeletePrompts(

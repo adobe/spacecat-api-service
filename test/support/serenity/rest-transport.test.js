@@ -95,6 +95,47 @@ describe('serenity/rest-transport', () => {
     expect(result.items[0].name).to.equal('hi');
   });
 
+  describe('cookie mode (SEMRUSH_COOKIE)', () => {
+    it('sends Cookie + User-Agent and omits Auth-Data-Jwt when SEMRUSH_COOKIE is set', async () => {
+      fetchStub.resolves(jsonResponse({ items: [], page: 1, total: 0 }));
+      const t = createSerenityTransport({
+        env: { SEMRUSH_COOKIE: 'sso_token=abc; other=def' },
+        imsToken: '', // intentionally absent
+      });
+      await t.listPromptsByTags('ws', 'p1', { tag_ids: [] });
+      const [, init] = fetchStub.firstCall.args;
+      expect(init.headers.Cookie).to.equal('sso_token=abc; other=def');
+      expect(init.headers['User-Agent']).to.match(/^Mozilla\/5\.0.*Chrome/);
+      expect(init.headers['Auth-Data-Jwt']).to.equal(undefined);
+    });
+
+    it('allows overriding the User-Agent via SEMRUSH_USER_AGENT', async () => {
+      fetchStub.resolves(jsonResponse({ items: [], page: 1, total: 0 }));
+      const t = createSerenityTransport({
+        env: {
+          SEMRUSH_COOKIE: 'sso_token=abc',
+          SEMRUSH_USER_AGENT: 'CustomUA/1.0',
+        },
+        imsToken: '',
+      });
+      await t.listPromptsByTags('ws', 'p1', { tag_ids: [] });
+      const [, init] = fetchStub.firstCall.args;
+      expect(init.headers['User-Agent']).to.equal('CustomUA/1.0');
+    });
+
+    it('falls back to IMS pass-through when SEMRUSH_COOKIE is empty', async () => {
+      fetchStub.resolves(jsonResponse({ items: [] }));
+      const t = createSerenityTransport({
+        env: { SEMRUSH_COOKIE: '' },
+        imsToken: 'ims-tok',
+      });
+      await t.listPromptsByTags('ws', 'p1', {});
+      const [, init] = fetchStub.firstCall.args;
+      expect(init.headers['Auth-Data-Jwt']).to.equal('ims-tok');
+      expect(init.headers.Cookie).to.equal(undefined);
+    });
+  });
+
   it('DELETE forwards the body of ids', async () => {
     fetchStub.resolves(jsonResponse(null, 204));
     const t = createSerenityTransport({ env: {}, imsToken: 't' });
