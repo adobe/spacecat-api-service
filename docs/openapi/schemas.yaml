@@ -8669,40 +8669,27 @@ FanoutReport:
 
 FanoutReportTopic:
   type: object
-  description: One topic in a `FanoutReport`.
+  description: |
+    One topic in a `FanoutReport`. Trimmed to the minimal set the UI consumes —
+    debug-only and pre-filtered fields (Semrush internal IDs, similarity score,
+    per-rate breakdown counts) are intentionally omitted.
   properties:
     topicUuid:
       type: string
       format: uuid
-      description: Internal UUID from `public.topics.id`.
-    topicId:
-      type: string
-      description: External text identifier from `public.topics.topic_id` (unique per org).
-      example: 'best-crm-for-smb'
+      description: Internal UUID from `public.topics.id`. Use this to deep-link to topic-scoped endpoints.
     name:
       type: string
-      description: Human-readable topic name.
+      description: Human-readable topic name from `public.topics.name`.
       example: 'Best CRM for SMB'
-    description:
-      type: [string, 'null']
-      description: Optional human-readable description from `public.topics.description`.
-    matchedTopicId:
-      type: string
-      format: uuid
-      description: Internal Semrush topic ID the input name was matched to.
     matchedTopicName:
       type: string
-      description: Semrush's canonical name for the matched topic. May differ from `name` when Semrush normalized the input.
-      example: 'Best CRM for small business'
-    similarityScore:
-      type: number
-      format: float
-      minimum: 0.7
-      maximum: 1.0
       description: |
-        Confidence of Semrush's topic match. Topics with `similarityScore < 0.70`
-        are dropped during curation and never appear in the report.
-      example: 0.92
+        Semrush's canonical name for the matched topic. May differ from `name`
+        when Semrush rewrote the input string (e.g. `"best crm for smb"` →
+        `"Best CRM for small business"`). UI can surface this as a
+        "matched to: X" hint.
+      example: 'Best CRM for small business'
     volume:
       type: integer
       description: Monthly search volume for the matched topic in the requested country.
@@ -8711,24 +8698,18 @@ FanoutReportTopic:
       type: integer
       description: |
         Number of distinct prompts under the topic that have at least one
-        execution in the trailing window.
-      example: 32
-    promptsMention:
-      type: integer
-      description: Number of prompts in `promptsTotal` where at least one execution had `mentions = true`.
-      example: 15
-    promptsCitation:
-      type: integer
-      description: Number of prompts in `promptsTotal` where at least one execution had `citations = true`.
-      example: 1
+        execution in the trailing window. Drives the "8 tracked prompts"
+        header text in the UI (PDF Fig 2).
+      example: 8
     mentionRate:
       type: [number, 'null']
       format: float
       minimum: 0
       maximum: 1
       description: |
-        `promptsMention / promptsTotal`. `null` when `promptsTotal = 0` (no
-        execution data in the window).
+        Fraction of `promptsTotal` where at least one execution had
+        `mentions = true`. `null` when `promptsTotal = 0` (no execution data
+        in the window).
       example: 0.47
     citationRate:
       type: [number, 'null']
@@ -8736,16 +8717,16 @@ FanoutReportTopic:
       minimum: 0
       maximum: 1
       description: |
-        `promptsCitation / promptsTotal`. `null` when `promptsTotal = 0` (no
-        execution data in the window). Topics with `null` are treated as
-        zero by the priority formula.
+        Fraction of `promptsTotal` where at least one execution had
+        `citations = true`. `null` when `promptsTotal = 0`. Topics with
+        `null` are treated as zero by the priority formula.
       example: 0.03
     priorityScore:
       type: number
       format: float
       description: |
-        `volume × (1 − COALESCE(citationRate, 0))`. Pre-computed so the UI can
-        sort/rank without recomputing. Higher score = larger opportunity.
+        `volume × (1 − COALESCE(citationRate, 0))`. Pre-computed so the UI
+        can sort/rank without recomputing. Higher score = larger opportunity.
       example: 2328.0
     subQueries:
       type: array
@@ -8754,15 +8735,10 @@ FanoutReportTopic:
         $ref: '#/FanoutReportSubQuery'
   required:
     - topicUuid
-    - topicId
     - name
-    - matchedTopicId
     - matchedTopicName
-    - similarityScore
     - volume
     - promptsTotal
-    - promptsMention
-    - promptsCitation
     - mentionRate
     - citationRate
     - priorityScore
