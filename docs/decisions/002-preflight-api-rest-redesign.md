@@ -233,7 +233,9 @@ Key changes:
   resource is communicated via the `Location` response header. Clients that need to poll for
   completion read `Location` rather than a body field.
 - **`step` is removed.** Mysticat's agent always performs both identify and suggest as a single
-  flow, making the field redundant. `promiseToken` (cookie) is retained unchanged.
+  flow, making the field redundant. `promiseToken` (cookie) is retained unchanged. The existing
+  `step` branching in `src/preflight/links.js:102` and `src/preflight/metatags.js:103` is dead
+  code that will be removed as part of this implementation.
 - **`createdBy`** is captured server-side as `{ id, displayName }` from the caller's IMS
   profile and stored in job metadata. It surfaces in all three endpoint responses for audit
   purposes. No additional IMS lookup required — both fields are on the authenticated profile.
