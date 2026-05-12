@@ -30,8 +30,12 @@ const defaultSleep = (ms) => new Promise((resolve) => {
  *
  * On terminal failure (all 3 attempts fail), emits a structured
  * [atomic-strategy-create-failed] log carrying enough metadata for an
- * operator to reconstruct the intended strategy. Does NOT throw — callers
- * have already created the GeoExperiment, which is the user's primary asset.
+ * operator to reconstruct the intended strategy, then THROWS. The new UI
+ * (progress stepper, "View Strategy" button) treats the Atomic strategy as
+ * a required projection of the experiment — a missing strategy means an
+ * invisible experiment with no UI path. Callers must roll back any
+ * side-effects (GeoExperiment row, DRS schedule, suggestion mutations)
+ * accordingly.
  *
  * @param {object} params
  * @param {string} params.siteId
@@ -43,7 +47,8 @@ const defaultSleep = (ms) => new Promise((resolve) => {
  * @param {object} params.s3                { s3Client, s3Bucket }
  * @param {object} params.log
  * @param {Function} [params.sleep]         Override for tests.
- * @returns {Promise<{ success: boolean, strategyId: string, attempts: number }>}
+ * @returns {Promise<{ success: true, strategyId: string, attempts: number }>}
+ * @throws {Error} If all attempts fail. Original error message is preserved.
  */
 export async function createAtomicStrategy({
   siteId,
@@ -137,5 +142,105 @@ export async function createAtomicStrategy({
     stack: lastError?.stack,
   });
 
-  return { success: false, strategyId, attempts: MAX_ATTEMPTS };
+  // Throw so the caller can roll back the GeoExperiment + DRS schedule +
+  // suggestion mutations. A successful experiment with no strategy is
+  // user-invisible (no UI path), which is worse than a clean failure.
+  const err = new Error(
+    `atomic-strategy create failed after ${MAX_ATTEMPTS} attempts for strategy ${strategyId}: ${lastError?.message}`,
+  );
+  err.cause = lastError;
+  throw err;
+}
+
+/**
+ * Remove an Atomic Strategy entry from the site's LLMO strategy blob in S3.
+ *
+ * Used as the compensating action when a later step in the edge-deploy
+ * pipeline (DRS schedule, suggestion marking, etc.) fails after the strategy
+ * has already been written. Delete-by-id is idempotent: if the strategy is
+ * already absent (concurrent cleanup, never-existed, or blob doesn't exist
+ * yet) the helper returns success without writing.
+ *
+ * Bounded retry mirrors createAtomicStrategy so concurrent writes from
+ * another request can't undo the cleanup: each attempt re-reads the blob
+ * before filtering, so we don't write stale data over a fresh insert.
+ *
+ * @param {object} params
+ * @param {string} params.siteId
+ * @param {string} params.strategyId       The strategy.id to remove (== geoExperimentId).
+ * @param {object} params.s3                { s3Client, s3Bucket }
+ * @param {object} params.log
+ * @param {Function} [params.sleep]         Override for tests.
+ * @returns {Promise<{ success: true, strategyId: string, attempts: number, removed: boolean }>}
+ * @throws {Error} If all attempts fail. Caller should log loudly — orphan
+ *   strategy + missing experiment is the failure mode we accept here.
+ */
+export async function deleteAtomicStrategy({
+  siteId,
+  strategyId,
+  s3,
+  log,
+  sleep = defaultSleep,
+}) {
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    // Same retry semantics as createAtomicStrategy: sequential awaits are
+    // intentional because each retry re-reads the blob to avoid clobbering
+    // concurrent writes. Pragma silences eslint(no-await-in-loop).
+    /* eslint-disable no-await-in-loop */
+    try {
+      if (BACKOFF_MS[attempt - 1] > 0) {
+        await sleep(BACKOFF_MS[attempt - 1]);
+      }
+
+      const { data, exists } = await readStrategy(siteId, s3.s3Client, {
+        s3Bucket: s3.s3Bucket,
+      });
+
+      if (!exists || !data) {
+        log.info(`[atomic-strategy-delete] idempotent skip: blob does not exist for site ${siteId} (attempt ${attempt})`);
+        return {
+          success: true, strategyId, attempts: attempt, removed: false,
+        };
+      }
+
+      const existingStrategies = data.strategies ?? [];
+      const present = existingStrategies.some((s) => s.id === strategyId);
+      if (!present) {
+        log.info(`[atomic-strategy-delete] idempotent skip: strategy ${strategyId} not present (attempt ${attempt})`);
+        return {
+          success: true, strategyId, attempts: attempt, removed: false,
+        };
+      }
+
+      const nextData = {
+        opportunities: data.opportunities ?? [],
+        strategies: existingStrategies.filter((s) => s.id !== strategyId),
+      };
+
+      await writeStrategy(siteId, nextData, s3.s3Client, { s3Bucket: s3.s3Bucket });
+
+      log.info(`[atomic-strategy-delete] success: strategy ${strategyId} removed for site ${siteId} (attempt ${attempt})`);
+      return {
+        success: true, strategyId, attempts: attempt, removed: true,
+      };
+    } catch (error) {
+      lastError = error;
+      log.warn(`[atomic-strategy-delete] attempt ${attempt}/${MAX_ATTEMPTS} failed for strategy ${strategyId}: ${error.message}`);
+    }
+    /* eslint-enable no-await-in-loop */
+  }
+
+  log.error('[atomic-strategy-delete-failed]', {
+    siteId,
+    strategyId,
+    error: lastError?.message,
+    stack: lastError?.stack,
+  });
+
+  const err = new Error(
+    `atomic-strategy delete failed after ${MAX_ATTEMPTS} attempts for strategy ${strategyId}: ${lastError?.message}`,
+  );
+  err.cause = lastError;
+  throw err;
 }
