@@ -332,6 +332,7 @@ export async function handleTopicsResearch(sp, clients) {
       topicId: String(t.id),
       topicVolume: num(t.volume),
       promptsCount: num(t.promptsCount),
+      relevanceScore: num(t.relevanceScore),
     }));
     return {
       status: 200,
@@ -358,8 +359,12 @@ export async function handleTopicsResearch(sp, clients) {
           topicId: id,
           topicVolume: num(t.volume),
           promptsCount: num(t.promptsCount),
+          relevanceScore: num(t.relevanceScore),
           volumeSortKey: num(t.volume),
         });
+      } else {
+        const prev = seen.get(id);
+        prev.relevanceScore = Math.max(prev.relevanceScore, num(t.relevanceScore));
       }
     }
   }
