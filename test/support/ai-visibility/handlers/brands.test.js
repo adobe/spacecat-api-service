@@ -27,8 +27,9 @@ import {
   handleBrandCompetitors,
   mapStatsByLLM,
   mapGrpcPromptToBrandPromptRow,
+  citedPagesOwnedCountFromStatsByLlmForMonth,
 } from '../../../../src/support/ai-visibility/handlers/brands.js';
-import { FTS_LLMS, LLM_ENUM } from '../../../../src/support/ai-visibility/grpc-utils.js';
+import { FTS_LLMS, LLM_ENUM, COUNTRY_ENUM, brandTarget } from '../../../../src/support/ai-visibility/grpc-utils.js';
 
 describe('AI Visibility – brands handlers', () => {
   let sandbox;
@@ -289,6 +290,27 @@ describe('AI Visibility – brands handlers', () => {
       const res = await handleBrandStats(sp, clients);
       expect(res.body.byCountry[0].country).to.equal('99999');
     });
+
+    it('uses empty byCountry when statsByCountry rejects', async () => {
+      clients.brandClient.statsByLLM.resolves({ llm: [] });
+      clients.brandClient.statsByCountry.rejects(new Error('down'));
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handleBrandStats(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.byCountry).to.deep.equal([]);
+    });
+
+    it('throws when statsByLLM rejects', async () => {
+      clients.brandClient.statsByLLM.rejects(new Error('llm down'));
+      clients.brandClient.statsByCountry.resolves({ byCountry: [] });
+      const sp = new URLSearchParams('domain=example.com');
+      try {
+        await handleBrandStats(sp, clients);
+        expect.fail('expected rejection');
+      } catch (e) {
+        expect(e.message).to.equal('llm down');
+      }
+    });
   });
 
   /* ------------------------------------------------------------------ */
@@ -342,6 +364,27 @@ describe('AI Visibility – brands handlers', () => {
       const res = await handleBrandTopics(sp, clients);
       expect(res.body.data[0].engine).to.equal('chatgpt');
     });
+
+    it('uses total 0 when brandTopicsTotals rejects', async () => {
+      clients.topicClient.brandTopics.resolves({ topics: [{ name: 'T', id: '1', volume: 100, mentions: 5 }] });
+      clients.topicClient.brandTopicsTotals.rejects(new Error('totals down'));
+      const sp = new URLSearchParams('domain=example.com&engine=chatgpt');
+      const res = await handleBrandTopics(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.total).to.equal(0);
+    });
+
+    it('throws when brandTopics rejects', async () => {
+      clients.topicClient.brandTopics.rejects(new Error('topics down'));
+      clients.topicClient.brandTopicsTotals.resolves({ total: 0 });
+      const sp = new URLSearchParams('domain=example.com');
+      try {
+        await handleBrandTopics(sp, clients);
+        expect.fail('expected rejection');
+      } catch (e) {
+        expect(e.message).to.equal('topics down');
+      }
+    });
   });
 
   /* ------------------------------------------------------------------ */
@@ -352,6 +395,24 @@ describe('AI Visibility – brands handlers', () => {
       const sp = new URLSearchParams('');
       const res = await handleBrandPrompts(sp, clients);
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 for invalid topicIds', async () => {
+      const sp = new URLSearchParams('domain=example.com&engine=chatgpt&topicIds=0%20OR%201%3D1');
+      const res = await handleBrandPrompts(sp, clients);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('invalid_topic_ids');
+      expect(clients.promptClient.prompts.called).to.be.false;
+    });
+
+    it('returns 400 when topicIds exceed cap', async () => {
+      const params = new URLSearchParams('domain=example.com&engine=chatgpt');
+      for (let i = 0; i <= 50; i += 1) {
+        params.append('topicIds', String(i));
+      }
+      const res = await handleBrandPrompts(params, clients);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('topic_ids_limit_exceeded');
     });
 
     it('single LLM path returns data', async () => {
@@ -365,6 +426,18 @@ describe('AI Visibility – brands handlers', () => {
       const res = await handleBrandPrompts(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data[0]).to.not.have.property('topicVolumeSortKey');
+    });
+
+    it('throws when single-LLM prompts call rejects', async () => {
+      clients.promptClient.promptsTotals.resolves({ total: 1 });
+      clients.promptClient.prompts.rejects(new Error('prompts fail'));
+      const sp = new URLSearchParams('domain=example.com&engine=chatgpt');
+      try {
+        await handleBrandPrompts(sp, clients);
+        expect.fail('expected rejection');
+      } catch (e) {
+        expect(e.message).to.equal('prompts fail');
+      }
     });
 
     it('single LLM path passes topic_ids filter', async () => {
@@ -643,6 +716,22 @@ describe('AI Visibility – brands handlers', () => {
       expect(res.body.total).to.equal(15);
     });
 
+    it('citedPagesOwnedCount uses cp.all when llm has no UI slug', async () => {
+      clients.brandClient.statsByLLM.resolves({
+        llm: [{
+          date: { year: 2026, month: 3 }, ownedSources: 77, mentions: 1, aiVisibility: 10, audience: 5,
+        }],
+      });
+      const val = await citedPagesOwnedCountFromStatsByLlmForMonth(
+        COUNTRY_ENUM.US,
+        brandTarget('example.com'),
+        { year: 2026, month: 3 },
+        LLM_ENUM.UNSPECIFIED,
+        clients,
+      );
+      expect(val).to.equal(77);
+    });
+
     it('throws when sources call fails without targetDate', async () => {
       clients.sourceClient.sources.rejects(new Error('sources fail'));
       clients.brandClient.statsByLLM.resolves({ llm: [] });
@@ -833,6 +922,17 @@ describe('AI Visibility – brands handlers', () => {
       expect(res.status).to.equal(200);
     });
 
+    it('topic opportunities merge uses norm key when serpId is absent', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [{
+          prompt: 'Only hash', promptHash: 'hx', topicName: 'T', topicId: '1', topicVolume: 6000, mentionedBrandsCount: 2, sourcesCount: 1,
+        }],
+      });
+      const sp = new URLSearchParams('domain=example.com&engine=chatgpt');
+      const res = await handleBrandTopicOpportunities(sp, clients);
+      expect(res.status).to.equal(200);
+    });
+
     it('handles raw.prompts undefined in fetch', async () => {
       clients.promptClient.prompts.resolves({});
       const sp = new URLSearchParams('domain=example.com&engine=chatgpt');
@@ -868,6 +968,50 @@ describe('AI Visibility – brands handlers', () => {
       const res = await handleBrandTopicOpportunities(sp, clients);
       expect(res.status).to.equal(200);
     });
+
+    it('dedupe merge inner sort: same volume, null prompts, tie-break by engine', async () => {
+      const llm0 = FTS_LLMS[0];
+      const llm1 = FTS_LLMS[1];
+      clients.promptClient.prompts.withArgs(sinon.match({ llm: llm0 })).resolves({
+        prompts: [{
+          prompt: undefined, promptHash: 'h1', serpId: 's1', topicName: 'T', topicId: '1', topicVolume: 6000, mentionedBrandsCount: 3, sourcesCount: 1, llm: llm0,
+        }],
+      });
+      clients.promptClient.prompts.withArgs(sinon.match({ llm: llm1 })).resolves({
+        prompts: [{
+          prompt: null, promptHash: 'h2', serpId: 's2', topicName: 'T', topicId: '2', topicVolume: 6000, mentionedBrandsCount: 3, sourcesCount: 1, llm: llm1,
+        }],
+      });
+      for (let i = 2; i < FTS_LLMS.length; i++) {
+        clients.promptClient.prompts.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ prompts: [] });
+      }
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handleBrandTopicOpportunities(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data.length).to.equal(2);
+    });
+
+    it('dedupe merge inner sort: same volume, different prompts, tie-break by localeCompare', async () => {
+      const llm0 = FTS_LLMS[0];
+      const llm1 = FTS_LLMS[1];
+      clients.promptClient.prompts.withArgs(sinon.match({ llm: llm0 })).resolves({
+        prompts: [{
+          prompt: 'Beta', promptHash: 'h1', serpId: 's1', topicName: 'T', topicId: '1', topicVolume: 6000, mentionedBrandsCount: 3, sourcesCount: 1, llm: llm0,
+        }],
+      });
+      clients.promptClient.prompts.withArgs(sinon.match({ llm: llm1 })).resolves({
+        prompts: [{
+          prompt: 'Alpha', promptHash: 'h2', serpId: 's2', topicName: 'T', topicId: '2', topicVolume: 6000, mentionedBrandsCount: 3, sourcesCount: 1, llm: llm1,
+        }],
+      });
+      for (let i = 2; i < FTS_LLMS.length; i++) {
+        clients.promptClient.prompts.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ prompts: [] });
+      }
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handleBrandTopicOpportunities(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data[0].prompt).to.equal('Alpha');
+    });
   });
 
   /* ------------------------------------------------------------------ */
@@ -889,6 +1033,16 @@ describe('AI Visibility – brands handlers', () => {
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
       expect(res.body.data[0].name).to.equal('BrandA');
+    });
+
+    it('omits country field when region is worldwide', async () => {
+      clients.brandClient.topBrandsByDomain.resolves({
+        brands: [{ brandName: 'Acme', count: 10 }],
+      });
+      const sp = new URLSearchParams('domain=www.example.com&region=WW');
+      const res = await handleBrandTopBrands(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data[0]).to.not.have.property('country');
     });
 
     it('uses llm=ALL fallback then fan-out on error', async () => {
@@ -1088,6 +1242,23 @@ describe('AI Visibility – brands handlers', () => {
       const res = await handleBrandSourceOpportunities(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data[0].sourceDomain).to.equal('gap.com');
+    });
+
+    it('skips unusable competitor names when building competitors list', async () => {
+      clients.brandClient.topBrandsByDomain.resolves({
+        brands: [
+          { brandName: '   ', count: 1 },
+          { brandName: 'GoodComp', count: 5 },
+        ],
+      });
+      clients.sourceClient.gapSourceDomains.resolves({
+        domains: [{ domain: 'gap.com', sourcesCount: 1, promptsCount: 1, targetMentions: 1 }],
+      });
+      clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 1 });
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handleBrandSourceOpportunities(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data).to.have.length(1);
     });
 
     it('returns empty when competitors list is empty and gap kinds need competitors', async () => {

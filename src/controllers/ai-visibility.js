@@ -11,7 +11,9 @@
  */
 
 import {
-  internalServerError, createResponse,
+  ok,
+  internalServerError,
+  createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { getGrpcClients } from '../support/ai-visibility/grpc-transport.js';
@@ -90,17 +92,23 @@ function wrapHandler(handlerFn, relPath, log) {
       clients = getGrpcClients(context.env);
     } catch (e) {
       log.error('AI Visibility gRPC transport init failed', e);
-      return createResponse({ error: 'aiVisibilityNotConfigured', message: e.message }, 503);
+      return createResponse({
+        error: 'aiVisibilityNotConfigured',
+        message: 'AI Visibility is not configured.',
+      }, 503);
     }
     const sp = extractSearchParams(context);
     try {
       const result = await handlerFn(sp, clients);
+      if (result.status !== 200) {
+        return createResponse(result.body, result.status);
+      }
       const normalized = normalizeVisibilityV1SuccessfulBody(relPath, result.body);
       const withFilters = attachSrFiltersToSuccessfulBody(result.status, normalized, sp);
-      return createResponse(withFilters, result.status);
+      return ok(withFilters);
     } catch (e) {
       log.error(`AI Visibility handler error [${relPath}]`, e);
-      return internalServerError(e.message);
+      return internalServerError('AI Visibility request failed');
     }
   };
 }

@@ -21,8 +21,10 @@ import {
   handleTopicsResearchPrompts,
   handleTopicsResearchBrands,
   handleTopicsResearchSourceDomains,
+  countTopicRowsByTopicsByFtsPaging,
+  countDistinctTopicIdsAcrossFtsLlms,
 } from '../../../../src/support/ai-visibility/handlers/topics.js';
-import { FTS_LLMS, LLM_ENUM, TOPIC_INTENT_ENUM } from '../../../../src/support/ai-visibility/grpc-utils.js';
+import { FTS_LLMS, LLM_ENUM, TOPIC_INTENT_ENUM, COUNTRY_ENUM } from '../../../../src/support/ai-visibility/grpc-utils.js';
 
 describe('AI Visibility – topics handlers', () => {
   let sandbox;
@@ -288,6 +290,20 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.body.data[0].topicId).to.equal('1');
     });
 
+    it('single LLM throws when topicsByFTS list rejects', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.reject(new Error('topics list down'));
+      });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      try {
+        await handleTopicsResearch(sp, clients);
+        expect.fail('expected rejection');
+      } catch (e) {
+        expect(e.message).to.equal('topics list down');
+      }
+    });
+
     it('all LLMs fan-out deduplicates by topic id', async () => {
       clients.topicClient.topicsByFTS.callsFake(({ range }) => {
         if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
@@ -434,6 +450,32 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.status).to.equal(200);
       expect(res.body.data).to.have.length(1);
       expect(res.body.data[0].engine).to.equal('chatgpt');
+    });
+
+    it('single LLM throws when promptsByTopicFTS rejects', async () => {
+      clients.promptClient.promptsByTopicFTSTotals.resolves({ total: 0 });
+      clients.promptClient.promptsByTopicFTS.rejects(new Error('fts down'));
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      try {
+        await handleTopicsResearchPrompts(sp, clients);
+        expect.fail('expected rejection');
+      } catch (e) {
+        expect(e.message).to.equal('fts down');
+      }
+    });
+
+    it('single LLM uses total 0 when promptsByTopicFTSTotals rejects', async () => {
+      clients.promptClient.promptsByTopicFTSTotals.rejects(new Error('tot down'));
+      clients.promptClient.promptsByTopicFTS.resolves({
+        prompts: [{
+          prompt: 'Q', promptHash: 'h', serpId: 's', topicName: 'T', topicId: '1', llm: 1, mentionedBrandsCount: 2, sourcesCount: 1, topicVolume: 5000,
+        }],
+      });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearchPrompts(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.total).to.equal(0);
+      expect(res.body.data).to.have.length(1);
     });
 
     it('all LLMs fan-out with dedup/grouping', async () => {
@@ -586,6 +628,33 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.body.data.length).to.equal(2);
     });
 
+    it('all LLMs uses alternate dedupe key when promptHash set but serpId empty', async () => {
+      clients.promptClient.promptsByTopicFTSTotals
+        .withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({ total: 1 });
+      clients.promptClient.promptsByTopicFTS
+        .withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({
+          prompts: [{
+            prompt: 'Alt key',
+            promptHash: 'h1',
+            serpId: '',
+            topicName: 'T',
+            topicId: '1',
+            llm: FTS_LLMS[0],
+            mentionedBrandsCount: 1,
+            sourcesCount: 1,
+            topicVolume: 5000,
+          }],
+        });
+      for (let i = 1; i < FTS_LLMS.length; i++) {
+        clients.promptClient.promptsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
+        clients.promptClient.promptsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ prompts: [] });
+      }
+      const sp = new URLSearchParams('searchQuery=test');
+      const res = await handleTopicsResearchPrompts(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data.some((d) => d.prompt === 'Alt key')).to.equal(true);
+    });
+
     it('all LLMs multi-engine group that fits exactly at limit', async () => {
       for (let i = 0; i < FTS_LLMS.length; i++) {
         const llm = FTS_LLMS[i];
@@ -624,6 +693,102 @@ describe('AI Visibility – topics handlers', () => {
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.body.data).to.have.length(1);
     });
+
+    it('multi-LLM same norm group sorts by raw prompt when mentions tie', async () => {
+      clients.promptClient.promptsByTopicFTSTotals
+        .withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({ total: 2 });
+      clients.promptClient.promptsByTopicFTS
+        .withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({
+          prompts: [
+            {
+              prompt: 'BetaCase',
+              promptHash: 'hb',
+              serpId: 'sb',
+              topicName: 'T',
+              topicId: '1',
+              llm: FTS_LLMS[0],
+              mentionedBrandsCount: 5,
+              sourcesCount: 1,
+              topicVolume: 5000,
+            },
+            {
+              prompt: 'betacase',
+              promptHash: 'ha',
+              serpId: 'sa',
+              topicName: 'T',
+              topicId: '2',
+              llm: FTS_LLMS[0],
+              mentionedBrandsCount: 5,
+              sourcesCount: 1,
+              topicVolume: 5000,
+            },
+          ],
+        });
+      for (let i = 1; i < FTS_LLMS.length; i++) {
+        clients.promptClient.promptsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
+        clients.promptClient.promptsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ prompts: [] });
+      }
+      const sp = new URLSearchParams('searchQuery=test&limit=10');
+      const res = await handleTopicsResearchPrompts(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data).to.have.length(1);
+    });
+
+    it('multi-LLM groups.sort tie-breaks by norm when maxSort ties', async () => {
+      clients.promptClient.promptsByTopicFTSTotals
+        .withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({ total: 2 });
+      clients.promptClient.promptsByTopicFTS
+        .withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({
+          prompts: [
+            {
+              prompt: null,
+              promptHash: 'h1',
+              serpId: 's1',
+              topicName: 'T',
+              topicId: '1',
+              llm: FTS_LLMS[0],
+              mentionedBrandsCount: 5,
+              sourcesCount: 1,
+              topicVolume: 5000,
+            },
+            {
+              prompt: undefined,
+              promptHash: 'h2',
+              serpId: 's2',
+              topicName: 'T',
+              topicId: '2',
+              llm: FTS_LLMS[0],
+              mentionedBrandsCount: 5,
+              sourcesCount: 1,
+              topicVolume: 5000,
+            },
+          ],
+        });
+      clients.promptClient.promptsByTopicFTSTotals
+        .withArgs(sinon.match({ llm: FTS_LLMS[1] })).resolves({ total: 1 });
+      clients.promptClient.promptsByTopicFTS
+        .withArgs(sinon.match({ llm: FTS_LLMS[1] })).resolves({
+          prompts: [{
+            prompt: 'ZebraNorm',
+            promptHash: 'hz',
+            serpId: 'sz',
+            topicName: 'T',
+            topicId: '3',
+            llm: FTS_LLMS[1],
+            mentionedBrandsCount: 5,
+            sourcesCount: 1,
+            topicVolume: 5000,
+          }],
+        });
+      for (let i = 2; i < FTS_LLMS.length; i++) {
+        clients.promptClient.promptsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
+        clients.promptClient.promptsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ prompts: [] });
+      }
+      const sp = new URLSearchParams('searchQuery=test&limit=10');
+      const res = await handleTopicsResearchPrompts(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data.length).to.be.greaterThan(0);
+    });
   });
 
   /* ------------------------------------------------------------------ */
@@ -649,6 +814,31 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.body.data).to.have.length(1);
       expect(res.body.data[0].domain).to.equal('brand.com');
       expect(res.body.data[0].sourceDomainsCount).to.equal(5);
+    });
+
+    it('single LLM uses total 0 when brandsByTopicFTSTotals rejects', async () => {
+      clients.brandClient.brandsByTopicFTSTotals.rejects(new Error('tot'));
+      clients.brandClient.brandsByTopicFTS.resolves({
+        brands: [{
+          domain: 'brand.com', name: 'Brand', mentions: 10, sourceDomainsCount: 5, examplePrompt: 'Q?',
+        }],
+      });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearchBrands(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.total).to.equal(0);
+    });
+
+    it('single LLM throws when brandsByTopicFTS rejects', async () => {
+      clients.brandClient.brandsByTopicFTSTotals.resolves({ total: 0 });
+      clients.brandClient.brandsByTopicFTS.rejects(new Error('brands fts down'));
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      try {
+        await handleTopicsResearchBrands(sp, clients);
+        expect.fail('expected rejection');
+      } catch (e) {
+        expect(e.message).to.equal('brands fts down');
+      }
     });
 
     it('all LLMs fan-out with aggregation', async () => {
@@ -765,6 +955,25 @@ describe('AI Visibility – topics handlers', () => {
       const res = await handleTopicsResearchBrands(sp, clients);
       expect(res.body.data[0].promptExample).to.equal('Example Q');
     });
+
+    it('all LLMs merged brands tie-break mentions by domain name', async () => {
+      clients.brandClient.brandsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({ total: 1 });
+      clients.brandClient.brandsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[0] })).resolves({
+        brands: [{ domain: 'zebra.com', name: 'Z', mentions: 5, sourceDomainsCount: 1 }],
+      });
+      clients.brandClient.brandsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[1] })).resolves({ total: 1 });
+      clients.brandClient.brandsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[1] })).resolves({
+        brands: [{ domain: 'alpha.com', name: 'A', mentions: 5, sourceDomainsCount: 1 }],
+      });
+      for (let i = 2; i < FTS_LLMS.length; i++) {
+        clients.brandClient.brandsByTopicFTSTotals.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ total: 0 });
+        clients.brandClient.brandsByTopicFTS.withArgs(sinon.match({ llm: FTS_LLMS[i] })).resolves({ brands: [] });
+      }
+      const sp = new URLSearchParams('searchQuery=test&limit=10');
+      const res = await handleTopicsResearchBrands(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data[0].domain).to.equal('alpha.com');
+    });
   });
 
   /* ------------------------------------------------------------------ */
@@ -791,6 +1000,31 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.body.data[0].sourceDomain).to.equal('src.com');
       expect(res.body.data[0].organicTraffic).to.equal(5000);
       expect(res.body.data[0].promptExample).to.equal('Q?');
+    });
+
+    it('single LLM uses total 0 when sourceDomainsByTopicFTSTotals rejects', async () => {
+      clients.sourceClient.sourceDomainsByTopicFTSTotals.rejects(new Error('tot'));
+      clients.sourceClient.sourceDomainsByTopicFTS.resolves({
+        sourceDomains: [{
+          domain: 'src.com', sourcesCount: 3, mentions: 10, organicTraffic: 5000, examplePrompt: 'Q?',
+        }],
+      });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearchSourceDomains(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.total).to.equal(0);
+    });
+
+    it('single LLM throws when sourceDomainsByTopicFTS rejects', async () => {
+      clients.sourceClient.sourceDomainsByTopicFTSTotals.resolves({ total: 0 });
+      clients.sourceClient.sourceDomainsByTopicFTS.rejects(new Error('sd fts down'));
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      try {
+        await handleTopicsResearchSourceDomains(sp, clients);
+        expect.fail('expected rejection');
+      } catch (e) {
+        expect(e.message).to.equal('sd fts down');
+      }
     });
 
     it('all LLMs fan-out with aggregation', async () => {
@@ -1006,6 +1240,30 @@ describe('AI Visibility – topics handlers', () => {
       const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearchSourceDomains(sp, clients);
       expect(res.body.data[0].organicTraffic).to.equal(500);
+    });
+  });
+
+  describe('FTS topic row / distinct id paging helpers', () => {
+    it('countTopicRowsByTopicsByFtsPaging respects maxPages when each page is full', async () => {
+      const row = { name: 'n', volume: 1, promptsCount: 0 };
+      clients.topicClient.topicsByFTS.resolves({
+        topics: Array.from({ length: 1000 }, (_, i) => ({ ...row, id: String(i) })),
+      });
+      const total = await countTopicRowsByTopicsByFtsPaging(
+        COUNTRY_ENUM.US,
+        'energy',
+        LLM_ENUM.CHAT_GPT,
+        clients,
+        { maxPages: 1 },
+      );
+      expect(total).to.equal(1000);
+      expect(clients.topicClient.topicsByFTS.callCount).to.equal(1);
+    });
+
+    it('countDistinctTopicIdsAcrossFtsLlms returns 0 and skips gRPC when maxPages is 0', async () => {
+      const n = await countDistinctTopicIdsAcrossFtsLlms(COUNTRY_ENUM.US, 'q', clients, { maxPages: 0 });
+      expect(n).to.equal(0);
+      expect(clients.topicClient.topicsByFTS.called).to.equal(false);
     });
   });
 });

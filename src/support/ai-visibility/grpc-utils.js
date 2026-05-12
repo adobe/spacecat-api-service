@@ -42,7 +42,71 @@ export const EMPTY_ENGINE_BREAKDOWN = () => ({
   googleAiOverview: 0,
 });
 
+/**
+ * @param {{ status: 'fulfilled' | 'rejected', value?: *, reason?: * }} settled
+ * @param {*} fallback
+ * @returns {*}
+ */
+export function settledValueOrElse(settled, fallback) {
+  return settled.status === 'fulfilled' ? settled.value : fallback;
+}
+
+/**
+ * @param {{ status: 'fulfilled' | 'rejected', value?: *, reason?: * }} settled
+ * @param {(value: *) => *} mapFn
+ * @param {*} fallback
+ * @returns {*}
+ */
+export function settledFulfilledMap(settled, mapFn, fallback) {
+  return settled.status === 'fulfilled' ? mapFn(settled.value) : fallback;
+}
+
 export const GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT = 100;
+/** Max topicIds query values combined into Semrush dimensionFilterQl (injection-safe numeric ids only). */
+export const MAX_TOPIC_IDS_DIMENSION_FILTER = 50;
+const TOPIC_HASH_ID_PATTERN = /^\d+$/;
+
+/**
+ * Validates topicIds for dimensionFilterQl: digits-only, capped count.
+ * @param {URLSearchParams} sp
+ * @returns {{ ok: true, dimensionFilterQl: string } | { ok: false, status: number, body: object }}
+ */
+export function resolveTopicIdsDimensionFilter(sp) {
+  const raw = sp.getAll('topicIds').filter(Boolean);
+  if (raw.length === 0) {
+    return { ok: true, dimensionFilterQl: '' };
+  }
+  if (raw.length > MAX_TOPIC_IDS_DIMENSION_FILTER) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'topic_ids_limit_exceeded',
+        message: `At most ${MAX_TOPIC_IDS_DIMENSION_FILTER} topicIds values are allowed`,
+      },
+    };
+  }
+  for (const id of raw) {
+    if (!TOPIC_HASH_ID_PATTERN.test(id)) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: 'invalid_topic_ids',
+          message: 'Each topicIds value must be a non-negative integer string',
+        },
+      };
+    }
+  }
+  let dimensionFilterQl = '';
+  if (raw.length === 1) {
+    dimensionFilterQl = `topic_hash = ${raw[0]}`;
+  } else {
+    dimensionFilterQl = raw.map((id) => `topic_hash = ${id}`).join(' OR ');
+  }
+  return { ok: true, dimensionFilterQl };
+}
+
 export const PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT = 500;
 export const MAX_COMPETITOR_DOMAINS = 5;
 export const TOPIC_OPPORTUNITY_PROMPTS_MAX_PAGES = 15;
@@ -388,8 +452,6 @@ export function coerceProtoCommonGapKind(kind) {
     UNIQUE: 6,
   };
   if (map[bare] != null) { return map[bare]; }
-  /* c8 ignore next */
-  if (map[tail] != null) { return map[tail]; }
   return null;
 }
 

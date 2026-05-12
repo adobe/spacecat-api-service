@@ -57,8 +57,12 @@ import {
   parseGapKindEnumList,
   coerceProtoCommonGapKind,
   aggregateGapPromptsTotalFromTotals,
+  resolveTopicIdsDimensionFilter,
+  MAX_TOPIC_IDS_DIMENSION_FILTER,
   TOPIC_INTENT_SLUG,
   mergeTopBrandsByDomainResponsesByMax,
+  settledValueOrElse,
+  settledFulfilledMap,
 } from '../../../src/support/ai-visibility/grpc-utils.js';
 
 function sp(query) {
@@ -66,6 +70,21 @@ function sp(query) {
 }
 
 describe('grpc-utils', () => {
+  describe('settledValueOrElse / settledFulfilledMap', () => {
+    it('settledValueOrElse returns value when fulfilled', () => {
+      expect(settledValueOrElse({ status: 'fulfilled', value: 42 }, 0)).to.equal(42);
+    });
+    it('settledValueOrElse returns fallback when rejected', () => {
+      expect(settledValueOrElse({ status: 'rejected', reason: new Error('x') }, [])).to.deep.equal([]);
+    });
+    it('settledFulfilledMap applies mapFn when fulfilled', () => {
+      expect(settledFulfilledMap({ status: 'fulfilled', value: { n: 2 } }, (v) => v.n * 3, null)).to.equal(6);
+    });
+    it('settledFulfilledMap returns fallback when rejected', () => {
+      expect(settledFulfilledMap({ status: 'rejected', reason: new Error('x') }, () => 1, null)).to.equal(null);
+    });
+  });
+
   describe('exported constants', () => {
     it('LLM_UI maps known LLM enum values to UI strings', () => {
       expect(LLM_UI[LLM_ENUM.CHAT_GPT]).to.equal('chatgpt');
@@ -97,6 +116,7 @@ describe('grpc-utils', () => {
       expect(PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT).to.equal(500);
       expect(MAX_COMPETITOR_DOMAINS).to.equal(5);
       expect(TOPIC_OPPORTUNITY_PROMPTS_MAX_PAGES).to.equal(15);
+      expect(MAX_TOPIC_IDS_DIMENSION_FILTER).to.equal(50);
     });
 
     it('TOPIC_INTENT_SLUG maps all topic intent enums', () => {
@@ -120,6 +140,42 @@ describe('grpc-utils', () => {
     it('returns 0 for Infinity', () => expect(num(Infinity)).to.equal(0));
     it('returns 0 for -Infinity', () => expect(num(-Infinity)).to.equal(0));
     it('truncates negative decimals', () => expect(num(-2.9)).to.equal(-2));
+  });
+
+  describe('resolveTopicIdsDimensionFilter', () => {
+    it('returns empty dimensionFilterQl when no topicIds', () => {
+      const r = resolveTopicIdsDimensionFilter(sp('domain=x.com'));
+      expect(r.ok).to.be.true;
+      expect(r.dimensionFilterQl).to.equal('');
+    });
+
+    it('builds single-hash filter', () => {
+      const r = resolveTopicIdsDimensionFilter(sp('topicIds=42'));
+      expect(r.ok).to.be.true;
+      expect(r.dimensionFilterQl).to.equal('topic_hash = 42');
+    });
+
+    it('builds OR filter for multiple ids', () => {
+      const r = resolveTopicIdsDimensionFilter(sp('topicIds=1&topicIds=2'));
+      expect(r.ok).to.be.true;
+      expect(r.dimensionFilterQl).to.equal('topic_hash = 1 OR topic_hash = 2');
+    });
+
+    it('rejects non-numeric topicIds', () => {
+      const r = resolveTopicIdsDimensionFilter(sp('topicIds=1%20OR%201'));
+      expect(r.ok).to.be.false;
+      expect(r.body.error).to.equal('invalid_topic_ids');
+    });
+
+    it('rejects too many topicIds', () => {
+      const params = new URLSearchParams();
+      for (let i = 0; i <= MAX_TOPIC_IDS_DIMENSION_FILTER; i += 1) {
+        params.append('topicIds', String(i));
+      }
+      const r = resolveTopicIdsDimensionFilter(params);
+      expect(r.ok).to.be.false;
+      expect(r.body.error).to.equal('topic_ids_limit_exceeded');
+    });
   });
 
   describe('brandTarget', () => {

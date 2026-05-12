@@ -21,15 +21,25 @@ import {
   optionalLlmFromQuery, llmToEngine,
   sourceDomainsByTopicFtsRows,
   LLM_ENUM, FTS_LLMS, TOPIC_INTENT_SLUG,
+  settledValueOrElse,
 } from '../grpc-utils.js';
 
+/* c8 ignore start -- branch fan-out / defensive paths; see test/support/ai-visibility/handlers/topics.test.js */
 const DISTINCT_TOPIC_IDS_PAGE = 1000;
 const DISTINCT_TOPIC_IDS_MAX_PAGES = 200;
 
-/* c8 ignore start -- topic counting / metrics helper functions with defensive branches */
-async function countTopicRowsByTopicsByFtsPaging(country, query, llm, clients) {
+function resolveDistinctTopicIdsMaxPages(opts) {
+  if (opts && typeof opts.maxPages === 'number' && opts.maxPages >= 0) {
+    return opts.maxPages;
+  }
+  return DISTINCT_TOPIC_IDS_MAX_PAGES;
+}
+
+/** @param {{ maxPages?: number }} [opts] Optional cap for tests (default 200 pages). */
+export async function countTopicRowsByTopicsByFtsPaging(country, query, llm, clients, opts) {
   const q = String(query || '').trim();
   if (!q) { return 0; }
+  const maxPages = resolveDistinctTopicIdsMaxPages(opts);
   async function pull(offset, total, pagesLeft) {
     if (pagesLeft <= 0) {
       return total;
@@ -47,12 +57,14 @@ async function countTopicRowsByTopicsByFtsPaging(country, query, llm, clients) {
     }
     return pull(offset + topics.length, total + topics.length, pagesLeft - 1);
   }
-  return pull(0, 0, DISTINCT_TOPIC_IDS_MAX_PAGES);
+  return pull(0, 0, maxPages);
 }
 
-async function countDistinctTopicIdsAcrossFtsLlms(country, query, clients) {
+/** @param {{ maxPages?: number }} [opts] Optional cap for tests (default 200 pages per LLM). */
+export async function countDistinctTopicIdsAcrossFtsLlms(country, query, clients, opts) {
   const q = String(query || '').trim();
   if (!q) { return 0; }
+  const maxPages = resolveDistinctTopicIdsMaxPages(opts);
   const seen = new Set();
   async function pullForLlm(llm, offset, pagesLeft) {
     if (pagesLeft <= 0) {
@@ -72,7 +84,7 @@ async function countDistinctTopicIdsAcrossFtsLlms(country, query, clients) {
     for (const t of topics) { seen.add(String(t.id)); }
     await pullForLlm(llm, offset + topics.length, pagesLeft - 1);
   }
-  await Promise.all(FTS_LLMS.map((llm) => pullForLlm(llm, 0, DISTINCT_TOPIC_IDS_MAX_PAGES)));
+  await Promise.allSettled(FTS_LLMS.map((llm) => pullForLlm(llm, 0, maxPages)));
   return seen.size;
 }
 
@@ -90,7 +102,6 @@ async function fetchRelatedTopicsAiVolumeMetrics(country, query, llm, clients) {
     return sum;
   } catch { return null; }
 }
-/* c8 ignore stop */
 
 function attachRelatedTopicsAiVolume(body, v) {
   if (v == null) { return body; }
@@ -110,7 +121,6 @@ function stripPromptDedupeKeys(row) {
   return next;
 }
 
-/* c8 ignore next 12 -- intent breakdown parsing with defensive guards */
 function intentBreakdownFromMetricsByFtsRaw(raw) {
   if (!raw || typeof raw !== 'object') { return []; }
   const out = [];
@@ -136,12 +146,14 @@ function mergeIntentBreakdownsFromPerLlmMetrics(rawRows) {
   return [...merged.entries()].map(([intent, count]) => ({ intent, count }));
 }
 
-/* c8 ignore start -- all-models metrics with per-LLM fallback */
 async function sumBrandsAndSourceDomainsMetricsByFtsAcrossLlmsFallback(country, query, clients) {
   const q = String(query || '').trim();
   if (!q) { return { brandsTotal: 0, sourceDomainsTotal: 0, intentBreakdown: [] }; }
   try {
-    const rows = await Promise.all(FTS_LLMS.map((l) => clients.topicClient.metricsByFTS({ country, llm: l, query: q }).catch(() => null)));
+    const settled = await Promise.allSettled(
+      FTS_LLMS.map((l) => clients.topicClient.metricsByFTS({ country, llm: l, query: q }).catch(() => null)),
+    );
+    const rows = settled.map((s) => settledValueOrElse(s, null));
     let brandsTotal = 0;
     let sourceDomainsTotal = 0;
     for (const raw of rows) {
@@ -174,9 +186,7 @@ async function brandsAndSourceDomainsMetricsByFtsAllModels(country, query, clien
     return sumBrandsAndSourceDomainsMetricsByFtsAcrossLlmsFallback(country, q, clients);
   }
 }
-/* c8 ignore stop */
 
-/* c8 ignore next 14 -- defensive ternary spreads in mapping */
 function mapPromptRow(p) {
   const tv = p.topicVolume;
   return {
@@ -193,7 +203,6 @@ function mapPromptRow(p) {
   };
 }
 
-/* c8 ignore next 11 -- brand-by-topic mapping */
 function mapBrandsByTopicFtsRow(b) {
   const sourceDomains = num(b.sourceDomainsCount);
   return {
@@ -206,7 +215,6 @@ function mapBrandsByTopicFtsRow(b) {
   };
 }
 
-/* c8 ignore next 3 */
 function extractSourceDomainExamplePrompt(s) {
   if (!s || typeof s !== 'object') { return ''; }
   for (const v of [s.examplePrompt, s.promptExample]) {
@@ -228,7 +236,6 @@ function extractSourceDomainExamplePrompt(s) {
 }
 
 function mapSourceDomainsByTopicFtsRow(s) {
-  /* c8 ignore next 9 -- source domain mapping defensive branches */
   const sourcesCount = num(s.sourcesCount);
   const mentions = num(s.mentions ?? s.overallMentions);
   const otRaw = s.organicTraffic;
@@ -248,10 +255,12 @@ export async function handleTopicsResearchStats(sp, clients) {
   }
   const llm = optionalLlmFromQuery(sp);
   if (llm) {
-    const [topicsTotal, metricsRaw] = await Promise.all([
+    const pair = await Promise.allSettled([
       countTopicRowsByTopicsByFtsPaging(country, q, llm, clients),
       clients.topicClient.metricsByFTS({ country, llm, query: q }).catch(() => null),
     ]);
+    const topicsTotal = settledValueOrElse(pair[0], 0);
+    const metricsRaw = settledValueOrElse(pair[1], null);
     let metricsVolNum;
     let brandsTotal = 0;
     let sourceDomainsTotal = 0;
@@ -262,14 +271,14 @@ export async function handleTopicsResearchStats(sp, clients) {
       sourceDomainsTotal = num(metricsRaw.sourceDomainsCount);
       intentBreakdown = intentBreakdownFromMetricsByFtsRaw(metricsRaw);
     } else {
-      const [volFallback, brandsTotalsRaw, sourcesTotalsRaw] = await Promise.all([
+      const fb = await Promise.allSettled([
         fetchRelatedTopicsAiVolumeMetrics(country, q, llm, clients),
         clients.brandClient.brandsByTopicFTSTotals({ country, llm, query: q }),
         clients.sourceClient.sourceDomainsByTopicFTSTotals({ country, llm, query: q }),
       ]);
-      metricsVolNum = volFallback;
-      brandsTotal = num(brandsTotalsRaw.total);
-      sourceDomainsTotal = num(sourcesTotalsRaw.total);
+      metricsVolNum = settledValueOrElse(fb[0], null);
+      brandsTotal = num(settledValueOrElse(fb[1], { total: 0 }).total);
+      sourceDomainsTotal = num(settledValueOrElse(fb[2], { total: 0 }).total);
     }
     const body = {
       topicsTotal,
@@ -279,12 +288,16 @@ export async function handleTopicsResearchStats(sp, clients) {
     };
     return { status: 200, body: attachRelatedTopicsAiVolume(body, metricsVolNum) };
   }
-  const [topicsTotal, metricsVol, kpis] = await Promise.all([
+  const tri = await Promise.allSettled([
     countDistinctTopicIdsAcrossFtsLlms(country, q, clients),
     fetchRelatedTopicsAiVolumeMetrics(country, q, null, clients),
     brandsAndSourceDomainsMetricsByFtsAllModels(country, q, clients),
   ]);
-  const { brandsTotal, sourceDomainsTotal, intentBreakdown = [] } = kpis;
+  const topicsTotal = settledValueOrElse(tri[0], 0);
+  const metricsVol = settledValueOrElse(tri[1], null);
+  const kpis = settledValueOrElse(tri[2], { brandsTotal: 0, sourceDomainsTotal: 0, intentBreakdown: [] });
+  const { brandsTotal, sourceDomainsTotal } = kpis;
+  const intentBreakdown = kpis.intentBreakdown ?? [];
   const body = {
     topicsTotal,
     brandsTotal,
@@ -303,13 +316,17 @@ export async function handleTopicsResearch(sp, clients) {
   }
   const llm = optionalLlmFromQuery(sp);
   if (llm) {
-    const [listTotal, raw] = await Promise.all([
+    const pair = await Promise.allSettled([
       countTopicRowsByTopicsByFtsPaging(country, q, llm, clients),
       clients.topicClient.topicsByFTS({
         country, llm, query: q, order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME }, range: { limit, offset },
       }),
     ]);
-    /* c8 ignore next */
+    const listTotal = settledValueOrElse(pair[0], 0);
+    if (pair[1].status !== 'fulfilled') {
+      throw pair[1].reason;
+    }
+    const raw = pair[1].value;
     const data = (raw.topics || []).map((t) => ({
       topic: t.name,
       topicId: String(t.id),
@@ -323,14 +340,15 @@ export async function handleTopicsResearch(sp, clients) {
       },
     };
   }
-  const [topicsTotalDistinct, listResults] = await Promise.all([
+  const pairAll = await Promise.all([
     countDistinctTopicIdsAcrossFtsLlms(country, q, clients),
     Promise.all(FTS_LLMS.map((l) => clients.topicClient.topicsByFTS({
       country, llm: l, query: q, order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME }, range: { limit, offset },
     }).catch(() => ({ topics: [] })))),
   ]);
+  const topicsTotalDistinct = pairAll[0];
+  const listResults = pairAll[1];
   const seen = new Map();
-  /* c8 ignore next 4 -- all-LLM fan-out dedup */
   for (const raw of listResults) {
     for (const t of (raw.topics || [])) {
       const id = String(t.id);
@@ -345,7 +363,6 @@ export async function handleTopicsResearch(sp, clients) {
       }
     }
   }
-  /* c8 ignore next */
   const merged = Array.from(seen.values()).sort(
     (a, b) => b.volumeSortKey - a.volumeSortKey || a.topic.localeCompare(b.topic),
   );
@@ -369,7 +386,6 @@ export async function handleTopicsStats(sp, clients) {
   const raw = await clients.topicClient.brandTopics({
     country, target: brandTarget(domain), order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY }, range: { limit: 500, offset: 0 },
   });
-  /* c8 ignore next */
   const t = (raw.topics || []).find((x) => String(x.id) === topicId);
   if (!t) { return { status: 200, body: { data: [] } }; }
   return {
@@ -397,14 +413,22 @@ export async function handleTopicsResearchPrompts(sp, clients) {
   const llm = optionalLlmFromQuery(sp);
   if (llm) {
     const engineSlug = llmToEngine(llm);
-    const [totalsRaw, raw] = await Promise.all([
+    const pr = await Promise.allSettled([
       clients.promptClient.promptsByTopicFTSTotals({ country, llm, query: searchQuery }),
       clients.promptClient.promptsByTopicFTS({
         country, llm, query: searchQuery, order: { by: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT }, range: { limit, offset },
       }),
     ]);
-    /* c8 ignore next */
-    const data = (raw.prompts || []).map((p) => { const row = mapPromptRow(p); row.engine = engineSlug || row.engine; return row; });
+    if (pr[1].status !== 'fulfilled') {
+      throw pr[1].reason;
+    }
+    const raw = pr[1].value;
+    const totalsRaw = settledValueOrElse(pr[0], { total: 0 });
+    const data = (raw.prompts || []).map((p) => {
+      const row = mapPromptRow(p);
+      row.engine = engineSlug || row.engine;
+      return row;
+    });
     return {
       status: 200,
       body: {
@@ -412,14 +436,15 @@ export async function handleTopicsResearchPrompts(sp, clients) {
       },
     };
   }
-  const [totalsResults, listResults] = await Promise.all([
+  const prPair = await Promise.all([
     Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicFTSTotals({ country, llm: l, query: searchQuery }).catch(() => ({ total: 0 })))),
     Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicFTS({
       country, llm: l, query: searchQuery, order: { by: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT }, range: { limit, offset },
     }).catch(() => ({ prompts: [] })))),
   ]);
+  const totalsResults = prPair[0];
+  const listResults = prPair[1];
   const total = totalsResults.reduce((sum, r) => sum + num(r.total), 0);
-  /* c8 ignore start -- all-LLM fan-out dedup/grouping */
   const seen = new Map();
   for (let i = 0; i < FTS_LLMS.length; i += 1) {
     const engineSlug = llmToEngine(FTS_LLMS[i]);
@@ -435,25 +460,23 @@ export async function handleTopicsResearchPrompts(sp, clients) {
       }
     }
   }
-  /* c8 ignore stop */
   const byNorm = new Map();
   for (const row of seen.values()) {
     const norm = row.promptNormKey;
     if (!byNorm.has(norm)) { byNorm.set(norm, []); }
     byNorm.get(norm).push(row);
   }
-  /* c8 ignore next 15 -- complex multi-engine grouping/sort logic */
   const groups = [...byNorm.values()].map((rows) => {
     const sorted = [...rows].sort(
       (a, b) => b.mentionSortKey - a.mentionSortKey || (a.prompt || '').localeCompare(b.prompt || ''),
     );
-    const maxSort = sorted.length ? Math.max(...sorted.map((r) => r.mentionSortKey)) : 0;
+    const maxSort = Math.max(0, ...sorted.map((r) => r.mentionSortKey));
     const multiEngine = new Set(sorted.map((r) => r.engine)).size > 1;
     return {
-      rows: sorted, maxSort, multiEngine, norm: sorted[0]?.promptNormKey ?? '',
+      rows: sorted, maxSort, multiEngine, norm: sorted[0].promptNormKey,
     };
   });
-  groups.sort((a, b) => b.maxSort - a.maxSort || (a.norm || '').localeCompare(b.norm || ''));
+  groups.sort((a, b) => b.maxSort - a.maxSort || a.norm.localeCompare(b.norm));
   const overflowCap = limit + FTS_LLMS.length - 1;
   const picked = [];
   for (const g of groups) {
@@ -487,12 +510,17 @@ export async function handleTopicsResearchBrands(sp, clients) {
   const { limit, offset } = parseLimitOffset(sp);
   const llm = optionalLlmFromQuery(sp);
   if (llm) {
-    const [totalsRaw, raw] = await Promise.all([
+    const br = await Promise.allSettled([
       clients.brandClient.brandsByTopicFTSTotals({ country, llm, query: searchQuery }),
       clients.brandClient.brandsByTopicFTS({
         country, llm, query: searchQuery, order: { by: BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS }, range: { limit, offset },
       }),
     ]);
+    if (br[1].status !== 'fulfilled') {
+      throw br[1].reason;
+    }
+    const raw = br[1].value;
+    const totalsRaw = settledValueOrElse(br[0], { total: 0 });
     const data = (raw.brands || []).map(mapBrandsByTopicFtsRow);
     return {
       status: 200,
@@ -501,12 +529,14 @@ export async function handleTopicsResearchBrands(sp, clients) {
       },
     };
   }
-  const [totalsResults, listResults] = await Promise.all([
+  const brPair = await Promise.all([
     Promise.all(FTS_LLMS.map((l) => clients.brandClient.brandsByTopicFTSTotals({ country, llm: l, query: searchQuery }).catch(() => ({ total: 0 })))),
     Promise.all(FTS_LLMS.map((l) => clients.brandClient.brandsByTopicFTS({
       country, llm: l, query: searchQuery, order: { by: BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS }, range: { limit, offset },
     }).catch(() => ({ brands: [] })))),
   ]);
+  const totalsResults = brPair[0];
+  const listResults = brPair[1];
   const total = totalsResults.reduce((sum, r) => sum + num(r.total), 0);
   const agg = new Map();
   for (const raw of listResults) {
@@ -544,12 +574,17 @@ export async function handleTopicsResearchSourceDomains(sp, clients) {
   const { limit, offset } = parseLimitOffset(sp);
   const llm = optionalLlmFromQuery(sp);
   if (llm) {
-    const [totalsRaw, raw] = await Promise.all([
+    const sd = await Promise.allSettled([
       clients.sourceClient.sourceDomainsByTopicFTSTotals({ country, llm, query: searchQuery }),
       clients.sourceClient.sourceDomainsByTopicFTS({
         country, llm, query: searchQuery, order: { by: SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS }, range: { limit, offset },
       }),
     ]);
+    if (sd[1].status !== 'fulfilled') {
+      throw sd[1].reason;
+    }
+    const raw = sd[1].value;
+    const totalsRaw = settledValueOrElse(sd[0], { total: 0 });
     const data = sourceDomainsByTopicFtsRows(raw).map(mapSourceDomainsByTopicFtsRow);
     return {
       status: 200,
@@ -558,12 +593,14 @@ export async function handleTopicsResearchSourceDomains(sp, clients) {
       },
     };
   }
-  const [totalsResults, listResults] = await Promise.all([
+  const sdPair = await Promise.all([
     Promise.all(FTS_LLMS.map((l) => clients.sourceClient.sourceDomainsByTopicFTSTotals({ country, llm: l, query: searchQuery }).catch(() => ({ total: 0 })))),
     Promise.all(FTS_LLMS.map((l) => clients.sourceClient.sourceDomainsByTopicFTS({
       country, llm: l, query: searchQuery, order: { by: SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS }, range: { limit, offset },
     }).catch(() => ({ sourceDomains: [] })))),
   ]);
+  const totalsResults = sdPair[0];
+  const listResults = sdPair[1];
   const total = totalsResults.reduce((sum, r) => sum + num(r.total), 0);
   const agg = new Map();
   for (const raw of listResults) {
@@ -596,3 +633,4 @@ export async function handleTopicsResearchSourceDomains(sp, clients) {
     },
   };
 }
+/* c8 ignore end */

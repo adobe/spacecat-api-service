@@ -108,6 +108,28 @@ describe('AI Visibility – prompts handlers', () => {
       expect(res.body.data[0].responseExcerpt).to.equal('excerpt');
     });
 
+    it('treats rejected relation fetch as empty relation payload', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [{
+          prompt: 'Q',
+          promptHash: 'h1',
+          serpId: 's1',
+          topicName: 'T',
+          topicId: 't1',
+          llm: 1,
+          mentionedBrandsCount: 1,
+          sourcesCount: 1,
+          briefResponse: 'fallback text',
+        }],
+      });
+      clients.prRelationsClient.prompt.rejects(new Error('upstream'));
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handlePromptsResponses(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data[0].response).to.equal('fallback text');
+      expect(res.body.data[0].citedPages).to.deep.equal([]);
+    });
+
     it('handles prompt filter', async () => {
       clients.promptClient.prompts.resolves({
         prompts: [

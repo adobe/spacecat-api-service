@@ -8645,7 +8645,7 @@ AiVisibilityServiceUnavailable:
       example: aiVisibilityNotConfigured
     message:
       type: string
-      example: Missing AI_SEO_CLIENT_ID
+      example: Missing SEO_CLIENT_ID
   required: [error, message]
 
 AiVisibilityEngineBreakdown:

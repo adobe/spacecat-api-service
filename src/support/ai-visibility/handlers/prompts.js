@@ -39,7 +39,7 @@ export async function handlePromptsResponses(sp, clients) {
   }
   const total = prompts.length;
   const page = prompts.slice(offset, offset + limit);
-  const relations = await Promise.all(
+  const settled = await Promise.allSettled(
     page.map((p) => {
       const { promptHash } = p;
       const serpId = String(p.serpId ?? '');
@@ -50,6 +50,7 @@ export async function handlePromptsResponses(sp, clients) {
       });
     }),
   );
+  const relations = settled.map((s) => (s.status === 'fulfilled' ? s.value : null));
   const data = page.map((p, i) => {
     const rel = relations[i]?.value ?? null;
     return {

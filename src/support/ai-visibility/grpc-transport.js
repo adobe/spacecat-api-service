@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-disable max-statements-per-line -- transport bootstrap */
-
 import { createClient } from '@connectrpc/connect';
 import { createGrpcTransport } from '@connectrpc/connect-node';
 import { BrandService } from '@quazar/ai-seo-ts/v2/brand/service_pb.js';
@@ -31,29 +29,24 @@ const DEFAULT_SCOPES = 'ai-seo.meta ai-seo.topics ai-seo.prompts ai-seo.sources 
 const GRPC_BASE_URL = 'https://grpc-api.semrush.com';
 
 function semrushAiSeoOAuthTokenUrl(env) {
-  const u = env.AI_SEO_OAUTH_TOKEN_URL?.trim();
-  if (u) { return u; }
-  const segment = String.fromCodePoint(118, 52, 45, 114, 97, 119);
-  const path = `/apis/${segment}/auth/v0/oauth2/access_token`;
+  const u = env.SEO_OAUTH_TOKEN_URL?.trim();
+  if (u) {
+    return u;
+  }
+  const path = '/apis/v4-raw/auth/v0/oauth2/access_token';
   return new URL(path, 'https://api.semrush.com').href;
 }
 
-let tokenCache = { token: '', exp: 0 };
-
 async function getAccessToken(env) {
-  const now = Date.now();
-  if (tokenCache.token && tokenCache.exp > now + 5000) {
-    return tokenCache.token;
-  }
-  const id = env.AI_SEO_CLIENT_ID;
-  const secret = env.AI_SEO_CLIENT_SECRET;
+  const id = env.SEO_CLIENT_ID;
+  const secret = env.SEO_CLIENT_SECRET;
   if (!id?.trim() || !secret?.trim()) {
-    throw new Error('AI_SEO_CLIENT_ID and AI_SEO_CLIENT_SECRET must be set');
+    throw new Error('SEO_CLIENT_ID and SEO_CLIENT_SECRET must be set');
   }
   const body = new URLSearchParams({
     client_id: id.trim(),
     client_secret: secret.trim(),
-    scope: (env.AI_SEO_OAUTH_SCOPES || DEFAULT_SCOPES).trim(),
+    scope: (env.SEO_OAUTH_SCOPES || DEFAULT_SCOPES).trim(),
     grant_type: 'client_credentials',
   });
   const r = await fetch(semrushAiSeoOAuthTokenUrl(env), {
@@ -63,10 +56,15 @@ async function getAccessToken(env) {
   });
   const j = await r.json();
   if (!j.access_token) {
-    throw new Error(`oauth_failed: ${JSON.stringify(j)}`);
+    const oauthErr = typeof j.error === 'string' ? j.error : '';
+    // eslint-disable-next-line no-console
+    console.error('Semrush OAuth token request failed', {
+      httpStatus: r.status,
+      oauthError: oauthErr,
+    });
+    throw new Error('Semrush OAuth token request failed');
   }
-  tokenCache = { token: j.access_token, exp: now + 50 * 60 * 1000 };
-  return tokenCache.token;
+  return j.access_token;
 }
 
 function createAuthInterceptor(env) {
@@ -84,7 +82,9 @@ let cachedClients = null;
  * Reuses a singleton per process so multiple requests share the same HTTP/2 connection pool.
  */
 export function getGrpcClients(env) {
-  if (cachedClients) { return cachedClients; }
+  if (cachedClients) {
+    return cachedClients;
+  }
 
   const transport = createGrpcTransport({
     baseUrl: GRPC_BASE_URL,
@@ -109,7 +109,6 @@ export function getGrpcClients(env) {
 /** @visibleForTesting */
 export function resetGrpcClients() {
   cachedClients = null;
-  tokenCache = { token: '', exp: 0 };
 }
 
 export { getAccessToken, createAuthInterceptor };
