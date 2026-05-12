@@ -3275,6 +3275,53 @@ llmo-agentic-traffic-movers:
       - ims_key: []
       - scoped_api_key: []
 
+brand-presence-filter-dimensions:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Filter dimensions for the Brand Presence config dashboard
+    description: |
+      Returns the distinct brands, categories, topics, regions, origins, page intents,
+      and prompt stats available for the given organization. Used to populate the
+      filter dropdowns in the Brand Presence configuration view.
+
+      Brand scoping is driven by the `brandId` path segment:
+        * `brands/{brandId}` → filter by that specific brand
+        * `brands/all`       → aggregate across all brands (filterByBrandId = null)
+
+      Use `siteId` to further narrow brand options to those linked to a specific site.
+      Use `categoryId` to scope the returned topics and prompt count to a single category.
+    operationId: getBrandPresenceFilterDimensions
+    parameters:
+      - name: siteId
+        in: query
+        required: false
+        description: Optional site UUID to narrow brand options to those linked to the site
+        schema: { type: string, format: uuid }
+      - name: categoryId
+        in: query
+        required: false
+        description: Optional category UUID to scope topics and prompt count to a single category
+        schema: { type: string, format: uuid }
+    responses:
+      '200':
+        description: Filter dimensions for the Brand Presence config view
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandPresenceFilterDimensions'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
 brand-presence-prompt-execution-status:
   parameters: *url-inspector-common-params
   get:
