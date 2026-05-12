@@ -1318,6 +1318,26 @@ describe('llmo-agentic-traffic', () => {
       const res = await handler(ctx);
       expect(res.status).to.equal(400);
     });
+
+    it('returns 400 when the export bucket is not configured', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.env = {}; // strip AGENTIC_TRAFFIC_EXPORT_BUCKET / S3_REPORT_BUCKET
+      delete ctx.s3.s3Bucket;
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 500 when S3 throws during status check', async () => {
+      // ListObjectsV2 / GetObject failure inside the try block — exercises
+      // the catch path that logs and returns internalServerError.
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = sinon.stub().rejects(new Error('S3 unavailable'));
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(500);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/Agentic traffic URLs export status error/);
+    });
   });
 
   // ── Filter Dimensions ──────────────────────────────────────────────────────
