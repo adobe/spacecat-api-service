@@ -678,14 +678,6 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
             return buildExportReadyResponse(ctx, s3Bucket, exportId, csvKeys, metadata);
           }
 
-          if (isExportFailed(metadata)) {
-            return ok({
-              exportId,
-              status: 'failed',
-              failureReason: metadata.failureReason || 'Export failed',
-            });
-          }
-
           if (isExportProcessing(metadata)) {
             return accepted({
               exportId,
@@ -693,6 +685,11 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
             });
           }
 
+          // Failed metadata or no metadata → re-enqueue. POST is the
+          // user's "I want this export" signal; a prior failure shouldn't
+          // permanently lock the cache key. The worker overwrites the
+          // failed metadata.json on success/retry. Status reporting on
+          // `failed` is the GET endpoint's job, not POST's.
           await sqs.sendMessage(queueUrl, {
             type: EXPORT_TYPE,
             data: {

@@ -1218,6 +1218,31 @@ describe('llmo-agentic-traffic', () => {
       const res = await handler(ctx);
       expect(res.status).to.equal(400);
     });
+
+    it('re-enqueues when a prior attempt failed (failed metadata is retriable)', async () => {
+      // POST is the user's "I want this export" signal — a previously
+      // failed attempt with the same filters shouldn't permanently lock
+      // the cache key. Status reporting on 'failed' is the GET endpoint's
+      // job, not POST's.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve('{"status":"failed","failureReason":"db error"}'),
+          },
+        });
+      });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(202);
+      expect(body.status).to.equal('processing');
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
   });
 
   describe('createAgenticTrafficUrlsExportStatusHandler', () => {
