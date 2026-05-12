@@ -70,7 +70,7 @@ consumers have migrated:
 
 `promiseToken` is passed via cookie for authenticated CMS pages (CS/CS_CW/AMS sites); it is not part of the request body.
 
-`createdBy` is derived server-side from the caller's IMS profile (`authInfo.getProfile().email`) and is never supplied by the client.
+`createdBy` is derived server-side from the caller's IMS profile and is never supplied by the client. It is an object containing the IMS user ID (`profile.email`) and a display name composed from `profile.first_name` and `profile.last_name` (falling back to `profile.name`). No additional IMS lookup is required — both fields are available on the profile already.
 
 **Response** `202 Accepted`:
 
@@ -85,7 +85,10 @@ Body:
   "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "status": "IN_PROGRESS",
   "createdAt": "2026-05-11T10:00:00.000Z",
-  "createdBy": "user@example.com"
+  "createdBy": {
+    "id": "ABC123@techacct.adobe.com",
+    "displayName": "John Doe"
+  }
 }
 ```
 
@@ -128,14 +131,14 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
         "status": "COMPLETED",
         "createdAt": "2026-05-11T10:00:00.000Z",
         "updatedAt": "2026-05-11T10:00:05.000Z",
-        "createdBy": "user@example.com"
+        "createdBy": { "id": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
       },
       {
         "preflightId": "7c9b1e32-1234-4abc-b3fc-9f8a7c6d5e4f",
         "status": "COMPLETED",
         "createdAt": "2026-05-11T10:05:00.000Z",
         "updatedAt": "2026-05-11T10:05:04.000Z",
-        "createdBy": "user@example.com"
+        "createdBy": { "id": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
       }
     ]
   },
@@ -147,7 +150,7 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
         "status": "IN_PROGRESS",
         "createdAt": "2026-05-11T10:10:00.000Z",
         "updatedAt": "2026-05-11T10:10:00.000Z",
-        "createdBy": "user@example.com"
+        "createdBy": { "id": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
       }
     ]
   }
@@ -162,7 +165,9 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `preflights[].status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
 | `preflights[].createdAt` | ISO 8601 | When the preflight was created |
 | `preflights[].updatedAt` | ISO 8601 | When the preflight was last updated |
-| `preflights[].createdBy` | string | IMS email of the user who triggered the preflight |
+| `preflights[].createdBy` | object | Caller identity — `{ id, displayName }` |
+| `preflights[].createdBy.id` | string | IMS user ID (`profile.email`) |
+| `preflights[].createdBy.displayName` | string | Full name from IMS profile |
 
 ---
 
@@ -175,7 +180,10 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
   "status": "COMPLETED",
   "url": "https://main--site--org.hlx.page/some-path",
   "createdAt": "2026-05-11T10:00:00.000Z",
-  "createdBy": "user@example.com",
+  "createdBy": {
+    "id": "ABC123@techacct.adobe.com",
+    "displayName": "John Doe"
+  },
   "updatedAt": "2026-05-11T10:00:05.000Z",
   "startedAt": "2026-05-11T10:00:01.000Z",
   "endedAt": "2026-05-11T10:00:05.000Z",
@@ -190,7 +198,9 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `status` | enum | `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` |
 | `url` | string | The page URL that was analyzed |
 | `createdAt` | ISO 8601 | When the preflight was created |
-| `createdBy` | string | IMS email of the user who triggered the preflight |
+| `createdBy` | object | Caller identity — `{ id, displayName }` |
+| `createdBy.id` | string | IMS user ID (`profile.email`) |
+| `createdBy.displayName` | string | Full name from IMS profile |
 | `updatedAt` | ISO 8601 | When the preflight was last updated |
 | `startedAt` | ISO 8601 | When processing began |
 | `endedAt` | ISO 8601 | When processing completed |
@@ -212,8 +222,9 @@ Key changes:
   completion read `Location` rather than a body field.
 - **`step` is removed.** Mysticat's agent always performs both identify and suggest as a single
   flow, making the field redundant. `promiseToken` (cookie) is retained unchanged.
-- **`createdBy`** is captured server-side from the caller's IMS profile and stored in job
-  metadata. It surfaces in all three endpoint responses for audit purposes.
+- **`createdBy`** is captured server-side as `{ id, displayName }` from the caller's IMS
+  profile and stored in job metadata. It surfaces in all three endpoint responses for audit
+  purposes. No additional IMS lookup required — both fields are on the authenticated profile.
 - **No phantom jobs for rejected requests.** If the site is not found, the caller lacks access,
   or preflight is not enabled for the site, the endpoint returns an error immediately without
   creating a job record. The previous behavior of creating a `CANCELLED` job in these cases
@@ -251,9 +262,12 @@ complexity for no real gain given the inherently transient nature of the data. E
 The `GET /sites/:siteId/preflights` controller will query by `siteId` and filter to
 `jobType: "preflight"` jobs only, then group results by `url` from the metadata.
 
-`createdBy` is stored as a top-level metadata field at job creation time, derived from
-`authInfo.getProfile().email` (the IMS email of the authenticated caller). It is never
-supplied by the client. This enables lightweight audit trails without a separate audit log.
+`createdBy` is stored as a top-level metadata field at job creation time as an object
+`{ id, displayName }`, where `id` is `profile.email` (the IMS user ID) and `displayName` is
+composed from `profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`).
+No additional IMS lookup is required — both fields are available on the authenticated profile.
+It is never supplied by the client. This enables lightweight audit trails without a separate
+audit log and is easily extended with additional identity fields in future.
 
 Note: the `spacecat-shared-data-access` change is a prerequisite and must land before the
 controller work in this repo.
