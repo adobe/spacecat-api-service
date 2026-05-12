@@ -1,3 +1,10 @@
+# [1.492.0](https://github.com/adobe/spacecat-api-service/compare/v1.491.0...v1.492.0) (2026-05-12)
+
+
+### Features
+
+* init serenity backend ([#2387](https://github.com/adobe/spacecat-api-service/issues/2387)) ([f6959c4](https://github.com/adobe/spacecat-api-service/commit/f6959c415eb606ef7e961855ee75ee5d5f43b9ae))
+
 # [1.491.0](https://github.com/adobe/spacecat-api-service/compare/v1.490.1...v1.491.0) (2026-05-12)
 
 
