@@ -1219,6 +1219,17 @@ describe('llmo-agentic-traffic', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 500 when S3 / SQS interaction throws unexpectedly', async () => {
+      // ListObjectsV2 / GetObject failure inside the try block — exercises
+      // the POST catch path that logs and returns internalServerError.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().rejects(new Error('S3 unavailable'));
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(500);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/Agentic traffic URLs export error/);
+    });
+
     it('re-enqueues when a prior attempt failed (failed metadata is retriable)', async () => {
       // POST is the user's "I want this export" signal — a previously
       // failed attempt with the same filters shouldn't permanently lock
@@ -1339,6 +1350,14 @@ describe('llmo-agentic-traffic', () => {
 
     it('rejects invalid export ids', async () => {
       const ctx = makeExportContext({ params: { exportId: 'not-a-hash' } });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when S3 client is missing from context', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3 = {}; // strip s3Client / ListObjectsV2Command / GetObjectCommand / getSignedUrl
       const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(400);
