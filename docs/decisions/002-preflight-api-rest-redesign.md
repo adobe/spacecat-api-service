@@ -249,7 +249,8 @@ Key changes:
 **Both existing endpoint pairs are deprecated**, not removed. They will remain functional in
 parallel with the new endpoints until the MFE has migrated and a deletion milestone is agreed
 upon. Deprecation notices should be added to their OpenAPI spec entries and response headers
-(`Deprecation: true`, `Sunset: <date-tbd>`).
+(`Deprecation: true`, `Sunset: <date>`). The Sunset date will be set by PM at the time this ADR
+moves to Accepted, with a minimum of 90 days from MFE migration start.
 
 ## Data Model: Extending AsyncJob for Efficient siteId Queries
 
