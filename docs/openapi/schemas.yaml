@@ -8755,10 +8755,23 @@ FanoutReportSubQuery:
     intent:
       type: string
       description: |
-        Search-intent label assigned by Semrush. Common values observed in
-        the prototype: `Comparison`, `Commercial`, `Informational`. Passed
-        through as-is — the API does not normalize the value set.
-      example: 'Comparison'
+        Search-intent label assigned by Semrush. One of the values from
+        `KEYWORD_INTENT_ENUM` in `third-party/ai-seo-ts/v2/fanout/enums_pb.d.ts`.
+
+        Semrush returns a multi-label `intents` array per fan-out keyword;
+        the curation step picks `intents[0]` and surfaces it here as a
+        single value. Absent when Semrush returns an empty list.
+
+        The PDF prototype shows labels like `Comparison` / `Commercial` /
+        `Informational` — those were illustrative. The actual enum values
+        are listed below.
+      enum:
+        - COMMERCIAL
+        - INFORMATIONAL
+        - NAVIGATIONAL
+        - TRANSACTIONAL
+        - UNSPECIFIED
+      example: 'COMMERCIAL'
     volume:
       type: integer
       description: Monthly search volume for this sub-query in the requested country.
