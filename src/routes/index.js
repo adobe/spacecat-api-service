@@ -153,6 +153,7 @@ export default function getRouteHandlers(
   plgOnboardingController,
   drsBpPgAuditController,
   webhooksController,
+  aiVisibilityController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -622,6 +623,30 @@ export default function getRouteHandlers(
 
     // Autofix checks (permission/capability validation before autofix deploy)
     'POST /sites/:siteId/autofix-checks': autofixChecksController.runChecks,
+
+    // AI Visibility (Semrush gRPC)
+    'GET /llmo/ai-visibility/brands/stats': aiVisibilityController.getBrandsStats,
+    'GET /llmo/ai-visibility/brands/topics': aiVisibilityController.getBrandsTopics,
+    'GET /llmo/ai-visibility/brands/prompts': aiVisibilityController.getBrandsPrompts,
+    'GET /llmo/ai-visibility/brands/cited-pages': aiVisibilityController.getBrandsCitedPages,
+    'GET /llmo/ai-visibility/brands/topic-opportunities': aiVisibilityController.getBrandsTopicOpportunities,
+    'GET /llmo/ai-visibility/brands/top-brands': aiVisibilityController.getBrandsTopBrands,
+    'GET /llmo/ai-visibility/brands/cited-sources': aiVisibilityController.getBrandsCitedSources,
+    'GET /llmo/ai-visibility/brands/source-opportunities': aiVisibilityController.getBrandsSourceOpportunities,
+    'GET /llmo/ai-visibility/brands/competitors': aiVisibilityController.getBrandsCompetitors,
+    'GET /llmo/ai-visibility/competitors/metrics': aiVisibilityController.getCompetitorsMetrics,
+    'GET /llmo/ai-visibility/competitors/gap-topics': aiVisibilityController.getCompetitorsGapTopics,
+    'GET /llmo/ai-visibility/competitors/gap-source-domains': aiVisibilityController.getCompetitorsGapSourceDomains,
+    'GET /llmo/ai-visibility/competitors/gap-prompts': aiVisibilityController.getCompetitorsGapPrompts,
+    'GET /llmo/ai-visibility/meta': aiVisibilityController.getMeta,
+    'GET /llmo/ai-visibility/prompts/responses/latest': aiVisibilityController.getPromptsResponsesLatest,
+    'GET /llmo/ai-visibility/prompts/responses': aiVisibilityController.getPromptsResponses,
+    'GET /llmo/ai-visibility/topics/research/stats': aiVisibilityController.getTopicsResearchStats,
+    'GET /llmo/ai-visibility/topics/research/prompts': aiVisibilityController.getTopicsResearchPrompts,
+    'GET /llmo/ai-visibility/topics/research/brands': aiVisibilityController.getTopicsResearchBrands,
+    'GET /llmo/ai-visibility/topics/research/source-domains': aiVisibilityController.getTopicsResearchSourceDomains,
+    'GET /llmo/ai-visibility/topics/research': aiVisibilityController.getTopicsResearch,
+    'GET /llmo/ai-visibility/topics/stats': aiVisibilityController.getTopicsStats,
   };
 
   // Initialization of static and dynamic routes

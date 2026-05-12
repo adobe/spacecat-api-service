@@ -1,3 +1,57 @@
+# [1.492.0](https://github.com/adobe/spacecat-api-service/compare/v1.491.0...v1.492.0) (2026-05-12)
+
+
+### Features
+
+* init serenity backend ([#2387](https://github.com/adobe/spacecat-api-service/issues/2387)) ([f6959c4](https://github.com/adobe/spacecat-api-service/commit/f6959c415eb606ef7e961855ee75ee5d5f43b9ae))
+
+# [1.491.0](https://github.com/adobe/spacecat-api-service/compare/v1.490.1...v1.491.0) (2026-05-12)
+
+
+### Features
+
+* read only admin owned resource write access ([#2391](https://github.com/adobe/spacecat-api-service/issues/2391)) ([af57bd9](https://github.com/adobe/spacecat-api-service/commit/af57bd903a22fee33cd0997c96786f7fa59b30b9))
+
+## [1.490.1](https://github.com/adobe/spacecat-api-service/compare/v1.490.0...v1.490.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.61.0 ([#2394](https://github.com/adobe/spacecat-api-service/issues/2394)) ([f64a7bb](https://github.com/adobe/spacecat-api-service/commit/f64a7bb55ba393711a380fc513553867d197fa41))
+
+# [1.490.0](https://github.com/adobe/spacecat-api-service/compare/v1.489.2...v1.490.0) (2026-05-12)
+
+
+### Features
+
+* PLG onboarding aso link ([#2389](https://github.com/adobe/spacecat-api-service/issues/2389)) ([b4f80a2](https://github.com/adobe/spacecat-api-service/commit/b4f80a2c6ebdb6e014dc9227ab77fbf622d44d2c))
+
+## [1.489.2](https://github.com/adobe/spacecat-api-service/compare/v1.489.1...v1.489.2) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.27.1 ([#2392](https://github.com/adobe/spacecat-api-service/issues/2392)) ([b594756](https://github.com/adobe/spacecat-api-service/commit/b5947560faed1fc7c7ed9f4ebb82f909e0cc48d0))
+
+## [1.489.1](https://github.com/adobe/spacecat-api-service/compare/v1.489.0...v1.489.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2390](https://github.com/adobe/spacecat-api-service/issues/2390)) ([77a2e84](https://github.com/adobe/spacecat-api-service/commit/77a2e8447334a5e7493fdecabf2039a4d4e20fc0))
+
+# [1.489.0](https://github.com/adobe/spacecat-api-service/compare/v1.488.1...v1.489.0) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-shared-bounce to v2.0.30 ([#2388](https://github.com/adobe/spacecat-api-service/issues/2388)) ([5db398c](https://github.com/adobe/spacecat-api-service/commit/5db398cdd3011aeca8aefd1a029187fc9ca2fc86))
+
+
+### Features
+
+* add includedURLs support to patchAuditForSite endpoint ([#2355](https://github.com/adobe/spacecat-api-service/issues/2355)) ([3dfe4af](https://github.com/adobe/spacecat-api-service/commit/3dfe4afb3e5b547f3ba95d9f8a5aa5a89ade81a4))
+
 ## [1.488.1](https://github.com/adobe/spacecat-api-service/compare/v1.488.0...v1.488.1) (2026-05-11)
 
 

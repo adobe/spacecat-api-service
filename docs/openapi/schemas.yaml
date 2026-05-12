@@ -198,6 +198,12 @@ HandlerConfig:
       items:
         type: string
         format: uri
+    includedURLs:
+      description: URLs to be included in the handler's processing
+      type: array
+      items:
+        type: string
+        format: uri
     groupedURLs:
       description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
       type: array
@@ -221,6 +227,8 @@ HandlerConfig:
     excludedURLs:
       - 'https://www.adobe.com/excluded-page'
       - 'https://www.adobe.com/another-excluded-page'
+    includedURLs:
+      - 'https://www.adobe.com/included-page'
     groupedURLs:
       - name: 'catalog'
         pattern: '/products/'
@@ -811,10 +819,25 @@ UpdateHandlerTypeConfig:
   type: object
   properties:
     excludedURLs:
-      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed
+      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed. Combined with replaceExcludedURLs to control merge vs replace behavior
       type: array
       items:
         type: string
+        format: uri
+    replaceExcludedURLs:
+      description: When true, excludedURLs fully replaces the existing list. When false (default), values are appended and deduplicated
+      type: boolean
+      default: false
+    includedURLs:
+      description: Set of URLs to include. If empty, previously included URLs will be removed. Combined with replaceIncludedURLs to control merge vs replace behavior
+      type: array
+      items:
+        type: string
+        format: uri
+    replaceIncludedURLs:
+      description: When true, includedURLs fully replaces the existing list. When false (default), values are appended and deduplicated
+      type: boolean
+      default: false
     groupedURLs:
       description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
       type: array
@@ -831,6 +854,10 @@ UpdateHandlerTypeConfig:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
+    replaceExcludedURLs: true
+    includedURLs:
+      - 'https://www.adobe.com/included-page'
+    replaceIncludedURLs: true
     groupedURLs:
       - name: 'catalog'
         pattern: '/products/'
@@ -8606,3 +8633,312 @@ PromptExecutionStatusResponse:
       items:
         $ref: '#/PromptExecutionStatusItem'
   required: [items]
+
+# ── AI Visibility schemas ──────────────────────────────────────────────
+
+AiVisibilityServiceUnavailable:
+  type: object
+  description: Returned when the AI Visibility gRPC backend is not configured
+  properties:
+    error:
+      type: string
+      example: aiVisibilityNotConfigured
+    message:
+      type: string
+      example: Missing SEO_CLIENT_ID
+  required: [error, message]
+
+AiVisibilityEngineBreakdown:
+  type: object
+  description: Per-LLM-engine numeric breakdown
+  properties:
+    all:
+      type: number
+    chatgpt:
+      type: number
+    gemini:
+      type: number
+    googleAiMode:
+      type: number
+    googleAiOverview:
+      type: number
+
+AiVisibilityByDateEntry:
+  type: object
+  description: A single date-bucket in brand statistics
+  properties:
+    year:
+      type: integer
+    month:
+      type: integer
+    day:
+      type: integer
+    aiVisibility:
+      type: number
+    mentions:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    citedPages:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    visibilityByEngine:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    ownedSources:
+      type: integer
+    audience:
+      type: integer
+
+AiVisibilityByCountryEntry:
+  type: object
+  description: Per-country breakdown row in brand statistics
+  properties:
+    country:
+      type: string
+    mentions:
+      type: integer
+    audience:
+      type: integer
+    citedPages:
+      type: integer
+
+AiVisibilitySrFilters:
+  type: object
+  description: Available filter dimensions extracted from the response
+  properties:
+    markets:
+      type: array
+      items:
+        type: object
+        properties:
+          code:
+            type: string
+          name:
+            type: string
+    models:
+      type: array
+      items:
+        type: object
+        properties:
+          code:
+            type: string
+          name:
+            type: string
+
+AiVisibilityBrandStats:
+  type: object
+  description: Brand visibility statistics response
+  properties:
+    visibility:
+      type: number
+    visibilityByEngine:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    audience:
+      type: integer
+    mentions:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    citedPages:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    byDate:
+      type: array
+      items:
+        $ref: '#/AiVisibilityByDateEntry'
+    byCountry:
+      type: array
+      items:
+        $ref: '#/AiVisibilityByCountryEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityPaginatedResponse:
+  type: object
+  description: Generic paginated response for AI Visibility list endpoints
+  properties:
+    data:
+      type: array
+      items:
+        type: object
+        additionalProperties: true
+    total:
+      type: integer
+      description: Total number of results matching the query
+    offset:
+      type: integer
+    limit:
+      type: integer
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityCompetitorsMetrics:
+  type: object
+  description: Competitor comparison time-series response
+  properties:
+    byBrand:
+      type: array
+      items:
+        type: object
+        properties:
+          brand:
+            type: object
+            properties:
+              domain:
+                type: string
+              name:
+                type: string
+          byDate:
+            type: array
+            items:
+              type: object
+              properties:
+                date:
+                  type: object
+                  properties:
+                    year:
+                      type: integer
+                    month:
+                      type: integer
+                    day:
+                      type: integer
+                visibility:
+                  type: number
+                mentions:
+                  type: number
+                audience:
+                  type: number
+                ownedSources:
+                  type: number
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityGapPromptRow:
+  type: object
+  description: A single gap prompt row
+  properties:
+    id:
+      type: string
+    prompt:
+      type: string
+    engine:
+      type: string
+    topic:
+      type: string
+    topicId:
+      type: string
+    topicVolume:
+      type: integer
+    mentioned:
+      type: boolean
+    brands:
+      type: integer
+    sources:
+      type: integer
+    promptHash:
+      type: string
+    serpId:
+      type: string
+
+AiVisibilityGapPromptsResponse:
+  type: object
+  description: Normalized gap prompts response
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityGapPromptRow'
+    total:
+      type: integer
+    offset:
+      type: integer
+    limit:
+      type: integer
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data, total, offset, limit]
+
+AiVisibilityMeta:
+  type: object
+  description: AI Visibility metadata including supported countries
+  properties:
+    countries:
+      type: array
+      items:
+        type: object
+        properties:
+          countryCode:
+            type: string
+            description: ISO country code
+          daily:
+            type: array
+            items:
+              type: object
+          monthly:
+            type: array
+            items:
+              type: object
+          isComingSoon:
+            type: boolean
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityTopicsResearchStats:
+  type: object
+  description: Aggregate statistics for topic research
+  properties:
+    topicsTotal:
+      type: integer
+      description: Total number of distinct topics matching the query
+    brandsTotal:
+      type: integer
+      description: Total number of brands across matching topics
+    sourceDomainsTotal:
+      type: integer
+      description: Total number of source domains across matching topics
+    intentBreakdown:
+      type: array
+      items:
+        type: object
+        properties:
+          intent:
+            type: string
+          count:
+            type: integer
+    relatedTopicsAiVolume:
+      type: integer
+      description: Aggregated AI volume for related topics
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilitySourceDomainRow:
+  type: object
+  description: A source domain row in topic research
+  properties:
+    sourceDomain:
+      type: string
+    sourcesCount:
+      type: integer
+    mentions:
+      type: integer
+    organicTraffic:
+      type: integer
+    promptExample:
+      type: string
+
+AiVisibilitySourceDomainsResponse:
+  type: object
+  description: Normalized source domains response
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySourceDomainRow'
+    total:
+      type: integer
+    offset:
+      type: integer
+    limit:
+      type: integer
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data, total, offset, limit]
