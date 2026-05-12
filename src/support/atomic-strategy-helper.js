@@ -92,10 +92,6 @@ export async function createAtomicStrategy({
 
   let lastError;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    // Retry loop: sequential awaits are intentional. Each attempt re-reads
-    // the strategy blob to pick up concurrent writes (handled by the
-    // idempotency check below), so attempts cannot run in parallel via
-    // Promise.all. Pragma silences eslint(no-await-in-loop) for this block.
     /* eslint-disable no-await-in-loop */
     try {
       if (BACKOFF_MS[attempt - 1] > 0) {
@@ -184,9 +180,6 @@ export async function deleteAtomicStrategy({
 }) {
   let lastError;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    // Same retry semantics as createAtomicStrategy: sequential awaits are
-    // intentional because each retry re-reads the blob to avoid clobbering
-    // concurrent writes. Pragma silences eslint(no-await-in-loop).
     /* eslint-disable no-await-in-loop */
     try {
       if (BACKOFF_MS[attempt - 1] > 0) {
