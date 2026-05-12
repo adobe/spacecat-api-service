@@ -66,7 +66,12 @@ consumers have migrated:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `url` | string (URI) | Yes | The single page URL to analyze |
+| `url` | string (URI) | Yes | The single page URL to analyze — must belong to the site identified by `:siteId` |
+
+The controller validates that the `url` hostname matches one of the site's known hostnames
+(base URL, preview URL, or live URL). A URL that is structurally valid but belongs to a
+different site returns `PREFLIGHT_INVALID_REQUEST`. This replaces the implicit validation
+previously provided by `findByPreviewURL`.
 
 `promiseToken` is passed via cookie for authenticated CMS pages (CS/CS_CW/AMS sites); it is not part of the request body.
 
@@ -96,7 +101,7 @@ Body:
 
 | Status | `errorCode` | Condition |
 |--------|-------------|-----------|
-| `400 Bad Request` | `PREFLIGHT_INVALID_REQUEST` | `url` is missing or invalid |
+| `400 Bad Request` | `PREFLIGHT_INVALID_REQUEST` | `url` is missing, not a valid URI, or does not belong to the site identified by `:siteId` |
 | `403 Forbidden` | `PREFLIGHT_ACCESS_DENIED` | Caller does not have access to the site |
 | `403 Forbidden` | `PREFLIGHT_NOT_ENABLED` | Preflight is not enabled for the site |
 | `404 Not Found` | `PREFLIGHT_SITE_NOT_FOUND` | `siteId` does not exist |
