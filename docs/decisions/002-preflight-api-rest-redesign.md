@@ -213,6 +213,8 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `result` | object \| null | Audit results written back by Mysticat |
 | `error` | object \| null | `{ code, message }` if the job failed |
 
+**Ownership validation:** The handler loads the job by `preflightId` then verifies the stored `siteId` matches the path's `:siteId`. A mismatch returns `404 Not Found` — the same response as a non-existent `preflightId` — so callers cannot confirm a preflight exists by probing with a different site path.
+
 ---
 
 Key changes:
