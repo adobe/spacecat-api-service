@@ -176,6 +176,13 @@ ScopeName:
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
+SemrushWorkspaceId:
+  type: string
+  description: |
+    Semrush workspace identifier mapped to this Adobe organization.
+    UNIQUE across organizations (DB-enforced). Setting this field via
+    PATCH is restricted to admin users.
+  example: 'ws_12345'
 ImsUserAccessToken:
   type: string
   example: 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEyMzQ1IiwidHlwZSI6ImFjY2Vzc190b2tlbiIsImNsaWVudF9pZCI6ImV4YW1wbGVfYXBwIiwidXNlcl9pZCI6Ijk4NzY1NDc4OTBBQkNERUYxMjM0NTY3OEBhYmNkZWYxMjM0NTY3ODkuZSIsImFzIjoiaW1zLW5hMSIsImFhX2lkIjoiMTIzNDU2Nzg5MEFCQ0RFRjEyMzQ1Njc4QGFkb2JlLmNvbSIsImNyZWF0ZWRfYXQiOiIxNzEwMjQ3MDAwMDAwIn0.MRDpxgxSHDj4DmA182hPnjMAnKkly-VUJ_bXpQ-J8EQ'
@@ -399,6 +406,9 @@ Organization:
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
+    semrushWorkspaceId:
+      description: Optional. The Semrush workspace ID mapped to this organization.
+      $ref: '#/SemrushWorkspaceId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -412,6 +422,7 @@ Organization:
     id: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     name: 'Example Organization'
     imsOrgId: '1234567890ABCDEF12345678@AdobeOrg'
+    semrushWorkspaceId: 'ws_12345'
     config:
       slack:
         channel: '#example-channel'
@@ -449,6 +460,12 @@ OrganizationCreate:
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
+    semrushWorkspaceId:
+      description: |
+        Optional. The Semrush workspace ID to bind to this organization at
+        creation time. Admin-only endpoint - non-admins cannot reach this
+        path. UNIQUE across organizations.
+      $ref: '#/SemrushWorkspaceId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -482,6 +499,11 @@ OrganizationUpdate:
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
+    semrushWorkspaceId:
+      description: |
+        Optional. The Semrush workspace ID to bind to this organization.
+        Admin-only - non-admin users PATCHing this field receive a 403.
+      $ref: '#/SemrushWorkspaceId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
