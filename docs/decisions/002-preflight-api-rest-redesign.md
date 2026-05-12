@@ -194,6 +194,8 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
   "startedAt": "2026-05-11T10:00:01.000Z",
   "endedAt": "2026-05-11T10:00:05.000Z",
   "result": {},
+  "resultType": "INLINE",
+  "resultLocation": null,
   "error": null
 }
 ```
@@ -210,7 +212,9 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `updatedAt` | ISO 8601 | When the preflight was last updated |
 | `startedAt` | ISO 8601 | When processing began |
 | `endedAt` | ISO 8601 | When processing completed |
-| `result` | object \| null | Audit results written back by Mysticat |
+| `result` | object \| null | Audit results when `resultType` is `INLINE`; `null` otherwise |
+| `resultType` | enum \| null | `INLINE` — result is in the `result` field; `S3` or `URL` — result is at `resultLocation` and `result` is `null` |
+| `resultLocation` | string \| null | S3 URI or URL of the result when `resultType` is `S3` or `URL`; `null` when `resultType` is `INLINE` |
 | `error` | object \| null | `{ code, message }` if the job failed |
 
 **Ownership validation:** The handler loads the job by `preflightId` then verifies the stored `siteId` matches the path's `:siteId`. A mismatch returns `404 Not Found` — the same response as a non-existent `preflightId` — so callers cannot confirm a preflight exists by probing with a different site path.
