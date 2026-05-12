@@ -178,7 +178,14 @@ function buildExportKeys(siteId, exportId) {
 }
 
 function getExportConfig(ctx) {
+  // Fallbacks: dedicated export bucket → reporting-worker's bucket env
+  // (S3_REPORTING_BUCKET_NAME — used by the worker that consumes the SQS
+  // message) → S3_REPORT_BUCKET (older name some envs still use) →
+  // ctx.s3.s3Bucket from the SDK config. Resolution order must end up at
+  // the same bucket the worker resolves to, otherwise the worker rejects
+  // the SQS message with 's3Bucket must match the configured export bucket'.
   const s3Bucket = ctx.env?.AGENTIC_TRAFFIC_EXPORT_BUCKET
+    || ctx.env?.S3_REPORTING_BUCKET_NAME
     || ctx.env?.S3_REPORT_BUCKET
     || ctx.s3?.s3Bucket;
   const queueUrl = ctx.env?.AGENTIC_TRAFFIC_EXPORT_QUEUE_URL
