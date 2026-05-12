@@ -23,7 +23,7 @@ Semrush V2 AIO prompts API (https://www.semrush.com)
 
 | Repo | Branch | PR |
 | --- | --- | --- |
-| `adobe/spacecat-api-service` | `feat/spacecat-api-service` | [#2393](https://github.com/adobe/spacecat-api-service/pull/2393) — serenity prompt CRUD proxy (rebased on top of #2385) |
+| `adobe/spacecat-api-service` | `feat/prompts-management` | [#2397](https://github.com/adobe/spacecat-api-service/pull/2397) — serenity prompt CRUD proxy (rebased on top of #2385). Draft — build fails on the 100% coverage gate; tests for the new serenity files are still TBD before deploy. |
 | `adobe/project-elmo-ui` | `feat/prompts-management` | [#1735](https://github.com/adobe/project-elmo-ui/pull/1735) — Semrush-backed prompts management UI (rebased on top of #1700) |
 
 Optional dependency:
@@ -411,7 +411,7 @@ It listens on `https://localhost:3000`. Accept the self-signed cert warning.
 | 401 from `/serenity/prompts` | `SEMRUSH_COOKIE` expired | recapture (§6), restart proxy |
 | 503 `matrixNotConfigured` | bad JSON in `SEMRUSH_PROJECT_MATRIX` | re-paste on single line, restart |
 | Prompts page shows 0 items but Semrush has them | wrong `projectId` in matrix | double-check the matrix row |
-| Created a prompt but count didn't go up | Semrush draft buffer not published | proxy auto-publishes since [#2393]; if you're on an older commit, hit the project's publish endpoint manually |
+| Created a prompt but count didn't go up | Semrush draft buffer not published | proxy auto-publishes since [#2397]; if you're on an older commit, hit the project's publish endpoint manually |
 | Sidebar shows old entries only | brandalf flag off (§9) OR `FT_LLMO-4799` off (§10.1) | enable both, hard-reload |
 | `auth error` page right after login | Local DB missing the org / brand / site for your IMS org | re-run the seed SQL (§5) with **your** IMS org's UUID |
 | Edit dialog shows wrong prompt's data | Pre-fix bug in PR #1735 — pull latest | `git pull` on `feat/prompts-management` |
@@ -420,7 +420,7 @@ It listens on `https://localhost:3000`. Accept the self-signed cert warning.
 
 ## 13. What this PR set actually changes
 
-### `spacecat-api-service` (PR #2393)
+### `spacecat-api-service` (PR #2397)
 
 - `src/support/serenity/rest-transport.js` — REST transport for Semrush V2 AIO
   with dual auth (cookie or IMS bearer).
@@ -544,7 +544,7 @@ audit pipeline which isn't part of this local stack.
 
 ### Done (committed across both PRs)
 
-**Proxy (`spacecat-api-service` #2393)**
+**Proxy (`spacecat-api-service` #2397)**
 - Semrush V2 AIO REST transport with cookie auth, retries-on-401 surfaced.
 - Hardcoded matrix `(brandId, category, market, language) → projectId` read
   from `SEMRUSH_PROJECT_MATRIX`. Three live rows today: Acrobat / Photoshop /
