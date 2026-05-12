@@ -261,6 +261,7 @@ index. The `AsyncJobCollection` exposes only `findById`; there is no `allBySiteI
 The decision is to **extend `AsyncJob` in `spacecat-shared-data-access`**:
 
 - Add `siteId` as an **optional** top-level indexed attribute on the `AsyncJob` schema
+- Add `jobType` as an **optional** top-level indexed attribute on the `AsyncJob` schema
 - Add an `allBySiteIdAndJobType(siteId, jobType)` method to `AsyncJobCollection`
 
 `siteId` must be optional so that existing job creation paths (including the deprecated
@@ -274,8 +275,10 @@ A purpose-built `Preflight` entity would require its own TTL and cleanup strateg
 complexity for no real gain given the inherently transient nature of the data. Extending
 `AsyncJob` is low-friction and sufficient.
 
-The `GET /sites/:siteId/preflights` controller will query by `siteId` and filter to
-`jobType: "preflight"` jobs only, then group results by `url` from the metadata.
+The `GET /sites/:siteId/preflights` controller will query using both indexed top-level attributes
+via `allBySiteIdAndJobType(siteId, "preflight")` — no `metadata` scan needed. The `url` grouping
+for the list response is an in-memory `groupBy` on `metadata.url` after the indexed query;
+this is acceptable given the 50-record cap on the endpoint.
 
 `createdBy` is stored as a top-level metadata field at job creation time as an object
 `{ id, displayName }`, where `id` is `profile.email` (the IMS user ID) and `displayName` is
