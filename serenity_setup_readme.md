@@ -477,7 +477,156 @@ Elmo doesn't need to be restarted — it doesn't hold any Semrush state.
 
 ---
 
-## 15. Tearing it all down
+## 15. Brand Presence — clearing the "Configuration Required" gate
+
+`/org/{orgId}/brand-presence` checks the local Postgres `prompts`/`categories`
+tables for the brand and shows a full-screen "Configuration Required" overlay
+when neither has rows. The Serenity prompts UI writes to **Semrush**, not to
+local Postgres, so creating prompts there doesn't unblock the gate. To get
+past the overlay, seed a minimal V2 prompt row directly:
+
+```bash
+psql postgresql://postgres:postgres@localhost:5432/postgres
+```
+
+```sql
+SET session_replication_role = 'replica';
+
+-- A topic in the Photoshop category (BP needs at least one V2 prompt to
+-- consider the brand "configured"; the topic is its parent row).
+INSERT INTO topics (id, organization_id, name, status)
+VALUES (
+  '55555555-5555-4555-b555-555555555555',
+  '160da889-39a2-4019-9315-82bbd4da59e7',
+  'Photo editing basics',
+  'active'
+) ON CONFLICT DO NOTHING;
+
+INSERT INTO topic_categories (id, topic_id, category_id)
+VALUES (
+  gen_random_uuid(),
+  '55555555-5555-4555-b555-555555555555',
+  '44444444-4444-4444-b444-444444444444'
+) ON CONFLICT DO NOTHING;
+
+INSERT INTO prompts (
+  id, organization_id, brand_id, category_id, topic_id,
+  prompt, language, regions, status, origin, source
+) VALUES (
+  '66666666-6666-4666-b666-666666666666',
+  '160da889-39a2-4019-9315-82bbd4da59e7',
+  '3e3556f0-6494-4e8f-858f-01f2c358861a',
+  '44444444-4444-4444-b444-444444444444',
+  '55555555-5555-4555-b555-555555555555',
+  'How do I remove a background in Photoshop?',
+  'en',
+  ARRAY['US'],
+  'active',
+  'human',
+  'manual'
+) ON CONFLICT DO NOTHING;
+
+RESET session_replication_role;
+```
+
+After this, BP renders. Charts will still be empty because no
+`brand_presence_executions` rows exist locally — that's produced by the DRS
+audit pipeline which isn't part of this local stack.
+
+> **Why a separate seed?** BP reads from local Postgres (`prompts`,
+> `categories`, `topics`, `brand_presence_executions`). The Serenity proxy
+> mutates Semrush — they're different data planes. There's no automatic
+> mirror today; bridging them is one of the open items in §17.
+
+---
+
+## 16. Status — what's done, what's open
+
+### Done (committed across both PRs)
+
+**Proxy (`spacecat-api-service` #2393)**
+- Semrush V2 AIO REST transport with cookie auth, retries-on-401 surfaced.
+- Hardcoded matrix `(brandId, category, market, language) → projectId` read
+  from `SEMRUSH_PROJECT_MATRIX`. Three live rows today: Acrobat / Photoshop /
+  Adobe at US/US/JP, en/en/ja.
+- CRUD handlers with full pagination, base64url logical ids, multi-tag
+  `topics: string[]` input, project auto-publish after every mutation.
+- `/serenity/projects` endpoint exposing matrix rows + derived facets
+  (categories, regions, languages) so the UI doesn't have to know the matrix.
+
+**UI (`project-elmo-ui` #1735)**
+- Prompts Management page — list/create/edit/delete against Semrush via the
+  proxy, with matrix-driven filters that cross-narrow to valid combinations.
+- Create/Edit dialog — pickers source options from `/serenity/projects`
+  facets; Topics multi-select keyed off the project's existing tags;
+  pre-pinning of the just-saved Category/Market/Language after Track →
+  Confirm hops to this page.
+- Pagination footer (50/100/200/500 rows), Tags column, bulk-delete.
+- Tracking Recommendations dashboard — Track-all and per-row Track both feed
+  the same Serenity dialog (`POST /serenity/prompts`) with one prompt per
+  hand-curated snapshot row, tagged with the topic name. Markets / Language
+  pickers narrow off the matrix. Category is the anchor picker.
+- LaunchDarkly local override via `LD_FLAG_OVERRIDES` that survives
+  `ldClient.identify()` (real override, not just bootstrap).
+- Webpack-dev-server overlay filter for the harmless `ResizeObserver loop`
+  runtime warning.
+
+### Open
+
+1. **Brand Presence filters → Semrush-aware** *(next)*
+   - Drop the legacy `selectedProject` filter from `brand-presence` and
+     `brand-presence-pg` in `src/constants/dashboards.tsx`.
+   - Add three new filter types — `SEMRUSH_CATEGORY`, `SEMRUSH_MARKET`,
+     `SEMRUSH_LANGUAGE` — to `src/constants/filters.ts`. Each `loadOptions`
+     reads matrix data via `listSerenityProjects(orgId, brandId)` (load once
+     at dashboard level, push into the filter store's `rawData` channel so
+     the existing pattern keeps working).
+   - Cross-narrow the three options against each other with `dependsOn` so
+     only combinations that map to a real Semrush project are selectable
+     (same pattern the Prompts Management filters already use client-side).
+   - Derive a `semrushProjectId` from the three values and thread it down to
+     the BP widgets so the data fetch can target the right Semrush project.
+     This is the heavy bit — every widget data hook currently keys off
+     `selectedSite`/`selectedBrand`, none look at a Semrush projectId yet.
+   - Considered: a small `useSemrushProjectFromMatrix(orgId, brandId,
+     filters)` hook that the BP page header sets and pushes via context to
+     the widgets below.
+
+2. **Mirror Serenity prompts into the local Postgres `prompts` table**
+   - Today the Serenity proxy only writes to Semrush. BP and the legacy
+     v2-prompts surfaces read from Postgres. Creating prompts in the
+     Serenity UI leaves BP gated by "Configuration Required" until you
+     hand-seed (§15) — and even then the rows aren't tied to the Semrush
+     project.
+   - Plan: on `POST /serenity/prompts` success, the proxy upserts a matching
+     V2 prompt row into Postgres (one per (matrix project × prompt text)).
+     Same on PATCH / bulk-delete. Treat Semrush as the source of truth;
+     Postgres becomes a denormalized projection used only for BP reads.
+   - Need to confirm with data team whether the BP pipeline can backfill
+     execution rows for prompts not seeded via the DRS path.
+
+3. **Wire SR AI Visibility prompts list (currently 404 on local proxy)**
+   - `/llmo/ai-visibility/brands/prompts` returns 404 locally because that
+     route lives in a different service. The Tracking Recommendations card
+     reports "0 prompts will be added" until the hand-curated snapshot is in
+     place (since 2026-05-12; pulled into this branch already).
+   - When the SR backend is wired, the snapshot fallback in
+     `SRTrackingRecommendationsDashboard.tsx` falls back to live data
+     automatically — no further UI work needed.
+
+4. **Per-row workspace override in the matrix schema**
+   - The matrix carries one top-level `workspaceId`. If you add a Semrush
+     project in a different workspace, the matrix won't accept it. Easy to
+     add `row.workspaceId` with the top-level as default.
+
+5. **Polish**
+   - The legacy `SRTrackTopicToPromptsDialog.tsx` is no longer rendered
+     (per-row Track was rerouted to the bulk dialog) but still in the tree.
+     Safe to delete in a cleanup commit.
+
+---
+
+## 17. Tearing it all down
 
 ```bash
 cd spacecat-api-service
