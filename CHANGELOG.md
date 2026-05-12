@@ -1,3 +1,10 @@
+# [1.491.0](https://github.com/adobe/spacecat-api-service/compare/v1.490.1...v1.491.0) (2026-05-12)
+
+
+### Features
+
+* read only admin owned resource write access ([#2391](https://github.com/adobe/spacecat-api-service/issues/2391)) ([af57bd9](https://github.com/adobe/spacecat-api-service/commit/af57bd903a22fee33cd0997c96786f7fa59b30b9))
+
 ## [1.490.1](https://github.com/adobe/spacecat-api-service/compare/v1.490.0...v1.490.1) (2026-05-12)
 
 
