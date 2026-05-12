@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
-import type { Brand } from "../../common/types_pb";
+import type { Brand } from "../../common/types_pb.js";
 
 /**
  * Describes the file v2/competitor/messages.proto.
