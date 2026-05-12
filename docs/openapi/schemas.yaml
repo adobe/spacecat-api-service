@@ -198,6 +198,12 @@ HandlerConfig:
       items:
         type: string
         format: uri
+    includedURLs:
+      description: URLs to be included in the handler's processing
+      type: array
+      items:
+        type: string
+        format: uri
     groupedURLs:
       description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
       type: array
@@ -221,6 +227,8 @@ HandlerConfig:
     excludedURLs:
       - 'https://www.adobe.com/excluded-page'
       - 'https://www.adobe.com/another-excluded-page'
+    includedURLs:
+      - 'https://www.adobe.com/included-page'
     groupedURLs:
       - name: 'catalog'
         pattern: '/products/'
@@ -811,10 +819,25 @@ UpdateHandlerTypeConfig:
   type: object
   properties:
     excludedURLs:
-      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed
+      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed. Combined with replaceExcludedURLs to control merge vs replace behavior
       type: array
       items:
         type: string
+        format: uri
+    replaceExcludedURLs:
+      description: When true, excludedURLs fully replaces the existing list. When false (default), values are appended and deduplicated
+      type: boolean
+      default: false
+    includedURLs:
+      description: Set of URLs to include. If empty, previously included URLs will be removed. Combined with replaceIncludedURLs to control merge vs replace behavior
+      type: array
+      items:
+        type: string
+        format: uri
+    replaceIncludedURLs:
+      description: When true, includedURLs fully replaces the existing list. When false (default), values are appended and deduplicated
+      type: boolean
+      default: false
     groupedURLs:
       description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
       type: array
@@ -831,6 +854,10 @@ UpdateHandlerTypeConfig:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
+    replaceExcludedURLs: true
+    includedURLs:
+      - 'https://www.adobe.com/included-page'
+    replaceIncludedURLs: true
     groupedURLs:
       - name: 'catalog'
         pattern: '/products/'
@@ -8503,6 +8530,61 @@ UrlInspectorFilterDimensions:
           label: { type: string }
         required: [id, label]
   required: [categories, regions, content_types]
+
+BrandPresenceFilterOption:
+  type: object
+  description: A single id/label option for a filter dropdown
+  properties:
+    id: { type: string }
+    label: { type: string }
+  required: [id, label]
+
+BrandPresenceFilterDimensions:
+  type: object
+  description: |
+    Filter dimensions for the Brand Presence configuration view.
+    Each dimension is an array of id/label pairs except `stats`.
+  properties:
+    brands:
+      type: array
+      description: Brands accessible for the organization (and optionally a specific site).
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    categories:
+      type: array
+      description: Prompt categories configured for the organization.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    topics:
+      type: array
+      description: Topics for the organization, optionally scoped to a category.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    regions:
+      type: array
+      description: Available region codes.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    origins:
+      type: array
+      description: Prompt origin values (e.g. `human`, `ai`).
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    page_intents:
+      type: array
+      description: Page intent values derived from the brand's prompt data.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    stats:
+      type: object
+      description: Aggregate statistics for the current filter scope.
+      properties:
+        distinct_prompt_count:
+          type: integer
+          description: Number of distinct prompts matching the current filter scope.
+      required: [distinct_prompt_count]
+  required: [brands, categories, topics, regions, origins, page_intents, stats]
+
 WebhookAccepted:
   type: object
   properties:
