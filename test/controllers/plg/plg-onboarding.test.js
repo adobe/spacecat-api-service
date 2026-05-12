@@ -2052,7 +2052,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.include('Test Org');
       expect(message).to.include(TEST_ORG_ID);
       expect(message).to.include(TEST_SITE_ID);
-      expect(message).to.include(`https://experience.adobe.com/?organizationId=${TEST_ORG_ID}#/sites-optimizer/sites/${TEST_SITE_ID}`);
+      expect(message).to.not.include('ASO Link');
       expect(message).to.include(`https://experience.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${TEST_SITE_ID}`);
     });
 
