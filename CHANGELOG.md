@@ -1,3 +1,22 @@
+## [1.489.1](https://github.com/adobe/spacecat-api-service/compare/v1.489.0...v1.489.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2390](https://github.com/adobe/spacecat-api-service/issues/2390)) ([77a2e84](https://github.com/adobe/spacecat-api-service/commit/77a2e8447334a5e7493fdecabf2039a4d4e20fc0))
+
+# [1.489.0](https://github.com/adobe/spacecat-api-service/compare/v1.488.1...v1.489.0) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-shared-bounce to v2.0.30 ([#2388](https://github.com/adobe/spacecat-api-service/issues/2388)) ([5db398c](https://github.com/adobe/spacecat-api-service/commit/5db398cdd3011aeca8aefd1a029187fc9ca2fc86))
+
+
+### Features
+
+* add includedURLs support to patchAuditForSite endpoint ([#2355](https://github.com/adobe/spacecat-api-service/issues/2355)) ([3dfe4af](https://github.com/adobe/spacecat-api-service/commit/3dfe4afb3e5b547f3ba95d9f8a5aa5a89ade81a4))
+
 ## [1.488.1](https://github.com/adobe/spacecat-api-service/compare/v1.488.0...v1.488.1) (2026-05-11)
 
 
