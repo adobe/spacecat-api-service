@@ -59,13 +59,44 @@ function pickPrimaryTagName(tags) {
   return first?.name || null;
 }
 
-function fetchProjectPrompts(transport, project, { search }) {
-  return transport.listPromptsByTags(project.workspaceId, project.projectId, {
-    tag_ids: [],
-    page: 1,
-    limit: DEFAULT_PAGE_SIZE,
-    search: search || undefined,
-  });
+function pickTagNames(tags) {
+  if (!Array.isArray(tags)) {
+    return [];
+  }
+  return tags.map((t) => t?.name).filter(Boolean);
+}
+
+// Hard cap so a runaway project doesn't blow the request out. Semrush's
+// largest single-project prompt set we've seen is ~7k; the cap is generous.
+const MAX_PROMPTS_PER_PROJECT = 10000;
+
+/**
+ * Paginate through `POST /aio/prompts/by_tags` until we've collected every
+ * prompt in the project (or hit the safety cap). Semrush returns
+ * `{ items, page, total }`; we keep advancing `page` until items run out or
+ * we've fetched `total`.
+ */
+async function fetchProjectPrompts(transport, project, { search }) {
+  const collected = [];
+  let page = 1;
+  let total = Infinity;
+  while (collected.length < total && collected.length < MAX_PROMPTS_PER_PROJECT) {
+    // eslint-disable-next-line no-await-in-loop
+    const result = await transport.listPromptsByTags(project.workspaceId, project.projectId, {
+      tag_ids: [],
+      page,
+      limit: DEFAULT_PAGE_SIZE,
+      search: search || undefined,
+    });
+    const items = Array.isArray(result?.items) ? result.items : [];
+    if (items.length === 0) {
+      break;
+    }
+    collected.push(...items);
+    total = Number.isFinite(result?.total) ? result.total : collected.length;
+    page += 1;
+  }
+  return { items: collected, total: collected.length, page: 1 };
 }
 
 function filterProjects(projects, query) {
@@ -104,6 +135,7 @@ function ingestProjectItems(grouped, brandId, project, items) {
           category: project.category,
           language: project.language,
           topic: pickPrimaryTagName(item.tags),
+          tags: pickTagNames(item.tags),
           regions: [],
           projects: [],
         });
@@ -152,22 +184,28 @@ export async function handleListPrompts(transport, env, brandId, query) {
   const start = (page - 1) * limit;
   const pageItems = all.slice(start, start + limit);
 
+  const availableTags = Array.from(
+    new Set(all.flatMap((p) => (Array.isArray(p.tags) ? p.tags : []))),
+  ).sort();
+
   return {
     items: pageItems,
     total: all.length,
     page,
     limit,
+    availableTags,
     errors: errors.length ? errors : undefined,
   };
 }
 
-async function createOnSingleProject(transport, project, tagName, text) {
-  const promptsByTag = { [tagName]: [text] };
+async function createOnSingleProject(transport, project, text, tagNames) {
+  // Semrush /aio/prompts/tagged body is text-keyed: { prompts: { [text]: [tag1, tag2, ...] } }
+  const promptsByText = { [text]: tagNames };
   try {
     const r = await transport.createTaggedPrompts(
       project.workspaceId,
       project.projectId,
-      promptsByTag,
+      promptsByText,
     );
     const semrushPromptId = Array.isArray(r?.ids) && r.ids.length > 0 ? r.ids[0] : null;
     return {
@@ -184,12 +222,48 @@ async function createOnSingleProject(transport, project, tagName, text) {
   }
 }
 
-function createOnProjects(transport, projectsByTag, text) {
+function createOnProjects(transport, projects, text, tagNames) {
   return Promise.all(
-    projectsByTag.map(({ project, tagName }) => (
-      createOnSingleProject(transport, project, tagName, text)
+    projects.map((project) => (
+      createOnSingleProject(transport, project, text, tagNames)
     )),
   );
+}
+
+/**
+ * Publish every distinct (workspaceId, projectId) pair so freshly created /
+ * updated / deleted prompts move out of the project's draft buffer and become
+ * visible in subsequent listings. Failures are swallowed — Semrush returns 202
+ * Accepted and the publish is async; a publish error shouldn't fail the
+ * mutation itself, but should be surfaced so the caller can warn the user.
+ */
+async function publishAffectedProjects(transport, projectRefs, log) {
+  const unique = new Map();
+  for (const p of projectRefs) {
+    if (p?.workspaceId && p?.projectId) {
+      unique.set(`${p.workspaceId}:${p.projectId}`, p);
+    }
+  }
+  const errors = [];
+  await Promise.all(Array.from(unique.values()).map(async (p) => {
+    try {
+      await transport.publishProject(p.workspaceId, p.projectId);
+    } catch (e) {
+      log?.warn?.('publishProject failed', { projectId: p.projectId, error: e.message });
+      errors.push({ projectId: p.projectId, message: e.message });
+    }
+  }));
+  return errors;
+}
+
+function normalizeTopics(input) {
+  if (Array.isArray(input?.topics)) {
+    return input.topics.map((t) => String(t || '').trim()).filter(Boolean);
+  }
+  if (input?.topic) {
+    return [String(input.topic).trim()].filter(Boolean);
+  }
+  return [];
 }
 
 function validatePromptInput(input) {
@@ -197,12 +271,12 @@ function validatePromptInput(input) {
   const category = String(input?.category || '').trim();
   const language = String(input?.language || '').trim().toLowerCase();
   const regions = Array.isArray(input?.regions) ? input.regions : [];
-  const topic = String(input?.topic || category || 'general');
+  const topics = normalizeTopics(input);
   if (!text || !category || !language || regions.length === 0) {
     return null;
   }
   return {
-    text, category, language, regions, topic,
+    text, category, language, regions, topics,
   };
 }
 
@@ -217,7 +291,7 @@ async function createOnePrompt(transport, env, brandId, input) {
     };
   }
   const {
-    text, category, language, regions, topic,
+    text, category, language, regions, topics,
   } = normalized;
 
   const { matched, skipped } = resolveProjectsForPrompt(env, brandId, {
@@ -236,8 +310,8 @@ async function createOnePrompt(transport, env, brandId, input) {
     };
   }
 
-  const projectsByTag = matched.map((project) => ({ project, tagName: topic }));
-  const projectResults = await createOnProjects(transport, projectsByTag, text);
+  const tagNames = topics.length > 0 ? topics : [category];
+  const projectResults = await createOnProjects(transport, matched, text, tagNames);
 
   return {
     created: {
@@ -248,15 +322,17 @@ async function createOnePrompt(transport, env, brandId, input) {
       text,
       category,
       language,
-      topic,
+      topic: tagNames[0] || null,
+      tags: tagNames,
       regions: matched.map((p) => p.market),
       projects: projectResults,
       skipped: skipped.length ? skipped : undefined,
     },
+    affectedProjects: matched.map((p) => ({ workspaceId: p.workspaceId, projectId: p.projectId })),
   };
 }
 
-export async function handleCreatePrompts(transport, env, brandId, body) {
+export async function handleCreatePrompts(transport, env, brandId, body, log) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
     return { created: [], errors: [{ message: 'No prompts in request body' }] };
@@ -268,12 +344,20 @@ export async function handleCreatePrompts(transport, env, brandId, body) {
 
   const created = [];
   const errors = [];
+  const affectedProjectRefs = [];
   for (const r of results) {
     if (r.created) {
       created.push(r.created);
+      if (Array.isArray(r.affectedProjects)) {
+        affectedProjectRefs.push(...r.affectedProjects);
+      }
     } else if (r.error) {
       errors.push(r.error);
     }
+  }
+  const publishErrors = await publishAffectedProjects(transport, affectedProjectRefs, log);
+  if (publishErrors.length > 0) {
+    errors.push(...publishErrors.map((e) => ({ ...e, message: `publish: ${e.message}` })));
   }
   return { created, errors };
 }
@@ -315,7 +399,7 @@ async function deleteByPerProjectIds(transport, env, brandId, targets) {
   return Promise.all(tasks);
 }
 
-export async function handleBulkDeletePrompts(transport, env, brandId, body) {
+export async function handleBulkDeletePrompts(transport, env, brandId, body, log) {
   const targets = Array.isArray(body?.targets) ? body.targets : [];
   if (targets.length === 0) {
     return { deleted: 0, results: [], errors: [{ message: 'No targets supplied' }] };
@@ -323,10 +407,20 @@ export async function handleBulkDeletePrompts(transport, env, brandId, body) {
   const results = await deleteByPerProjectIds(transport, env, brandId, targets);
   const deleted = results.reduce((sum, r) => sum + (r.deleted || 0), 0);
   const errors = results.filter((r) => r.error).map((r) => r.error);
+
+  const matrix = listProjectsForBrand(env, brandId);
+  const affectedRefs = Array.from(new Set(results.map((r) => r.projectId).filter(Boolean)))
+    .map((pid) => matrix.find((m) => m.projectId === pid))
+    .filter(Boolean)
+    .map((m) => ({ workspaceId: m.workspaceId, projectId: m.projectId }));
+  const publishErrors = await publishAffectedProjects(transport, affectedRefs, log);
+  if (publishErrors.length > 0) {
+    errors.push(...publishErrors.map((e) => ({ ...e, message: `publish: ${e.message}` })));
+  }
   return { deleted, results, errors };
 }
 
-export async function handleUpdatePrompt(transport, env, brandId, logicalId, body) {
+export async function handleUpdatePrompt(transport, env, brandId, logicalId, body, log) {
   const decoded = decodeLogicalId(logicalId);
   if (!decoded || decoded.brandId !== String(brandId)) {
     return {
@@ -352,7 +446,7 @@ export async function handleUpdatePrompt(transport, env, brandId, logicalId, bod
     text: String(body?.text ?? decoded.text),
     category: String(body?.category ?? decoded.category),
     language: String(body?.language ?? decoded.language).toLowerCase(),
-    topic: body?.topic ? String(body.topic) : null,
+    topics: normalizeTopics(body),
     regions: Array.isArray(body?.regions)
       ? body.regions
       : currentProjects.map((p) => String(p.market || '').toUpperCase()).filter(Boolean),
@@ -365,17 +459,30 @@ export async function handleUpdatePrompt(transport, env, brandId, logicalId, bod
       text: next.text,
       category: next.category,
       language: next.language,
-      topic: next.topic || next.category,
+      topics: next.topics.length > 0 ? next.topics : [next.category],
       regions: next.regions,
     }],
-  });
+  }, log);
+
+  // handleCreatePrompts already publishes projects affected by the new content,
+  // but the projects we deleted from may be different (e.g. region changed),
+  // so publish those too. publishAffectedProjects de-dupes by (ws, projectId).
+  const matrix = listProjectsForBrand(env, brandId);
+  const deletedRefs = Array.from(new Set(deleteResults.map((r) => r.projectId).filter(Boolean)))
+    .map((pid) => matrix.find((m) => m.projectId === pid))
+    .filter(Boolean)
+    .map((m) => ({ workspaceId: m.workspaceId, projectId: m.projectId }));
+  const publishErrors = await publishAffectedProjects(transport, deletedRefs, log);
 
   return {
     status: 200,
     body: {
       updated: createResult.created[0] || null,
       deleted: deleteResults,
-      errors: [...(createResult.errors || [])],
+      errors: [
+        ...(createResult.errors || []),
+        ...publishErrors.map((e) => ({ ...e, message: `publish: ${e.message}` })),
+      ],
     },
   };
 }

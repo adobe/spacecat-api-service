@@ -15,7 +15,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
-import { MatrixNotConfiguredError } from '../support/serenity/matrix.js';
+import { MatrixNotConfiguredError, listProjectsForBrand } from '../support/serenity/matrix.js';
 import {
   handleListPrompts,
   handleCreatePrompts,
@@ -97,7 +97,7 @@ function SerenityPromptsController(context, log) {
       return badRequest('Missing IMS bearer token and SEMRUSH_COOKIE is not configured');
     }
     try {
-      const result = await handleCreatePrompts(transport, ctx.env, brandId, ctx.data || {});
+      const result = await handleCreatePrompts(transport, ctx.env, brandId, ctx.data || {}, log);
       return createResponse(result, 201);
     } catch (e) {
       return mapTransportError(e, log);
@@ -121,6 +121,7 @@ function SerenityPromptsController(context, log) {
         brandId,
         logicalId,
         ctx.data || {},
+        log,
       );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -140,8 +141,26 @@ function SerenityPromptsController(context, log) {
         ctx.env,
         brandId,
         ctx.data || {},
+        log,
       );
       return ok(result);
+    } catch (e) {
+      return mapTransportError(e, log);
+    }
+  };
+
+  const listProjects = async (ctx) => {
+    const brandId = ctx?.params?.brandId;
+    try {
+      const projects = listProjectsForBrand(ctx.env, brandId);
+      const uniq = (xs) => Array.from(new Set(xs.filter(Boolean))).sort();
+      const categories = uniq(projects.map((p) => p.category));
+      const regions = uniq(projects.map((p) => p.market));
+      const languages = uniq(projects.map((p) => p.language));
+      return ok({
+        projects,
+        facets: { categories, regions, languages },
+      });
     } catch (e) {
       return mapTransportError(e, log);
     }
@@ -152,6 +171,7 @@ function SerenityPromptsController(context, log) {
     createPrompts,
     updatePrompt,
     bulkDeletePrompts,
+    listProjects,
   };
 }
 

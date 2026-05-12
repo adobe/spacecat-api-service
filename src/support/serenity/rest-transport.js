@@ -138,5 +138,16 @@ export function createSerenityTransport({ env, imsToken }) {
       const url = `${root}${projectPath(workspaceId, projectId, '')}`;
       return request('DELETE', url, env, imsToken, { ids });
     },
+
+    /**
+     * POST /v1/workspaces/{ws}/projects/{pid}/publish — moves the project's
+     * draft state to live. Semrush returns 202 Accepted and publishes
+     * asynchronously; mutations (create/update/delete) land in draft until
+     * this is called, which is why the UI count lagged behind Semrush's.
+     */
+    async publishProject(workspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${workspaceId}/projects/${projectId}/publish`;
+      return request('POST', url, env, imsToken, undefined);
+    },
   };
 }
