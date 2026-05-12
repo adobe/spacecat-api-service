@@ -2068,8 +2068,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.include('Test Org');
       expect(message).to.include(TEST_ORG_ID);
       expect(message).to.include(TEST_SITE_ID);
-      expect(message).to.include(`https://experience.adobe.com/?organizationId=${TEST_ORG_ID}#/sites-optimizer/sites/${TEST_SITE_ID}`);
-      expect(message).to.include('https://experience.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/plg-sites');
+      expect(message).to.not.include('ASO Link');
+      expect(message).to.include(`https://experience.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${TEST_SITE_ID}`);
     });
 
     it('posts notification with botBlocker type but no ipsToAllowlist', async () => {
@@ -2173,7 +2173,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.include('Waitlisted');
       expect(message).to.not.include('IMS Org Name');
       expect(message).to.not.include('ASO Link');
-      expect(message).to.include('https://experience.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/plg-sites');
+      expect(message).to.not.include('Backoffice Link');
       expect(mockLog.warn).to.have.been.calledWith(
         sinon.match(/Failed to look up org name for onboarding notification/),
       );
@@ -2205,7 +2205,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.include(TEST_ORG_ID);
       expect(message).to.include(TEST_SITE_ID);
       expect(message).to.include(`https://experience.adobe.com/?organizationId=${TEST_ORG_ID}#/sites-optimizer/sites/${TEST_SITE_ID}`);
-      expect(message).to.include('https://experience.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/plg-sites');
+      expect(message).to.include(`https://experience.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${TEST_SITE_ID}`);
     });
 
     it('uses custom EXPERIENCE_URL for ASO link when provided', async () => {
@@ -2223,7 +2223,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.include(`https://experience-stage.adobe.com/?organizationId=${TEST_ORG_ID}#/sites-optimizer/sites/${TEST_SITE_ID}`);
-      expect(message).to.include('https://experience-stage.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/plg-sites');
+      expect(message).to.include(`https://experience-stage.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${TEST_SITE_ID}`);
       expect(message).to.not.include('https://experience.adobe.com/');
     });
 
