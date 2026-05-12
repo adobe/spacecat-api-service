@@ -166,9 +166,6 @@ export const INTERNAL_ROUTES = [
   'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
   'PATCH /contact-sales-leads/:contactSalesLeadId',
 
-  // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
-  'POST /sites/:siteId/autofix-checks',
-
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
   'GET /consumers/by-client-id/:clientId',
@@ -314,6 +311,8 @@ const routeRequiredCapabilities = {
   'GET /preflight/jobs/:jobId': 'site:read',
   'POST /preflight/beta/jobs': 'site:write',
   'GET /preflight/beta/jobs/:jobId': 'site:read',
+  // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
+  'POST /sites/:siteId/autofix-checks': 'site:read',
 
   // Sites
   // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
