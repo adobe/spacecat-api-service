@@ -1219,6 +1219,20 @@ describe('llmo-agentic-traffic', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 400 when S3 / SQS clients are present but bucket / queue env is empty', async () => {
+      // Exercises the second config-check that trips after the s3?.s3Client
+      // guard — the deploy is configured for SDKs but missing the env vars
+      // that point at the actual bucket / queue.
+      const ctx = makeExportContext();
+      // strip AGENTIC_TRAFFIC_EXPORT_BUCKET / S3_REPORT_BUCKET / REPORT_JOBS_QUEUE_URL
+      ctx.env = {};
+      delete ctx.s3.s3Bucket;
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
     it('returns 500 when S3 / SQS interaction throws unexpectedly', async () => {
       // ListObjectsV2 / GetObject failure inside the try block — exercises
       // the POST catch path that logs and returns internalServerError.

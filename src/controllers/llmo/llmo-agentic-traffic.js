@@ -155,10 +155,10 @@ function canonicalizeExportPayload(siteId, parsed) {
   };
 }
 
+// Order-stable JSON serialisation. The canonical export payload is a flat
+// object of primitives, so the recursive object branch is enough — no array
+// handling needed.
 function stableStringify(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(',')}]`;
-  }
   if (value && typeof value === 'object') {
     return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
   }
