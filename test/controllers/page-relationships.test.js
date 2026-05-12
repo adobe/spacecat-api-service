@@ -644,6 +644,39 @@ describe('Page Relationships Controller', () => {
       expect(body.relationships['row-invalid-base'].pageId).to.equal('pg-1');
     });
 
+    it('passes through original input when URL constructor throws on a malformed absolute URL', async () => {
+      // Covers the catch branch of normalizePageUrlForLookup: the input passes the
+      // /^https?:\/\//i regex but the URL constructor rejects it (e.g. unparseable
+      // host). Function returns the original trimmed string instead of crashing.
+      isAEMAuthoredSiteStub.returns(true);
+      requestContext.data = {
+        pages: [{ key: 'row-malformed', pageUrl: 'https://example.com/us/en/page1', suggestionType: 'Missing Title' }],
+      };
+      // eslint-disable-next-line prefer-arrow-callback -- arrow functions cannot be used with `new`
+      sandbox.replace(globalThis, 'URL', function FailingURL() {
+        throw new TypeError('Invalid URL');
+      });
+      resolvePageIdsStub.resolves([{ url: 'https://example.com/us/en/page1', pageId: 'pg-1' }]);
+      fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
+        results: {
+          [items[0].key]: {
+            pageId: items[0].pageId,
+            upstream: { chain: [] },
+          },
+        },
+        errors: {},
+      }));
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.search(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['https://example.com/us/en/page1']);
+      expect(body.relationships).to.have.property('row-malformed');
+      expect(body.relationships['row-malformed'].pageId).to.equal('pg-1');
+    });
+
     it('falls back to root path when normalized absolute URL has empty pathname', async () => {
       isAEMAuthoredSiteStub.returns(true);
       requestContext.data = {
