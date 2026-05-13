@@ -39,11 +39,15 @@ export function getSkipReason(data, action, env) {
     return `auto-trigger not yet supported: ${action}`;
   }
 
-  // Invite-based trigger: reviewer must be the app
+  // Invite-based trigger: reviewer must be the configured login.
+  // GITHUB_REVIEWER_LOGIN overrides the default [bot] suffix — use this
+  // when the reviewer is a plain user account (e.g. a shared service account)
+  // rather than a GitHub App bot.
   if (action === 'review_requested') {
     const reviewer = data.requested_reviewer?.login;
-    if (reviewer !== `${appSlug}[bot]`) {
-      return `reviewer ${reviewer} is not ${appSlug}`;
+    const expectedReviewer = env.GITHUB_REVIEWER_LOGIN ?? `${appSlug}[bot]`;
+    if (reviewer !== expectedReviewer) {
+      return `reviewer ${reviewer} is not ${expectedReviewer}`;
     }
   }
 

@@ -58,6 +58,40 @@ describe('github-trigger-rules', () => {
       });
     });
 
+    describe('GITHUB_REVIEWER_LOGIN override', () => {
+      it('returns null when reviewer matches GITHUB_REVIEWER_LOGIN (plain user)', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev', GITHUB_REVIEWER_LOGIN: 'aighagent' };
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: 'aighagent' },
+        };
+        expect(getSkipReason(data, 'review_requested', env)).to.be.null;
+      });
+
+      it('returns skip reason when reviewer does not match GITHUB_REVIEWER_LOGIN', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev', GITHUB_REVIEWER_LOGIN: 'aighagent' };
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: 'mysticat-bot-dev[bot]' },
+        };
+        const reason = getSkipReason(data, 'review_requested', env);
+        expect(reason).to.include('mysticat-bot-dev[bot]');
+        expect(reason).to.include('aighagent');
+      });
+
+      it('falls back to [bot] suffix when GITHUB_REVIEWER_LOGIN is absent', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev' };
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: 'mysticat-bot-dev[bot]' },
+        };
+        expect(getSkipReason(data, 'review_requested', env)).to.be.null;
+      });
+    });
+
     describe('labeled trigger (disabled)', () => {
       // Labeled triggers were disabled because GitHub does not count
       // label-triggered reviews toward branch protection / merge
