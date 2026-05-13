@@ -1,3 +1,10 @@
+## [1.495.1](https://github.com/adobe/spacecat-api-service/compare/v1.495.0...v1.495.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* order topics by visibility rather than volume | serenity VO ([#2413](https://github.com/adobe/spacecat-api-service/issues/2413)) ([69b084f](https://github.com/adobe/spacecat-api-service/commit/69b084f907c8a0a500f657f86d1d19addb1d7311))
+
 # [1.495.0](https://github.com/adobe/spacecat-api-service/compare/v1.494.1...v1.495.0) (2026-05-13)
 
 
