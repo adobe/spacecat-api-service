@@ -178,19 +178,13 @@ function buildExportKeys(siteId, exportId) {
 }
 
 function getExportConfig(ctx) {
-  // S3_REPORT_BUCKET is the API service's existing env var name (the
-  // worker uses S3_REPORTING_BUCKET_NAME in its own Lambda env — both
-  // resolve to the same spacecat-{env}-reports bucket at deploy time).
-  const s3Bucket = ctx.env?.AGENTIC_TRAFFIC_EXPORT_BUCKET
-    || ctx.env?.S3_REPORT_BUCKET
-    /* c8 ignore next -- last-resort fallback when no env var is set */
-    || ctx.s3?.s3Bucket;
-  const queueUrl = ctx.env?.AGENTIC_TRAFFIC_EXPORT_QUEUE_URL
-    || ctx.env?.REPORT_JOBS_QUEUE_URL;
-  const s3Region = ctx.env?.AGENTIC_TRAFFIC_EXPORT_REGION
-    || ctx.runtime?.region
-    /* c8 ignore next -- default region when neither env nor runtime sets one */
-    || 'us-east-1';
+  // S3_REPORT_BUCKET is the API service's existing env var name; the worker
+  // uses S3_REPORTING_BUCKET_NAME in its own Lambda env — both resolve to
+  // the same spacecat-{env}-reports bucket at deploy time.
+  const s3Bucket = ctx.env?.S3_REPORT_BUCKET;
+  const queueUrl = ctx.env?.REPORT_JOBS_QUEUE_URL;
+  /* c8 ignore next -- default region when ctx.runtime is unset */
+  const s3Region = ctx.runtime?.region || 'us-east-1';
   return { s3Bucket, queueUrl, s3Region };
 }
 
