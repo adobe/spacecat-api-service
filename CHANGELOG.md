@@ -1,3 +1,10 @@
+# [1.495.0](https://github.com/adobe/spacecat-api-service/compare/v1.494.1...v1.495.0) (2026-05-13)
+
+
+### Features
+
+* **llmo:** query brand opportunities by scope_id instead of iterating sites ([#2316](https://github.com/adobe/spacecat-api-service/issues/2316)) ([479c622](https://github.com/adobe/spacecat-api-service/commit/479c6223e5dcd47cddc26daeb29ddced24184e6d)), closes [spacecat-audit-worker#2427](https://github.com/spacecat-audit-worker/issues/2427)
+
 ## [1.494.1](https://github.com/adobe/spacecat-api-service/compare/v1.494.0...v1.494.1) (2026-05-13)
 
 
