@@ -500,6 +500,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
   /sites/{siteId}/agentic-traffic/movers:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  /org/{spaceCatId}/brands/{brandId}/fanout-report:
+    $ref: './fanout-report-api.yaml#/fanout-report'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/filter-dimensions:
     $ref: './llmo-api.yaml#/brand-presence-filter-dimensions'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/prompt-execution-status:
@@ -628,6 +630,10 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-brands'
   /llmo/ai-visibility/topics/research/source-domains:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
+  /llmo/ai-visibility/v1/topic/brand-topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
+  /llmo/ai-visibility/v1/prompt/brand-prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts'
 
 components:
   securitySchemes:
