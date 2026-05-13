@@ -1,3 +1,10 @@
+## [1.494.1](https://github.com/adobe/spacecat-api-service/compare/v1.494.0...v1.494.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* prevent unhandled 5xx in scrape controller on malformed URLs ([#2292](https://github.com/adobe/spacecat-api-service/issues/2292)) ([9db900c](https://github.com/adobe/spacecat-api-service/commit/9db900cc019abab2d2e02248402370aad1a11e64))
+
 # [1.494.0](https://github.com/adobe/spacecat-api-service/compare/v1.493.1...v1.494.0) (2026-05-13)
 
 
