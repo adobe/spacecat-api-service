@@ -296,6 +296,8 @@ describe('getRouteHandlers', () => {
     getReferralTrafficUrlTrend: () => null,
     getReferralTrafficBusinessImpact: () => null,
     getReferralTrafficWeeks: () => null,
+    exportAgenticTrafficUrls: () => null,
+    getAgenticTrafficUrlsExportStatus: () => null,
   };
 
   const mockLlmoOpportunitiesController = {
@@ -488,6 +490,12 @@ describe('getRouteHandlers', () => {
     getTopicsResearchSourceDomains: sinon.stub(),
     getTopicsResearch: sinon.stub(),
     getTopicsStats: sinon.stub(),
+    getV1TopicBrandTopics: sinon.stub(),
+    getV1PromptBrandPrompts: sinon.stub(),
+  };
+
+  const mockFanoutReportController = {
+    getFanoutReport: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -545,6 +553,7 @@ describe('getRouteHandlers', () => {
       mockDrsBpPgAuditController,
       mockWebhooksController,
       mockAiVisibilityController,
+      mockFanoutReportController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -583,28 +592,30 @@ describe('getRouteHandlers', () => {
       'POST /llmo/onboard/update-query-index',
       'GET /llmo/agentic-traffic/global',
       'POST /llmo/agentic-traffic/global',
-      'GET /llmo/ai-visibility/brands/cited-pages',
-      'GET /llmo/ai-visibility/brands/cited-sources',
-      'GET /llmo/ai-visibility/brands/competitors',
-      'GET /llmo/ai-visibility/brands/prompts',
-      'GET /llmo/ai-visibility/brands/source-opportunities',
       'GET /llmo/ai-visibility/brands/stats',
-      'GET /llmo/ai-visibility/brands/topic-opportunities',
       'GET /llmo/ai-visibility/brands/topics',
+      'GET /llmo/ai-visibility/brands/prompts',
+      'GET /llmo/ai-visibility/brands/cited-pages',
+      'GET /llmo/ai-visibility/brands/topic-opportunities',
       'GET /llmo/ai-visibility/brands/top-brands',
-      'GET /llmo/ai-visibility/competitors/gap-prompts',
-      'GET /llmo/ai-visibility/competitors/gap-source-domains',
-      'GET /llmo/ai-visibility/competitors/gap-topics',
+      'GET /llmo/ai-visibility/brands/cited-sources',
+      'GET /llmo/ai-visibility/brands/source-opportunities',
+      'GET /llmo/ai-visibility/brands/competitors',
       'GET /llmo/ai-visibility/competitors/metrics',
+      'GET /llmo/ai-visibility/competitors/gap-topics',
+      'GET /llmo/ai-visibility/competitors/gap-source-domains',
+      'GET /llmo/ai-visibility/competitors/gap-prompts',
       'GET /llmo/ai-visibility/meta',
-      'GET /llmo/ai-visibility/prompts/responses',
       'GET /llmo/ai-visibility/prompts/responses/latest',
-      'GET /llmo/ai-visibility/topics/research',
-      'GET /llmo/ai-visibility/topics/research/brands',
-      'GET /llmo/ai-visibility/topics/research/prompts',
-      'GET /llmo/ai-visibility/topics/research/source-domains',
+      'GET /llmo/ai-visibility/prompts/responses',
       'GET /llmo/ai-visibility/topics/research/stats',
+      'GET /llmo/ai-visibility/topics/research/prompts',
+      'GET /llmo/ai-visibility/topics/research/brands',
+      'GET /llmo/ai-visibility/topics/research/source-domains',
+      'GET /llmo/ai-visibility/topics/research',
       'GET /llmo/ai-visibility/topics/stats',
+      'GET /llmo/ai-visibility/v1/topic/brand-topics',
+      'GET /llmo/ai-visibility/v1/prompt/brand-prompts',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
@@ -660,6 +671,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research/source-domains']).to.equal(mockAiVisibilityController.getTopicsResearchSourceDomains);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research']).to.equal(mockAiVisibilityController.getTopicsResearch);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/stats']).to.equal(mockAiVisibilityController.getTopicsStats);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics']).to.equal(mockAiVisibilityController.getV1TopicBrandTopics);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts']).to.equal(mockAiVisibilityController.getV1PromptBrandPrompts);
     expect(staticRoutes['GET /v2/regions']).to.equal(mockLlmoMysticatController.getRegions);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
     expect(staticRoutes['GET /plg/sites']).to.equal(mockPlgOnboardingController.getAllOnboardings);
@@ -705,6 +718,7 @@ describe('getRouteHandlers', () => {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
       'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
+      'GET /org/:spaceCatId/brands/:brandId/fanout-report',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions',
       'GET /org/:spaceCatId/brands/all/brand-presence/weeks',
@@ -1024,6 +1038,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/agentic-traffic/movers',
       'GET /sites/:siteId/agentic-traffic/url-brand-presence',
       'GET /sites/:siteId/agentic-traffic/has-data',
+      'POST /sites/:siteId/agentic-traffic/urls/export',
+      'GET /sites/:siteId/agentic-traffic/urls/export/:exportId',
       'GET /sites/:siteId/referral-traffic/has-data',
       'GET /sites/:siteId/referral-traffic/filter-dimensions',
       'GET /sites/:siteId/referral-traffic/kpis',

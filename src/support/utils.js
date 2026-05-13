@@ -628,17 +628,7 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
         return true;
       }
     }
-    const { Configuration, Entitlement } = context.dataAccess || {};
-    if (!Configuration) {
-      return false;
-    }
-    const configuration = await Configuration.findLatest();
-    if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
-      return false;
-    }
-    if (!configuration.isHandlerEnabledForSite('summit-plg', site)) {
-      return false;
-    }
+    const { Entitlement } = context.dataAccess || {};
 
     const organizationId = site.getOrganizationId();
     if (!Entitlement || !organizationId) {

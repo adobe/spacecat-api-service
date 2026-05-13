@@ -498,13 +498,7 @@ describe('utils', () => {
       sandbox.restore();
     });
 
-    it('returns true when summit-plg is enabled and entitlement is PLG ASO', async () => {
-      const isHandlerEnabledForSite = sandbox.stub().withArgs('summit-plg', site).returns(true);
-      context.dataAccess.Configuration = {
-        findLatest: sandbox.stub().resolves({
-          isHandlerEnabledForSite,
-        }),
-      };
+    it('returns true when entitlement is PLG ASO', async () => {
       context.dataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub()
           .withArgs('org-456', 'ASO')
@@ -514,18 +508,11 @@ describe('utils', () => {
       const result = await getIsSummitPlgEnabled(site, context);
 
       expect(result).to.be.true;
-      expect(context.dataAccess.Configuration.findLatest).to.have.been.calledOnce;
-      expect(isHandlerEnabledForSite).to.have.been.calledWith('summit-plg', site);
       expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
         .to.have.been.calledWith('org-456', 'ASO');
     });
 
-    it('returns false when summit-plg is enabled but entitlement is FREE_TRIAL', async () => {
-      context.dataAccess.Configuration = {
-        findLatest: sandbox.stub().resolves({
-          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
-        }),
-      };
+    it('returns false when entitlement is FREE_TRIAL', async () => {
       context.dataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub()
           .resolves({ getTier: () => 'FREE_TRIAL' }),
@@ -536,12 +523,7 @@ describe('utils', () => {
       expect(result).to.be.false;
     });
 
-    it('returns false when summit-plg is enabled but entitlement is PRE_ONBOARD', async () => {
-      context.dataAccess.Configuration = {
-        findLatest: sandbox.stub().resolves({
-          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
-        }),
-      };
+    it('returns false when entitlement is PRE_ONBOARD', async () => {
       context.dataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub()
           .resolves({ getTier: () => 'PRE_ONBOARD' }),
@@ -552,12 +534,7 @@ describe('utils', () => {
       expect(result).to.be.false;
     });
 
-    it('returns false when summit-plg is enabled but entitlement is PAID', async () => {
-      context.dataAccess.Configuration = {
-        findLatest: sandbox.stub().resolves({
-          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
-        }),
-      };
+    it('returns false when entitlement is PAID', async () => {
       context.dataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub()
           .resolves({ getTier: () => 'PAID' }),
@@ -568,12 +545,7 @@ describe('utils', () => {
       expect(result).to.be.false;
     });
 
-    it('returns false when summit-plg is enabled but no ASO entitlement exists', async () => {
-      context.dataAccess.Configuration = {
-        findLatest: sandbox.stub().resolves({
-          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
-        }),
-      };
+    it('returns false when no ASO entitlement exists', async () => {
       context.dataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub().resolves(null),
       };
@@ -583,25 +555,14 @@ describe('utils', () => {
       expect(result).to.be.false;
     });
 
-    it('returns false when summit-plg is enabled but Entitlement model is missing', async () => {
-      context.dataAccess.Configuration = {
-        findLatest: sandbox.stub().resolves({
-          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
-        }),
-      };
-
+    it('returns false when Entitlement model is missing', async () => {
       const result = await getIsSummitPlgEnabled(site, context);
 
       expect(result).to.be.false;
     });
 
-    it('returns false when summit-plg is enabled but organizationId is missing', async () => {
+    it('returns false when organizationId is missing', async () => {
       site.getOrganizationId.returns(undefined);
-      context.dataAccess.Configuration = {
-        findLatest: sandbox.stub().resolves({
-          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
-        }),
-      };
       context.dataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub(),
       };
@@ -613,19 +574,7 @@ describe('utils', () => {
       expect(findEntitlement).to.not.have.been.called;
     });
 
-    it('returns false when Configuration has summit-plg disabled for site', async () => {
-      context.dataAccess.Configuration = {
-        findLatest: sandbox.stub().resolves({
-          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(false),
-        }),
-      };
-
-      const result = await getIsSummitPlgEnabled(site, context);
-
-      expect(result).to.be.false;
-    });
-
-    it('returns false when context.dataAccess has no Configuration', async () => {
+    it('returns false when context.dataAccess has no Entitlement', async () => {
       context.dataAccess = {};
 
       const result = await getIsSummitPlgEnabled(site, context);
@@ -639,23 +588,7 @@ describe('utils', () => {
       expect(await getIsSummitPlgEnabled(site, context)).to.be.false;
     });
 
-    it('returns false and logs error when findLatest throws', async () => {
-      context.dataAccess.Configuration = {
-        findLatest: sandbox.stub().rejects(new Error('DB error')),
-      };
-
-      const result = await getIsSummitPlgEnabled(site, context);
-
-      expect(result).to.be.false;
-      expect(context.log.error).to.have.been.calledWithMatch(/Error checking audit summit-plg for site/, sinon.match.instanceOf(Error));
-    });
-
     it('returns false and logs error when entitlement lookup throws', async () => {
-      context.dataAccess.Configuration = {
-        findLatest: sandbox.stub().resolves({
-          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
-        }),
-      };
       context.dataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub().rejects(new Error('Entitlement DB error')),
       };
@@ -663,7 +596,7 @@ describe('utils', () => {
       const result = await getIsSummitPlgEnabled(site, context);
 
       expect(result).to.be.false;
-      expect(context.log.error).to.have.been.calledOnce;
+      expect(context.log.error).to.have.been.calledWithMatch(/Error checking audit summit-plg for site/, sinon.match.instanceOf(Error));
     });
 
     it('returns true immediately when x-view-as-trial header is set, without config or entitlement lookup', async () => {

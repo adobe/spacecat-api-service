@@ -17,6 +17,8 @@ import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
+import { fileURLToPath } from 'url';
+
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import esmock from 'esmock';
@@ -41,8 +43,8 @@ describe('Sites Controller', () => {
   };
 
   const SITE_IDS = ['0b4dcf79-fe5f-410b-b11f-641f0bf56da3', 'c4420c67-b4e8-443d-b7ab-0099cfd5da20'];
-  const BRAND_PROFILE_TRIGGER_MODULE = new URL('../../src/support/brand-profile-trigger.js', import.meta.url).pathname;
-  const ACCESS_CONTROL_MODULE = new URL('../../src/support/access-control-util.js', import.meta.url).pathname;
+  const BRAND_PROFILE_TRIGGER_MODULE = fileURLToPath(new URL('../../src/support/brand-profile-trigger.js', import.meta.url));
+  const ACCESS_CONTROL_MODULE = fileURLToPath(new URL('../../src/support/access-control-util.js', import.meta.url));
 
   const defaultAuthAttributes = {
     attributes: {
@@ -4849,9 +4851,9 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('isSummitPlgEnabled', true);
     });
 
-    it('should set isSummitPlgEnabled to false when summit-plg is not enabled for site', async () => {
-      mockDataAccess.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: sandbox.stub().returns(false),
+    it('should set isSummitPlgEnabled to false when entitlement is not PLG', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getTier: () => 'FREE_TRIAL',
       });
 
       context.data = { organizationId: testOrganizations[0].getId() };
