@@ -31,12 +31,22 @@ dotenv.config({ override: true });
 // detect and undo leaks left behind by tests that mutate them. Required in
 // parallel mode where multiple test files share a worker's globalThis and a
 // leak in one file poisons the next (most commonly via `global.fetch = ...`).
+//
+// The set must cover everything sinon can swap out. `sinon.useFakeTimers()`
+// in particular replaces `Date`, the timer family, `queueMicrotask`, and
+// `setImmediate`/`clearImmediate`. Tracking only timers would risk a partial
+// restore (timers reset to native while `Date` stays faked) — a state sinon
+// itself never produces.
 const NATIVE_GLOBALS = {
   fetch: globalThis.fetch,
   setTimeout: globalThis.setTimeout,
   setInterval: globalThis.setInterval,
   clearTimeout: globalThis.clearTimeout,
   clearInterval: globalThis.clearInterval,
+  Date: globalThis.Date,
+  queueMicrotask: globalThis.queueMicrotask,
+  setImmediate: globalThis.setImmediate,
+  clearImmediate: globalThis.clearImmediate,
 };
 
 export const mochaHooks = {
@@ -48,7 +58,8 @@ export const mochaHooks = {
           try {
             current.restore();
           } catch {
-            /* ignore double-restore */
+            // Ignore any restore failure - the manual reset below is the
+            // source of truth and runs regardless.
           }
         }
         if (globalThis[prop] !== native) {
