@@ -87,11 +87,6 @@ async function fetchProjectPrompts(transport, project, { search }) {
       page,
       limit: DEFAULT_PAGE_SIZE,
       search: search || undefined,
-      // Best-effort newest-first. Semrush ignores unknown sort fields silently,
-      // so if `created_at` isn't valid the order falls back to whatever the
-      // server returns; the merge step below applies its own ordering anyway.
-      sort_field: 'created_at',
-      sort_dir: 'desc',
     });
     const items = Array.isArray(result?.items) ? result.items : [];
     if (items.length === 0) {
