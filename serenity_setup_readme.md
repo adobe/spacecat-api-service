@@ -83,6 +83,11 @@ npm install
 
 ---
 
+> **Want to skip Postgres entirely?** Set `STUB_DATA_SERVICE=true` in
+> `project-elmo-ui/config/.env.localapi` and skip §4 and §5. The UI will fake
+> all the data-service endpoints client-side; only the proxy needs to be
+> running (for the Semrush-backed Serenity calls). Details in §10.3.
+
 ## 4. Run the local Postgres + PostgREST stack
 
 The proxy needs a PostgREST server to look up orgs, brands, sites, and feature
@@ -399,6 +404,56 @@ npm run dev:localapi
 
 It listens on `https://localhost:3000`. Accept the self-signed cert warning.
 
+### 10.3 Stub the data-service (skip Docker / PostgREST / seed SQL)
+
+For pure hackathon dev — only Brand Presence + Prompts Management — you can
+short-circuit every data-service call from the browser and skip §4 and §5
+entirely. The proxy still has to be running so Semrush traffic flows, but it
+won't query Postgres because the UI never asks it to.
+
+Set this in `project-elmo-ui/config/.env.localapi`:
+
+```bash
+STUB_DATA_SERVICE=true
+```
+
+When enabled, `src/api/dataServiceStub.ts` intercepts the following URLs the
+proxy normally serves from PostgREST and returns canned JSON:
+
+| URL pattern | Fixture response |
+| --- | --- |
+| `/organizations/by-ims-org-id/...` | One org (`160da889-…`) |
+| `/organizations/{orgId}` | Same org |
+| `/organizations/{orgId}/entitlements` | `[llmo_optimizer, aso]` (paid tier) |
+| `/organizations/{orgId}/feature-flags?product=LLMO` | `[{flagName: 'brandalf', flagValue: true}]` |
+| `/organizations/{orgId}/sites` | One site |
+| `/organizations/{orgId}/userDetails` | `{}` |
+| `/organizations/{orgId}/trial-users` | `[]` |
+| `/organizations/{orgId}/feature-flags/{product}/{flag}` (PUT/DELETE) | `200 {ok:true}` (no-op toggle) |
+| `/sites` | `{sites: [<one site>]}` |
+| `/sites/{siteId}` | One site |
+| `/v2/orgs/{orgId}/brands` | `{brands: [<Adobe brand>]}` |
+| `/v2/orgs/{orgId}/brands/{brandId}` | Adobe brand |
+| `/v2/orgs/{orgId}/categories` | `{categories: []}` |
+
+URLs containing `/serenity/`, `/llmo/`, or `/demo/` are **not** intercepted —
+they pass through to the real proxy as normal. Anything else also falls
+through, so missing endpoints show up clearly in DevTools.
+
+**Skipping §9** as well: the brandalf flag is hardcoded `true` in the stub,
+so you don't need to PUT it via the proxy.
+
+**Trade-offs (versus real Postgres):**
+- One org / brand / site only. Multi-tenant flows can't be exercised.
+- Feature-flag toggles in the UI are no-ops; the value won't change.
+- Trial-state transitions that mutate `customer-configuration` are inert.
+- Any future Postgres-backed surface needs a new pattern in
+  `dataServiceStub.ts`. The unmatched URLs hit the proxy and fail
+  (loudly) so you'll know.
+
+The env var is read at webpack build time (`DotenvWebpack` inlines
+`process.env`), so restart `npm run dev:localapi` after toggling it.
+
 ---
 
 ## 11. Click through the flow
@@ -549,6 +604,14 @@ and restart the dev server.
 - `src/components/dashboards/ai-visibility/ModelLogo.tsx` — dispatcher
   extended to match Semrush model names (`"Chat GPT"`, `"chat-gpt"`,
   `"search-gpt"`, bare `"gpt"`).
+- `src/api/dataServiceStub.ts` — **NEW.** Hackathon-only fixture
+  interceptor for the proxy's Postgres-backed endpoints (org / brand /
+  site / feature-flag / entitlement). Enabled by `STUB_DATA_SERVICE=true`
+  in `config/.env.localapi`; lets local dev skip Postgres + PostgREST +
+  seed SQL entirely. See §10.3 for the full URL pattern table.
+- `config/.env.localapi` — documents `STUB_DATA_SERVICE` and the three
+  `LD_FLAG_OVERRIDES` flags (`FT_LLMO-4071`, `FT_LLMO-3785`,
+  `FT_LLMO-4799`).
 
 ---
 
@@ -614,11 +677,16 @@ the Serenity-aware overlay.
 - Tracking Recommendations Track-all / Track-topic both publish through the
   same Serenity dialog (one prompt per snapshot row, tagged with topic).
 - Brand Presence dashboard — six KPI cards backed by the Reporting API,
-  Category filter that switches between workspace projects, Platform filter
-  driven by the project's Semrush models, Tags filter driven by the
-  project's tags, comparison-period date math, SR fireball badge on every
-  live widget, loading skeletons until each query lands.
+  Category filter that switches between workspace projects (with
+  `friendlyCategoryLabel` lay-person labels: General / Doodle / GMI /
+  HEIC to PDF / Adobe Stock), Platform filter driven by the project's
+  Semrush models, Tags filter driven by the project's tags,
+  comparison-period date math, SR fireball badge on every live widget,
+  loading skeletons until each query lands.
 - LaunchDarkly local override that survives `ldClient.identify()`.
+- Optional `STUB_DATA_SERVICE=true` flag — fakes every Postgres-backed
+  data-service endpoint in the browser so local dev only needs the proxy
+  running, no Docker / no PostgREST / no seed SQL.
 
 ### Open
 
