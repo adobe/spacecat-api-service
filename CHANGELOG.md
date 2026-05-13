@@ -1,3 +1,38 @@
+# [1.493.0](https://github.com/adobe/spacecat-api-service/compare/v1.492.0...v1.493.0) (2026-05-12)
+
+
+### Bug Fixes
+
+* **page-relationships:** normalize suggestion URL to pathname regardless of host ([#2399](https://github.com/adobe/spacecat-api-service/issues/2399)) ([4c29f4b](https://github.com/adobe/spacecat-api-service/commit/4c29f4bc8834be4dcab4381dbcd758a48b943bd0)), closes [#1907](https://github.com/adobe/spacecat-api-service/issues/1907)
+
+
+### Features
+
+* ai-seo-ts sdk bump ([#2400](https://github.com/adobe/spacecat-api-service/issues/2400)) ([1edd772](https://github.com/adobe/spacecat-api-service/commit/1edd7729ff35cc0e99dbafabda15e8c0d9b611d1))
+* **organizations:** surface semrushWorkspaceId on GET + admin PATCH ([#2403](https://github.com/adobe/spacecat-api-service/issues/2403)) ([8a9401e](https://github.com/adobe/spacecat-api-service/commit/8a9401ecf0bf01305ca17562b11fdde12c930597))
+* sort prompt research results by relevancy | ai visibility ([#2396](https://github.com/adobe/spacecat-api-service/issues/2396)) ([77e31df](https://github.com/adobe/spacecat-api-service/commit/77e31dfcae0115adc500e42d5874db7c63e061bb))
+
+# [1.492.0](https://github.com/adobe/spacecat-api-service/compare/v1.491.0...v1.492.0) (2026-05-12)
+
+
+### Features
+
+* init serenity backend ([#2387](https://github.com/adobe/spacecat-api-service/issues/2387)) ([f6959c4](https://github.com/adobe/spacecat-api-service/commit/f6959c415eb606ef7e961855ee75ee5d5f43b9ae))
+
+# [1.491.0](https://github.com/adobe/spacecat-api-service/compare/v1.490.1...v1.491.0) (2026-05-12)
+
+
+### Features
+
+* read only admin owned resource write access ([#2391](https://github.com/adobe/spacecat-api-service/issues/2391)) ([af57bd9](https://github.com/adobe/spacecat-api-service/commit/af57bd903a22fee33cd0997c96786f7fa59b30b9))
+
+## [1.490.1](https://github.com/adobe/spacecat-api-service/compare/v1.490.0...v1.490.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.61.0 ([#2394](https://github.com/adobe/spacecat-api-service/issues/2394)) ([f64a7bb](https://github.com/adobe/spacecat-api-service/commit/f64a7bb55ba393711a380fc513553867d197fa41))
+
 # [1.490.0](https://github.com/adobe/spacecat-api-service/compare/v1.489.2...v1.490.0) (2026-05-12)
 
 

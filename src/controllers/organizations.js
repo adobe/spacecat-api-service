@@ -343,6 +343,18 @@ function OrganizationsController(ctx, env) {
       updates = true;
     }
 
+    if (isString(requestBody.semrushWorkspaceId)
+      && requestBody.semrushWorkspaceId !== organization.getSemrushWorkspaceId()) {
+      // semrushWorkspaceId binds the Adobe org to a Semrush workspace - billing
+      // and access-level concern. Restrict to admins, unlike the other fields
+      // that any org member can update.
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can set semrushWorkspaceId');
+      }
+      organization.setSemrushWorkspaceId(requestBody.semrushWorkspaceId);
+      updates = true;
+    }
+
     if (isObject(requestBody.config)) {
       organization.setConfig(requestBody.config);
       updates = true;
