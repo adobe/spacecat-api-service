@@ -898,7 +898,7 @@ describe('onboard-modal', () => {
       await onboardSiteModalAction({ ack: ackMock, body: bodyNoName, client: clientMock });
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith(sinon.match({
-        text: sinon.match('*Triggered by:* unknown'),
+        text: sinon.match('*Triggered by:* unknown').and(sinon.match('*IMS Org:* unknown')),
       }));
     });
 
@@ -1526,7 +1526,10 @@ describe('onboard-modal', () => {
         expect(onboardStub.calledOnce).to.be.true;
 
         // Slack failure should be logged, not thrown
-        expect(context.log.warn).to.have.been.called;
+        expect(context.log.warn).to.have.been.calledWith(
+          sinon.match(/Failed to post bot-blocker warning/),
+          sinon.match.instanceOf(Error),
+        );
 
         const successMessage = postMessageStub.getCalls()
           .find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
