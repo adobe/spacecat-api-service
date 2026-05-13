@@ -309,7 +309,9 @@ function SitesController(ctx, log, env) {
         ...context.data,
         baseURL, // override with normalized value
       });
-      await updateRumConfig(site, context);
+      updateRumConfig(site, context).catch((e) => {
+        log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
+      });
       return createResponse(SiteDto.toJSON(site), 201);
     } catch (error) {
       log.error(`Error creating site: ${error.message}`, error);

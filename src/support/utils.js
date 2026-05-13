@@ -1732,7 +1732,8 @@ export const onboardSingleSite = async (
       ...(additionalParams.force ? { forcedOverride: true } : {}),
     }, { maxHistory: MAX_ONBOARD_HISTORY });
 
-    await updateRumConfig(site, context, { save: false });
+    const hasDomainKey = await updateRumConfig(site, context, { save: false });
+    siteConfig.updateRumConfig(hasDomainKey);
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
       await site.save();

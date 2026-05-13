@@ -93,7 +93,11 @@ function AddSiteCommand(context) {
         return;
       }
 
-      await updateRumConfig(newSite, context);
+      try {
+        await updateRumConfig(newSite, context);
+      } catch (e) {
+        log.warn(`[add-site] RUM config update failed for ${baseURL}: ${e.message}`);
+      }
 
       let message = `:white_check_mark: *Successfully added new site <${baseURL}|${baseURL}>*.\n`;
       message += `:delivrer: *Delivery type:* ${deliveryType}.\n`;

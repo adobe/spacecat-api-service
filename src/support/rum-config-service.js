@@ -11,40 +11,57 @@
  */
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 const RUM_CHECK_TIMEOUT_MS = 3000;
 
 /**
- * Checks whether the site has a RUM domain key and persists the result in
- * site.config.rumConfig. Callers that already call site.save() themselves
- * (e.g. onboardSingleSite) should pass { save: false } to avoid a double-save.
+ * Checks whether the site has a RUM domain key and optionally persists the result.
+ *
+ * When called with the default { save: true }, this function applies the rumConfig
+ * update and saves the site internally.
+ *
+ * When called with { save: false }, no config mutation or save is performed — the
+ * caller must explicitly apply the returned value:
+ *
+ *   const hasDomainKey = await updateRumConfig(site, context, { save: false });
+ *   siteConfig.updateRumConfig(hasDomainKey);
+ *   site.setConfig(Config.toDynamoItem(siteConfig));
+ *   await site.save();
+ *
+ * Omitting these steps silently discards the RUM check result.
  *
  * @param {object} site - Site model instance.
  * @param {object} context - Request/worker context (provides env, log).
  * @param {{ save?: boolean }} [options]
- * @returns {Promise<boolean>} true if a domain key was found.
+ * @returns {Promise<boolean>} true if a RUM domain key was found.
  */
 export async function updateRumConfig(site, context, { save = true } = {}) {
   const { log } = context;
-  const domain = site.getBaseURL().replace(/^https?:\/\//, '');
+  const domain = new URL(site.getBaseURL()).hostname;
 
   let hasDomainKey = false;
+  let timeoutId;
+
   try {
     const rumApiClient = RUMAPIClient.createFrom(context);
     await Promise.race([
       rumApiClient.retrieveDomainkey(domain),
       new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('RUM check timed out')), RUM_CHECK_TIMEOUT_MS);
+        timeoutId = setTimeout(() => reject(new Error('RUM check timed out')), RUM_CHECK_TIMEOUT_MS);
       }),
     ]);
     hasDomainKey = true;
   } catch (e) {
     log.warn(`[rum-config-service] RUM check failed for ${domain}: ${e.message}`);
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  site.getConfig().updateRumConfig(hasDomainKey);
-
   if (save) {
+    const siteConfig = site.getConfig();
+    siteConfig.updateRumConfig(hasDomainKey);
+    site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
   }
 

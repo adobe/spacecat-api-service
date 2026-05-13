@@ -273,6 +273,16 @@ describe('Sites Controller', () => {
     expect(site).to.have.property('baseURL', 'https://site1.com');
   });
 
+  it('returns 201 even when RUM config update fails after site creation', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+    updateRumConfigStub.rejects(new Error('RUM API unavailable'));
+
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    expect(response.status).to.equal(201);
+  });
+
   it('creates a site for a non-admin user', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });

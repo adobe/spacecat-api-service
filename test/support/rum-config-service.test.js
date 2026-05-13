@@ -23,6 +23,7 @@ describe('rum-config-service', () => {
   let updateRumConfig;
   let retrieveDomainkeyStub;
   let rumApiClientStub;
+  let toDynamoItemStub;
   let site;
   let siteConfig;
   let context;
@@ -30,10 +31,14 @@ describe('rum-config-service', () => {
   before(async () => {
     retrieveDomainkeyStub = sandbox.stub();
     rumApiClientStub = { retrieveDomainkey: retrieveDomainkeyStub };
+    toDynamoItemStub = sandbox.stub().returns({});
 
     ({ updateRumConfig } = await esmock('../../src/support/rum-config-service.js', {
       '@adobe/spacecat-shared-rum-api-client': {
         default: { createFrom: () => rumApiClientStub },
+      },
+      '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+        Config: { toDynamoItem: toDynamoItemStub },
       },
     }));
   });
@@ -48,6 +53,7 @@ describe('rum-config-service', () => {
     site = {
       getBaseURL: () => 'https://example.com',
       getConfig: () => siteConfig,
+      setConfig: sandbox.stub(),
       save: sandbox.stub().resolves(),
     };
 
@@ -62,6 +68,8 @@ describe('rum-config-service', () => {
 
       expect(result).to.be.true;
       expect(siteConfig.updateRumConfig).to.have.been.calledOnceWith(true);
+      expect(toDynamoItemStub).to.have.been.calledOnceWith(siteConfig);
+      expect(site.setConfig).to.have.been.calledOnce;
       expect(site.save).to.have.been.calledOnce;
     });
 
@@ -72,11 +80,13 @@ describe('rum-config-service', () => {
 
       expect(result).to.be.false;
       expect(siteConfig.updateRumConfig).to.have.been.calledOnceWith(false);
+      expect(toDynamoItemStub).to.have.been.calledOnceWith(siteConfig);
+      expect(site.setConfig).to.have.been.calledOnce;
       expect(site.save).to.have.been.calledOnce;
       expect(context.log.warn).to.have.been.calledOnce;
     });
 
-    it('sets hasDomainKey false when RUM check times out', async () => {
+    it('sets hasDomainKey false and clears timer when RUM check times out', async () => {
       retrieveDomainkeyStub.returns(new Promise(() => {})); // never resolves
 
       const clock = sinon.useFakeTimers();
@@ -87,18 +97,22 @@ describe('rum-config-service', () => {
 
       expect(result).to.be.false;
       expect(siteConfig.updateRumConfig).to.have.been.calledOnceWith(false);
+      expect(site.setConfig).to.have.been.calledOnce;
+      expect(site.save).to.have.been.calledOnce;
     });
 
-    it('skips site.save when { save: false } is passed', async () => {
+    it('skips config mutation and save when { save: false } is passed', async () => {
       retrieveDomainkeyStub.resolves('dom-key-abc');
 
-      await updateRumConfig(site, context, { save: false });
+      const result = await updateRumConfig(site, context, { save: false });
 
-      expect(siteConfig.updateRumConfig).to.have.been.calledOnceWith(true);
+      expect(result).to.be.true;
+      expect(siteConfig.updateRumConfig).to.not.have.been.called;
+      expect(site.setConfig).to.not.have.been.called;
       expect(site.save).to.not.have.been.called;
     });
 
-    it('strips protocol from baseURL before passing to retrieveDomainkey', async () => {
+    it('extracts hostname from baseURL before passing to retrieveDomainkey', async () => {
       retrieveDomainkeyStub.resolves('key');
 
       await updateRumConfig(site, context);

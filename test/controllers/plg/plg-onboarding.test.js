@@ -61,6 +61,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   let ldUpdateVariationValueStub;
   let ldCreateFromStub;
   let configToDynamoItemStub;
+  let updateRumConfigStub;
 
   // Mock objects
   let mockLog;
@@ -175,6 +176,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
     // RUM API client stubs
     rumRetrieveDomainkeyStub = sandbox.stub().resolves('test-domainkey');
+    updateRumConfigStub = sandbox.stub().resolves(true);
 
     // Shared-utils stubs
     composeBaseURLStub = sandbox.stub().returns(TEST_BASE_URL);
@@ -428,6 +430,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             fromContext: () => ({ hasAdminAccess: () => false, hasAdminReadAccess: () => false }),
           },
         },
+        '../../../src/support/rum-config-service.js': {
+          updateRumConfig: updateRumConfigStub,
+        },
       },
     )).default;
   });
@@ -647,6 +652,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             default: {
               fromContext: () => ({ hasAdminAccess: () => true }),
             },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -912,6 +920,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => false }) },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
 
@@ -1016,6 +1027,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -1125,6 +1139,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -2019,6 +2036,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               fromContext: () => ({ hasAdminAccess: () => false }),
             },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
     });
@@ -2228,6 +2248,228 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.not.include('https://experience.adobe.com/');
     });
 
+    it('INACTIVE notification includes last review reason', async () => {
+      const AdminSlackController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            created: (data) => ({ status: 201, value: data }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            noContent: () => ({ status: 204 }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub, createForOrg: tierClientCreateForOrgStub } },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+              },
+              REVIEW_DECISIONS: { BYPASSED: 'BYPASSED', UPHELD: 'UPHELD' },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+            postSlackMessage: postSlackMessageStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
+          '../../../src/support/access-control-util.js': {
+            default: { fromContext: () => ({ hasAdminAccess: () => true }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
+        },
+      )).default;
+
+      const record = createMockOnboarding({
+        status: 'ONBOARDED',
+        reviews: [{
+          reason: 'Domain is not an AEM site', decision: 'UPHELD', reviewedBy: 'ese@adobe.com', reviewedAt: '2026-01-01T00:00:00Z', justification: 'confirmed',
+        }],
+      });
+      let currentStatus = 'ONBOARDED';
+      let currentWaitlistReason = null;
+      record.getStatus.callsFake(() => currentStatus);
+      record.setStatus.callsFake((s) => {
+        currentStatus = s;
+      });
+      record.getWaitlistReason.callsFake(() => currentWaitlistReason);
+      record.setWaitlistReason.callsFake((r) => {
+        currentWaitlistReason = r;
+      });
+      mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+      await AdminSlackController({ log: mockLog }).update({
+        dataAccess: mockDataAccess,
+        params: { onboardingId: TEST_ONBOARDING_ID },
+        data: { decision: 'UPHELD', justification: 'Inactivating per request' },
+        attributes: { authInfo: { getProfile: () => ({ email: 'ese@adobe.com' }) } },
+        env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
+        log: mockLog,
+      });
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Waitlisted');
+      expect(message).to.include('Reason:');
+      expect(message).to.include('Inactivating per request');
+    });
+
+    it('INACTIVE notification omits inactivation reason when there are no reviews', async () => {
+      const AdminSlackController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            created: (data) => ({ status: 201, value: data }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            noContent: () => ({ status: 204 }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub, createForOrg: tierClientCreateForOrgStub } },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+              },
+              REVIEW_DECISIONS: { BYPASSED: 'BYPASSED', UPHELD: 'UPHELD' },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+            postSlackMessage: postSlackMessageStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
+          '../../../src/support/access-control-util.js': {
+            default: { fromContext: () => ({ hasAdminAccess: () => true }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
+        },
+      )).default;
+
+      const record = createMockOnboarding({
+        status: 'ONBOARDED',
+        reviews: null,
+      });
+      let currentStatus = 'ONBOARDED';
+      record.getStatus.callsFake(() => currentStatus);
+      record.setStatus.callsFake((s) => {
+        currentStatus = s;
+      });
+      mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+      await AdminSlackController({ log: mockLog }).update({
+        dataAccess: mockDataAccess,
+        params: { onboardingId: TEST_ONBOARDING_ID },
+        data: { decision: 'UPHELD', justification: 'Inactivating per request' },
+        attributes: { authInfo: { getProfile: () => ({ email: 'ese@adobe.com' }) } },
+        env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
+        log: mockLog,
+      });
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Waitlisted');
+      expect(message).to.not.include('Inactivation Reason');
+    });
+
     it('posts notification with fast onboarded note via fast path (PRE_ONBOARDING + siteId)', async () => {
       const preonboardedOnboarding = createMockOnboarding({
         status: 'PRE_ONBOARDING',
@@ -2420,6 +2662,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => true }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -4948,6 +5193,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               fromContext: () => ({ hasAdminAccess: () => true }),
             },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
     });
@@ -5092,6 +5340,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                   hasAdminReadAccess: () => true,
                 }),
               },
+            },
+            '../../../src/support/rum-config-service.js': {
+              updateRumConfig: updateRumConfigStub,
             },
           },
         )).default;
@@ -5671,6 +5922,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => true }) },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
     });
@@ -5767,6 +6021,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: sandbox.stub() },
             '../../../src/support/access-control-util.js': {
               default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+            },
+            '../../../src/support/rum-config-service.js': {
+              updateRumConfig: updateRumConfigStub,
             },
           },
         )).default;
