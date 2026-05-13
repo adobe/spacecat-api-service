@@ -314,7 +314,7 @@ export async function handleBrandTopics(sp, clients) {
   const { limit, offset } = parseLimitOffset(sp);
   const llm = engineToLlm(sp.get('engine')?.trim() || '');
   const body = {
-    country, target: brandTarget(domain), order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VOLUME }, range: { limit, offset },
+    country, target: brandTarget(domain), order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY }, range: { limit, offset },
   };
   if (llm) { body.llm = llm; }
   const totalsBody = { country, target: brandTarget(domain) };
