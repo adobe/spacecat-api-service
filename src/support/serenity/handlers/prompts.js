@@ -87,6 +87,11 @@ async function fetchProjectPrompts(transport, project, { search }) {
       page,
       limit: DEFAULT_PAGE_SIZE,
       search: search || undefined,
+      // Best-effort newest-first. Semrush ignores unknown sort fields silently,
+      // so if `created_at` isn't valid the order falls back to whatever the
+      // server returns; the merge step below applies its own ordering anyway.
+      sort_field: 'created_at',
+      sort_dir: 'desc',
     });
     const items = Array.isArray(result?.items) ? result.items : [];
     if (items.length === 0) {
@@ -117,7 +122,18 @@ function filterProjects(projects, query) {
   });
 }
 
-function ingestProjectItems(grouped, brandId, project, items) {
+function parseTimestamp(v) {
+  if (v == null) {
+    return 0;
+  }
+  if (typeof v === 'number') {
+    return v > 1e12 ? v : v * 1000;
+  }
+  const t = Date.parse(String(v));
+  return Number.isFinite(t) ? t : 0;
+}
+
+function ingestProjectItems(grouped, sortKeys, brandId, project, items) {
   for (const item of items) {
     const text = item?.name || '';
     if (text) {
@@ -139,6 +155,7 @@ function ingestProjectItems(grouped, brandId, project, items) {
           regions: [],
           projects: [],
         });
+        sortKeys.set(logicalId, { createdAtMs: 0, idStr: '' });
       }
       const entry = grouped.get(logicalId);
       if (!entry.regions.includes(project.market)) {
@@ -149,6 +166,17 @@ function ingestProjectItems(grouped, brandId, project, items) {
         market: project.market,
         semrushPromptId: item.id,
       });
+      const key = sortKeys.get(logicalId);
+      const itemCreatedAtMs = parseTimestamp(
+        item?.created_at ?? item?.createdAt ?? item?.created ?? null,
+      );
+      if (itemCreatedAtMs > key.createdAtMs) {
+        key.createdAtMs = itemCreatedAtMs;
+      }
+      const idStr = String(item?.id ?? '');
+      if (idStr > key.idStr) {
+        key.idStr = idStr;
+      }
     }
   }
 }
@@ -166,19 +194,36 @@ export async function handleListPrompts(transport, env, brandId, query) {
   );
 
   const grouped = new Map();
+  const sortKeys = new Map();
   const errors = [];
 
   for (const r of responses) {
     if (r.status === 'fulfilled') {
       const { project, result } = r.value;
       const items = Array.isArray(result?.items) ? result.items : [];
-      ingestProjectItems(grouped, brandId, project, items);
+      ingestProjectItems(grouped, sortKeys, brandId, project, items);
     } else {
       errors.push({ message: r.reason?.message || String(r.reason) });
     }
   }
 
   const all = Array.from(grouped.values());
+
+  // Newest-first ordering so prompts just minted via createPrompts (e.g.
+  // Tracking Recommendations) surface at the top of page 1. Primary key:
+  // max `created_at` across project refs (set when Semrush returns one).
+  // Fallback: lexicographic comparison of the max `semrushPromptId` string —
+  // works for either numeric-string ids (where lex order tracks insertion
+  // order for equal-length ids) or opaque ids (deterministic tiebreaker).
+  all.sort((a, b) => {
+    const ka = sortKeys.get(a.id) || { createdAtMs: 0, idStr: '' };
+    const kb = sortKeys.get(b.id) || { createdAtMs: 0, idStr: '' };
+    if (kb.createdAtMs !== ka.createdAtMs) {
+      return kb.createdAtMs - ka.createdAtMs;
+    }
+    return kb.idStr.localeCompare(ka.idStr);
+  });
+
   const page = Math.max(1, parseInt(query?.page ?? '1', 10) || 1);
   const limit = Math.max(1, Math.min(parseInt(query?.limit ?? '50', 10) || 50, 200));
   const start = (page - 1) * limit;
