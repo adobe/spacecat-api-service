@@ -42,13 +42,13 @@ This spec covers making the reviewer login configurable via a new env var so the
 | Example (bot) | `mysticat-bot-dev[bot]` (implicit via `GITHUB_APP_SLUG=mysticat-bot-dev`) |
 | Example (user) | `aighagent` |
 
-When `GITHUB_REVIEWER_LOGIN` is set it takes full precedence — `GITHUB_APP_SLUG` is still required (security gate in controller) but is not used for the reviewer check.
+When `GITHUB_REVIEWER_LOGIN` is set it takes full precedence — `GITHUB_APP_SLUG` is still required (security gate in controller) but is not used for the reviewer check when `GITHUB_REVIEWER_LOGIN` is set.
 
 ### Behaviour change in `getSkipReason`
 
 ```
 Before: reviewer !== `${appSlug}[bot]`
-After:  reviewer !== (env.GITHUB_REVIEWER_LOGIN ?? `${appSlug}[bot]`)
+After:  reviewer !== (env.GITHUB_REVIEWER_LOGIN?.trim() || `${appSlug}[bot]`)
 ```
 
 The skip reason message is updated to show the resolved login, not the raw slug.

@@ -90,6 +90,16 @@ describe('github-trigger-rules', () => {
         };
         expect(getSkipReason(data, 'review_requested', env)).to.be.null;
       });
+
+      it('falls back to [bot] suffix when GITHUB_REVIEWER_LOGIN is empty string', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev', GITHUB_REVIEWER_LOGIN: '' };
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: 'mysticat-bot-dev[bot]' },
+        };
+        expect(getSkipReason(data, 'review_requested', env)).to.be.null;
+      });
     });
 
     describe('labeled trigger (disabled)', () => {
