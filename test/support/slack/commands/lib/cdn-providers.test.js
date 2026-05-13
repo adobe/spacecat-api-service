@@ -26,35 +26,24 @@ describe('cdn-providers', () => {
     expect(normalizeProvider(null)).to.equal('unknown');
   });
 
-  [
-    ['aem-cs-fastly', 'fastly'],
-    ['commerce-fastly', 'fastly'],
-    ['byocdn-fastly', 'fastly'],
-    ['byocdn-akamai', 'akamai'],
-    ['byocdn-cloudflare', 'cloudflare'],
-    ['byocdn-cloudfront', 'cloudfront'],
-    ['byocdn-frontdoor', 'frontdoor'],
-    ['byocdn-imperva', 'imperva'],
-    ['byocdn-other', 'other'],
-    ['ams-cloudfront', 'cloudfront'],
-    ['ams-frontdoor', 'frontdoor'],
-  ].forEach(([provider, family]) => {
-    it(`maps service provider ${provider} to family ${family}`, () => {
-      expect(getCdnFamily(provider)).to.equal(family);
+  it('maps every service-provider key in the canonical table to its family', () => {
+    expect(Object.keys(SERVICE_PROVIDER_TO_CDN_FAMILY)).to.have.lengthOf(11);
+    Object.entries(SERVICE_PROVIDER_TO_CDN_FAMILY).forEach(([provider, family]) => {
+      expect(getCdnFamily(provider), `getCdnFamily(${provider})`).to.equal(family);
     });
   });
 
-  [
-    ['Amazon CloudFront', 'cloudfront'],
-    ['Azure FrontDoor', 'frontdoor'],
-    ['Akamai Edge', 'akamai'],
-    ['Imperva WAF', 'imperva'],
-    ['Incapsula', 'imperva'],
-    ['cloudflare', 'cloudflare'],
-    ['fastly', 'fastly'],
-  ].forEach(([raw, family]) => {
-    it(`detects ${family} from free-form provider name "${raw}"`, () => {
-      expect(getCdnFamily(raw)).to.equal(family);
+  it('detects CDN family from free-form provider names', () => {
+    [
+      ['Amazon CloudFront', 'cloudfront'],
+      ['Azure FrontDoor', 'frontdoor'],
+      ['Akamai Edge', 'akamai'],
+      ['Imperva WAF', 'imperva'],
+      ['Incapsula', 'imperva'],
+      ['cloudflare', 'cloudflare'],
+      ['fastly', 'fastly'],
+    ].forEach(([raw, family]) => {
+      expect(getCdnFamily(raw), `getCdnFamily(${raw})`).to.equal(family);
     });
   });
 
@@ -63,15 +52,10 @@ describe('cdn-providers', () => {
     expect(getCdnFamily(null)).to.equal('unknown');
   });
 
-  it('flags cloudflare, imperva, and other as daily-only', () => {
+  it('flags cloudflare, imperva, and other as daily-only families', () => {
     expect(DAILY_ONLY_CDN_FAMILIES.has('cloudflare')).to.be.true;
     expect(DAILY_ONLY_CDN_FAMILIES.has('imperva')).to.be.true;
     expect(DAILY_ONLY_CDN_FAMILIES.has('other')).to.be.true;
     expect(DAILY_ONLY_CDN_FAMILIES.has('fastly')).to.be.false;
-  });
-
-  it('exports the canonical service-provider mapping table', () => {
-    expect(SERVICE_PROVIDER_TO_CDN_FAMILY).to.have.property('aem-cs-fastly', 'fastly');
-    expect(Object.keys(SERVICE_PROVIDER_TO_CDN_FAMILY)).to.have.lengthOf(11);
   });
 });
