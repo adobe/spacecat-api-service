@@ -21,23 +21,35 @@ import { normalizeVisibilityV1SuccessfulBody } from '../support/ai-visibility/vi
 import { attachSrFiltersToSuccessfulBody } from '../support/ai-visibility/visibility-filters.js';
 
 import {
-  handleBrandStats, handleBrandTopics, handleBrandPrompts,
-  handleBrandCitedPages, handleBrandTopicOpportunities,
-  handleBrandTopBrands, handleBrandCitedSources,
-  handleBrandSourceOpportunities, handleBrandCompetitors,
+  handleBrandStats,
+  handleBrandTopics,
+  handleBrandPrompts,
+  handleBrandCitedPages,
+  handleBrandTopicOpportunities,
+  handleBrandTopBrands,
+  handleBrandCitedSources,
+  handleBrandSourceOpportunities,
+  handleBrandCompetitors,
 } from '../support/ai-visibility/handlers/brands.js';
 import {
-  handleCompetitorsMetrics, handleCompetitorsGapTopics,
-  handleCompetitorsGapSourceDomains, handleCompetitorsGapPrompts,
+  handleCompetitorsMetrics,
+  handleCompetitorsGapTopics,
+  handleCompetitorsGapSourceDomains,
+  handleCompetitorsGapPrompts,
 } from '../support/ai-visibility/handlers/competitors.js';
 import {
-  handlePromptsResponses, handlePromptsResponsesLatest,
+  handlePromptsResponses,
+  handlePromptsResponsesLatest,
 } from '../support/ai-visibility/handlers/prompts.js';
 import {
-  handleTopicsResearchStats, handleTopicsResearch, handleTopicsStats,
-  handleTopicsResearchPrompts, handleTopicsResearchBrands,
+  handleTopicsResearchStats,
+  handleTopicsResearch,
+  handleTopicsStats,
+  handleTopicsResearchPrompts,
+  handleTopicsResearchBrands,
   handleTopicsResearchSourceDomains,
 } from '../support/ai-visibility/handlers/topics.js';
+import { handleBrandTopics as handleBrandTopicsV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics.js';
 import { handleMeta } from '../support/ai-visibility/handlers/meta.js';
 
 const ROUTE_MAP = [
@@ -63,13 +75,16 @@ const ROUTE_MAP = [
   ['/topics/research/source-domains', handleTopicsResearchSourceDomains],
   ['/topics/research', handleTopicsResearch],
   ['/topics/stats', handleTopicsStats],
+  ['/v1/topic/brand-topics', handleBrandTopicsV1],
 ];
 
 function extractSearchParams(context) {
   if (context.request?.url) {
     try {
       return new URL(context.request.url).searchParams;
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
   }
   const data = context.data || {};
   const sp = new URLSearchParams();
@@ -92,10 +107,13 @@ function wrapHandler(handlerFn, relPath, log) {
       clients = getGrpcClients(context.env);
     } catch (e) {
       log.error('AI Visibility gRPC transport init failed', e);
-      return createResponse({
-        error: 'aiVisibilityNotConfigured',
-        message: 'AI Visibility is not configured.',
-      }, 503);
+      return createResponse(
+        {
+          error: 'aiVisibilityNotConfigured',
+          message: 'AI Visibility is not configured.',
+        },
+        503,
+      );
     }
     const sp = extractSearchParams(context);
     try {
@@ -103,8 +121,15 @@ function wrapHandler(handlerFn, relPath, log) {
       if (result.status !== 200) {
         return createResponse(result.body, result.status);
       }
-      const normalized = normalizeVisibilityV1SuccessfulBody(relPath, result.body);
-      const withFilters = attachSrFiltersToSuccessfulBody(result.status, normalized, sp);
+      const normalized = normalizeVisibilityV1SuccessfulBody(
+        relPath,
+        result.body,
+      );
+      const withFilters = attachSrFiltersToSuccessfulBody(
+        result.status,
+        normalized,
+        sp,
+      );
       return ok(withFilters);
     } catch (e) {
       log.error(`AI Visibility handler error [${relPath}]`, e);

@@ -17,6 +17,7 @@ import {
   LLM_ENUM,
   TOPIC_INTENT_ENUM,
 } from '@quazar/ai-seo-ts/common/types_pb.js';
+import { ConnectError, Code } from '@connectrpc/connect';
 
 export { COUNTRY_ENUM, LLM_ENUM, TOPIC_INTENT_ENUM };
 
@@ -112,8 +113,12 @@ export const MAX_COMPETITOR_DOMAINS = 5;
 export const TOPIC_OPPORTUNITY_PROMPTS_MAX_PAGES = 15;
 
 export function num(v) {
-  if (v == null) { return 0; }
-  if (typeof v === 'bigint') { return Number(v); }
+  if (v == null) {
+    return 0;
+  }
+  if (typeof v === 'bigint') {
+    return Number(v);
+  }
   const n = typeof v === 'string' ? Number(v) : v;
   return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
@@ -144,18 +149,30 @@ export function parseLimitOffset(sp) {
 
 export function normalizeCountryForGrpc(raw) {
   const u = String(raw).trim().toUpperCase();
-  if (u === 'WW' || u === 'WORLDWIDE') { return COUNTRY_ENUM.WORLDWIDE; }
-  if (u === 'GB') { return COUNTRY_ENUM.UK; }
-  if (COUNTRY_ENUM[u] != null) { return COUNTRY_ENUM[u]; }
+  if (u === 'WW' || u === 'WORLDWIDE') {
+    return COUNTRY_ENUM.WORLDWIDE;
+  }
+  if (u === 'GB') {
+    return COUNTRY_ENUM.UK;
+  }
+  if (COUNTRY_ENUM[u] != null) {
+    return COUNTRY_ENUM[u];
+  }
   return COUNTRY_ENUM.US;
 }
 
 export function resolveCountry(sp) {
   const country = sp.get('country')?.trim();
-  if (country) { return normalizeCountryForGrpc(country); }
+  if (country) {
+    return normalizeCountryForGrpc(country);
+  }
   const region = (sp.get('region') || '').trim().toUpperCase();
-  if (region === 'WW' || region === 'WORLDWIDE') { return COUNTRY_ENUM.WORLDWIDE; }
-  if (/^[A-Z]{2}$/.test(region)) { return normalizeCountryForGrpc(region); }
+  if (region === 'WW' || region === 'WORLDWIDE') {
+    return COUNTRY_ENUM.WORLDWIDE;
+  }
+  if (/^[A-Z]{2}$/.test(region)) {
+    return normalizeCountryForGrpc(region);
+  }
   return COUNTRY_ENUM.US;
 }
 
@@ -182,41 +199,67 @@ export function restCountryFromGrpcRequestCountry(grpcCountry) {
   ) {
     return undefined;
   }
-  if (grpcCountry === COUNTRY_ENUM.UK) { return 'GB'; }
+  if (grpcCountry === COUNTRY_ENUM.UK) {
+    return 'GB';
+  }
   return COUNTRY_ENUM[grpcCountry] || undefined;
 }
 
 export function restCountryFromPromptProto(p) {
-  if (!p || typeof p !== 'object') { return undefined; }
+  if (!p || typeof p !== 'object') {
+    return undefined;
+  }
   const raw = p.country;
-  if (raw == null || raw === 0) { return undefined; }
+  if (raw == null || raw === 0) {
+    return undefined;
+  }
   if (typeof raw === 'number') {
-    if (raw === COUNTRY_ENUM.WORLDWIDE) { return undefined; }
-    if (raw === COUNTRY_ENUM.UK) { return 'GB'; }
+    if (raw === COUNTRY_ENUM.WORLDWIDE) {
+      return undefined;
+    }
+    if (raw === COUNTRY_ENUM.UK) {
+      return 'GB';
+    }
     return COUNTRY_ENUM[raw] || undefined;
   }
   const s = String(raw).trim().toUpperCase();
-  if (s === '' || s === 'WORLDWIDE' || s === 'WW') { return undefined; }
-  if (s === 'UK') { return 'GB'; }
-  if (/^[A-Z]{2}$/.test(s)) { return s; }
+  if (s === '' || s === 'WORLDWIDE' || s === 'WW') {
+    return undefined;
+  }
+  if (s === 'UK') {
+    return 'GB';
+  }
+  if (/^[A-Z]{2}$/.test(s)) {
+    return s;
+  }
   return undefined;
 }
 
 export function restMarketFromSourceDomainCountryField(d) {
   const raw = d?.country;
-  if (raw == null || raw === 0) { return undefined; }
+  if (raw == null || raw === 0) {
+    return undefined;
+  }
   if (typeof raw === 'number') {
-    if (raw === COUNTRY_ENUM.WORLDWIDE) { return 'WW'; }
-    if (raw === COUNTRY_ENUM.UK) { return 'GB'; }
+    if (raw === COUNTRY_ENUM.WORLDWIDE) {
+      return 'WW';
+    }
+    if (raw === COUNTRY_ENUM.UK) {
+      return 'GB';
+    }
     return COUNTRY_ENUM[raw] || undefined;
   }
   const s = String(raw).trim().toUpperCase();
-  if (s === 'WORLDWIDE') { return 'WW'; }
+  if (s === 'WORLDWIDE') {
+    return 'WW';
+  }
   return s;
 }
 
 export function engineToLlm(engine) {
-  if (!engine) { return undefined; }
+  if (!engine) {
+    return undefined;
+  }
   const map = {
     chatgpt: LLM_ENUM.CHAT_GPT,
     gemini: LLM_ENUM.GEMINI,
@@ -244,9 +287,13 @@ export function requiredLlmFromQuery(sp) {
 
 export function parseMonthYM(sp) {
   const raw = sp.get('month')?.trim();
-  if (!raw) { return null; }
+  if (!raw) {
+    return null;
+  }
   const m = /^(\d{4})-(\d{2})$/.exec(raw);
-  if (!m) { return null; }
+  if (!m) {
+    return null;
+  }
   return { year: Number(m[1]), month: Number(m[2]) };
 }
 
@@ -286,9 +333,13 @@ export function topBrandsByDomainEntryCount(b) {
 }
 
 export function mentionedBrandRestLabel(b) {
-  if (typeof b === 'string') { return b.trim(); }
+  if (typeof b === 'string') {
+    return b.trim();
+  }
   const name = String(b?.name ?? '').trim();
-  if (name) { return name; }
+  if (name) {
+    return name;
+  }
   return String(b?.domain ?? '').trim();
 }
 
@@ -307,32 +358,46 @@ export function promptMatchesResponsesQuery(promptRaw, queryRaw) {
     .toLowerCase()
     .replace(/\u00a0/g, ' ')
     .replace(/\s+/g, ' ');
-  if (!q) { return true; }
+  if (!q) {
+    return true;
+  }
   const pl = String(promptRaw ?? '')
     .trim()
     .toLowerCase()
     .replace(/\u00a0/g, ' ')
     .replace(/\s+/g, ' ');
-  if (!pl) { return false; }
-  if (pl === q) { return true; }
+  if (!pl) {
+    return false;
+  }
+  if (pl === q) {
+    return true;
+  }
   const shorter = pl.length <= q.length ? pl : q;
-  if (shorter.length < 12) { return false; }
+  if (shorter.length < 12) {
+    return false;
+  }
   return pl.includes(q) || q.includes(pl);
 }
 
 export function dateKey(d) {
-  if (!d) { return 0; }
+  if (!d) {
+    return 0;
+  }
   return num(d.year) * 10000 + num(d.month) * 100 + num(d.day);
 }
 
 export function sourcesListFromSourcesResponse(raw) {
-  if (!raw || typeof raw !== 'object') { return []; }
+  if (!raw || typeof raw !== 'object') {
+    return [];
+  }
   const rows = raw.source ?? raw.sources;
   return Array.isArray(rows) ? rows : [];
 }
 
 export function sourceDomainsListFromResponse(raw) {
-  if (!raw || typeof raw !== 'object') { return []; }
+  if (!raw || typeof raw !== 'object') {
+    return [];
+  }
   const rows = raw.domains ?? raw.sourceDomains;
   return Array.isArray(rows) ? rows : [];
 }
@@ -342,9 +407,13 @@ export function sourceDomainsByTopicFtsRows(raw) {
 }
 
 export function sumVoTotalBySourceCategoryCounts(raw) {
-  if (!raw || typeof raw !== 'object') { return null; }
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
   const rows = raw.totals || [];
-  if (!Array.isArray(rows) || rows.length === 0) { return null; }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return null;
+  }
   let sum = 0;
   for (const t of rows) {
     sum += num(t.count);
@@ -364,9 +433,13 @@ export function voTotalCountForSourceCategory(raw, categoryName) {
     || typeof raw !== 'object'
     || categoryName == null
     || categoryName === ''
-  ) { return null; }
+  ) {
+    return null;
+  }
   const rows = raw.totals || [];
-  if (!Array.isArray(rows)) { return null; }
+  if (!Array.isArray(rows)) {
+    return null;
+  }
   const want = String(categoryName);
   for (const t of rows) {
     const c = t.category;
@@ -375,7 +448,9 @@ export function voTotalCountForSourceCategory(raw, categoryName) {
       : c == null
         ? ''
         : String(c);
-    if (asName === want) { return num(t.count); }
+    if (asName === want) {
+      return num(t.count);
+    }
   }
   return null;
 }
@@ -386,12 +461,16 @@ export function parseCompetitorDomainsList(sp) {
   if (csv) {
     for (const part of csv.split(',')) {
       const d = part.trim().toLowerCase();
-      if (d) { out.push(d.startsWith('www.') ? d.slice(4) : d); }
+      if (d) {
+        out.push(d.startsWith('www.') ? d.slice(4) : d);
+      }
     }
   }
   for (const raw of sp.getAll('competitor')) {
     const d = raw.trim().toLowerCase();
-    if (d) { out.push(d.startsWith('www.') ? d.slice(4) : d); }
+    if (d) {
+      out.push(d.startsWith('www.') ? d.slice(4) : d);
+    }
   }
   return [...new Set(out)].slice(0, MAX_COMPETITOR_DOMAINS);
 }
@@ -415,9 +494,13 @@ export function parseGapKindEnumList(sp) {
     shared: [4],
     unique: [6],
   };
-  if (tabMap[tab]) { return tabMap[tab]; }
+  if (tabMap[tab]) {
+    return tabMap[tab];
+  }
   const csv = (sp.get('gapKinds') ?? sp.get('gap_kinds'))?.trim();
-  if (!csv) { return [1]; }
+  if (!csv) {
+    return [1];
+  }
   const nameToN = {
     ALL: 1,
     MISSING: 2,
@@ -429,16 +512,24 @@ export function parseGapKindEnumList(sp) {
   const result = [];
   for (const part of csv.split(',')) {
     const k = part.trim().toUpperCase();
-    if (nameToN[k] != null) { result.push(nameToN[k]); }
+    if (nameToN[k] != null) {
+      result.push(nameToN[k]);
+    }
   }
   return result.length ? result : [1];
 }
 
 export function coerceProtoCommonGapKind(kind) {
-  if (kind == null) { return null; }
-  if (typeof kind === 'number' && Number.isFinite(kind)) { return kind; }
+  if (kind == null) {
+    return null;
+  }
+  if (typeof kind === 'number' && Number.isFinite(kind)) {
+    return kind;
+  }
   const s = String(kind).trim();
-  if (/^\d+$/.test(s)) { return Number(s); }
+  if (/^\d+$/.test(s)) {
+    return Number(s);
+  }
   const upper = s.toUpperCase();
   const tail = upper.includes('.') ? upper.split('.').pop() : upper;
   const bare = tail.replace(/^GAP_KIND_/, '');
@@ -451,18 +542,28 @@ export function coerceProtoCommonGapKind(kind) {
     STRONG: 5,
     UNIQUE: 6,
   };
-  if (map[bare] != null) { return map[bare]; }
+  if (map[bare] != null) {
+    return map[bare];
+  }
   return null;
 }
 
 export function aggregateGapPromptsTotalFromTotals(raw, kinds) {
-  if (!raw || typeof raw !== 'object') { return null; }
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
   const single = num(raw.total);
-  if (single > 0) { return single; }
+  if (single > 0) {
+    return single;
+  }
   const rows = raw.totals || [];
-  if (!rows.length) { return null; }
+  if (!rows.length) {
+    return null;
+  }
   const want = new Set(kinds.filter((k) => Number.isFinite(k) && k > 0));
-  if (want.size === 0) { return null; }
+  if (want.size === 0) {
+    return null;
+  }
   let sum = 0;
   let matched = false;
   for (const row of rows) {
@@ -489,7 +590,9 @@ export function mergeTopBrandsByDomainResponsesByMax(rawList) {
   for (const raw of rawList) {
     for (const b of raw.brands || []) {
       const name = topBrandsByDomainEntryName(b);
-      if (!name) { continue; }
+      if (!name) {
+        continue;
+      }
       const key = normalizeTopBrandsByDomainNameKey(name);
       const c = topBrandsByDomainEntryCount(b);
       const prev = merged.get(key);
@@ -509,4 +612,37 @@ export function mergeTopBrandsByDomainResponsesByMax(rawList) {
       count,
     })),
   };
+}
+
+/**
+ * Map a Connect RPC failure to an HTTP-style handler result.
+ * @param {unknown} error
+ * @returns {{ status: number, body: object } | null} null → propagate (e.g. unexpected throw)
+ */
+export function responseFromGrpcError(error) {
+  if (!(error instanceof ConnectError)) {
+    return null;
+  }
+  const message = error.rawMessage || error.message || 'Request failed';
+  const grpcCode = error.code;
+  const body = { error: 'grpc_error', grpcCode, message };
+  switch (error.code) {
+    case Code.InvalidArgument:
+    case Code.FailedPrecondition:
+    case Code.OutOfRange:
+      return { status: 400, body: { ...body, error: 'invalid_request' } };
+    case Code.Unauthenticated:
+      return { status: 401, body: { ...body, error: 'unauthenticated' } };
+    case Code.PermissionDenied:
+      return { status: 403, body: { ...body, error: 'forbidden' } };
+    case Code.NotFound:
+      return { status: 404, body: { ...body, error: 'not_found' } };
+    case Code.ResourceExhausted:
+      return { status: 429, body: { ...body, error: 'resource_exhausted' } };
+    case Code.Unavailable:
+    case Code.DeadlineExceeded:
+      return { status: 503, body: { ...body, error: 'service_unavailable' } };
+    default:
+      return { status: 502, body: { ...body, error: 'bad_gateway' } };
+  }
 }

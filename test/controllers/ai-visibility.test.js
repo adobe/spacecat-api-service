@@ -39,6 +39,7 @@ const ALL_METHOD_NAMES = [
   'getTopicsResearchSourceDomains',
   'getTopicsResearch',
   'getTopicsStats',
+  'getV1TopicBrandTopics',
 ];
 
 describe('AiVisibilityController', () => {
@@ -72,6 +73,7 @@ describe('AiVisibilityController', () => {
   let mockHandleTopicsResearchPrompts;
   let mockHandleTopicsResearchBrands;
   let mockHandleTopicsResearchSourceDomains;
+  let mockHandleV1TopicBrandTopics;
 
   const log = {
     info: sinon.stub(),
@@ -155,6 +157,9 @@ describe('AiVisibilityController', () => {
     mockHandleTopicsResearchSourceDomains = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1TopicBrandTopics = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
 
     const mod = await esmock('../../src/controllers/ai-visibility.js', {
       '../../src/support/ai-visibility/grpc-transport.js': {
@@ -199,6 +204,9 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/meta.js': {
         handleMeta: mockHandleMeta,
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/brand-topics.js': {
+        handleBrandTopics: mockHandleV1TopicBrandTopics,
       },
       '../../third-party/ai-seo-ts/v2/brand/service_pb.js': {
         BrandService: {},
@@ -267,9 +275,9 @@ describe('AiVisibilityController', () => {
   });
 
   describe('returned handler object', () => {
-    it('returns an object with all 22 method names', () => {
+    it('returns an object with all 23 method names', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      expect(Object.keys(handlers)).to.have.lengthOf(22);
+      expect(Object.keys(handlers)).to.have.lengthOf(23);
       for (const name of ALL_METHOD_NAMES) {
         expect(handlers).to.have.property(name).that.is.a('function');
       }
@@ -523,6 +531,7 @@ describe('AiVisibilityController', () => {
       getTopicsResearchSourceDomains: mockHandleTopicsResearchSourceDomains,
       getTopicsResearch: mockHandleTopicsResearch,
       getTopicsStats: mockHandleTopicsStats,
+      getV1TopicBrandTopics: mockHandleV1TopicBrandTopics,
     });
 
     it('each method invokes its corresponding handler', async () => {

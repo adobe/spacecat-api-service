@@ -628,6 +628,8 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-brands'
   /llmo/ai-visibility/topics/research/source-domains:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
+  /llmo/ai-visibility/v1/topic/brand-topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
 
 components:
   securitySchemes:

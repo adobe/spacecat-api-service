@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 22 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – 23 GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 
@@ -772,6 +772,36 @@ ai-visibility-topics-research-source-domains:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilitySourceDomainsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-brand-topics:
+  get:
+    tags: [ai-visibility]
+    summary: Get brand topics (Topic v2 JSON)
+    description: |
+      Returns brand-associated topics using Semrush `TopicService` v2 `BrandTopics` and
+      `BrandTopicsTotals`. Unlike `/llmo/ai-visibility/brands/topics`, this route fixes prompt
+      categories to **mentions target** and **cites target**, orders by **topic volume**,
+      and returns each topic as **native protobuf JSON** (camelCase), including fields such as `visibility`,
+      `difficulty`, `volumeTrend`, and `intents`. The response body is `{ data, total }` plus `srFilters`;
+      `offset` and `limit` are not echoed (use the query parameters).
+    operationId: getAiVisibilityV1TopicBrandTopics
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Brand topics (v2 topic payload) retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicBrandTopicsResponse'
       <<: *errorResponses
     security:
       - api_key: []

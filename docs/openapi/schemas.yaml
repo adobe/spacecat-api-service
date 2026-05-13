@@ -8790,6 +8790,65 @@ AiVisibilityPaginatedResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1TopicBrandTopicRow:
+  type: object
+  description: |
+    One topic from Semrush `BrandTopicsResponse.Topic` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    id:
+      description: Topic identifier
+      oneOf:
+        - type: string
+        - type: integer
+    name:
+      type: string
+    visibility:
+      type: integer
+    difficulty:
+      type: integer
+    mentions:
+      oneOf:
+        - type: string
+        - type: integer
+    volume:
+      oneOf:
+        - type: string
+        - type: integer
+    volumeTrend:
+      type: array
+      items:
+        type: integer
+    intents:
+      type: array
+      items:
+        type: object
+        additionalProperties: true
+    country:
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1TopicBrandTopicsResponse:
+  type: object
+  description: |
+    Brand topics list from `GET /llmo/ai-visibility/v1/topic/brand-topics`.
+    Wraps Semrush v2 topic `BrandTopics` / `BrandTopicsTotals` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1TopicBrandTopicRow'
+    total:
+      description: Total topics matching the request (from `BrandTopicsTotals`)
+      oneOf:
+        - type: integer
+        - type: string
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityCompetitorsMetrics:
   type: object
   description: Competitor comparison time-series response

@@ -488,6 +488,7 @@ describe('getRouteHandlers', () => {
     getTopicsResearchSourceDomains: sinon.stub(),
     getTopicsResearch: sinon.stub(),
     getTopicsStats: sinon.stub(),
+    getV1TopicBrandTopics: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -605,6 +606,7 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/topics/research/source-domains',
       'GET /llmo/ai-visibility/topics/research/stats',
       'GET /llmo/ai-visibility/topics/stats',
+      'GET /llmo/ai-visibility/v1/topic/brand-topics',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
@@ -660,6 +662,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research/source-domains']).to.equal(mockAiVisibilityController.getTopicsResearchSourceDomains);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research']).to.equal(mockAiVisibilityController.getTopicsResearch);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/stats']).to.equal(mockAiVisibilityController.getTopicsStats);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics']).to.equal(mockAiVisibilityController.getV1TopicBrandTopics);
     expect(staticRoutes['GET /v2/regions']).to.equal(mockLlmoMysticatController.getRegions);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
     expect(staticRoutes['GET /plg/sites']).to.equal(mockPlgOnboardingController.getAllOnboardings);
