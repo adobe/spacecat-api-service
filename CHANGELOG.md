@@ -1,3 +1,24 @@
+## [1.494.1](https://github.com/adobe/spacecat-api-service/compare/v1.494.0...v1.494.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* prevent unhandled 5xx in scrape controller on malformed URLs ([#2292](https://github.com/adobe/spacecat-api-service/issues/2292)) ([9db900c](https://github.com/adobe/spacecat-api-service/commit/9db900cc019abab2d2e02248402370aad1a11e64))
+
+# [1.494.0](https://github.com/adobe/spacecat-api-service/compare/v1.493.1...v1.494.0) (2026-05-13)
+
+
+### Features
+
+* GET endpoint for query fan-out report ([#2407](https://github.com/adobe/spacecat-api-service/issues/2407)) ([4ae34e4](https://github.com/adobe/spacecat-api-service/commit/4ae34e4504fb0262969e0164ad46ee7843768f00))
+
+## [1.493.1](https://github.com/adobe/spacecat-api-service/compare/v1.493.0...v1.493.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* sort responses by relevance ([#2404](https://github.com/adobe/spacecat-api-service/issues/2404)) ([9d17393](https://github.com/adobe/spacecat-api-service/commit/9d17393b7369d846f3e651745137a529e454e5c8))
+
 # [1.493.0](https://github.com/adobe/spacecat-api-service/compare/v1.492.0...v1.493.0) (2026-05-12)
 
 
