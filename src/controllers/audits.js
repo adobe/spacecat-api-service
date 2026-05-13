@@ -199,7 +199,14 @@ function AuditsController(ctx) {
       return badRequest('Audit type required');
     }
 
-    const { excludedURLs, manualOverwrites, groupedURLs } = context.data;
+    const {
+      excludedURLs,
+      includedURLs,
+      manualOverwrites,
+      groupedURLs,
+      replaceExcludedURLs = false,
+      replaceIncludedURLs = false,
+    } = context.data ?? {};
     let hasUpdates = false;
 
     const site = await Site.findById(siteId);
@@ -211,11 +218,18 @@ function AuditsController(ctx) {
       return forbidden('User does not have access to this site');
     }
 
-    const configuration = await Configuration.findLatest();
-    const registeredAudits = configuration.getHandlers();
-    if (!registeredAudits[auditType]) {
-      return notFound(`The "${auditType}" is not present in the configuration. List of allowed audits:`
-        + ` ${Object.keys(registeredAudits).join(', ')}.`);
+    let configuration;
+    try {
+      configuration = await Configuration.findLatest();
+    } catch (err) {
+      context.log.warn(`Failed to load configuration, skipping audit-type check: ${err.message}`);
+    }
+    if (configuration) {
+      const registeredAudits = configuration.getHandlers();
+      if (!registeredAudits[auditType]) {
+        return notFound(`The "${auditType}" is not present in the configuration. List of allowed audits:`
+          + ` ${Object.keys(registeredAudits).join(', ')}.`);
+      }
     }
 
     const siteConfig = site.getConfig();
@@ -229,11 +243,26 @@ function AuditsController(ctx) {
 
       hasUpdates = true;
 
-      const newExcludedURLs = excludedURLs.length === 0
-        ? []
+      const newExcludedURLs = replaceExcludedURLs || excludedURLs.length === 0
+        ? Array.from(new Set(excludedURLs))
         : Array.from(new Set([...(siteConfig.getExcludedURLs(auditType) || []), ...excludedURLs]));
 
       siteConfig.updateExcludedURLs(auditType, newExcludedURLs);
+    }
+
+    let newIncludedURLs;
+    if (Array.isArray(includedURLs)) {
+      for (const url of includedURLs) {
+        if (!isValidUrl(url)) {
+          return badRequest('Invalid URL format');
+        }
+      }
+
+      hasUpdates = true;
+
+      newIncludedURLs = replaceIncludedURLs || includedURLs.length === 0
+        ? Array.from(new Set(includedURLs))
+        : Array.from(new Set([...(siteConfig.getIncludedURLs(auditType) || []), ...includedURLs]));
     }
 
     if (Array.isArray(manualOverwrites)) {
@@ -287,9 +316,16 @@ function AuditsController(ctx) {
 
     if (hasUpdates) {
       const configObj = Config.toDynamoItem(siteConfig);
+      if (newIncludedURLs !== undefined) {
+        // Config has no updateIncludedURLs setter, so we write directly to the serialised object.
+        // Shallow-copy handlers and the target handler slot to avoid mutating shared state.
+        configObj.handlers = { ...(configObj.handlers || {}) };
+        configObj.handlers[auditType] = { ...(configObj.handlers[auditType] || {}) };
+        configObj.handlers[auditType].includedURLs = newIncludedURLs;
+      }
       site.setConfig(configObj);
       await site.save();
-      const auditConfig = siteConfig.getHandlerConfig(auditType);
+      const auditConfig = configObj.handlers?.[auditType];
       return ok(auditConfig);
     }
     return badRequest('No updates provided');
