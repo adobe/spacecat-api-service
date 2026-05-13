@@ -462,18 +462,6 @@ describe('Brands Controller', () => {
               if (table === 'brands') {
                 return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
               }
-              if (table === 'llmo_customer_config') {
-                return Promise.resolve({
-                  data: {
-                    config: {
-                      customer: {
-                        brands: [{ id: 'chevrolet', name: 'Chevrolet' }],
-                      },
-                    },
-                  },
-                  error: null,
-                });
-              }
               if (table === 'prompts') {
                 return Promise.resolve({
                   data: {
@@ -614,11 +602,6 @@ describe('Brands Controller', () => {
             if (table === 'brands') {
               return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
             }
-            if (table === 'llmo_customer_config') {
-              return Promise.resolve({
-                data: { config: { customer: { brands: [] } } }, error: null,
-              });
-            }
             return Promise.resolve({ data: null, error: null });
           }),
         };
@@ -682,11 +665,6 @@ describe('Brands Controller', () => {
           if (table === 'brands') {
             return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
           }
-          if (table === 'llmo_customer_config') {
-            return Promise.resolve({
-              data: { config: { customer: { brands: [] } } }, error: null,
-            });
-          }
           if (table === 'prompts') {
             return Promise.resolve({ data: null, error: null });
           }
@@ -715,11 +693,6 @@ describe('Brands Controller', () => {
           maybeSingle: sandbox.stub().callsFake(() => {
             if (table === 'brands') {
               return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            }
-            if (table === 'llmo_customer_config') {
-              return Promise.resolve({
-                data: { config: { customer: { brands: [] } } }, error: null,
-              });
             }
             if (table === 'prompts') {
               return Promise.reject(new Error('DB connection lost'));
@@ -791,10 +764,6 @@ describe('Brands Controller', () => {
         if (table === 'brands') {
           chain.maybeSingle = sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null });
         }
-        if (table === 'llmo_customer_config') {
-          chain.maybeSingle = sandbox.stub()
-            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
-        }
         return chain;
       });
 
@@ -861,10 +830,6 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
-        if (table === 'llmo_customer_config') {
-          chain.maybeSingle = sandbox.stub()
-            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
-        }
         return chain;
       });
 
@@ -949,11 +914,6 @@ describe('Brands Controller', () => {
           if (table === 'brands') {
             return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
           }
-          if (table === 'llmo_customer_config') {
-            return Promise.resolve({
-              data: { config: { customer: { brands: [] } } }, error: null,
-            });
-          }
           if (table === 'prompts') {
             return Promise.resolve({ data: null, error: null });
           }
@@ -1017,11 +977,6 @@ describe('Brands Controller', () => {
           if (table === 'brands') {
             return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
           }
-          if (table === 'llmo_customer_config') {
-            return Promise.resolve({
-              data: { config: { customer: { brands: [] } } }, error: null,
-            });
-          }
           if (table === 'prompts') {
             return Promise.resolve({ data: null, error: null });
           }
@@ -1050,11 +1005,6 @@ describe('Brands Controller', () => {
           maybeSingle: sandbox.stub().callsFake(() => {
             if (table === 'brands') {
               return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            }
-            if (table === 'llmo_customer_config') {
-              return Promise.resolve({
-                data: { config: { customer: { brands: [] } } }, error: null,
-              });
             }
             if (table === 'prompts') {
               return Promise.reject(new Error('DB connection lost'));
@@ -1087,11 +1037,6 @@ describe('Brands Controller', () => {
           maybeSingle: sandbox.stub().callsFake(() => {
             if (table === 'brands') {
               return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            }
-            if (table === 'llmo_customer_config') {
-              return Promise.resolve({
-                data: { config: { customer: { brands: [] } } }, error: null,
-              });
             }
             if (table === 'prompts') {
               return Promise.reject(new Error('DB connection lost'));
@@ -1543,12 +1488,6 @@ describe('Brands Controller', () => {
               if (table === 'brands') {
                 return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
               }
-              if (table === 'llmo_customer_config') {
-                return Promise.resolve({
-                  data: { config: { customer: { brands: [] } } },
-                  error: null,
-                });
-              }
               if (table === 'prompts') {
                 return Promise.resolve({ data: { id: 'row-id' }, error: null });
               }
@@ -1674,12 +1613,6 @@ describe('Brands Controller', () => {
           maybeSingle: sandbox.stub().callsFake(() => {
             if (table === 'brands') {
               return Promise.resolve({ data: null, error: null });
-            }
-            if (table === 'llmo_customer_config') {
-              return Promise.resolve({
-                data: { config: { customer: { brands: [] } } },
-                error: null,
-              });
             }
             return Promise.resolve({ data: null, error: null });
           }),

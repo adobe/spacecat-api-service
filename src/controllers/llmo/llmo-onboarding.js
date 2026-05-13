@@ -21,11 +21,6 @@ import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
 import {
-  readCustomerConfigV2FromPostgres,
-  writeCustomerConfigV2ToPostgres,
-} from '../../support/customer-config-v2-storage.js';
-import { convertV1ToV2, generateBrandId } from '../../support/customer-config-mapper.js';
-import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V1,
   LLMO_ONBOARDING_MODE_V2,
@@ -56,12 +51,6 @@ export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 
 export const ASO_CRITICAL_SITES = [];
 const LLMO_ONBOARDING_PUBLISH_TRIGGER = 'trigger:llmo-onboarding-publish';
-
-function resolveUpdatedBy(context) {
-  return context.attributes?.authInfo?.profile?.email
-    || context.attributes?.authInfo?.getProfile?.()?.email
-    || 'system';
-}
 
 function buildOnboardingMetadata({
   siteId, imsOrgId, brandName, onboardingMode, extra = {},
@@ -136,129 +125,6 @@ export async function triggerBrandalfOnboardingJob({
 
 // submitOnboardingPromptGenerationJob removed — prompt generation is now
 // triggered by DRS after Brandalf completes (LLMO-4258, option b).
-
-export function buildInitialCustomerConfigV2({
-  brandName,
-  imsOrgId,
-  siteId,
-  baseURL,
-  overrideBaseURL,
-  updatedBy = 'system',
-}) {
-  const primaryUrl = overrideBaseURL || baseURL;
-  const config = convertV1ToV2({
-    brands: {
-      aliases: [{
-        name: brandName,
-        regions: ['gl'],
-        status: 'active',
-      }],
-    },
-    competitors: { competitors: [] },
-    categories: {},
-    topics: {},
-  }, brandName, imsOrgId);
-
-  const [brand] = config.customer.brands;
-  const timestamp = new Date().toISOString();
-
-  brand.v1SiteId = siteId;
-  brand.baseUrl = primaryUrl;
-  brand.updatedAt = timestamp;
-  brand.updatedBy = updatedBy;
-  brand.urls = [{ value: primaryUrl, type: 'base' }];
-  brand.brandAliases = [{ name: brandName, regions: ['gl'] }];
-
-  config.customer.customerName = brandName;
-
-  return config;
-}
-
-export async function ensureInitialCustomerConfigV2({
-  organizationId,
-  brandName,
-  imsOrgId,
-  siteId,
-  baseURL,
-  overrideBaseURL,
-  context,
-}) {
-  const postgrestClient = context.dataAccess?.services?.postgrestClient;
-  if (!postgrestClient?.from) {
-    throw new Error('V2 customer config requires Postgres (DATA_SERVICE_PROVIDER=postgres)');
-  }
-
-  const existingConfig = await readCustomerConfigV2FromPostgres(organizationId, postgrestClient);
-  if (existingConfig) {
-    if (!existingConfig.customer) {
-      existingConfig.customer = {};
-    }
-    if (!existingConfig.customer.brands) {
-      existingConfig.customer.brands = [];
-    }
-    const { brands } = existingConfig.customer;
-    const siteAlreadyRegistered = brands.some((b) => b.v1SiteId === siteId);
-
-    if (siteAlreadyRegistered) {
-      context.log.info(`V2 customer config already exists for organization ${organizationId} with site ${siteId}, skipping`);
-      return existingConfig;
-    }
-
-    // Add the new site as a brand to the existing config
-    const primaryUrl = overrideBaseURL || baseURL;
-    const timestamp = new Date().toISOString();
-    const trimmedName = brandName.trim();
-    let brandId = generateBrandId(trimmedName);
-
-    // Ensure brand ID is unique within the config
-    const existingIds = new Set(brands.map((b) => b.id));
-    if (existingIds.has(brandId)) {
-      brandId = `${brandId}-${siteId.slice(0, 8)}`;
-    }
-
-    brands.push({
-      id: brandId,
-      v1SiteId: siteId,
-      name: trimmedName,
-      baseUrl: primaryUrl,
-      status: 'active',
-      origin: 'system',
-      regions: ['gl'],
-      updatedAt: timestamp,
-      updatedBy: resolveUpdatedBy(context),
-      urls: [{ value: primaryUrl, type: 'base' }],
-      brandAliases: [{ name: trimmedName, regions: ['gl'] }],
-    });
-
-    await writeCustomerConfigV2ToPostgres(
-      organizationId,
-      existingConfig,
-      postgrestClient,
-      resolveUpdatedBy(context),
-    );
-    context.log.info(`Added site ${siteId} as brand "${brandName}" to existing V2 config for organization ${organizationId}`);
-    return existingConfig;
-  }
-
-  const config = buildInitialCustomerConfigV2({
-    brandName: brandName.trim(),
-    imsOrgId,
-    siteId,
-    baseURL,
-    overrideBaseURL,
-    updatedBy: resolveUpdatedBy(context),
-  });
-
-  await writeCustomerConfigV2ToPostgres(
-    organizationId,
-    config,
-    postgrestClient,
-    resolveUpdatedBy(context),
-  );
-  context.log.info(`Initialized V2 customer config for organization ${organizationId} during onboarding`);
-
-  return config;
-}
 
 /**
  * Generates the SharePoint data folder name from a baseURL.
@@ -1341,16 +1207,6 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     await site.save();
 
     if (onboardingMode === LLMO_ONBOARDING_MODE_V2) {
-      await ensureInitialCustomerConfigV2({
-        organizationId: organization.getId(),
-        brandName,
-        imsOrgId,
-        siteId: site.getId(),
-        baseURL,
-        overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
-        context,
-      });
-
       // Enable brandalf flag so DRS scheduler uses v2 prompts for this org
       const postgrestClient = context.dataAccess?.services?.postgrestClient;
       await upsertFeatureFlag({
