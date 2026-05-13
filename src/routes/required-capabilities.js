@@ -100,6 +100,8 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/weeks',
   'GET /sites/:siteId/agentic-traffic/movers',
   'GET /sites/:siteId/agentic-traffic/has-data',
+  'POST /sites/:siteId/agentic-traffic/urls/export',
+  'GET /sites/:siteId/agentic-traffic/urls/export/:exportId',
 
   // Referral traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
   'GET /sites/:siteId/referral-traffic/has-data',
@@ -560,6 +562,8 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/topics/research/source-domains': 'report:read',
   'GET /llmo/ai-visibility/topics/research': 'report:read',
   'GET /llmo/ai-visibility/topics/stats': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/brand-topics': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/brand-prompts': 'report:read',
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
