@@ -1,3 +1,10 @@
+# [1.494.0](https://github.com/adobe/spacecat-api-service/compare/v1.493.1...v1.494.0) (2026-05-13)
+
+
+### Features
+
+* GET endpoint for query fan-out report ([#2407](https://github.com/adobe/spacecat-api-service/issues/2407)) ([4ae34e4](https://github.com/adobe/spacecat-api-service/commit/4ae34e4504fb0262969e0164ad46ee7843768f00))
+
 ## [1.493.1](https://github.com/adobe/spacecat-api-service/compare/v1.493.0...v1.493.1) (2026-05-13)
 
 
