@@ -285,7 +285,7 @@ describe('AiVisibilityController', () => {
   describe('returned handler object', () => {
     it('returns an object with all 24 method names', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      expect(Object.keys(handlers)).to.have.lengthOf(23);
+      expect(Object.keys(handlers)).to.have.lengthOf(24);
       for (const name of ALL_METHOD_NAMES) {
         expect(handlers).to.have.property(name).that.is.a('function');
       }
