@@ -98,6 +98,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
  * @param {Object} webhooksController - GitHub webhook handler controller.
+ * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
+ * @param {Object} fanoutReportController - Query Fan-Out report controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -154,6 +156,7 @@ export default function getRouteHandlers(
   drsBpPgAuditController,
   webhooksController,
   aiVisibilityController,
+  fanoutReportController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -473,6 +476,7 @@ export default function getRouteHandlers(
 
     // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
+    'GET /org/:spaceCatId/brands/:brandId/fanout-report': fanoutReportController.getFanoutReport,
     'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
     'GET /org/:spaceCatId/brands/all/brand-presence/weeks': llmoMysticatController.getBrandPresenceWeeks,
