@@ -50,6 +50,7 @@ import {
   handleTopicsResearchSourceDomains,
 } from '../support/ai-visibility/handlers/topics.js';
 import { handleBrandTopics as handleBrandTopicsV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics.js';
+import { handleBrandPrompts as handleBrandPromptsV1 } from '../support/ai-visibility/handlers/v1/prompt/brand-prompts.js';
 import { handleMeta } from '../support/ai-visibility/handlers/meta.js';
 
 const ROUTE_MAP = [
@@ -76,6 +77,7 @@ const ROUTE_MAP = [
   ['/topics/research', handleTopicsResearch],
   ['/topics/stats', handleTopicsStats],
   ['/v1/topic/brand-topics', handleBrandTopicsV1],
+  ['/v1/prompt/brand-prompts', handleBrandPromptsV1],
 ];
 
 function extractSearchParams(context) {

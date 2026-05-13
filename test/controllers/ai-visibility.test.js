@@ -40,6 +40,7 @@ const ALL_METHOD_NAMES = [
   'getTopicsResearch',
   'getTopicsStats',
   'getV1TopicBrandTopics',
+  'getV1PromptBrandPrompts',
 ];
 
 describe('AiVisibilityController', () => {
@@ -74,6 +75,7 @@ describe('AiVisibilityController', () => {
   let mockHandleTopicsResearchBrands;
   let mockHandleTopicsResearchSourceDomains;
   let mockHandleV1TopicBrandTopics;
+  let mockHandleV1PromptBrandPrompts;
 
   const log = {
     info: sinon.stub(),
@@ -160,6 +162,9 @@ describe('AiVisibilityController', () => {
     mockHandleV1TopicBrandTopics = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1PromptBrandPrompts = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
 
     const mod = await esmock('../../src/controllers/ai-visibility.js', {
       '../../src/support/ai-visibility/grpc-transport.js': {
@@ -207,6 +212,9 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/v1/topic/brand-topics.js': {
         handleBrandTopics: mockHandleV1TopicBrandTopics,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/brand-prompts.js': {
+        handleBrandPrompts: mockHandleV1PromptBrandPrompts,
       },
       '../../third-party/ai-seo-ts/v2/brand/service_pb.js': {
         BrandService: {},
@@ -275,7 +283,7 @@ describe('AiVisibilityController', () => {
   });
 
   describe('returned handler object', () => {
-    it('returns an object with all 23 method names', () => {
+    it('returns an object with all 24 method names', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
       expect(Object.keys(handlers)).to.have.lengthOf(23);
       for (const name of ALL_METHOD_NAMES) {
@@ -532,6 +540,7 @@ describe('AiVisibilityController', () => {
       getTopicsResearch: mockHandleTopicsResearch,
       getTopicsStats: mockHandleTopicsStats,
       getV1TopicBrandTopics: mockHandleV1TopicBrandTopics,
+      getV1PromptBrandPrompts: mockHandleV1PromptBrandPrompts,
     });
 
     it('each method invokes its corresponding handler', async () => {
