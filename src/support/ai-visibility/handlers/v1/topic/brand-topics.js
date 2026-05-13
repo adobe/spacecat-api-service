@@ -11,7 +11,7 @@
  */
 
 import { fromJson, toJson } from '@bufbuild/protobuf';
-import { COUNTRY_ENUM, LLM_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
+import { COUNTRY_ENUM, LLM_ENUM, ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   BrandTopicsRequestSchema,
   BrandTopicsResponseSchema,
@@ -53,7 +53,10 @@ export async function handleBrandTopics(sp, clients) {
       country,
       llm: engine,
       target: { domain, name: domain },
-      order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VOLUME },
+      order: {
+        by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY,
+        direction: ORDER_DIRECTION_ENUM.DESC,
+      },
       range: { limit, offset },
       categories,
     },
