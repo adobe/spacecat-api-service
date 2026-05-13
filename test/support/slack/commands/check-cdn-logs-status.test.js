@@ -178,6 +178,34 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(summaryCall[0]).to.include('fastly-site.com');
   });
 
+  it('paginates S3 listing when NextContinuationToken is present', async () => {
+    const site = makeSite('site-pg', 'https://paginated.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'fastly' } } });
+
+    const firstHalf = Array.from({ length: 12 }, (_, i) => String(i).padStart(2, '0'));
+    const secondHalf = Array.from({ length: 12 }, (_, i) => String(i + 12).padStart(2, '0'));
+    s3SendStub
+      .onFirstCall().resolves({
+        CommonPrefixes: firstHalf.map((h) => ({ Prefix: `aggregated/site-pg/2026/04/21/${h}/` })),
+        NextContinuationToken: 'page2-token',
+      })
+      .onSecondCall().resolves({
+        CommonPrefixes: secondHalf.map((h) => ({ Prefix: `aggregated/site-pg/2026/04/21/${h}/` })),
+        NextContinuationToken: undefined,
+      });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    expect(s3SendStub.callCount).to.equal(2);
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Complete: *1*');
+  });
+
   it('shows complete for cloudflare (daily-only) site when hour 23 is present', async () => {
     const site = makeSite('site-cf', 'https://cloudflare-site.com');
     context.dataAccess.Site.all.resolves([site]);

@@ -324,6 +324,21 @@ describe('BackfillLlmoCommand', () => {
     expect(context.log.error.calledWith('Error in LLMO backfill:', error)).to.be.true;
   });
 
+  it('staggers SQS delaySeconds across multi-day cdn-logs-analysis backfill', async () => {
+    dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+    const command = BackfillLlmoCommand(context);
+
+    await command.handleExecution(
+      ['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`, 'days=3'],
+      slackContext,
+    );
+
+    expect(sqsStub.sendMessage.callCount).to.equal(3);
+    expect(sqsStub.sendMessage.firstCall.args[3]).to.deep.equal({ delaySeconds: 0 });
+    expect(sqsStub.sendMessage.secondCall.args[3]).to.deep.equal({ delaySeconds: 5 });
+    expect(sqsStub.sendMessage.thirdCall.args[3]).to.deep.equal({ delaySeconds: 10 });
+  });
+
   it('triggers cdn-logs-analysis for specific date and hour', async () => {
     dataAccessStub.Site.findByBaseURL.resolves(siteStub);
     const command = BackfillLlmoCommand(context);

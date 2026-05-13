@@ -23,65 +23,18 @@ import {
   postReport,
   resolveSiteScope,
 } from './status-command-helpers.js';
+import {
+  DAILY_ONLY_CDN_FAMILIES,
+  getCdnFamily,
+  normalizeProvider,
+} from './lib/cdn-providers.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['check cdn logs status'];
 const CDN_LOGS_AUDIT = 'cdn-logs-analysis';
 const BATCH_SIZE = 10;
 
-// These CDN families only produce a single daily aggregate (hour 23).
-// All others produce 24 hourly aggregates (hours 00–23).
-const DAILY_ONLY_CDN_FAMILIES = new Set(['cloudflare', 'imperva', 'other']);
-const SERVICE_PROVIDER_TO_CDN_FAMILY = {
-  'aem-cs-fastly': 'fastly',
-  'commerce-fastly': 'fastly',
-  'byocdn-fastly': 'fastly',
-  'byocdn-akamai': 'akamai',
-  'byocdn-cloudflare': 'cloudflare',
-  'byocdn-cloudfront': 'cloudfront',
-  'byocdn-frontdoor': 'frontdoor',
-  'byocdn-imperva': 'imperva',
-  'byocdn-other': 'other',
-  'ams-cloudfront': 'cloudfront',
-  'ams-frontdoor': 'frontdoor',
-};
-
 const ALL_HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
-
-function normalizeProvider(raw) {
-  return raw ? String(raw).trim().toLowerCase() : 'unknown';
-}
-
-function getCdnFamily(cdnProvider) {
-  const normalized = normalizeProvider(cdnProvider);
-  /* c8 ignore next 3 */
-  if (SERVICE_PROVIDER_TO_CDN_FAMILY[normalized]) {
-    return SERVICE_PROVIDER_TO_CDN_FAMILY[normalized];
-  }
-  if (normalized.includes('cloudflare')) {
-    return 'cloudflare';
-  }
-  /* c8 ignore next 3 */
-  if (normalized.includes('imperva') || normalized.includes('incapsula')) {
-    return 'imperva';
-  }
-  if (normalized.includes('fastly')) {
-    return 'fastly';
-  }
-  /* c8 ignore next 3 */
-  if (normalized.includes('akamai')) {
-    return 'akamai';
-  }
-  /* c8 ignore next 3 */
-  if (normalized.includes('cloudfront')) {
-    return 'cloudfront';
-  }
-  /* c8 ignore next 3 */
-  if (normalized.includes('frontdoor')) {
-    return 'frontdoor';
-  }
-  return normalized;
-}
 
 function resolveAggregateBucket(env, region) {
   const environment = env.AWS_ENV || 'prod';
@@ -132,7 +85,6 @@ async function listPresentHours(s3Client, bucket, prefix) {
     }
 
     continuationToken = response.NextContinuationToken;
-  /* c8 ignore next */
   } while (continuationToken);
 
   return [...hours].sort();

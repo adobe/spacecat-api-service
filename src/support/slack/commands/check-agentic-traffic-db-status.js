@@ -69,8 +69,10 @@ function rowsEmptySummary() {
 
 function addRowSummary(summaries, row) {
   const siteId = row.site_id;
-  /* c8 ignore next */
-  if (!siteId) return;
+  /* c8 ignore next 3 */
+  if (!siteId) {
+    return;
+  }
   const summary = summaries.get(siteId) || rowsEmptySummary();
   const hits = Number(row.hits || 0);
   summary.rows += 1;
@@ -99,11 +101,15 @@ function formatNumber(value) {
 }
 
 function formatUpdateTime(value) {
-  /* c8 ignore next */
-  if (!value) return 'n/a';
+  /* c8 ignore next 3 */
+  if (!value) {
+    return 'n/a';
+  }
   const date = new Date(value);
-  /* c8 ignore next */
-  if (Number.isNaN(date.getTime())) return value;
+  /* c8 ignore next 3 */
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
   return date.toISOString().slice(0, 16).replace('T', ' ');
 }
 

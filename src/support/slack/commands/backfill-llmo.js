@@ -102,8 +102,10 @@ function isCompletedIsoWeek(weekRange, now = new Date()) {
 
 async function refreshAgenticWeeklyRollup(context, siteId, weekRange) {
   const postgrestClient = context.dataAccess?.services?.postgrestClient;
-  /* c8 ignore next */
-  if (!postgrestClient?.rpc) throw new Error('PostgREST client is unavailable; cannot refresh agentic weekly rollup.');
+  /* c8 ignore next 3 */
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is unavailable; cannot refresh agentic weekly rollup.');
+  }
 
   const { data, error } = await postgrestClient.rpc('wrpc_refresh_agentic_traffic_weekly', {
     p_site_id: siteId,
@@ -112,10 +114,14 @@ async function refreshAgenticWeeklyRollup(context, siteId, weekRange) {
     p_updated_by: 'slack:backfill-llmo-weekly-db',
   });
 
-  /* c8 ignore next */
-  if (error) throw new Error(`wrpc_refresh_agentic_traffic_weekly: ${error.message}`);
-  /* c8 ignore next */
-  if (Array.isArray(data)) return data;
+  /* c8 ignore next 3 */
+  if (error) {
+    throw new Error(`wrpc_refresh_agentic_traffic_weekly: ${error.message}`);
+  }
+  /* c8 ignore next 3 */
+  if (Array.isArray(data)) {
+    return data;
+  }
   /* c8 ignore next */
   return data ? [data] : [];
 }
@@ -173,7 +179,6 @@ async function triggerBackfill(
             configuration.getQueues().audits,
             message,
             undefined,
-            /* c8 ignore next 4 */
             {
               delaySeconds: Math.min(
                 (dayOffset - 1) * CDN_LOGS_ANALYSIS_DELAY_SECONDS,
