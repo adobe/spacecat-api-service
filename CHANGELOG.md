@@ -1,3 +1,10 @@
+## [1.497.1](https://github.com/adobe/spacecat-api-service/compare/v1.497.0...v1.497.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* reliably deliver CDN opt-in notification email ([#2340](https://github.com/adobe/spacecat-api-service/issues/2340)) ([a7788e3](https://github.com/adobe/spacecat-api-service/commit/a7788e321b4efff4535c2327bf5dae91879e4959))
+
 # [1.497.0](https://github.com/adobe/spacecat-api-service/compare/v1.496.0...v1.497.0) (2026-05-13)
 
 

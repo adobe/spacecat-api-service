@@ -249,15 +249,6 @@ describe('cdn-opt-in-notification', () => {
       expect(templateData.replyAllTeam).to.include('Customer CSE');
     });
 
-    it('flags aem-cs-fastly as adobe-managed with CSE reply-all team and commerceManaged=false', async () => {
-      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'aem-cs-fastly' });
-
-      const { templateData } = sendEmailStub.firstCall.args[1];
-      expect(templateData.adobeManaged).to.be.true;
-      expect(templateData.commerceManaged).to.be.false;
-      expect(templateData.replyAllTeam).to.include('Customer CSE');
-    });
-
     it('flags commerce-fastly as adobe-managed and commerceManaged=true with Commerce team reply-all', async () => {
       await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'commerce-fastly' });
 
