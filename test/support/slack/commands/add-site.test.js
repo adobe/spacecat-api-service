@@ -38,6 +38,7 @@ describe('AddSiteCommand', () => {
   });
 
   beforeEach(() => {
+    updateRumConfigStub.resolves(true);
     const configuration = {
       isHandlerEnabledForSite: sinon.stub(),
     };
@@ -55,7 +56,7 @@ describe('AddSiteCommand', () => {
     };
     context = {
       dataAccess: dataAccessStub,
-      log: console,
+      log: { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() },
       sqs: sqsStub,
       env: { AUDIT_JOBS_QUEUE_URL: 'testQueueUrl', DEFAULT_ORGANIZATION_ID: 'default' },
     };
@@ -252,6 +253,30 @@ describe('AddSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: test error')).to.be.true;
+    });
+
+    it('should log a warning when updateRumConfig fails', async () => {
+      const baseURL = 'https://example.com';
+      nock(baseURL)
+        .get('/')
+        .replyWithError('rainy weather');
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+      dataAccessStub.Site.create.resolves({
+        getId: () => 'site123',
+        getBaseURL: () => baseURL,
+        getDeliveryType: () => 'other',
+        getIsLive: () => true,
+      });
+      updateRumConfigStub.rejects(new Error('RUM API error'));
+
+      const args = ['example.com'];
+      const command = AddSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(context.log.warn).to.have.been.calledWith(
+        `[add-site] RUM config update failed for ${baseURL}: RUM API error`,
+      );
     });
 
     it('adds an aem_edge site', async () => {
