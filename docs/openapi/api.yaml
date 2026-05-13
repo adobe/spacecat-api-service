@@ -504,6 +504,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
   /sites/{siteId}/agentic-traffic/movers:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  /org/{spaceCatId}/brands/{brandId}/fanout-report:
+    $ref: './fanout-report-api.yaml#/fanout-report'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/filter-dimensions:
     $ref: './llmo-api.yaml#/brand-presence-filter-dimensions'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/prompt-execution-status:
