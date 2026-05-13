@@ -155,6 +155,7 @@ export default function getRouteHandlers(
   drsBpPgAuditController,
   webhooksController,
   serenityController,
+  serenityPromptsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -205,6 +206,15 @@ export default function getRouteHandlers(
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.updatePromptByBrandAndId,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.deletePromptByBrandAndId,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': brandsController.bulkDeletePromptsByBrand,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects': serenityPromptsController.listProjects,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/tags': serenityPromptsController.listProjectTags,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/models': serenityPromptsController.listProjectModels,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/workspaces/:workspaceId/projects': serenityPromptsController.listWorkspaceProjects,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/reporting/elements/:elementId': serenityPromptsController.queryReportingElement,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityPromptsController.listPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityPromptsController.createPrompts,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:promptId': serenityPromptsController.updatePrompt,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityPromptsController.bulkDeletePrompts,
     'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': brandsController.triggerConfigSync,
     'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': brandsController.getBrandForOrgSite,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,

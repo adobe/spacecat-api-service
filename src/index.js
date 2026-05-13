@@ -102,6 +102,7 @@ import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
+import SerenityPromptsController from './controllers/serenity-prompts.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import SerenityController from './controllers/serenity.js';
 
@@ -258,6 +259,7 @@ async function run(request, context) {
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
     const serenityController = SerenityController(context);
+    const serenityPromptsController = SerenityPromptsController(context, log);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -313,6 +315,7 @@ async function run(request, context) {
       drsBpPgAuditController,
       webhooksController,
       serenityController,
+      serenityPromptsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
