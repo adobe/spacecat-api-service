@@ -44,7 +44,7 @@ export async function handleBrandPrompts(sp, clients) {
   const domain = sp.get('domain');
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
-  const sortBy = sp.get('sortBy') || PROMPTS_REQUEST_ORDER_BY_ENUM.VISIBILITY;
+  const sortBy = sp.get('sortBy') || PROMPTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
   const topicId = sp.get('topicId');
   const { limit, offset } = parseLimitOffset(sp);
