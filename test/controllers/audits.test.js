@@ -601,6 +601,21 @@ describe('Audits Controller', () => {
       expect(error).to.have.property('message', 'No updates provided');
     });
 
+    it('returns bad request when context.data is null (no request body)', async () => {
+      const auditType = 'broken-backlinks';
+
+      const context = {
+        params: { siteId, auditType },
+        data: null,
+      };
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'No updates provided');
+    });
+
     it('returns bad request if excludedURLs is not an array', async () => {
       const auditType = 'broken-backlinks';
       const excludedURLs = 'http://valid-url.com';
@@ -839,6 +854,27 @@ describe('Audits Controller', () => {
         `The "${auditType}" is not present in the configuration. List of allowed audits:`
         + ` ${Object.keys(handlers).join(', ')}.`,
       );
+    });
+
+    it('proceeds without audit-type check when Configuration.findLatest throws', async () => {
+      mockDataAccess.Configuration.findLatest.rejects(new Error('S3 bucket not found'));
+      const auditType = 'broken-backlinks';
+      const log = { warn: sinon.stub() };
+
+      const context = {
+        params: { siteId, auditType },
+        data: {},
+        log,
+      };
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      // S3 unavailability must not surface as 500 — controller continues and hits normal validation
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'No updates provided');
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.include('S3 bucket not found');
     });
 
     it('merges manual overwrites correctly', async () => {
@@ -1267,6 +1303,267 @@ describe('Audits Controller', () => {
           expect(result.status).to.equal(200);
         },
       );
+    });
+
+    describe('process includedURLs parameter', () => {
+      const auditType = 'broken-backlinks';
+      let patchHandlers;
+      let siteConfig;
+
+      beforeEach(() => {
+        patchHandlers = { [auditType]: {} };
+        siteConfig = {
+          getHandlerConfig: sandbox.stub().returns(patchHandlers[auditType]),
+          getIncludedURLs: sandbox.stub().returns(undefined),
+          getHandlers: () => patchHandlers,
+          getSlackConfig: () => {},
+          getContentAiConfig: () => {},
+          getImports: () => [],
+          getFetchConfig: () => {},
+          getBrandConfig: () => ({ brandId: 'test-brand' }),
+          getCdnLogsConfig: () => ({}),
+          getLlmoConfig: () => ({}),
+          getTokowakaConfig: () => ({}),
+          getEdgeOptimizeConfig: () => undefined,
+          getBrandProfile: () => ({}),
+        };
+
+        site.getConfig = () => siteConfig;
+      });
+
+      it('treats non-array includedURLs as no update provided', async () => {
+        const context = {
+          params: { siteId, auditType },
+          data: { includedURLs: 'https://valid-url.com' },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(400);
+        const error = await result.json();
+        expect(error).to.have.property('message', 'No updates provided');
+      });
+
+      it('returns bad request if includedURLs contains invalid URLs', async () => {
+        const context = {
+          params: { siteId, auditType },
+          data: { includedURLs: ['invalid-url', 'https://valid-url.com'] },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(400);
+        const error = await result.json();
+        expect(error).to.have.property('message', 'Invalid URL format');
+      });
+
+      it('clears includedURLs when array is empty', async () => {
+        const context = {
+          params: { siteId, auditType },
+          data: { includedURLs: [] },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(200);
+        const savedConfig = site.setConfig.firstCall.args[0];
+        expect(savedConfig.handlers?.[auditType]?.includedURLs).to.deep.equal([]);
+        expect(site.setConfig).to.have.been.calledOnce;
+        expect(site.save).to.have.been.calledOnce;
+      });
+
+      it('appends includedURLs when no existing list (merge mode)', async () => {
+        siteConfig.getIncludedURLs = sandbox.stub().returns(undefined);
+
+        const context = {
+          params: { siteId, auditType },
+          data: { includedURLs: ['https://example.com/page1', 'https://example.com/page2'] },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(200);
+        const savedConfig = site.setConfig.firstCall.args[0];
+        expect(savedConfig.handlers?.[auditType]?.includedURLs).to.deep.equal([
+          'https://example.com/page1',
+          'https://example.com/page2',
+        ]);
+        expect(site.setConfig).to.have.been.calledOnce;
+        expect(site.save).to.have.been.calledOnce;
+      });
+
+      it('appends to existing includedURLs in merge mode', async () => {
+        siteConfig.getIncludedURLs = sandbox.stub().returns(['https://example.com/existing']);
+
+        const context = {
+          params: { siteId, auditType },
+          data: { includedURLs: ['https://example.com/new'] },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(200);
+        const savedConfig = site.setConfig.firstCall.args[0];
+        expect(savedConfig.handlers?.[auditType]?.includedURLs).to.deep.equal([
+          'https://example.com/existing',
+          'https://example.com/new',
+        ]);
+      });
+
+      it('deduplicates URLs within incoming includedURLs array', async () => {
+        siteConfig.getIncludedURLs = sandbox.stub().returns([]);
+
+        const context = {
+          params: { siteId, auditType },
+          data: { includedURLs: ['https://example.com/page', 'https://example.com/page'] },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(200);
+        const savedConfig = site.setConfig.firstCall.args[0];
+        expect(savedConfig.handlers?.[auditType]?.includedURLs).to.deep.equal(['https://example.com/page']);
+      });
+
+      it('replaces includedURLs atomically when replaceIncludedURLs is true', async () => {
+        siteConfig.getIncludedURLs = sandbox.stub().returns([
+          'https://example.com/old1',
+          'https://example.com/old2',
+        ]);
+
+        const context = {
+          params: { siteId, auditType },
+          data: {
+            includedURLs: ['https://example.com/kept'],
+            replaceIncludedURLs: true,
+          },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(200);
+        const savedConfig = site.setConfig.firstCall.args[0];
+        expect(savedConfig.handlers?.[auditType]?.includedURLs).to.deep.equal(['https://example.com/kept']);
+      });
+
+      it('persists both includedURLs and excludedURLs when sent in the same request', async () => {
+        siteConfig.updateExcludedURLs = sandbox.stub();
+        siteConfig.getExcludedURLs = sandbox.stub().returns([]);
+
+        const context = {
+          params: { siteId, auditType },
+          data: {
+            includedURLs: ['https://example.com/included'],
+            excludedURLs: ['https://example.com/excluded'],
+          },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(200);
+        expect(siteConfig.updateExcludedURLs.calledWith(
+          auditType,
+          ['https://example.com/excluded'],
+        )).to.be.true;
+        const savedConfig = site.setConfig.firstCall.args[0];
+        expect(savedConfig.handlers?.[auditType]?.includedURLs).to.deep.equal(['https://example.com/included']);
+        expect(site.setConfig).to.have.been.calledOnce;
+        expect(site.save).to.have.been.calledOnce;
+      });
+
+      it('persists includedURLs even when getHandlers returns undefined', async () => {
+        siteConfig.getHandlers = () => undefined;
+
+        const context = {
+          params: { siteId, auditType },
+          data: { includedURLs: ['https://example.com/page1'] },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(200);
+        const savedConfig = site.setConfig.firstCall.args[0];
+        expect(savedConfig.handlers?.[auditType]?.includedURLs).to.deep.equal(['https://example.com/page1']);
+        expect(site.save).to.have.been.calledOnce;
+      });
+
+      it('returns the updated handler config in the response body', async () => {
+        const context = {
+          params: { siteId, auditType },
+          data: { includedURLs: ['https://example.com/page1'] },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(200);
+        const body = await result.json();
+        expect(body).to.have.property('includedURLs').that.deep.equals(['https://example.com/page1']);
+      });
+    });
+
+    describe('process replaceExcludedURLs parameter', () => {
+      const auditType = 'broken-backlinks';
+
+      function makeExcludedURLsConfig(existingExcluded) {
+        return {
+          getExcludedURLs: sandbox.stub().returns(existingExcluded),
+          updateExcludedURLs: sandbox.stub(),
+          getHandlerConfig: sandbox.stub().returns({}),
+          getHandlers: () => ({}),
+          getSlackConfig: () => {},
+          getContentAiConfig: () => {},
+          getImports: () => [],
+          getFetchConfig: () => {},
+          getBrandConfig: () => ({ brandId: 'test-brand' }),
+          getCdnLogsConfig: () => ({}),
+          getLlmoConfig: () => ({}),
+          getTokowakaConfig: () => ({}),
+          getEdgeOptimizeConfig: () => undefined,
+          getBrandProfile: () => ({}),
+        };
+      }
+
+      it('replaces excludedURLs atomically when replaceExcludedURLs is true', async () => {
+        const handlerTypeConfig = makeExcludedURLsConfig(['https://example.com/old']);
+        site.getConfig = () => handlerTypeConfig;
+
+        const context = {
+          params: { siteId, auditType },
+          data: {
+            excludedURLs: ['https://example.com/kept'],
+            replaceExcludedURLs: true,
+          },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(200);
+        expect(handlerTypeConfig.updateExcludedURLs.calledWith(
+          auditType,
+          ['https://example.com/kept'],
+        )).to.be.true;
+      });
+
+      it('merges excludedURLs with existing list when replaceExcludedURLs is false', async () => {
+        const handlerTypeConfig = makeExcludedURLsConfig(['https://example.com/old']);
+        site.getConfig = () => handlerTypeConfig;
+
+        const context = {
+          params: { siteId, auditType },
+          data: {
+            excludedURLs: ['https://example.com/new'],
+            replaceExcludedURLs: false,
+          },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(200);
+        expect(handlerTypeConfig.updateExcludedURLs.calledWith(
+          auditType,
+          ['https://example.com/old', 'https://example.com/new'],
+        )).to.be.true;
+      });
     });
   });
 });

@@ -17,6 +17,10 @@ export const OpportunityDto = {
 
   /**
    * Converts an Opportunity object into a JSON object.
+   * scopeType and scopeId are intentionally omitted — they are brand-internal fields
+   * that must only appear in the brand-scoped endpoint response, added by the brand
+   * controller directly. Including them here would expose brand UUIDs on shared sites
+   * to users who have site access but not brand access.
    * @param {Readonly<Opportunity>} oppty - Opportunity object.
    * @returns {{
     * id: string,
@@ -31,7 +35,6 @@ export const OpportunityDto = {
     * guidance: object,
     * tags: Array<string>,
     * createdAt: date,
-    * createdBy: string,
     * updatedAt: date,
     * updatedBy: string,
     * lastAuditedAt: date
