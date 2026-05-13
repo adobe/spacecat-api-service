@@ -1321,18 +1321,10 @@ function LlmoController(ctx) {
 
         const imsPromise = imsUserId && context.imsClient
           ? Promise.resolve(context.imsClient.getImsAdminProfile(imsUserId))
-            .catch((e) => {
-              log.warn(`[cdn-opt-in-notification] IMS lookup failed for site=${siteId}: ${e.message}`);
-              throw e;
-            })
           : Promise.resolve(null);
 
         const s3Promise = s3?.s3Client
           ? Promise.resolve(readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket }))
-            .catch((e) => {
-              log.warn(`[cdn-opt-in-notification] S3 LLMO config read failed for site=${siteId}: ${e.message}`);
-              throw e;
-            })
           : Promise.resolve(null);
 
         notificationPrep = Promise.allSettled([imsPromise, s3Promise]);
