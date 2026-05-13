@@ -1,3 +1,92 @@
+# [1.494.0](https://github.com/adobe/spacecat-api-service/compare/v1.493.1...v1.494.0) (2026-05-13)
+
+
+### Features
+
+* GET endpoint for query fan-out report ([#2407](https://github.com/adobe/spacecat-api-service/issues/2407)) ([4ae34e4](https://github.com/adobe/spacecat-api-service/commit/4ae34e4504fb0262969e0164ad46ee7843768f00))
+
+## [1.493.1](https://github.com/adobe/spacecat-api-service/compare/v1.493.0...v1.493.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* sort responses by relevance ([#2404](https://github.com/adobe/spacecat-api-service/issues/2404)) ([9d17393](https://github.com/adobe/spacecat-api-service/commit/9d17393b7369d846f3e651745137a529e454e5c8))
+
+# [1.493.0](https://github.com/adobe/spacecat-api-service/compare/v1.492.0...v1.493.0) (2026-05-12)
+
+
+### Bug Fixes
+
+* **page-relationships:** normalize suggestion URL to pathname regardless of host ([#2399](https://github.com/adobe/spacecat-api-service/issues/2399)) ([4c29f4b](https://github.com/adobe/spacecat-api-service/commit/4c29f4bc8834be4dcab4381dbcd758a48b943bd0)), closes [#1907](https://github.com/adobe/spacecat-api-service/issues/1907)
+
+
+### Features
+
+* ai-seo-ts sdk bump ([#2400](https://github.com/adobe/spacecat-api-service/issues/2400)) ([1edd772](https://github.com/adobe/spacecat-api-service/commit/1edd7729ff35cc0e99dbafabda15e8c0d9b611d1))
+* **organizations:** surface semrushWorkspaceId on GET + admin PATCH ([#2403](https://github.com/adobe/spacecat-api-service/issues/2403)) ([8a9401e](https://github.com/adobe/spacecat-api-service/commit/8a9401ecf0bf01305ca17562b11fdde12c930597))
+* sort prompt research results by relevancy | ai visibility ([#2396](https://github.com/adobe/spacecat-api-service/issues/2396)) ([77e31df](https://github.com/adobe/spacecat-api-service/commit/77e31dfcae0115adc500e42d5874db7c63e061bb))
+
+# [1.492.0](https://github.com/adobe/spacecat-api-service/compare/v1.491.0...v1.492.0) (2026-05-12)
+
+
+### Features
+
+* init serenity backend ([#2387](https://github.com/adobe/spacecat-api-service/issues/2387)) ([f6959c4](https://github.com/adobe/spacecat-api-service/commit/f6959c415eb606ef7e961855ee75ee5d5f43b9ae))
+
+# [1.491.0](https://github.com/adobe/spacecat-api-service/compare/v1.490.1...v1.491.0) (2026-05-12)
+
+
+### Features
+
+* read only admin owned resource write access ([#2391](https://github.com/adobe/spacecat-api-service/issues/2391)) ([af57bd9](https://github.com/adobe/spacecat-api-service/commit/af57bd903a22fee33cd0997c96786f7fa59b30b9))
+
+## [1.490.1](https://github.com/adobe/spacecat-api-service/compare/v1.490.0...v1.490.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.61.0 ([#2394](https://github.com/adobe/spacecat-api-service/issues/2394)) ([f64a7bb](https://github.com/adobe/spacecat-api-service/commit/f64a7bb55ba393711a380fc513553867d197fa41))
+
+# [1.490.0](https://github.com/adobe/spacecat-api-service/compare/v1.489.2...v1.490.0) (2026-05-12)
+
+
+### Features
+
+* PLG onboarding aso link ([#2389](https://github.com/adobe/spacecat-api-service/issues/2389)) ([b4f80a2](https://github.com/adobe/spacecat-api-service/commit/b4f80a2c6ebdb6e014dc9227ab77fbf622d44d2c))
+
+## [1.489.2](https://github.com/adobe/spacecat-api-service/compare/v1.489.1...v1.489.2) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.27.1 ([#2392](https://github.com/adobe/spacecat-api-service/issues/2392)) ([b594756](https://github.com/adobe/spacecat-api-service/commit/b5947560faed1fc7c7ed9f4ebb82f909e0cc48d0))
+
+## [1.489.1](https://github.com/adobe/spacecat-api-service/compare/v1.489.0...v1.489.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2390](https://github.com/adobe/spacecat-api-service/issues/2390)) ([77a2e84](https://github.com/adobe/spacecat-api-service/commit/77a2e8447334a5e7493fdecabf2039a4d4e20fc0))
+
+# [1.489.0](https://github.com/adobe/spacecat-api-service/compare/v1.488.1...v1.489.0) (2026-05-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-shared-bounce to v2.0.30 ([#2388](https://github.com/adobe/spacecat-api-service/issues/2388)) ([5db398c](https://github.com/adobe/spacecat-api-service/commit/5db398cdd3011aeca8aefd1a029187fc9ca2fc86))
+
+
+### Features
+
+* add includedURLs support to patchAuditForSite endpoint ([#2355](https://github.com/adobe/spacecat-api-service/issues/2355)) ([3dfe4af](https://github.com/adobe/spacecat-api-service/commit/3dfe4afb3e5b547f3ba95d9f8a5aa5a89ade81a4))
+
+## [1.488.1](https://github.com/adobe/spacecat-api-service/compare/v1.488.0...v1.488.1) (2026-05-11)
+
+
+### Bug Fixes
+
+* enable category filtering in filter-dimensions ([#2356](https://github.com/adobe/spacecat-api-service/issues/2356)) ([37938ef](https://github.com/adobe/spacecat-api-service/commit/37938ef3758879e76e0de16d451caf22b01647e3))
+
 # [1.488.0](https://github.com/adobe/spacecat-api-service/compare/v1.487.0...v1.488.0) (2026-05-11)
 
 
