@@ -21,12 +21,7 @@ import esmock from 'esmock';
 use(chaiAsPromised);
 use(sinonChai);
 
-describe('PreflightChecks Controller', function preflightChecksSuite() {
-  // `before` calls esmock (cold start ~1.6s) and individual `it` blocks
-  // can also brush the 2s default under parallel I/O load. Scope the bump
-  // to this file so the rest of the suite keeps the default fail-fast.
-  this.timeout(10000);
-
+describe('PreflightChecks Controller', () => {
   const sandbox = sinon.createSandbox();
   const siteId = '123e4567-e89b-12d3-a456-426614174000';
 

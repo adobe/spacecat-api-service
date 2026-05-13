@@ -17,11 +17,7 @@ import esmock from 'esmock';
 
 use(sinonChai);
 
-describe('LLMO Bulk Unpublish Functions', function unpublishSuite() {
-  // Most `it` blocks call `esmock` directly. Cold start is ~1.6s and
-  // intermittently exceeds the 2s default under parallel I/O load.
-  this.timeout(10000);
-
+describe('LLMO Bulk Unpublish Functions', () => {
   let mockLog;
   let mockEnv;
   let originalSetTimeout;
