@@ -8104,6 +8104,90 @@ AgenticTrafficByUrl:
     - totalCount
     - rows
 
+AgenticTrafficUrlsExportRequest:
+  type: object
+  description: Filter set for an asynchronous URL-level agentic traffic CSV export
+  properties:
+    startDate:
+      type: string
+      format: date
+    endDate:
+      type: string
+      format: date
+    platform:
+      type: string
+      description: AI platform UI code, mapped to the DB platform value before export
+      example: 'chatgpt'
+    categoryName:
+      type: string
+      example: 'Poster Maker'
+    agentType:
+      type: string
+      example: 'Chatbots'
+    userAgent:
+      type: string
+      example: 'ChatGPT-User'
+    contentType:
+      type: string
+      example: 'owned'
+    successRate:
+      type: string
+      description: Success-rate bucket accepted by the agentic traffic RPC helpers
+      example: 'high'
+    urlPathSearch:
+      type: string
+      description: Substring filter applied to url_path server-side
+      example: '/express/create'
+
+AgenticTrafficUrlsExportResponse:
+  type: object
+  description: Status and download metadata for an asynchronous URL-level CSV export
+  properties:
+    exportId:
+      type: string
+      pattern: '^[a-f0-9]{64}$'
+      example: 'b8d70f4ce07b44a1c46ef6d1a9f83a0678d8c0c14f82121161db725e9d4c7b9a'
+    status:
+      type: string
+      enum: [processing, ready, failed]
+      example: 'ready'
+    downloadUrls:
+      type: array
+      description: One or more presigned CSV URLs. Large DB exports may be split into multiple objects.
+      items:
+        type: string
+        format: uri
+    expiresAt:
+      type: string
+      format: date-time
+      description: Expiry timestamp shared by all presigned URLs
+      example: '2026-05-12T10:15:30.000Z'
+    rowCount:
+      oneOf:
+        - type: integer
+        - type: 'null'
+      description: Number of CSV rows reported by Aurora S3 export
+      example: 9900000
+    filesUploaded:
+      oneOf:
+        - type: integer
+        - type: 'null'
+      description: Number of CSV objects reported by Aurora S3 export
+      example: 3
+    bytesUploaded:
+      oneOf:
+        - type: integer
+        - type: 'null'
+      description: Number of bytes reported by Aurora S3 export
+      example: 1428000000
+    failureReason:
+      type: string
+      description: Present only when status is failed
+      example: 'aws_s3/aws_commons extensions are required to export agentic traffic URLs to S3'
+  required:
+    - exportId
+    - status
+
 AgenticTrafficFilterDimensions:
   type: object
   description: Distinct filter values available for the selected site and date range
