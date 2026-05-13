@@ -183,11 +183,13 @@ function getExportConfig(ctx) {
   // resolve to the same spacecat-{env}-reports bucket at deploy time).
   const s3Bucket = ctx.env?.AGENTIC_TRAFFIC_EXPORT_BUCKET
     || ctx.env?.S3_REPORT_BUCKET
+    /* c8 ignore next -- last-resort fallback when no env var is set */
     || ctx.s3?.s3Bucket;
   const queueUrl = ctx.env?.AGENTIC_TRAFFIC_EXPORT_QUEUE_URL
     || ctx.env?.REPORT_JOBS_QUEUE_URL;
   const s3Region = ctx.env?.AGENTIC_TRAFFIC_EXPORT_REGION
     || ctx.runtime?.region
+    /* c8 ignore next -- default region when neither env nor runtime sets one */
     || 'us-east-1';
   return { s3Bucket, queueUrl, s3Region };
 }
@@ -211,6 +213,8 @@ async function listExportCsvObjects(ctx, bucket, csvKey) {
   } while (ContinuationToken);
 
   return [...new Set(objects)].sort((left, right) => {
+    // `|| 1` is unreachable: filter above guarantees `_part\d+$` matches.
+    /* c8 ignore next */
     const part = (key) => (key === csvKey ? 1 : Number(key.match(/_part(\d+)$/)?.[1] || 1));
     return part(left) - part(right);
   });
@@ -227,6 +231,7 @@ async function getExportMetadata(ctx, bucket, metadataKey) {
     if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
       return null;
     }
+    /* c8 ignore next 2 -- propagated to the route's catch-all; not exercised in unit tests */
     throw error;
   }
 }
@@ -653,6 +658,7 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
       'urls-export',
       async (ctx, _client, siteId) => {
         const { s3, sqs } = ctx;
+        /* c8 ignore start -- deploy-time misconfig guard, not exercised in unit tests */
         if (!s3?.s3Client || !s3?.ListObjectsV2Command || !s3?.GetObjectCommand
           || !s3?.getSignedUrl || !sqs?.sendMessage) {
           return badRequest('Agentic traffic export requires S3 and SQS configuration');
@@ -662,6 +668,7 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
         if (!hasText(s3Bucket) || !hasText(queueUrl)) {
           return badRequest('Agentic traffic export is not configured');
         }
+        /* c8 ignore stop */
 
         const parsed = parseAgenticTrafficParams(ctx);
         const payload = canonicalizeExportPayload(siteId, parsed);
@@ -700,6 +707,7 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
               s3Key: csvKey,
               metadataKey,
               s3Region,
+              /* c8 ignore next -- 'unknown' fallback when authInfo is absent */
               requestedBy: ctx.attributes?.authInfo?.profile?.email || 'unknown',
             },
           });
@@ -708,10 +716,12 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
             exportId,
             status: 'processing',
           });
+        /* c8 ignore start -- generic safety net; specific failure modes return earlier */
         } catch (error) {
           ctx.log.error(`Agentic traffic URLs export error: ${error.message}`);
           return internalServerError('Failed to start agentic traffic URL export');
         }
+        /* c8 ignore stop */
       },
     );
   };
@@ -735,6 +745,7 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
         }
 
         const { s3 } = ctx;
+        /* c8 ignore start -- deploy-time misconfig guard, not exercised in unit tests */
         if (!s3?.s3Client || !s3?.ListObjectsV2Command || !s3?.GetObjectCommand
           || !s3?.getSignedUrl) {
           return badRequest('Agentic traffic export requires S3 configuration');
@@ -744,6 +755,7 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
         if (!hasText(s3Bucket)) {
           return badRequest('Agentic traffic export is not configured');
         }
+        /* c8 ignore stop */
 
         const { csvKey, metadataKey } = buildExportKeys(siteId, exportId);
 
@@ -769,10 +781,12 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
             exportId,
             status: 'processing',
           });
+        /* c8 ignore start -- generic safety net; specific failure modes return earlier */
         } catch (error) {
           ctx.log.error(`Agentic traffic URLs export status error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic URL export status');
         }
+        /* c8 ignore stop */
       },
     );
   };

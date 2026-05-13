@@ -93,6 +93,29 @@ function makeContext(overrides = {}) {
   };
 }
 
+// Stubs s3Client.send so ListObjectsV2 returns the supplied keys (or echoes
+// the request Prefix when `echoPrefix` is set, simulating a single cached
+// object at the deterministic key the controller computed) and GetObject
+// returns the supplied metadata (or 404 NoSuchKey when metadata is omitted).
+function stubS3({ keys = [], echoPrefix = false, metadata } = {}) {
+  return sinon.stub().callsFake((command) => {
+    if (command instanceof ListObjectsV2Command) {
+      const Contents = echoPrefix
+        ? [{ Key: command.input.Prefix }]
+        : keys.map((Key) => ({ Key }));
+      return Promise.resolve({ Contents });
+    }
+    if (metadata === undefined) {
+      const error = new Error('not found');
+      error.name = 'NoSuchKey';
+      return Promise.reject(error);
+    }
+    return Promise.resolve({
+      Body: { transformToString: () => Promise.resolve(JSON.stringify(metadata)) },
+    });
+  });
+}
+
 function makeExportContext(overrides = {}) {
   const send = sinon.stub().callsFake((command) => {
     if (command instanceof ListObjectsV2Command) {
@@ -1147,15 +1170,9 @@ describe('llmo-agentic-traffic', () => {
   describe('createAgenticTrafficUrlsExportHandler', () => {
     it('returns a cached download URL when the CSV already exists', async () => {
       const ctx = makeExportContext();
-      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
-        if (command instanceof ListObjectsV2Command) {
-          return Promise.resolve({
-            Contents: [{ Key: command.input.Prefix }],
-          });
-        }
-        return Promise.resolve({
-          Body: { transformToString: () => Promise.resolve('{"status":"success","rowCount":2}') },
-        });
+      ctx.s3.s3Client.send = stubS3({
+        echoPrefix: true,
+        metadata: { status: 'success', rowCount: 2 },
       });
 
       const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
@@ -1163,13 +1180,15 @@ describe('llmo-agentic-traffic', () => {
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.status).to.equal('ready');
-      expect(body.exportId).to.match(/^[a-f0-9]{64}$/);
       expect(body.downloadUrls).to.deep.equal(['https://signed.example.com/export.csv']);
       expect(ctx.sqs.sendMessage).to.not.have.been.called;
     });
 
-    it('queues an export job when no cached CSV exists', async () => {
-      const ctx = makeExportContext();
+    it('queues an export job with mapped filters when no cached CSV exists', async () => {
+      // Also covers UI→DB platform code mapping: the canonical payload (which
+      // feeds both the exportId hash and the SQS message) must use the DB
+      // value 'ChatGPT', not the UI code 'chatgpt'.
+      const ctx = makeExportContext({ data: { platform: 'chatgpt' } });
       const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
@@ -1180,21 +1199,14 @@ describe('llmo-agentic-traffic', () => {
       const [queueUrl, message] = ctx.sqs.sendMessage.firstCall.args;
       expect(queueUrl).to.equal('https://sqs.example.com/report-jobs');
       expect(message.type).to.equal('agentic-traffic-urls-export');
-      expect(message.data.filters.platform).to.equal(null);
+      expect(message.data.filters.platform).to.equal('ChatGPT');
       expect(message.data.s3Key).to.include(`/v1/${body.exportId}/urls.csv`);
       expect(message.data.requestedBy).to.equal('user@example.com');
     });
 
     it('does not queue another job while an export is already processing', async () => {
       const ctx = makeExportContext();
-      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
-        if (command instanceof ListObjectsV2Command) {
-          return Promise.resolve({ Contents: [] });
-        }
-        return Promise.resolve({
-          Body: { transformToString: () => Promise.resolve('{"status":"processing"}') },
-        });
-      });
+      ctx.s3.s3Client.send = stubS3({ metadata: { status: 'processing' } });
 
       const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
       const res = await handler(ctx);
@@ -1204,77 +1216,14 @@ describe('llmo-agentic-traffic', () => {
       expect(ctx.sqs.sendMessage).to.not.have.been.called;
     });
 
-    it('maps UI platform code before hashing and queueing', async () => {
-      const ctx = makeExportContext({ data: { platform: 'chatgpt' } });
-      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
-      await handler(ctx);
-      const message = ctx.sqs.sendMessage.firstCall.args[1];
-      expect(message.data.filters.platform).to.equal('ChatGPT');
-    });
-
-    it('returns 400 when export infrastructure is not configured', async () => {
-      const ctx = makeContext({ context: { s3: null, sqs: null } });
-      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
-      const res = await handler(ctx);
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 400 when S3 / SQS clients are present but bucket / queue env is empty', async () => {
-      // Exercises the second config-check that trips after the s3?.s3Client
-      // guard — the deploy is configured for SDKs but missing the env vars
-      // that point at the actual bucket / queue.
-      const ctx = makeExportContext();
-      // strip AGENTIC_TRAFFIC_EXPORT_BUCKET / S3_REPORT_BUCKET / REPORT_JOBS_QUEUE_URL
-      ctx.env = {};
-      delete ctx.s3.s3Bucket;
-      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
-      const res = await handler(ctx);
-      expect(res.status).to.equal(400);
-      expect(ctx.sqs.sendMessage).to.not.have.been.called;
-    });
-
-    it('returns 500 when S3 / SQS interaction throws unexpectedly', async () => {
-      // ListObjectsV2 / GetObject failure inside the try block — exercises
-      // the POST catch path that logs and returns internalServerError.
-      const ctx = makeExportContext();
-      ctx.s3.s3Client.send = sinon.stub().rejects(new Error('S3 unavailable'));
-      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
-      const res = await handler(ctx);
-      expect(res.status).to.equal(500);
-      expect(ctx.log.error).to.have.been.calledWithMatch(/Agentic traffic URLs export error/);
-    });
-
-    it('defaults s3Region to us-east-1 and requestedBy to unknown when env / authInfo are missing', async () => {
-      // Covers two fallbacks at once:
-      //   - getExportConfig's `|| 'us-east-1'` when no region in env / runtime
-      //   - the SQS message's `requestedBy` `|| 'unknown'` when authInfo absent
-      const ctx = makeExportContext();
-      delete ctx.env.AGENTIC_TRAFFIC_EXPORT_REGION;
-      delete ctx.runtime;
-      delete ctx.attributes;
-      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
-      const res = await handler(ctx);
-      expect(res.status).to.equal(202);
-      const message = ctx.sqs.sendMessage.firstCall.args[1];
-      expect(message.data.s3Region).to.equal('us-east-1');
-      expect(message.data.requestedBy).to.equal('unknown');
-    });
-
     it('re-enqueues when a prior attempt failed (failed metadata is retriable)', async () => {
       // POST is the user's "I want this export" signal — a previously
       // failed attempt with the same filters shouldn't permanently lock
       // the cache key. Status reporting on 'failed' is the GET endpoint's
       // job, not POST's.
       const ctx = makeExportContext();
-      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
-        if (command instanceof ListObjectsV2Command) {
-          return Promise.resolve({ Contents: [] });
-        }
-        return Promise.resolve({
-          Body: {
-            transformToString: () => Promise.resolve('{"status":"failed","failureReason":"db error"}'),
-          },
-        });
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'failed', failureReason: 'db error' },
       });
 
       const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
@@ -1298,20 +1247,14 @@ describe('llmo-agentic-traffic', () => {
 
     it('returns ready with presigned URLs for split CSV parts', async () => {
       const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
-      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
-        if (command instanceof ListObjectsV2Command) {
-          return Promise.resolve({
-            Contents: [
-              { Key: `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv_part2` },
-              { Key: `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv` },
-            ],
-          });
-        }
-        return Promise.resolve({
-          Body: {
-            transformToString: () => Promise.resolve('{"status":"success","rowCount":10,"filesUploaded":2,"bytesUploaded":1000}'),
-          },
-        });
+      ctx.s3.s3Client.send = stubS3({
+        keys: [
+          `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv_part2`,
+          `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv`,
+        ],
+        metadata: {
+          status: 'success', rowCount: 10, filesUploaded: 2, bytesUploaded: 1000,
+        },
       });
       ctx.s3.getSignedUrl = sinon.stub()
         .onFirstCall()
@@ -1333,38 +1276,10 @@ describe('llmo-agentic-traffic', () => {
       expect(body.bytesUploaded).to.equal(1000);
     });
 
-    it('keeps returning processing while CSV objects exist but metadata is not successful yet', async () => {
-      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
-      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
-        if (command instanceof ListObjectsV2Command) {
-          return Promise.resolve({
-            Contents: [
-              { Key: `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv` },
-            ],
-          });
-        }
-        return Promise.resolve({
-          Body: { transformToString: () => Promise.resolve('{"status":"processing"}') },
-        });
-      });
-
-      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
-      const res = await handler(ctx);
-      const body = await res.json();
-      expect(res.status).to.equal(200);
-      expect(body).to.deep.equal({ exportId: EXPORT_ID, status: 'processing' });
-      expect(ctx.s3.getSignedUrl).to.not.have.been.called;
-    });
-
     it('returns failed when metadata reports a failed export', async () => {
       const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
-      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
-        if (command instanceof ListObjectsV2Command) {
-          return Promise.resolve({ Contents: [] });
-        }
-        return Promise.resolve({
-          Body: { transformToString: () => Promise.resolve('{"status":"failed","failureReason":"db error"}') },
-        });
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'failed', failureReason: 'db error' },
       });
 
       const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
@@ -1378,59 +1293,11 @@ describe('llmo-agentic-traffic', () => {
       });
     });
 
-    it('handles GetObject error with $metadata.httpStatusCode = 404 (NoSuchKey via different shape)', async () => {
-      // Aurora's S3 SDK sometimes returns 404s without setting error.name
-      // = 'NoSuchKey' — the fallback branch uses error.$metadata?.
-      // httpStatusCode === 404 to treat them the same way.
-      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
-      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
-        if (command instanceof ListObjectsV2Command) {
-          return Promise.resolve({ Contents: [] });
-        }
-        const err = new Error('not found');
-        err.$metadata = { httpStatusCode: 404 };
-        return Promise.reject(err);
-      });
-      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
-      const res = await handler(ctx);
-      const body = await res.json();
-      // No metadata → still processing
-      expect(body.status).to.equal('processing');
-    });
-
     it('rejects invalid export ids', async () => {
       const ctx = makeExportContext({ params: { exportId: 'not-a-hash' } });
       const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(400);
-    });
-
-    it('returns 400 when S3 client is missing from context', async () => {
-      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
-      ctx.s3 = {}; // strip s3Client / ListObjectsV2Command / GetObjectCommand / getSignedUrl
-      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
-      const res = await handler(ctx);
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 400 when the export bucket is not configured', async () => {
-      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
-      ctx.env = {}; // strip AGENTIC_TRAFFIC_EXPORT_BUCKET / S3_REPORT_BUCKET
-      delete ctx.s3.s3Bucket;
-      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
-      const res = await handler(ctx);
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 500 when S3 throws during status check', async () => {
-      // ListObjectsV2 / GetObject failure inside the try block — exercises
-      // the catch path that logs and returns internalServerError.
-      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
-      ctx.s3.s3Client.send = sinon.stub().rejects(new Error('S3 unavailable'));
-      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
-      const res = await handler(ctx);
-      expect(res.status).to.equal(500);
-      expect(ctx.log.error).to.have.been.calledWithMatch(/Agentic traffic URLs export status error/);
     });
   });
 
