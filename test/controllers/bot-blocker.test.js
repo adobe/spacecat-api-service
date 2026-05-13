@@ -19,13 +19,7 @@ import esmock from 'esmock';
 use(chaiAsPromised);
 use(sinonChai);
 
-describe('Bot Blocker Controller', function botBlockerSuite() {
-  // The `before` hook below calls `esmock` (cold start ~1.6s) and the
-  // individual `it` blocks can also brush the 2s default under parallel
-  // I/O load. Scope the bump to this file only so the rest of the suite
-  // retains the default fail-fast signal.
-  this.timeout(10000);
-
+describe('Bot Blocker Controller', () => {
   const sandbox = sinon.createSandbox();
   const siteId = '123e4567-e89b-12d3-a456-426614174000';
   const baseURL = 'https://www.example.com';
