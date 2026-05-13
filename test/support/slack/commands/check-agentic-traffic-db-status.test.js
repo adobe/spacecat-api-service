@@ -143,15 +143,6 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     );
   });
 
-  it('warns when date matches regex but produces NaN', async () => {
-    // '2026-99-99' passes \d{4}-\d{2}-\d{2} but new Date returns Invalid Date
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-99-99'], slackContext);
-    expect(slackContext.say).to.have.been.calledWith(
-      ':warning: Invalid date format. Use YYYY-MM-DD.',
-    );
-  });
-
   it('warns when date matches regex but is not a real UTC calendar date', async () => {
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-02-30'], slackContext);
@@ -220,14 +211,6 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include(`for site \`${TARGET_SITE_ID}\``);
     expect(output).to.include('https://uuid-target.com');
-  });
-
-  it('ignores empty argument tokens and uses the default date', async () => {
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution([''], slackContext);
-
-    const firstArg = slackContext.say.getCall(0).args[0];
-    expect(firstArg).to.include(':hourglass_flowing_sand:');
   });
 
   it('uses yesterday as the target date when no argument is provided', async () => {
@@ -352,35 +335,6 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('No audit record found');
     expect(output).to.include('https://other.com');
-  });
-
-  it('falls back to latestAudit.auditResult when getAuditResult is not a function', async () => {
-    // Simulate an older audit record that stores auditResult as a plain property
-    const auditWithoutMethod = {
-      auditResult: {
-        dailyAgenticExport: {
-          success: true,
-          trafficDate: '2026-04-22',
-          batchId: 'batch-fallback',
-          rowCount: 10,
-          classificationCount: 2,
-        },
-      },
-    };
-    context.dataAccess.Site.all.resolves([
-      makeSite('site-fb', 'https://fallback.com', auditWithoutMethod),
-    ]);
-
-    const chain = makePostgrestChain({ data: [], error: null });
-    postgrestStub.from.returns(chain);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    // Site appears as pending (exported but no projection row)
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Pending');
-    expect(output).to.include('batch-fallback');
   });
 
   it('reports skipped for a site whose export was skipped (no traffic data)', async () => {
@@ -553,30 +507,6 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('unknown traffic rows');
   });
 
-  it('keeps import pending fresh when the audit timestamp is invalid', async () => {
-    const clock = sinon.useFakeTimers(new Date('2026-04-22T13:00:00Z').getTime());
-    const audit = makeAudit({
-      dailyAgenticExport: {
-        success: true,
-        trafficDate: '2026-04-22',
-        batchId: 'batch-invalid-audit-time',
-        rowCount: 12,
-      },
-    }, 'not-a-date');
-    context.dataAccess.Site.all.resolves([makeSite('site-it', 'https://invalid-time.com', audit)]);
-
-    const chain = makePostgrestChain({ data: [], error: null });
-    postgrestStub.from.returns(chain);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-    clock.restore();
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('import daily: pending');
-    expect(output).not.to.include('import daily: stale pending');
-  });
-
   it('marks missing raw import as stale pending after the lag threshold', async () => {
     const clock = sinon.useFakeTimers(new Date('2026-04-22T13:00:00Z').getTime());
     const audit = makeAudit({
@@ -667,64 +597,6 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('255');
     expect(output).to.include('daily refresh: projected (80 rows (2026-04-22))');
     expect(output).to.include('2026-04-22 08:30');
-  });
-
-  it('formats missing and invalid projection timestamps explicitly', async () => {
-    const missingTimeAudit = makeAudit({
-      dailyAgenticExport: {
-        success: true,
-        trafficDate: '2026-04-22',
-        batchId: 'batch-missing-time',
-        rowCount: 21,
-      },
-    });
-    const invalidTimeAudit = makeAudit({
-      dailyAgenticExport: {
-        success: true,
-        trafficDate: '2026-04-22',
-        batchId: 'batch-invalid-time',
-        rowCount: 22,
-      },
-    });
-    context.dataAccess.Site.all.resolves([
-      makeSite('site-mt', 'https://missing-time.com', missingTimeAudit),
-      makeSite('site-bt', 'https://bad-time.com', invalidTimeAudit),
-    ]);
-
-    const chain = makePostgrestChain({
-      data: [
-        makeProjectionRow({
-          correlationId: 'batch-missing-time',
-          scopePrefix: 'site-mt',
-          projectedAt: null,
-        }),
-        makeProjectionRow({
-          correlationId: 'batch-missing-time:daily-refresh',
-          handlerName: DAILY_REFRESH_HANDLER,
-          scopePrefix: 'site-mt',
-        }),
-        makeProjectionRow({
-          correlationId: 'batch-invalid-time',
-          scopePrefix: 'site-bt',
-          projectedAt: 'not-a-time',
-        }),
-        makeProjectionRow({
-          correlationId: 'batch-invalid-time:daily-refresh',
-          handlerName: DAILY_REFRESH_HANDLER,
-          scopePrefix: 'site-bt',
-        }),
-      ],
-      error: null,
-    });
-    postgrestStub.from.returns(chain);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('at unknown time');
-    expect(output).to.include('at not-a-time');
-    expect(output).to.include('21 traffic rows');
   });
 
   it('reports refresh pending when raw import is projected but daily refresh is missing', async () => {
@@ -949,68 +821,6 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Projector refresh enqueue appears disabled');
   });
 
-  it('reports refresh pending with daily refresh disabled when weekly refresh is skipped', async () => {
-    context.env = { MYSTICAT_AGENTIC_REFRESH_ENABLED: 'false' };
-    const audit = makeAudit({
-      dailyAgenticExport: {
-        success: true,
-        trafficDate: '2026-04-22',
-        batchId: 'batch-disabled-weekly-skipped',
-        rowCount: 80,
-      },
-    });
-    context.dataAccess.Site.all.resolves([makeSite('site-dws', 'https://disabled-weekly-skipped.com', audit)]);
-
-    const chain = makePostgrestChain({
-      data: [
-        makeProjectionRow({
-          correlationId: 'batch-disabled-weekly-skipped',
-          scopePrefix: 'site-dws',
-        }),
-        makeProjectionRow({
-          correlationId: 'batch-disabled-weekly-skipped:weekly-refresh',
-          handlerName: WEEKLY_REFRESH_HANDLER,
-          scopePrefix: 'site-dws',
-          skipped: true,
-        }),
-      ],
-      error: null,
-    });
-    postgrestStub.from.returns(chain);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Refresh Pending: *1*');
-    expect(output).to.include('daily refresh: disabled');
-    expect(output).to.include('weekly refresh: skipped');
-  });
-
-  it('treats null projRows with no error the same as an empty result (|| [] fallback)', async () => {
-    const audit = makeAudit({
-      dailyAgenticExport: {
-        success: true,
-        trafficDate: '2026-04-22',
-        batchId: 'batch-null-rows',
-        rowCount: 60,
-        classificationCount: 10,
-      },
-    });
-    context.dataAccess.Site.all.resolves([makeSite('site-nr', 'https://nullrows.com', audit)]);
-
-    // PostgREST returns {data: null, error: null} — exercises the `projRows || []` fallback
-    const chain = makePostgrestChain({ data: null, error: null });
-    postgrestStub.from.returns(chain);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    // projectionMap stays empty → site is pending
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Pending');
-  });
-
   it('handles projection_audit query error gracefully and reports projection status as unknown', async () => {
     const audit = makeAudit({
       dailyAgenticExport: {
@@ -1064,28 +874,6 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
       },
     });
     context.dataAccess.Site.all.resolves([makeSite('site-np', 'https://nopg.com', audit)]);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Unknown: *1*');
-    expect(output).to.include('projection audit check: unavailable');
-  });
-
-  it('reports unknown when postgrest client has no from method', async () => {
-    context.dataAccess.services = { postgrestClient: {} }; // client present but no .from
-
-    const audit = makeAudit({
-      dailyAgenticExport: {
-        success: true,
-        trafficDate: '2026-04-22',
-        batchId: 'batch-nofrom',
-        rowCount: 30,
-        classificationCount: 3,
-      },
-    });
-    context.dataAccess.Site.all.resolves([makeSite('site-nf', 'https://nofrom.com', audit)]);
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);

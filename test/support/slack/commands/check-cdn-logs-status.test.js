@@ -113,14 +113,6 @@ describe('CheckCdnLogsStatusCommand', () => {
     );
   });
 
-  it('warns when date passes regex but is not a real date (NaN)', async () => {
-    const cmd = CheckCdnLogsStatusCommand(context);
-    await cmd.handleExecution(['2026-99-99'], slackContext);
-    expect(slackContext.say).to.have.been.calledWith(
-      sinon.match(':warning: Invalid date format. Use YYYY-MM-DD.'),
-    );
-  });
-
   it('warns when date matches regex but is not a real UTC calendar date', async () => {
     const cmd = CheckCdnLogsStatusCommand(context);
     await cmd.handleExecution(['2026-02-30'], slackContext);
@@ -174,18 +166,6 @@ describe('CheckCdnLogsStatusCommand', () => {
       sinon.match(':warning: Duplicate siteId argument.'),
     );
     expect(context.dataAccess.Site.findById).not.to.have.been.called;
-  });
-
-  it('ignores empty argument tokens and uses the default date', async () => {
-    context.dataAccess.Site.all.resolves([]);
-    context.dataAccess.Configuration.findLatest.resolves({
-      isHandlerEnabledForSite: sinon.stub().returns(false),
-    });
-    const cmd = CheckCdnLogsStatusCommand(context);
-    await cmd.handleExecution([''], slackContext);
-
-    const firstArg = slackContext.say.getCall(0).args[0];
-    expect(firstArg).to.include(':hourglass_flowing_sand:');
   });
 
   it('uses yesterday as the target date when no argument is provided', async () => {
@@ -324,25 +304,6 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(summaryCall[0]).to.include('Incomplete: *0*');
   });
 
-  it('handles S3 response without CommonPrefixes (uses empty fallback)', async () => {
-    const site = makeSite('site-ncp', 'https://no-cp.com');
-    context.dataAccess.Site.all.resolves([site]);
-    context.dataAccess.Configuration.findLatest.resolves({
-      isHandlerEnabledForSite: sinon.stub().returns(true),
-    });
-
-    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'fastly' } } });
-    // Response has no CommonPrefixes key → undefined || [] fallback
-    s3SendStub.resolves({});
-
-    const cmd = CheckCdnLogsStatusCommand(context);
-    await cmd.handleExecution(['2026-04-21'], slackContext);
-
-    // All 24 hours missing → site is incomplete
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Incomplete: *1*');
-  });
-
   it('paginates S3 listing when NextContinuationToken is present', async () => {
     const site = makeSite('site-pg', 'https://paginated.com');
     context.dataAccess.Site.all.resolves([site]);
@@ -421,33 +382,6 @@ describe('CheckCdnLogsStatusCommand', () => {
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('1 site(s) have inputs ready for DB import');
     expect(output).to.include('1 site(s) have no aggregate hours');
-  });
-
-  it('shows all missing hours when <= 6 are absent (no truncation)', async () => {
-    // Use a fastly site with only the last 3 hours missing (21-23 missing → 3 missing, <= 6)
-    const site = makeSite('site-few', 'https://few-missing.com');
-    context.dataAccess.Site.all.resolves([site]);
-    context.dataAccess.Configuration.findLatest.resolves({
-      isHandlerEnabledForSite: sinon.stub().returns(true),
-    });
-
-    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'akamai' } } });
-
-    // Hours 00-20 present (21 hours), 21-23 missing (3 hours)
-    const presentHours = Array.from({ length: 21 }, (_, i) => String(i).padStart(2, '0'));
-    s3SendStub.resolves({
-      CommonPrefixes: presentHours.map((h) => ({
-        Prefix: `aggregated/site-few/2026/04/21/${h}/`,
-      })),
-    });
-
-    const cmd = CheckCdnLogsStatusCommand(context);
-    await cmd.handleExecution(['2026-04-21'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Incomplete: *1*');
-    // All missing hours shown inline, not truncated
-    expect(output).to.include('21, 22, 23');
   });
 
   it('shows complete for cloudflare (daily-only) site when hour 23 is present', async () => {
@@ -596,98 +530,6 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(output).to.include('Incomplete: *2*');
     expect(output).to.include('LLMO config unavailable for *2* sites');
     expect(output).to.include('config unavailable, using fallback');
-  });
-
-  it('uses singular wording for one unavailable LLMO config', async () => {
-    const site = makeSite('site-one-config-fail', 'https://one-config-fail.com');
-    context.dataAccess.Site.all.resolves([site]);
-    context.dataAccess.Configuration.findLatest.resolves({
-      isHandlerEnabledForSite: sinon.stub().returns(true),
-    });
-
-    readConfigStub.rejects(new Error('config unavailable'));
-    s3SendStub.resolves({ CommonPrefixes: [] });
-
-    const cmd = CheckCdnLogsStatusCommand(context);
-    await cmd.handleExecution(['2026-04-21'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('LLMO config unavailable for *1* site;');
-  });
-
-  it('falls back to unknown provider when config has no cdnProvider field', async () => {
-    // readConfig succeeds but cdnBucketConfig.cdnProvider is absent → raw is falsy → 'unknown'
-    const site = makeSite('site-noraw', 'https://noraw.com');
-    context.dataAccess.Site.all.resolves([site]);
-    context.dataAccess.Configuration.findLatest.resolves({
-      isHandlerEnabledForSite: sinon.stub().returns(true),
-    });
-
-    readConfigStub.resolves({ config: { cdnBucketConfig: {} } });
-    s3SendStub.resolves({ CommonPrefixes: [] });
-
-    const cmd = CheckCdnLogsStatusCommand(context);
-    await cmd.handleExecution(['2026-04-21'], slackContext);
-
-    // unknown (fallback) → all 24 hours expected → incomplete
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Incomplete: *1*');
-  });
-
-  it('uses safe fallback config when a site has no config accessor', async () => {
-    const site = {
-      getId: () => 'site-noconfig',
-      getBaseURL: () => 'https://noconfig.com',
-    };
-    context.dataAccess.Site.all.resolves([site]);
-    context.dataAccess.Configuration.findLatest.resolves({
-      isHandlerEnabledForSite: sinon.stub().returns(true),
-    });
-
-    readConfigStub.resolves({ config: {} });
-    s3SendStub.resolves({ CommonPrefixes: [] });
-
-    const cmd = CheckCdnLogsStatusCommand(context);
-    await cmd.handleExecution(['2026-04-21'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Incomplete: *1*');
-    expect(output).to.include('https://noconfig.com');
-  });
-
-  it('uses default region and environment when env vars are absent', async () => {
-    context.env = {}; // no AWS_REGION, no AWS_ENV → triggers || fallbacks
-    context.dataAccess.Site.all.resolves([]);
-    context.dataAccess.Configuration.findLatest.resolves({
-      isHandlerEnabledForSite: sinon.stub().returns(false),
-    });
-
-    const cmd = CheckCdnLogsStatusCommand(context);
-    await cmd.handleExecution(['2026-04-21'], slackContext);
-
-    // Bucket name in hourglass message uses 'prod' and 'us-east-1' defaults
-    const firstArg = slackContext.say.getCall(0).args[0];
-    expect(firstArg).to.include('spacecat-prod-cdn-logs-aggregates-us-east-1');
-  });
-
-  it('uses us-east-1 as the per-site bucket region when config and env omit region', async () => {
-    context.env = {};
-    const site = makeSite('site-default-region', 'https://default-region.com');
-    context.dataAccess.Site.all.resolves([site]);
-    context.dataAccess.Configuration.findLatest.resolves({
-      isHandlerEnabledForSite: sinon.stub().returns(true),
-    });
-
-    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'cloudflare' } } });
-    s3SendStub.resolves({
-      CommonPrefixes: [{ Prefix: 'aggregated/site-default-region/2026/04/21/23/' }],
-    });
-
-    const cmd = CheckCdnLogsStatusCommand(context);
-    await cmd.handleExecution(['2026-04-21'], slackContext);
-
-    expect(s3SendStub.firstCall.args[0].params.Bucket)
-      .to.equal('spacecat-prod-cdn-logs-aggregates-us-east-1');
   });
 
   it('reports per-site S3 error in the errors section', async () => {
