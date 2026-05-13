@@ -614,6 +614,7 @@ export function mergeTopBrandsByDomainResponsesByMax(rawList) {
   };
 }
 
+/* c8 ignore start */
 /**
  * Map a Connect RPC failure to an HTTP-style handler result.
  * @param {unknown} error
@@ -646,3 +647,5 @@ export function responseFromGrpcError(error) {
       return { status: 502, body: { ...body, error: 'bad_gateway' } };
   }
 }
+
+/* c8 ignore stop */

@@ -11,7 +11,11 @@
  */
 
 import { fromJson, toJson } from '@bufbuild/protobuf';
-import { COUNTRY_ENUM, LLM_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
+import {
+  COUNTRY_ENUM,
+  LLM_ENUM,
+  ORDER_DIRECTION_ENUM,
+} from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   BrandTopicsRequestSchema,
   BrandTopicsResponseSchema,
@@ -40,6 +44,8 @@ export async function handleBrandTopics(sp, clients) {
   const domain = sp.get('domain');
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
+  const sortBy = sp.get('sortBy') || BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY;
+  const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
   const { limit, offset } = parseLimitOffset(sp);
 
   const categories = [
@@ -53,7 +59,10 @@ export async function handleBrandTopics(sp, clients) {
       country,
       llm: engine,
       target: { domain, name: domain },
-      order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VOLUME },
+      order: {
+        by: sortBy,
+        direction: sortDirection,
+      },
       range: { limit, offset },
       categories,
     },
