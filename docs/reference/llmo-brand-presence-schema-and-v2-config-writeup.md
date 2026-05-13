@@ -117,33 +117,6 @@ Partitioned by execution_date. One row per source URL per execution. organizatio
 
 ---
 
-### brand_metrics_weekly (pre-aggregated weekly metrics)
-
-organization_id set from site on insert.
-
-| Field           | Type    | Required | Notes |
-|-----------------|---------|----------|--------|
-| id              | uuid    | no       | Default uuid_generate_v7(). |
-| site_id         | uuid    | yes      | FK sites(id). |
-| week            | text    | yes      | Format: YYYY-Wnn (e.g. 2025-W01). |
-| model           | text    | no       | |
-| brand_id        | uuid    | no       | FK brands(id). |
-| brand_name      | text    | no       | |
-| category_id     | uuid    | no       | FK categories(id). |
-| category_name   | text    | no       | |
-| region_code     | text    | no       | |
-| topic           | text    | no       | |
-| competitors     | text    | no       | |
-| mentions_count  | integer | no       | Default 0. |
-| citations_count | integer | no       | Default 0. |
-| prompt_count    | integer | no       | Default 0. |
-| created_at      | timestamptz | no    | Default now(). |
-| updated_at      | timestamptz | no    | Default now(). |
-
-Unique: (site_id, week, model, brand_name, category_name, region_code, topic) NULLS NOT DISTINCT.
-
----
-
 ### executions_competitor_data (competitor breakdown)
 
 Partitioned by execution_date. organization_id set from site on insert.
