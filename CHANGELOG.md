@@ -1,3 +1,10 @@
+# [1.496.0](https://github.com/adobe/spacecat-api-service/compare/v1.495.1...v1.496.0) (2026-05-13)
+
+
+### Features
+
+* new brand topics ([#2409](https://github.com/adobe/spacecat-api-service/issues/2409)) ([3ff1e85](https://github.com/adobe/spacecat-api-service/commit/3ff1e85ddc03fa8e2fd4b91240d43149e2d292e9))
+
 ## [1.495.1](https://github.com/adobe/spacecat-api-service/compare/v1.495.0...v1.495.1) (2026-05-13)
 
 
