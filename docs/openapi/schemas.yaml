@@ -9092,6 +9092,32 @@ AiVisibilityV1TopicBrandTopicsResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1PromptBrandPromptRow:
+  type: object
+  description: |
+    One prompt from Semrush `PromptsResponse.prompts` as protobuf JSON (camelCase).
+    UInt64 and other wide numeric fields may be serialized as JSON strings.
+  additionalProperties: true
+
+AiVisibilityV1PromptBrandPromptsResponse:
+  type: object
+  description: |
+    Brand prompts list from `GET /llmo/ai-visibility/v1/prompt/brand-prompts`.
+    Wraps Semrush v2 `Prompts` / `PromptsTotals` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptBrandPromptRow'
+    total:
+      description: Total prompts matching the request (from `PromptsTotals`)
+      oneOf:
+        - type: integer
+        - type: string
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityCompetitorsMetrics:
   type: object
   description: Competitor comparison time-series response
