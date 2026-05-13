@@ -97,22 +97,42 @@ function defaultDateRange() {
  * Parse common agentic traffic query params from context.data.
  * Supports camelCase and snake_case aliases.
  */
+// Filter values reach the exportId hash + SQS message; coerce non-strings
+// to null and bound length (SQS limit is 256 KiB).
+const FILTER_STRING_MAX = 512;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function sanitizeFilterString(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  /* c8 ignore next 3 -- empty/oversized length hygiene; not security-critical */
+  if (value.length === 0 || value.length > FILTER_STRING_MAX) {
+    return null;
+  }
+  return value;
+}
+
+function sanitizeDateString(value, fallback) {
+  return typeof value === 'string' && DATE_PATTERN.test(value) ? value : fallback;
+}
+
 function parseAgenticTrafficParams(context) {
   const q = context.data || {};
   const defaults = defaultDateRange();
   return {
-    startDate: q.startDate || q.start_date || defaults.startDate,
-    endDate: q.endDate || q.end_date || defaults.endDate,
+    startDate: sanitizeDateString(q.startDate || q.start_date, defaults.startDate),
+    endDate: sanitizeDateString(q.endDate || q.end_date, defaults.endDate),
     platform: PLATFORM_CODE_TO_DB[q.platform] ?? null,
-    categoryName: q.categoryName || q.category_name || null,
-    agentType: q.agentType || q.agent_type || null,
+    categoryName: sanitizeFilterString(q.categoryName || q.category_name),
+    agentType: sanitizeFilterString(q.agentType || q.agent_type),
     // Additive inclusion list orthogonal to the single-value `agentType`. Used by the
     // URL Inspector PG page to enforce `Agent Type ∈ {Chatbots, Research}`. Existing
     // callers omit this and continue to receive the same data.
     agentTypes: parseAgentTypes(q.agentTypes ?? q.agent_types),
-    userAgent: q.userAgent || q.user_agent || null,
-    contentType: q.contentType || q.content_type || null,
-    urlPathSearch: q.urlPathSearch || q.url_path_search || null,
+    userAgent: sanitizeFilterString(q.userAgent || q.user_agent),
+    contentType: sanitizeFilterString(q.contentType || q.content_type),
+    urlPathSearch: sanitizeFilterString(q.urlPathSearch || q.url_path_search),
     // Normalise to null for unknown buckets — mirrors how PLATFORM_CODE_TO_DB handles
     // unknown platform codes, preventing a DB exception (500) for invalid input.
     successRate: VALID_SUCCESS_RATE_BUCKETS.has(q.successRate || q.success_rate)
@@ -169,6 +189,8 @@ function buildExportId(payload) {
   return crypto.createHash('sha256').update(stableStringify(payload)).digest('hex');
 }
 
+// EXPORT_VERSION is intentionally in both the key prefix (physical isolation)
+// and the canonical payload (forces hash invalidation on bump). Keep both.
 function buildExportKeys(siteId, exportId) {
   const prefix = `agentic-traffic/url-exports/${siteId}/${EXPORT_VERSION}/${exportId}`;
   return {
@@ -176,6 +198,13 @@ function buildExportKeys(siteId, exportId) {
     metadataKey: `${prefix}/metadata.json`,
   };
 }
+
+// Caps defend status-polling against a pathological prefix (malicious
+// continuation token, misbehaving worker).
+const MAX_EXPORT_LIST_PAGES = 5;
+const MAX_EXPORT_LIST_KEYS_PER_PAGE = 100;
+const PART_SUFFIX_PATTERN = /_part(\d+)$/;
+const REGEX_META_PATTERN = /[.*+?^${}()|[\]\\]/g;
 
 function getExportConfig(ctx) {
   // S3_REPORT_BUCKET is the API service's existing env var name; the worker
@@ -191,25 +220,29 @@ function getExportConfig(ctx) {
 async function listExportCsvObjects(ctx, bucket, csvKey) {
   const { s3 } = ctx;
   const objects = [];
+  const partMatcher = new RegExp(`^${csvKey.replace(REGEX_META_PATTERN, '\\$&')}_part\\d+$`);
   let ContinuationToken;
+  let pages = 0;
   do {
     const command = new s3.ListObjectsV2Command({
       Bucket: bucket,
       Prefix: csvKey,
+      MaxKeys: MAX_EXPORT_LIST_KEYS_PER_PAGE,
       ContinuationToken,
     });
     // eslint-disable-next-line no-await-in-loop
     const result = await s3.s3Client.send(command);
     objects.push(...(result.Contents || [])
-      .filter((item) => item.Key === csvKey || item.Key?.match(new RegExp(`^${csvKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}_part\\d+$`)))
+      .filter((item) => item.Key === csvKey || item.Key?.match(partMatcher))
       .map((item) => item.Key));
     ContinuationToken = result.NextContinuationToken;
-  } while (ContinuationToken);
+    pages += 1;
+  } while (ContinuationToken && pages < MAX_EXPORT_LIST_PAGES);
 
   return [...new Set(objects)].sort((left, right) => {
     // `|| 1` is unreachable: filter above guarantees `_part\d+$` matches.
     /* c8 ignore next */
-    const part = (key) => (key === csvKey ? 1 : Number(key.match(/_part(\d+)$/)?.[1] || 1));
+    const part = (key) => (key === csvKey ? 1 : Number(key.match(PART_SUFFIX_PATTERN)?.[1] || 1));
     return part(left) - part(right);
   });
 }
@@ -230,13 +263,19 @@ async function getExportMetadata(ctx, bucket, metadataKey) {
   }
 }
 
+// Presigned URLs are bearer credentials — short TTL bounds leak blast radius.
+const PRESIGNED_URL_TTL_SECONDS = 60 * 60;
+const MAX_EXPORT_DOWNLOAD_URLS = 50;
+
 async function buildExportReadyResponse(ctx, bucket, exportId, csvKeys, metadata = null) {
-  const expiresIn = 60 * 60 * 24 * 7;
-  const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
-  const downloadUrls = await Promise.all(csvKeys.map(async (key) => {
+  const expiresIn = PRESIGNED_URL_TTL_SECONDS;
+  const keysToSign = csvKeys.slice(0, MAX_EXPORT_DOWNLOAD_URLS);
+  const downloadUrls = await Promise.all(keysToSign.map(async (key) => {
     const command = new ctx.s3.GetObjectCommand({ Bucket: bucket, Key: key });
     return ctx.s3.getSignedUrl(ctx.s3.s3Client, command, { expiresIn });
   }));
+  // Computed after signing so callers see the floor of the URL window.
+  const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
   return ok({
     exportId,
@@ -249,6 +288,8 @@ async function buildExportReadyResponse(ctx, bucket, exportId, csvKeys, metadata
   });
 }
 
+// Contract: worker writes CSV first, metadata.json last. Tighten to require
+// `metadata.status === 'success'` if that order ever changes.
 function isExportReady(csvKeys, metadata) {
   return csvKeys.length > 0 && (!metadata || metadata.status === 'success');
 }
@@ -259,6 +300,18 @@ function isExportFailed(metadata) {
 
 function isExportProcessing(metadata) {
   return metadata?.status === 'processing';
+}
+
+// 30 min covers Aurora's 840s statement_timeout + Lambda overhead.
+// Older `processing` metadata is treated as abandoned so the cache key unblocks.
+const EXPORT_PROCESSING_STALE_MS = 30 * 60 * 1000;
+
+function isExportStaleProcessing(metadata) {
+  if (!isExportProcessing(metadata) || !metadata.createdAt) {
+    return false;
+  }
+  const ageMs = Date.now() - new Date(metadata.createdAt).getTime();
+  return Number.isFinite(ageMs) && ageMs > EXPORT_PROCESSING_STALE_MS;
 }
 
 /**
@@ -679,18 +732,15 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
             return buildExportReadyResponse(ctx, s3Bucket, exportId, csvKeys, metadata);
           }
 
-          if (isExportProcessing(metadata)) {
+          if (isExportProcessing(metadata) && !isExportStaleProcessing(metadata)) {
             return accepted({
               exportId,
               status: 'processing',
             });
           }
 
-          // Failed metadata or no metadata → re-enqueue. POST is the
-          // user's "I want this export" signal; a prior failure shouldn't
-          // permanently lock the cache key. The worker overwrites the
-          // failed metadata.json on success/retry. Status reporting on
-          // `failed` is the GET endpoint's job, not POST's.
+          // Failed / stale-processing / no-metadata → re-enqueue. The worker
+          // overwrites metadata on retry; GET reports `failed` to the UI.
           await sqs.sendMessage(queueUrl, {
             type: EXPORT_TYPE,
             data: {
@@ -767,7 +817,15 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
             return ok({
               exportId,
               status: 'failed',
-              failureReason: metadata.failureReason || 'Export failed',
+              failureReason: metadata.failureReason ?? 'Export failed',
+            });
+          }
+
+          if (isExportStaleProcessing(metadata)) {
+            return ok({
+              exportId,
+              status: 'failed',
+              failureReason: 'Export timed out — please retry',
             });
           }
 

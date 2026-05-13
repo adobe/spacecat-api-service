@@ -1180,14 +1180,51 @@ describe('llmo-agentic-traffic', () => {
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.status).to.equal('ready');
+      // Lock the S3 key shape; a refactor flipping the prefix surfaces here.
+      const listCmd = ctx.s3.s3Client.send.firstCall.args[0];
+      expect(listCmd.input.Prefix).to.match(
+        new RegExp(`^agentic-traffic/url-exports/${SITE_ID}/v1/[a-f0-9]{64}/urls\\.csv$`),
+      );
       expect(body.downloadUrls).to.deep.equal(['https://signed.example.com/export.csv']);
       expect(ctx.sqs.sendMessage).to.not.have.been.called;
     });
 
+    it('produces the same exportId for the same filter set across calls', async () => {
+      // The cache contract rests on stableStringify being key-order invariant.
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const ctxA = makeExportContext({ data: { platform: 'chatgpt', urlPathSearch: 'pricing' } });
+      const ctxB = makeExportContext({ data: { urlPathSearch: 'pricing', platform: 'chatgpt' } });
+      const idA = (await (await handler(ctxA)).json()).exportId;
+      const idB = (await (await handler(ctxB)).json()).exportId;
+      expect(idA).to.equal(idB);
+    });
+
+    it('re-enqueues when prior `processing` metadata is stale (worker abandoned)', async () => {
+      const ctx = makeExportContext();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'processing', createdAt: oldDate },
+      });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('drops non-string filter values instead of forwarding them', async () => {
+      const ctx = makeExportContext({
+        data: { urlPathSearch: { $ne: null }, userAgent: ['a', 'b'] },
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const { filters } = ctx.sqs.sendMessage.firstCall.args[1].data;
+      expect(filters.urlPathSearch).to.equal(null);
+      expect(filters.userAgent).to.equal(null);
+    });
+
     it('queues an export job with mapped filters when no cached CSV exists', async () => {
-      // Also covers UI→DB platform code mapping: the canonical payload (which
-      // feeds both the exportId hash and the SQS message) must use the DB
-      // value 'ChatGPT', not the UI code 'chatgpt'.
+      // Also covers UI→DB platform code mapping (chatgpt → ChatGPT) in the payload.
       const ctx = makeExportContext({ data: { platform: 'chatgpt' } });
       const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
       const res = await handler(ctx);
@@ -1291,6 +1328,21 @@ describe('llmo-agentic-traffic', () => {
         status: 'failed',
         failureReason: 'db error',
       });
+    });
+
+    it('surfaces stale `processing` metadata as failed (timeout) so the UI can retry', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'processing', createdAt: oldDate },
+      });
+
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('failed');
+      expect(body.failureReason).to.match(/timed out/i);
     });
 
     it('rejects invalid export ids', async () => {
