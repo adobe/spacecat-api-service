@@ -251,6 +251,18 @@ describe('Projects Controller', () => {
       expect(responseBody.message).to.equal('Only admins can create new projects');
     });
 
+    it('should return forbidden for read-only admin users', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+      const response = await ProjectsController(context, { TEST_ENV: 'true' }).createProject({
+        data: { projectName: 'New Project', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const responseBody = await response.json();
+      expect(responseBody.message).to.equal('Only admins can create new projects');
+    });
+
     it('should return bad request when creation fails', async () => {
       mockDataAccess.Project.create.rejects(new Error('Validation failed'));
       const response = await projectsController.createProject({
@@ -286,6 +298,13 @@ describe('Projects Controller', () => {
       expect(response.status).to.equal(403);
       const responseBody = await response.json();
       expect(responseBody.message).to.equal('Only admins can view all projects');
+    });
+
+    it('should allow read-only admin to get all projects', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+      const response = await projectsController.getAll(context);
+
+      expect(response.status).to.equal(200);
     });
   });
 
@@ -367,6 +386,18 @@ describe('Projects Controller', () => {
     it('should return forbidden for non-admin users', async () => {
       context.attributes.authInfo.withProfile({ is_admin: false });
       const response = await projectsController.removeProject({
+        params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const responseBody = await response.json();
+      expect(responseBody.message).to.equal('Only admins can delete projects');
+    });
+
+    it('should return forbidden for read-only admin users', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+      const response = await ProjectsController(context, { TEST_ENV: 'true' }).removeProject({
         params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
         ...context,
       });
