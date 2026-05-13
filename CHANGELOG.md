@@ -1,3 +1,10 @@
+# [1.498.0](https://github.com/adobe/spacecat-api-service/compare/v1.497.1...v1.498.0) (2026-05-13)
+
+
+### Features
+
+* **llmo:** async URL CSV export for agentic traffic ([#2401](https://github.com/adobe/spacecat-api-service/issues/2401)) ([3151972](https://github.com/adobe/spacecat-api-service/commit/3151972210777ec672f13c6dffa574e4d339b0d4))
+
 ## [1.497.1](https://github.com/adobe/spacecat-api-service/compare/v1.497.0...v1.497.1) (2026-05-13)
 
 
