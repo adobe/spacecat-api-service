@@ -82,6 +82,11 @@ export async function sendEmail(context, {
       return result;
     }
 
+    if (!postOfficeEndpoint.startsWith('https://')) {
+      result.error = 'ADOBE_POSTOFFICE_ENDPOINT must use HTTPS';
+      return result;
+    }
+
     const body = JSON.stringify({
       toList: recipients.join(','),
       templateData: templateData || {},
@@ -105,8 +110,9 @@ export async function sendEmail(context, {
 
     if (!result.success) {
       const responseText = await response.text().catch(() => '(unable to read response body)');
-      result.error = `Post Office returned ${response.status}: ${responseText}`;
-      log.error(`Email send failed for template ${templateName}: ${result.error}`);
+      const truncated = responseText.length > 200 ? `${responseText.slice(0, 200)}…` : responseText;
+      log.error(`Email send failed for template ${templateName}: Post Office returned ${response.status}: ${truncated}`);
+      result.error = `Post Office returned ${response.status}`;
     }
   } catch (error) {
     result.error = error.message;

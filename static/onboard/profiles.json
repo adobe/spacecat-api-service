@@ -74,7 +74,6 @@
 			"scrape-top-pages": {},
 			"broken-backlinks": {},
 			"broken-internal-links": {},
-			"experimentation-opportunities": {},
 			"meta-tags": {},
 			"product-metatags": {},
 			"commerce-product-enrichments": {},
@@ -116,7 +115,6 @@
 			"scrape-top-pages": {},
 			"broken-backlinks": {},
 			"broken-internal-links": {},
-			"experimentation-opportunities": {},
 			"meta-tags": {},
 			"redirect-chains": {},
 			"cwv": {},
@@ -131,7 +129,8 @@
 			"accessibility": {},
 			"hreflang": {},
 			"security-vulnerabilities": {},
-			"security-vulnerabilities-auto-suggest": {}
+			"security-vulnerabilities-auto-suggest": {},
+			"wikipedia-analysis": {}
 		},
 		"imports": {
 			"organic-traffic" : {},

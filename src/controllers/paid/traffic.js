@@ -345,7 +345,7 @@ function TrafficController(context, log, env) {
 
     log.info(`Bounce gap calculation: totalLoss=${bounceGapResult.projectedTrafficLost}, hasShow=${bounceGapResult.hasShowData}, hasHidden=${bounceGapResult.hasHiddenData}`);
 
-    // Fetch CPC data from Ahrefs (or use default)
+    // Fetch CPC data from SEO source (or use default)
     const cpcData = await fetchCPCData(context, bucketName, siteId, log);
     log.info(`CPC data loaded - source: ${cpcData.source}, organicCPC: $${cpcData.organicCPC.toFixed(4)}, paidCPC: $${cpcData.paidCPC.toFixed(4)}`);
 

@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { CAP_ORG_READ_ALL, CAP_SITE_READ_ALL } from './capability-constants.js';
+
 /**
  * Routes that are intentionally excluded from S2S consumer access.
  *
@@ -33,12 +35,8 @@ export const INTERNAL_ROUTES = [
   // Hooks - use hookSecret in path for auth, not JWT
   'POST /hooks/site-detection/cdn/:hookSecret',
   'POST /hooks/site-detection/rum/:hookSecret',
-
-  // Preflight - CS/preflight flow not exposed to S2S consumers; end-user UI only
-  'POST /preflight/jobs',
-  'GET /preflight/jobs/:jobId',
-  'POST /preflight/beta/jobs',
-  'GET /preflight/beta/jobs/:jobId',
+  // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
+  'POST /webhooks/github',
 
   // Suggestion edge ops (auto-fix, edge-deploy, etc.): not yet required by S2S
   // TODO: Add these back in when we have a S2S consumer that needs them
@@ -103,6 +101,20 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/movers',
   'GET /sites/:siteId/agentic-traffic/has-data',
 
+  // Referral traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/referral-traffic/has-data',
+  'GET /sites/:siteId/referral-traffic/filter-dimensions',
+  'GET /sites/:siteId/referral-traffic/kpis',
+  'GET /sites/:siteId/referral-traffic/trend',
+  'GET /sites/:siteId/referral-traffic/by-platform',
+  'GET /sites/:siteId/referral-traffic/by-region',
+  'GET /sites/:siteId/referral-traffic/by-page-intent',
+  'GET /sites/:siteId/referral-traffic/by-url',
+  'GET /sites/:siteId/referral-traffic/by-url-trend',
+  'GET /sites/:siteId/referral-traffic/by-device',
+  'GET /sites/:siteId/referral-traffic/business-impact',
+  'GET /sites/:siteId/referral-traffic/weeks',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
@@ -119,6 +131,7 @@ export const INTERNAL_ROUTES = [
   'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
   'PATCH /plg/onboard/:onboardingId',
+  'PATCH /plg/onboard/:onboardingId/status',
   'POST /plg/records',
   'PATCH /plg/records/:plgOnboardingId',
   'DELETE /plg/records/:plgOnboardingId',
@@ -153,9 +166,6 @@ export const INTERNAL_ROUTES = [
   'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
   'PATCH /contact-sales-leads/:contactSalesLeadId',
 
-  // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
-  'POST /sites/:siteId/autofix-checks',
-
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
   'GET /consumers/by-client-id/:clientId',
@@ -164,6 +174,10 @@ export const INTERNAL_ROUTES = [
   'PATCH /consumers/:consumerId',
   'POST /consumers/:consumerId/revoke',
 
+  // API Keys - scoped API key management; end-user/admin flow, not exposed to S2S consumers
+  'POST /tools/api-keys',
+  'DELETE /tools/api-keys/:id',
+  'GET /tools/api-keys',
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
@@ -218,7 +232,7 @@ const routeRequiredCapabilities = {
   'PATCH /configurations/sites/audits': 'configuration:write',
 
   // Organizations
-  'GET /organizations': 'organization:read',
+  'GET /organizations': CAP_ORG_READ_ALL,
   'POST /organizations': 'organization:write',
   'GET /organizations/:organizationId': 'organization:read',
   'GET /organizations/by-ims-org-id/:imsOrgId': 'organization:read',
@@ -247,6 +261,7 @@ const routeRequiredCapabilities = {
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
   'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
@@ -261,12 +276,16 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/prompt-execution-status': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompt-execution-status': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/search': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/search': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/prompts/:promptId/detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompts/:promptId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': 'brand:read',
@@ -287,9 +306,21 @@ const routeRequiredCapabilities = {
   'GET /projects/:projectId/sites': 'site:read',
   'GET /projects/by-project-name/:projectName/sites': 'site:read',
 
+  // preflight jobs
+  'POST /preflight/jobs': 'site:write',
+  'GET /preflight/jobs/:jobId': 'site:read',
+  'POST /preflight/beta/jobs': 'site:write',
+  'GET /preflight/beta/jobs/:jobId': 'site:read',
+  // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
+  'POST /sites/:siteId/autofix-checks': 'site:read',
+
   // Sites
-  'GET /sites': 'site:read',
+  // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
+  // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
+  'GET /sites': CAP_SITE_READ_ALL,
   'POST /sites': 'site:write',
+  'POST /sites/detect/jobs': 'site:write',
+  'GET /sites/detect/jobs/:jobId': 'site:read',
   'GET /sites.csv': 'site:read',
   'GET /sites.xlsx': 'site:read',
   'GET /sites/:siteId': 'site:read',
@@ -432,11 +463,6 @@ const routeRequiredCapabilities = {
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',
 
-  // API Keys
-  'POST /tools/api-keys': 'apiKey:write',
-  'DELETE /tools/api-keys/:id': 'apiKey:write',
-  'GET /tools/api-keys': 'apiKey:read',
-
   // Import Jobs
   'POST /tools/import/jobs': 'importJob:write',
   'GET /tools/import/jobs/:jobId': 'importJob:read',
@@ -476,9 +502,13 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:read',
-  'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'site:write',
-  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:write',
-  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:write',
+  // These POST sheet-data routes use POST only to accommodate complex query payloads that exceed
+  // URL length limits. They are non-mutating (no side effects) and intentionally require
+  // only site:read, which also allows read-only admins and S2S consumers with read-only tokens
+  // to query sheet data.
+  'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
+  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:read',
+  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data': 'site:read',
   'GET /sites/:siteId/llmo/data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': 'site:read',
@@ -502,8 +532,33 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/strategy': 'site:read',
   'PUT /sites/:siteId/llmo/strategy': 'site:write',
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
+  'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',
   'POST /llmo/agentic-traffic/global': 'report:write',
+
+  // AI Visibility (Semrush proxy): gated like GET /llmo/agentic-traffic/global (report:read)
+  'GET /llmo/ai-visibility/brands/stats': 'report:read',
+  'GET /llmo/ai-visibility/brands/topics': 'report:read',
+  'GET /llmo/ai-visibility/brands/prompts': 'report:read',
+  'GET /llmo/ai-visibility/brands/cited-pages': 'report:read',
+  'GET /llmo/ai-visibility/brands/topic-opportunities': 'report:read',
+  'GET /llmo/ai-visibility/brands/top-brands': 'report:read',
+  'GET /llmo/ai-visibility/brands/cited-sources': 'report:read',
+  'GET /llmo/ai-visibility/brands/source-opportunities': 'report:read',
+  'GET /llmo/ai-visibility/brands/competitors': 'report:read',
+  'GET /llmo/ai-visibility/competitors/metrics': 'report:read',
+  'GET /llmo/ai-visibility/competitors/gap-topics': 'report:read',
+  'GET /llmo/ai-visibility/competitors/gap-source-domains': 'report:read',
+  'GET /llmo/ai-visibility/competitors/gap-prompts': 'report:read',
+  'GET /llmo/ai-visibility/meta': 'report:read',
+  'GET /llmo/ai-visibility/prompts/responses/latest': 'report:read',
+  'GET /llmo/ai-visibility/prompts/responses': 'report:read',
+  'GET /llmo/ai-visibility/topics/research/stats': 'report:read',
+  'GET /llmo/ai-visibility/topics/research/prompts': 'report:read',
+  'GET /llmo/ai-visibility/topics/research/brands': 'report:read',
+  'GET /llmo/ai-visibility/topics/research/source-domains': 'report:read',
+  'GET /llmo/ai-visibility/topics/research': 'report:read',
+  'GET /llmo/ai-visibility/topics/stats': 'report:read',
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
@@ -544,6 +599,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/sentiment/config': 'sentimentTopic:read',
 
   // Tokens
+  'GET /sites/:siteId/tokens': 'token:read',
   'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
   'GET /sites/:siteId/tokens/:tokenId/grants': 'token:read',
 

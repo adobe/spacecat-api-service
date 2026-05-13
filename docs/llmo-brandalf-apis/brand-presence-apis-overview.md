@@ -9,6 +9,8 @@ Single entry point for all org-scoped Brand Presence HTTP APIs backed by mystica
 
 Parameters are typically supplied as **query string** fields (merged into request `data` by the API gateway). Aliases such as `start_date` / `startDate` are noted per endpoint.
 
+**Category and region filters:** Singular `categoryId` / `regionCode` (plus `category_id`, `region_code`, `region`) stay supported. Plural `categoryIds` / `category_ids` and `regionCodes` / `region_codes` accept comma-separated or repeated values and merge with the singular fields (deduped). Some endpoints call PostgreSQL RPCs that only accept one category and one region; those return **400** when multiple categories, multiple regions, or mixed UUID + name category filters are used. **Stats** instead issues one RPC per Cartesian slice and merges counts (see [stats](brand-presence-stats-api.md)). Execution-backed routes (for example sentiment overview, search, topic prompts) filter `brand_presence_executions` by category and region in line with each other.
+
 Deep-dive docs: [filter-dimensions](filter-dimensions-api.md), [weeks](brand-presence-weeks-api.md), [sentiment-overview](sentiment-overview-api.md), [market-tracking-trends](market-tracking-trends-api.md), [topics & prompts](topics-api.md), [search](search-api.md), [topic detail](topic-detail-api.md), [prompt detail](prompt-detail-api.md), [sentiment-movers](sentiment-movers-api.md), [share-of-voice](share-of-voice-api.md), [stats](brand-presence-stats-api.md), [execution sources](execution-sources-api.md).
 
 **URL Inspector APIs** (site-scoped, separate suite): see [url-inspector-apis-overview.md](url-inspector-apis-overview.md) — covers `stats`, `owned-urls`, `trending-urls`, `cited-domains`, `domain-urls`, `url-prompts`.

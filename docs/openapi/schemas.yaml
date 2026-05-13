@@ -176,6 +176,13 @@ ScopeName:
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
+SemrushWorkspaceId:
+  type: string
+  description: |
+    Semrush workspace identifier mapped to this Adobe organization.
+    UNIQUE across organizations (DB-enforced). Setting this field via
+    PATCH is restricted to admin users.
+  example: 'ws_12345'
 ImsUserAccessToken:
   type: string
   example: 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEyMzQ1IiwidHlwZSI6ImFjY2Vzc190b2tlbiIsImNsaWVudF9pZCI6ImV4YW1wbGVfYXBwIiwidXNlcl9pZCI6Ijk4NzY1NDc4OTBBQkNERUYxMjM0NTY3OEBhYmNkZWYxMjM0NTY3ODkuZSIsImFzIjoiaW1zLW5hMSIsImFhX2lkIjoiMTIzNDU2Nzg5MEFCQ0RFRjEyMzQ1Njc4QGFkb2JlLmNvbSIsImNyZWF0ZWRfYXQiOiIxNzEwMjQ3MDAwMDAwIn0.MRDpxgxSHDj4DmA182hPnjMAnKkly-VUJ_bXpQ-J8EQ'
@@ -194,6 +201,12 @@ HandlerConfig:
       $ref: '#/SlackMentionConfig'
     excludedURLs:
       description: URLs to be excluded from the handler's processing
+      type: array
+      items:
+        type: string
+        format: uri
+    includedURLs:
+      description: URLs to be included in the handler's processing
       type: array
       items:
         type: string
@@ -221,6 +234,8 @@ HandlerConfig:
     excludedURLs:
       - 'https://www.adobe.com/excluded-page'
       - 'https://www.adobe.com/another-excluded-page'
+    includedURLs:
+      - 'https://www.adobe.com/included-page'
     groupedURLs:
       - name: 'catalog'
         pattern: '/products/'
@@ -391,6 +406,9 @@ Organization:
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
+    semrushWorkspaceId:
+      description: Optional. The Semrush workspace ID mapped to this organization.
+      $ref: '#/SemrushWorkspaceId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -404,6 +422,7 @@ Organization:
     id: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     name: 'Example Organization'
     imsOrgId: '1234567890ABCDEF12345678@AdobeOrg'
+    semrushWorkspaceId: 'ws_12345'
     config:
       slack:
         channel: '#example-channel'
@@ -441,6 +460,12 @@ OrganizationCreate:
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
+    semrushWorkspaceId:
+      description: |
+        Optional. The Semrush workspace ID to bind to this organization at
+        creation time. Admin-only endpoint - non-admins cannot reach this
+        path. UNIQUE across organizations.
+      $ref: '#/SemrushWorkspaceId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -474,6 +499,11 @@ OrganizationUpdate:
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
+    semrushWorkspaceId:
+      description: |
+        Optional. The Semrush workspace ID to bind to this organization.
+        Admin-only - non-admin users PATCHing this field receive a 403.
+      $ref: '#/SemrushWorkspaceId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -811,10 +841,25 @@ UpdateHandlerTypeConfig:
   type: object
   properties:
     excludedURLs:
-      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed
+      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed. Combined with replaceExcludedURLs to control merge vs replace behavior
       type: array
       items:
         type: string
+        format: uri
+    replaceExcludedURLs:
+      description: When true, excludedURLs fully replaces the existing list. When false (default), values are appended and deduplicated
+      type: boolean
+      default: false
+    includedURLs:
+      description: Set of URLs to include. If empty, previously included URLs will be removed. Combined with replaceIncludedURLs to control merge vs replace behavior
+      type: array
+      items:
+        type: string
+        format: uri
+    replaceIncludedURLs:
+      description: When true, includedURLs fully replaces the existing list. When false (default), values are appended and deduplicated
+      type: boolean
+      default: false
     groupedURLs:
       description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
       type: array
@@ -831,6 +876,10 @@ UpdateHandlerTypeConfig:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
+    replaceExcludedURLs: true
+    includedURLs:
+      - 'https://www.adobe.com/included-page'
+    replaceIncludedURLs: true
     groupedURLs:
       - name: 'catalog'
         pattern: '/products/'
@@ -5996,7 +6045,10 @@ V2Prompt:
       properties:
         id:
           type: string
-          description: Business key (category_id)
+          description: |
+            Currently the UUID PK (categories.id) for backward compat —
+            aligning this to the category_id business key is a deferred
+            breaking change. Use `uuid` for FK linkage today.
         uuid:
           type: string
           format: uuid
@@ -6010,14 +6062,15 @@ V2Prompt:
       properties:
         id:
           type: string
-          description: Business key (topic_id)
+          description: |
+            Currently the UUID PK (topics.id) for backward compat —
+            aligning this to the topic_id business key is a deferred
+            breaking change. Use `uuid` for FK linkage today.
         uuid:
           type: string
           format: uuid
           description: UUID primary key (topics.id)
         name:
-          type: string
-        categoryId:
           type: string
 
 V2PromptInput:
@@ -7308,6 +7361,21 @@ V2Topic:
         - 'null'
       format: uuid
       description: Optional brand UUID this topic belongs to
+    categoryUuids:
+      type: array
+      uniqueItems: true
+      items:
+        type: string
+        format: uuid
+      description: |
+        UUIDs of non-deleted categories linked to this topic via the
+        topic_categories junction table. Always present; empty array when no
+        categories are linked. Never null. Entries are unique (enforced by the
+        topic_categories UNIQUE(topic_id, category_id) constraint). Order is
+        not guaranteed; clients that need a stable order must sort client-side.
+      example:
+        - '019d4464-5784-74d1-8469-e5d3cddc8e52'
+        - '019d4465-2110-7c8a-9f12-7b8e8a3c4d11'
     updatedAt:
       type: string
       format: date-time
@@ -7507,6 +7575,72 @@ PageRelationshipsSearchResponse:
       $ref: '#/PageRelationshipsMapping'
     errors:
       $ref: '#/PageRelationshipsErrorMapping'
+
+CreateSiteDetectionJobResponse:
+  type: object
+  required: [jobId, status, createdAt, pollUrl]
+  properties:
+    createdAt:
+      type: string
+      format: date-time
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the newly created site detection job.
+    pollUrl:
+      type: string
+      format: uri
+      description: The URL to poll for the status of the site detection job.
+    status:
+      type: string
+      enum: [IN_PROGRESS]
+      description: Always IN_PROGRESS immediately after creation.
+
+SiteDetectionJobResponse:
+  type: object
+  required: [jobId, status, createdAt, updatedAt]
+  properties:
+    createdAt:
+      type: string
+      format: date-time
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the site detection job.
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+    updatedAt:
+      type: string
+      format: date-time
+    result:
+      type: object
+      description: The result of the site detection job once completed or failed. Absent when the job is still IN_PROGRESS.
+      properties:
+        action:
+          type: string
+          enum: [created, rejected, duplicate]
+          description: The action taken by the site detection job.
+        domain:
+          type: string
+          description: The domain that was processed.
+        baseURL:
+          type: string
+          format: uri
+          description: The normalized base URL (present for action=created).
+        reason:
+          type: string
+          description: Human-readable reason for the action (present for rejected/duplicate).
+    error:
+      type: object
+      description: The error of the site detection job if it failed with an exception. Absent when no exception occurred.
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+        message:
+          type: string
+          description: Human-readable error message.
 
 BrandPresenceLlmModel:
   type: string
@@ -7922,6 +8056,27 @@ AgenticTrafficByUrlRow:
     deployedAtEdge:
       type: boolean
       example: true
+    hitsTrend:
+      type: array
+      description: |
+        Multi-week sparkline for this URL — array of `{weekStart, value}` points
+        scoped by the same filters (including `agentTypes`). Used by the URL
+        Inspector PG dialog to render per-URL agentic charts without a second
+        request. Empty array when the URL has no agentic activity in the
+        requested window. The `value` field name (rather than `hits`) is
+        preserved from the underlying `rpc_agentic_traffic_by_url` week_series
+        payload to stay aligned with `UrlInspectorOwnedUrlRow.agenticHitsTrend`.
+      items:
+        type: object
+        properties:
+          weekStart:
+            type: string
+            format: date
+            example: '2026-02-09'
+          value:
+            type: integer
+            example: 12
+        required: [weekStart, value]
   required:
     - host
     - urlPath
@@ -8145,6 +8300,35 @@ UrlInspectorOwnedUrlRow:
       items:
         type: object
       description: Weekly prompts-cited breakdown (JSONB from RPC)
+    agenticHits:
+      type: integer
+      description: |
+        Total agentic Citation Attempts for this URL across the requested
+        window, scoped by `agentTypes` if supplied (the URL Inspector PG
+        page passes `Chatbots,Research`). Defaults to 0 when the URL has
+        no agentic activity. Server-side join from `agentic_traffic_weekly`
+        added in LLMO-4526 — replaces the previous client-side merge that
+        silently truncated owned URLs ranked beyond 500.
+      example: 1248
+    agenticHitsTrend:
+      type: array
+      description: |
+        Per-week agentic Citation Attempts for this URL — array of
+        `{weekStart, value}` points scoped by the same filters. Empty
+        array when there is no agentic activity. Added in LLMO-4526.
+      items:
+        type: object
+        properties:
+          weekStart:
+            oneOf:
+              - type: string
+                format: date
+              - type: 'null'
+            example: '2026-02-09'
+          value:
+            type: integer
+            example: 21
+        required: [value]
 
 UrlInspectorOwnedUrls:
   type: object
@@ -8368,3 +8552,415 @@ UrlInspectorFilterDimensions:
           label: { type: string }
         required: [id, label]
   required: [categories, regions, content_types]
+
+BrandPresenceFilterOption:
+  type: object
+  description: A single id/label option for a filter dropdown
+  properties:
+    id: { type: string }
+    label: { type: string }
+  required: [id, label]
+
+BrandPresenceFilterDimensions:
+  type: object
+  description: |
+    Filter dimensions for the Brand Presence configuration view.
+    Each dimension is an array of id/label pairs except `stats`.
+  properties:
+    brands:
+      type: array
+      description: Brands accessible for the organization (and optionally a specific site).
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    categories:
+      type: array
+      description: Prompt categories configured for the organization.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    topics:
+      type: array
+      description: Topics for the organization, optionally scoped to a category.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    regions:
+      type: array
+      description: Available region codes.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    origins:
+      type: array
+      description: Prompt origin values (e.g. `human`, `ai`).
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    page_intents:
+      type: array
+      description: Page intent values derived from the brand's prompt data.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    stats:
+      type: object
+      description: Aggregate statistics for the current filter scope.
+      properties:
+        distinct_prompt_count:
+          type: integer
+          description: Number of distinct prompts matching the current filter scope.
+      required: [distinct_prompt_count]
+  required: [brands, categories, topics, regions, origins, page_intents, stats]
+
+WebhookAccepted:
+  type: object
+  properties:
+    status:
+      type: string
+      enum: [accepted]
+  required: [status]
+WebhookUnauthorized:
+  type: object
+  properties:
+    message:
+      type: string
+  required: [message]
+
+PromptExecutionStatusItem:
+  type: object
+  description: Execution status for a single (topic, prompt, region) combination.
+  properties:
+    topicId:
+      type: string
+      format: uuid
+      description: Topic UUID
+      example: 'aaaaaaaa-0000-7000-8000-000000000001'
+    prompt:
+      type: string
+      description: Prompt text
+      example: 'What is the best photo editor?'
+    regionCode:
+      type: string
+      description: Two-character region code
+      example: 'US'
+    matchedModels:
+      type: array
+      description: LLM models that have execution data for this (topic, prompt, region) in the queried date range
+      items:
+        type: string
+      example: ['chatgpt-free', 'google']
+  required: [topicId, prompt, regionCode, matchedModels]
+
+PromptExecutionStatusResponse:
+  type: object
+  properties:
+    items:
+      type: array
+      description: One item per unique (topicId, prompt, regionCode) combination
+      items:
+        $ref: '#/PromptExecutionStatusItem'
+  required: [items]
+
+# ── AI Visibility schemas ──────────────────────────────────────────────
+
+AiVisibilityServiceUnavailable:
+  type: object
+  description: Returned when the AI Visibility gRPC backend is not configured
+  properties:
+    error:
+      type: string
+      example: aiVisibilityNotConfigured
+    message:
+      type: string
+      example: Missing SEO_CLIENT_ID
+  required: [error, message]
+
+AiVisibilityEngineBreakdown:
+  type: object
+  description: Per-LLM-engine numeric breakdown
+  properties:
+    all:
+      type: number
+    chatgpt:
+      type: number
+    gemini:
+      type: number
+    googleAiMode:
+      type: number
+    googleAiOverview:
+      type: number
+
+AiVisibilityByDateEntry:
+  type: object
+  description: A single date-bucket in brand statistics
+  properties:
+    year:
+      type: integer
+    month:
+      type: integer
+    day:
+      type: integer
+    aiVisibility:
+      type: number
+    mentions:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    citedPages:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    visibilityByEngine:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    ownedSources:
+      type: integer
+    audience:
+      type: integer
+
+AiVisibilityByCountryEntry:
+  type: object
+  description: Per-country breakdown row in brand statistics
+  properties:
+    country:
+      type: string
+    mentions:
+      type: integer
+    audience:
+      type: integer
+    citedPages:
+      type: integer
+
+AiVisibilitySrFilters:
+  type: object
+  description: Available filter dimensions extracted from the response
+  properties:
+    markets:
+      type: array
+      items:
+        type: object
+        properties:
+          code:
+            type: string
+          name:
+            type: string
+    models:
+      type: array
+      items:
+        type: object
+        properties:
+          code:
+            type: string
+          name:
+            type: string
+
+AiVisibilityBrandStats:
+  type: object
+  description: Brand visibility statistics response
+  properties:
+    visibility:
+      type: number
+    visibilityByEngine:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    audience:
+      type: integer
+    mentions:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    citedPages:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    byDate:
+      type: array
+      items:
+        $ref: '#/AiVisibilityByDateEntry'
+    byCountry:
+      type: array
+      items:
+        $ref: '#/AiVisibilityByCountryEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityPaginatedResponse:
+  type: object
+  description: Generic paginated response for AI Visibility list endpoints
+  properties:
+    data:
+      type: array
+      items:
+        type: object
+        additionalProperties: true
+    total:
+      type: integer
+      description: Total number of results matching the query
+    offset:
+      type: integer
+    limit:
+      type: integer
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityCompetitorsMetrics:
+  type: object
+  description: Competitor comparison time-series response
+  properties:
+    byBrand:
+      type: array
+      items:
+        type: object
+        properties:
+          brand:
+            type: object
+            properties:
+              domain:
+                type: string
+              name:
+                type: string
+          byDate:
+            type: array
+            items:
+              type: object
+              properties:
+                date:
+                  type: object
+                  properties:
+                    year:
+                      type: integer
+                    month:
+                      type: integer
+                    day:
+                      type: integer
+                visibility:
+                  type: number
+                mentions:
+                  type: number
+                audience:
+                  type: number
+                ownedSources:
+                  type: number
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityGapPromptRow:
+  type: object
+  description: A single gap prompt row
+  properties:
+    id:
+      type: string
+    prompt:
+      type: string
+    engine:
+      type: string
+    topic:
+      type: string
+    topicId:
+      type: string
+    topicVolume:
+      type: integer
+    mentioned:
+      type: boolean
+    brands:
+      type: integer
+    sources:
+      type: integer
+    promptHash:
+      type: string
+    serpId:
+      type: string
+
+AiVisibilityGapPromptsResponse:
+  type: object
+  description: Normalized gap prompts response
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityGapPromptRow'
+    total:
+      type: integer
+    offset:
+      type: integer
+    limit:
+      type: integer
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data, total, offset, limit]
+
+AiVisibilityMeta:
+  type: object
+  description: AI Visibility metadata including supported countries
+  properties:
+    countries:
+      type: array
+      items:
+        type: object
+        properties:
+          countryCode:
+            type: string
+            description: ISO country code
+          daily:
+            type: array
+            items:
+              type: object
+          monthly:
+            type: array
+            items:
+              type: object
+          isComingSoon:
+            type: boolean
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityTopicsResearchStats:
+  type: object
+  description: Aggregate statistics for topic research
+  properties:
+    topicsTotal:
+      type: integer
+      description: Total number of distinct topics matching the query
+    brandsTotal:
+      type: integer
+      description: Total number of brands across matching topics
+    sourceDomainsTotal:
+      type: integer
+      description: Total number of source domains across matching topics
+    intentBreakdown:
+      type: array
+      items:
+        type: object
+        properties:
+          intent:
+            type: string
+          count:
+            type: integer
+    relatedTopicsAiVolume:
+      type: integer
+      description: Aggregated AI volume for related topics
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilitySourceDomainRow:
+  type: object
+  description: A source domain row in topic research
+  properties:
+    sourceDomain:
+      type: string
+    sourcesCount:
+      type: integer
+    mentions:
+      type: integer
+    organicTraffic:
+      type: integer
+    promptExample:
+      type: string
+
+AiVisibilitySourceDomainsResponse:
+  type: object
+  description: Normalized source domains response
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySourceDomainRow'
+    total:
+      type: integer
+    offset:
+      type: integer
+    limit:
+      type: integer
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data, total, offset, limit]

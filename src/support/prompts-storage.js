@@ -219,7 +219,13 @@ function mapRowToPrompt(row) {
   const category = row.categories;
   const topic = row.topics;
   return {
+    // `id` is the TEXT business key (`prompts.prompt_id`) — used in URL paths
+    // (GET/PATCH/DELETE `/prompts/:promptId`) and as the human-readable handle.
+    // `uuid` is the UUID PK (`prompts.id`) — needed by DRS to populate the
+    // `brand_presence_executions.prompt_id` UUID FK column. Removing `uuid`
+    // (LLMO-4625 / PR #2199) caused 100% NULL prompt_id in BPE — keep both.
     id: row.prompt_id,
+    uuid: row.id,
     prompt: row.text,
     name: row.name,
     regions: row.regions || [],
@@ -232,9 +238,17 @@ function mapRowToPrompt(row) {
     updatedBy: row.updated_by,
     brandId: brand?.id ?? null,
     brandName: brand?.name ?? null,
+    // `uuid` is the UUID PK consumers must use for FK linkage (e.g. DRS reads
+    // `category.uuid` / `topic.uuid` to populate
+    // `brand_presence_executions.category_id` / `.topic_id`). Documented in
+    // OpenAPI V2Prompt schema; absent here previously, which produced NULL FKs
+    // for the v2 (brandalf) cohort. `id` kept unchanged for backward compat
+    // (today it carries the UUID, not the business key as the OpenAPI schema
+    // suggests; aligning to schema is a deferred breaking change).
     category: category
       ? {
         id: category.id,
+        uuid: category.id,
         name: category.name,
         origin: category.origin,
       }
@@ -242,6 +256,7 @@ function mapRowToPrompt(row) {
     topic: topic
       ? {
         id: topic.id,
+        uuid: topic.id,
         name: topic.name,
       }
       : null,
@@ -492,7 +507,7 @@ export async function upsertPrompts({
 
   let existingQuery = postgrestClient
     .from('prompts')
-    .select('id,prompt_id,text,regions')
+    .select('id,prompt_id,text,regions,status')
     .eq('organization_id', organizationId)
     .eq('brand_id', brandUuid);
 
@@ -556,6 +571,11 @@ export async function upsertPrompts({
       updated_by: updatedBy,
     };
 
+    if (match && match.status !== 'active') {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
     if (match) {
       toUpdate.push({ ...row, id: match.id });
       processed.push({ ...row, prompt_id: promptId });
@@ -567,6 +587,7 @@ export async function upsertPrompts({
 
   let created = 0;
   let updated = 0;
+  const skipped = prompts.length - toInsert.length - toUpdate.length;
 
   if (toInsert.length > 0) {
     const { data: inserted, error } = await postgrestClient.from('prompts').insert(toInsert).select();
@@ -599,7 +620,9 @@ export async function upsertPrompts({
     updatedAt: r.updated_at,
   }));
 
-  return { created, updated, prompts: promptsOut };
+  return {
+    created, updated, skipped, prompts: promptsOut,
+  };
 }
 
 /**
