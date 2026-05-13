@@ -9,7 +9,13 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { use } from 'chai';
+import sinonChai from 'sinon-chai';
+import chaiAsPromised from 'chai-as-promised';
 import dotenv from 'dotenv';
+
+use(sinonChai);
+use(chaiAsPromised);
 
 // eslint-disable-next-line no-console
 console.log('Forcing HTTP/1.1 for Adobe Fetch');
@@ -20,3 +26,35 @@ process.env.AWS_XRAY_SDK_ENABLED = 'false';
 process.env.AWS_XRAY_CONTEXT_MISSING = 'IGNORE_ERROR';
 
 dotenv.config({ override: true });
+
+// Snapshot native globals at module load (before any test runs) so we can
+// detect and undo leaks left behind by tests that mutate them. Required in
+// parallel mode where multiple test files share a worker's globalThis and a
+// leak in one file poisons the next (most commonly via `global.fetch = ...`).
+const NATIVE_GLOBALS = {
+  fetch: globalThis.fetch,
+  setTimeout: globalThis.setTimeout,
+  setInterval: globalThis.setInterval,
+  clearTimeout: globalThis.clearTimeout,
+  clearInterval: globalThis.clearInterval,
+};
+
+export const mochaHooks = {
+  afterEach() {
+    for (const [prop, native] of Object.entries(NATIVE_GLOBALS)) {
+      const current = globalThis[prop];
+      if (current !== native) {
+        if (current && typeof current.restore === 'function') {
+          try {
+            current.restore();
+          } catch {
+            /* ignore double-restore */
+          }
+        }
+        if (globalThis[prop] !== native) {
+          globalThis[prop] = native;
+        }
+      }
+    }
+  },
+};
