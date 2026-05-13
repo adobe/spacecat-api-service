@@ -149,5 +149,38 @@ export function createSerenityTransport({ env, imsToken }) {
       const url = `${root}${API_PREFIX}/v1/workspaces/${workspaceId}/projects/${projectId}/publish`;
       return request('POST', url, env, imsToken, undefined);
     },
+
+    /**
+     * GET /v2/workspaces/{ws}/projects?type=AIO&publish_status=live,…
+     *
+     * List active (published) AIO projects in a workspace. We include both
+     * `live` and `live_with_unpublished_updates` so projects with pending
+     * edits still surface — they remain queryable upstream. Drafts and failed
+     * publishes are omitted (`publish_status` enum: draft, publishing,
+     * initial_publish_failed, live, live_with_unpublished_updates).
+     * Response shape: { items: [{ id, name, domain, ... }], page, total }.
+     */
+    async listWorkspaceProjects(workspaceId) {
+      const params = new URLSearchParams({
+        type: 'AIO',
+        publish_status: 'live,live_with_unpublished_updates',
+        limit: '100',
+      });
+      const url = `${root}${API_PREFIX}/v2/workspaces/${workspaceId}/projects?${params.toString()}`;
+      return request('GET', url, env, imsToken, undefined);
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/projects/{pid}/ai_models — list the AI models
+     * configured for a Semrush AIO project. Used to populate the Brand
+     * Presence platform filter with the project-specific model codes (rather
+     * than Elmo's hardcoded PLATFORM_OPTIONS). Response shape:
+     *   { items: [{ id, model: { id, key, name, icon }, prompts_count }], page, total }
+     * where `model.key` is the Reporting API's `CBF_model` value.
+     */
+    async listAiModels(workspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${workspaceId}/projects/${projectId}/ai_models?limit=100`;
+      return request('GET', url, env, imsToken, undefined);
+    },
   };
 }

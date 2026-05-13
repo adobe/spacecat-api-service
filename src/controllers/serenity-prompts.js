@@ -15,6 +15,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
+import { createSerenityReportingTransport } from '../support/serenity/reporting-transport.js';
 import { MatrixNotConfiguredError, listProjectsForBrand } from '../support/serenity/matrix.js';
 import {
   handleListPrompts,
@@ -166,12 +167,162 @@ function SerenityPromptsController(context, log) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/tags
+   *
+   * Returns the set of unique tag names attached to prompts in a specific
+   * Semrush project. Used by the Brand Presence dashboard where the project
+   * is pinned outside of the matrix env var, so the existing matrix-driven
+   * `listPrompts` aggregation cannot surface it.
+   */
+  const listProjectTags = async (ctx) => {
+    const { workspaceId, projectId } = ctx?.params || {};
+    if (!workspaceId || !projectId) {
+      return badRequest('Missing workspaceId / projectId');
+    }
+    const transport = buildTransport(ctx);
+    if (!transport) {
+      return badRequest('Missing IMS bearer token and SEMRUSH_COOKIE is not configured');
+    }
+    try {
+      const tagNames = new Set();
+      let page = 1;
+      const LIMIT = 200;
+      while (page <= 50) {
+        // eslint-disable-next-line no-await-in-loop
+        const resp = await transport.listPromptsByTags(workspaceId, projectId, {
+          tag_ids: [],
+          page,
+          limit: LIMIT,
+        });
+        const items = Array.isArray(resp?.items) ? resp.items : [];
+        for (const item of items) {
+          const tags = Array.isArray(item?.tags) ? item.tags : [];
+          for (const t of tags) {
+            const name = typeof t === 'string' ? t : t?.name;
+            if (name) {
+              tagNames.add(name);
+            }
+          }
+        }
+        if (items.length < LIMIT) {
+          break;
+        }
+        page += 1;
+      }
+      return ok({ tags: Array.from(tagNames).sort() });
+    } catch (e) {
+      return mapTransportError(e, log);
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/workspaces/:workspaceId/projects
+   *
+   * Lists all Semrush projects in a workspace. Used by the Brand Presence
+   * dashboard's Category filter — each project becomes one Category option.
+   */
+  const listWorkspaceProjects = async (ctx) => {
+    const { workspaceId } = ctx?.params || {};
+    if (!workspaceId) {
+      return badRequest('Missing workspaceId');
+    }
+    const transport = buildTransport(ctx);
+    if (!transport) {
+      return badRequest('Missing IMS bearer token and SEMRUSH_COOKIE is not configured');
+    }
+    try {
+      const resp = await transport.listWorkspaceProjects(workspaceId);
+      const items = Array.isArray(resp?.items) ? resp.items : [];
+      const projects = items
+        .filter((p) => p && typeof p === 'object' && p.id)
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          domain: p.domain,
+        }));
+      return ok({ projects });
+    } catch (e) {
+      return mapTransportError(e, log);
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/models
+   *
+   * Returns the AI models configured for a specific Semrush AIO project. Each
+   * entry exposes `{ id, key, name, icon }` where `key` is the value the
+   * Reporting API expects in `CBF_model` filter clauses.
+   */
+  const listProjectModels = async (ctx) => {
+    const { workspaceId, projectId } = ctx?.params || {};
+    if (!workspaceId || !projectId) {
+      return badRequest('Missing workspaceId / projectId');
+    }
+    const transport = buildTransport(ctx);
+    if (!transport) {
+      return badRequest('Missing IMS bearer token and SEMRUSH_COOKIE is not configured');
+    }
+    try {
+      const resp = await transport.listAiModels(workspaceId, projectId);
+      const items = Array.isArray(resp?.items) ? resp.items : [];
+      const models = items
+        .map((it) => it?.model)
+        .filter((m) => m && typeof m === 'object')
+        .map((m) => ({
+          id: m.id,
+          key: m.key,
+          name: m.name,
+          icon: m.icon,
+        }));
+      return ok({ models });
+    } catch (e) {
+      return mapTransportError(e, log);
+    }
+  };
+
+  /**
+   * POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/reporting/elements/:elementId
+   *
+   * Forwards a Brand Presence dashboard widget request to the Semrush v4-raw
+   * Reporting API. Body must contain `{ workspaceId, render_data }` matching
+   * the shape documented in `feat-serenity/api_requests.md`.
+   */
+  const queryReportingElement = async (ctx) => {
+    const elementId = ctx?.params?.elementId;
+    if (!elementId) {
+      return badRequest('Missing elementId');
+    }
+    const { workspaceId, render_data: renderData } = ctx?.data || {};
+    if (!workspaceId) {
+      return badRequest('Missing workspaceId');
+    }
+    if (!isNonEmptyObject(renderData)) {
+      return badRequest('Missing render_data');
+    }
+    try {
+      const transport = createSerenityReportingTransport({ env: ctx.env });
+      const result = await transport.queryElement(
+        workspaceId,
+        elementId,
+        { render_data: renderData },
+      );
+      return ok(result);
+    } catch (e) {
+      return mapTransportError(e, log);
+    }
+  };
+
   return {
     listPrompts,
     createPrompts,
     updatePrompt,
     bulkDeletePrompts,
     listProjects,
+    listProjectTags,
+    listProjectModels,
+    listWorkspaceProjects,
+    queryReportingElement,
   };
 }
 
