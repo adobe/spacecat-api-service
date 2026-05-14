@@ -49,6 +49,7 @@ import {
 } from '../../support/utils.js';
 import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
+import { updateRumConfig } from '../../support/rum-config-service.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { cleanupPlgSiteSuggestionsAndFixes } from './plg-onboarding-cleanup.js';
@@ -1243,6 +1244,10 @@ async function performAsoPlgOnboarding({
     if (!site.getProjectId()) {
       site.setProjectId(project.getId());
     }
+
+    // Perform a live RUM domain-key check and persist the result.
+    const hasDomainKey = await updateRumConfig(site, context, { save: false });
+    siteConfig.updateRumConfig(hasDomainKey);
 
     // Save site with updated config
     site.setConfig(Config.toDynamoItem(siteConfig));

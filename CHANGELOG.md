@@ -1,3 +1,52 @@
+## [1.498.1](https://github.com/adobe/spacecat-api-service/compare/v1.498.0...v1.498.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **plg:** remove summit-plg handler flag check in favour of entitlement ([#2364](https://github.com/adobe/spacecat-api-service/issues/2364)) ([ddb79e1](https://github.com/adobe/spacecat-api-service/commit/ddb79e10c6549964a9791fd1cf3246d4ff79d525))
+
+# [1.498.0](https://github.com/adobe/spacecat-api-service/compare/v1.497.1...v1.498.0) (2026-05-13)
+
+
+### Features
+
+* **llmo:** async URL CSV export for agentic traffic ([#2401](https://github.com/adobe/spacecat-api-service/issues/2401)) ([3151972](https://github.com/adobe/spacecat-api-service/commit/3151972210777ec672f13c6dffa574e4d339b0d4))
+
+## [1.497.1](https://github.com/adobe/spacecat-api-service/compare/v1.497.0...v1.497.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* reliably deliver CDN opt-in notification email ([#2340](https://github.com/adobe/spacecat-api-service/issues/2340)) ([a7788e3](https://github.com/adobe/spacecat-api-service/commit/a7788e321b4efff4535c2327bf5dae91879e4959))
+
+# [1.497.0](https://github.com/adobe/spacecat-api-service/compare/v1.496.0...v1.497.0) (2026-05-13)
+
+
+### Features
+
+* **webhooks:** add GITHUB_REVIEWER_LOGIN for configurable reviewer identity ([#2411](https://github.com/adobe/spacecat-api-service/issues/2411)) ([da3c882](https://github.com/adobe/spacecat-api-service/commit/da3c8828565babfaf50d3fe7f552b8d7661d9430))
+
+# [1.496.0](https://github.com/adobe/spacecat-api-service/compare/v1.495.1...v1.496.0) (2026-05-13)
+
+
+### Features
+
+* new brand topics ([#2409](https://github.com/adobe/spacecat-api-service/issues/2409)) ([3ff1e85](https://github.com/adobe/spacecat-api-service/commit/3ff1e85ddc03fa8e2fd4b91240d43149e2d292e9))
+
+## [1.495.1](https://github.com/adobe/spacecat-api-service/compare/v1.495.0...v1.495.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* order topics by visibility rather than volume | serenity VO ([#2413](https://github.com/adobe/spacecat-api-service/issues/2413)) ([69b084f](https://github.com/adobe/spacecat-api-service/commit/69b084f907c8a0a500f657f86d1d19addb1d7311))
+
+# [1.495.0](https://github.com/adobe/spacecat-api-service/compare/v1.494.1...v1.495.0) (2026-05-13)
+
+
+### Features
+
+* **llmo:** query brand opportunities by scope_id instead of iterating sites ([#2316](https://github.com/adobe/spacecat-api-service/issues/2316)) ([479c622](https://github.com/adobe/spacecat-api-service/commit/479c6223e5dcd47cddc26daeb29ddced24184e6d)), closes [spacecat-audit-worker#2427](https://github.com/spacecat-audit-worker/issues/2427)
+
 ## [1.494.1](https://github.com/adobe/spacecat-api-service/compare/v1.494.0...v1.494.1) (2026-05-13)
 
 
