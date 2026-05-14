@@ -686,6 +686,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       'nba.com#section',
       'nba.com/kings?q=1',
       'nba.com/kings#section',
+      'nba.com/..',
+      'nba.com/../etc/passwd',
+      'nba.com//kings',
+      'nba.com/',
     ];
 
     invalidDomains.forEach((invalidDomain) => {
@@ -706,6 +710,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       'foo.private.adobe.io',
       'myhost.local/path',
       'service.internal/api',
+      'foo.localhost',
+      'foo.localhost/api',
     ];
 
     unsafeDomains.forEach((unsafeDomain) => {
@@ -761,7 +767,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       it(`accepts subpath domain: ${domain}`, async () => {
         const context = buildContext({ domain });
         const res = await controller.onboard(context);
-        expect(res.status).to.not.equal(400);
+        expect(res.status).to.equal(200);
       });
     });
   });

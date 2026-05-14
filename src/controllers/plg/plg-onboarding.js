@@ -219,11 +219,12 @@ async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
 // AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
 const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
 
-// RFC 1123 hostname optionally followed by a URL path; no scheme, query string, or fragment.
-// Hostname max 253 chars; labels 1-63 alphanumeric/hyphen chars separated by dots.
-// Valid: nba.com, www.nba.com, nba.com/kings  Invalid: https://nba.com, nba.com?q=1
+// RFC 1123 hostname optionally followed by a URL path; no scheme, port, query, or fragment.
+// Hostname: max 253 chars, labels 1-63 alphanumeric/hyphen separated by dots.
+// Path segments: alphanumeric, hyphens, underscores only (no dot-segments, empty segments).
+// Valid: nba.com, nba.com/kings  Invalid: https://nba.com, nba.com?q=1, nba.com/../etc
 // eslint-disable-next-line max-len
-const DOMAIN_RE = /^(?=[^/]{1,253}(?:\/|$))([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(\/[^\s?#]*)?$/;
+const DOMAIN_RE = /^(?=[^/]{1,253}(?:\/|$))([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(\/[A-Za-z0-9_-]+)*$/;
 
 /**
  * Validates that a domain string is a syntactically valid hostname or hostname/path (RFC 1123).
@@ -243,6 +244,7 @@ function isSafeDomain(domain) {
   const hostname = domain.split('/')[0];
   const blocked = [
     /^localhost$/i,
+    /\.localhost$/i,
     /^127\./,
     /^10\./,
     /^172\.(1[6-9]|2\d|3[01])\./,
