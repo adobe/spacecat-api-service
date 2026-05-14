@@ -1,3 +1,10 @@
+# [1.500.0](https://github.com/adobe/spacecat-api-service/compare/v1.499.0...v1.500.0) (2026-05-14)
+
+
+### Features
+
+* **plg:** stamp steps.preOnboarded=true when fast-tracking PRE_ONBOARDING to ONBOARDED ([#2395](https://github.com/adobe/spacecat-api-service/issues/2395)) ([a447e25](https://github.com/adobe/spacecat-api-service/commit/a447e257d94b45a7f8408e6cc71ea8278abf1d2b))
+
 # [1.499.0](https://github.com/adobe/spacecat-api-service/compare/v1.498.1...v1.499.0) (2026-05-14)
 
 
