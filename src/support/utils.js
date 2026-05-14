@@ -20,12 +20,12 @@ import {
   isValidUrl,
   isObject,
   isNonEmptyObject,
-  resolveCanonicalUrl,
   isValidIMSOrgId,
   detectAEMVersion,
   detectLocale,
   wwwUrlResolver as sharedWwwUrlResolver,
   getLastNumberOfWeeks,
+  resolveCanonicalUrl,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import RUMAPIClient, { RUM_BUNDLER_API_HOST } from '@adobe/spacecat-shared-rum-api-client';
@@ -1667,6 +1667,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: ${error}`);
       return reportLine;
     }
 
@@ -1675,6 +1676,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: ${error}`);
       return reportLine;
     }
 
@@ -1693,12 +1695,14 @@ export const onboardSingleSite = async (
       }
     }
 
-    // Resolve canonical URL for the site from the base URL
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
-    if (resolvedUrl === null) {
+    // Falsy check covers null (timeout), undefined (unexpected), and '' (empty resolution)
+    if (!resolvedUrl) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
+      await say(`:warning: Could not resolve canonical URL for ${baseURL}. Using base URL as fallback.`);
       resolvedUrl = baseURL;
     }
+
     const { pathname: baseUrlPathName, origin: baseUrlOrigin } = new URL(baseURL);
     log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
     const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
