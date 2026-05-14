@@ -310,8 +310,8 @@ without interference.
 
 **This change is scoped to `spacecat-shared-data-access` and is a prerequisite that must land
 before the controller work in this repo.** The design of the `Preflight` entity and its
-relationship to `AsyncJob` should be aligned with @ekremney before implementation begins.
-See SITES-44650 for the tracking ticket.
+relationship to `AsyncJob` should be aligned with @ekdogan before implementation begins.
+See SITES-44675 for the tracking ticket.
 
 ## Consequences
 - API shape is consistent with the rest of the service; new consumers can discover preflight
