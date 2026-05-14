@@ -32,10 +32,6 @@ Several problems with this design:
 
 4. **No list endpoint.** There is no way to retrieve the history of preflights for a site.
 
-5. **Beta qualifier in the path.** `/preflight/beta/jobs` signals immaturity via the URL,
-   which is an anti-pattern. Versioning and feature graduation should not be expressed in
-   path segments.
-
 ## Decision
 Replace both endpoint pairs with three site-scoped REST endpoints:
 
