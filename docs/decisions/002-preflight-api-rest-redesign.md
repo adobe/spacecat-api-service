@@ -249,44 +249,69 @@ upon. Deprecation notices should be added to their OpenAPI spec entries and resp
 (`Deprecation: true`, `Sunset: <date>`). The Sunset date will be set by PM at the time this ADR
 moves to Accepted, with a minimum of 90 days from MFE migration start.
 
-## Data Model: Extending AsyncJob for Efficient siteId Queries
+## Data Model: Dedicated Preflight Entity
 
-The current implementation backs preflights with the generic `AsyncJob` model. `AsyncJob` has
-no top-level `siteId` field — `siteId` is buried inside the `metadata` JSON blob with no
-index. The `AsyncJobCollection` exposes only `findById`; there is no `allBySiteId` method.
+The current implementation backs preflights with the generic `AsyncJob` model. `AsyncJob` is
+not exclusive to preflight — it is a shared backing store used by site-detection, PR review,
+and both legacy preflight variants (`preflight` and `preflight-beta`), each distinguished only
+by a `jobType` string buried in the `metadata` blob. Using it as the preflight backing store
+creates several problems:
 
-The decision is to **extend `AsyncJob` in `spacecat-shared-data-access`**:
+- **No schema enforcement.** Preflight-specific fields — `siteId`, `url`, `createdBy` — live
+  in the `metadata` JSON blob with no type guarantees. Consumers must introspect the blob
+  directly rather than relying on a typed contract.
+- **Type discrimination via metadata.** Querying preflights for a site requires filtering on
+  `metadata.jobType === "preflight"` alongside `metadata.siteId`, neither of which is indexed.
+  Promoting them to top-level attributes works around the indexing problem but still leaves the
+  domain model generic.
+- **Coupling to an implementation detail.** `AsyncJob` is an execution primitive; `Preflight`
+  is a domain concept. Exposing the same model for both leaks the execution abstraction to
+  callers and makes the API contract brittle as `AsyncJob` evolves.
 
-- Add `siteId` as an **optional** top-level indexed attribute on the `AsyncJob` schema
-- Add `jobType` as an **optional** top-level indexed attribute on the `AsyncJob` schema
-- Add an `allBySiteIdAndJobType(siteId, jobType)` method to `AsyncJobCollection`
+The decision is to **introduce a dedicated `Preflight` entity in `spacecat-shared-data-access`**
+rather than extending `AsyncJob`. The `Preflight` entity owns the domain record; it may
+reference an `AsyncJob` internally for execution lifecycle tracking (status polling, result
+storage) without exposing that detail to API consumers.
 
-`siteId` must be optional so that existing job creation paths (including the deprecated
-`/preflight/jobs` queue-based flow) continue to work unchanged — those jobs do not supply a
-top-level `siteId` today and must not be required to. The new endpoints populate `siteId` at
-job creation time and use the new collection method for list queries. Both workflows operate
-in parallel without interference.
+**`Preflight` entity — first-class fields:**
 
-This is the right approach because `AsyncJob` records are TTL-based and short-lived (~7 days).
-A purpose-built `Preflight` entity would require its own TTL and cleanup strategy, adding
-complexity for no real gain given the inherently transient nature of the data. Extending
-`AsyncJob` is low-friction and sufficient.
+| Field | Type | Description |
+|-------|------|-------------|
+| `preflightId` | UUID | Primary key |
+| `siteId` | UUID (indexed) | The site this preflight belongs to |
+| `url` | string (indexed) | The page URL that was analyzed |
+| `status` | enum | `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` |
+| `createdBy` | object | `{ email, displayName }` from IMS profile at creation time |
+| `createdAt` | ISO 8601 | Creation timestamp |
+| `updatedAt` | ISO 8601 | Last update timestamp |
+| `startedAt` | ISO 8601 | When processing began |
+| `endedAt` | ISO 8601 | When processing completed |
+| `result` | object \| null | Audit result payload; null until completed |
+| `error` | object \| null | `{ code, message }` on failure |
 
-The `GET /sites/:siteId/preflights` controller will query using both indexed top-level attributes
-via `allBySiteIdAndJobType(siteId, "preflight")` — no `metadata` scan needed. The optional
-`?url=` filter is applied in-memory on `metadata.url` after the indexed query. No cap is
-applied; all results are returned sorted by `createdAt` descending.
+**`PreflightCollection` — methods:**
 
-`createdBy` is stored as a top-level metadata field at job creation time as an object
-`{ email, displayName }`, where `email` is `profile.email` (the IMS user identifier) and
-`displayName` is composed from `profile.first_name + ' ' + profile.last_name` (falling back
-to `profile.name`). No additional IMS lookup is required — both fields are available on the
-authenticated profile. It is never supplied by the client. This enables lightweight audit
-trails without a separate audit log and is easily extended with additional identity fields
-in future.
+- `allBySiteId(siteId)` — returns all preflights for a site, sorted by `createdAt` descending;
+  `url` filter applied in-memory when `?url=` query parameter is present
+- `findById(preflightId)` — loads a single preflight; caller verifies `siteId` matches path
 
-Note: the `spacecat-shared-data-access` change is a prerequisite and must land before the
-controller work in this repo.
+**TTL** is configured on the `Preflight` table/collection at the same 7-day window as
+`AsyncJob`. No separate cleanup strategy is needed — the TTL attribute handles it identically.
+
+`createdBy` is derived from the caller's IMS profile at job creation time: `email` is
+`profile.email` (the IMS user identifier); `displayName` is composed from
+`profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`). It is
+never supplied by the client.
+
+The legacy endpoints (`/preflight/jobs`, `/preflight/beta/jobs`) continue to write to
+`AsyncJob` unchanged until they are retired. The new `/sites/:siteId/preflights` endpoints
+write exclusively to the `Preflight` entity. The two backing stores operate in parallel
+without interference.
+
+**This change is scoped to `spacecat-shared-data-access` and is a prerequisite that must land
+before the controller work in this repo.** The design of the `Preflight` entity and its
+relationship to `AsyncJob` should be aligned with @ekremney before implementation begins.
+See SITES-44650 for the tracking ticket.
 
 ## Consequences
 - API shape is consistent with the rest of the service; new consumers can discover preflight
