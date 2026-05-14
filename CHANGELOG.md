@@ -1,3 +1,10 @@
+# [1.499.0](https://github.com/adobe/spacecat-api-service/compare/v1.498.1...v1.499.0) (2026-05-14)
+
+
+### Features
+
+* persist RUM domain key availability on Site config ([#2367](https://github.com/adobe/spacecat-api-service/issues/2367)) ([e1687eb](https://github.com/adobe/spacecat-api-service/commit/e1687ebc46518f3085021cb953dc3758853cfb6b))
+
 ## [1.498.1](https://github.com/adobe/spacecat-api-service/compare/v1.498.0...v1.498.1) (2026-05-13)
 
 
