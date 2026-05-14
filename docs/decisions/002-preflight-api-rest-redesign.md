@@ -267,6 +267,13 @@ creates several problems:
 - **Coupling to an implementation detail.** `AsyncJob` is an execution primitive; `Preflight`
   is a domain concept. Exposing the same model for both leaks the execution abstraction to
   callers and makes the API contract brittle as `AsyncJob` evolves.
+- **Query inefficiency at scale.** Even with `siteId` promoted to an indexed column on
+  `async_jobs`, a query of `WHERE site_id = $siteId` would scan across all job types for that
+  site (site-detection, pr-review, preflight, preflight-beta). Isolating preflight records
+  requires a compound filter on `(site_id, job_type)`, a composite index, or an in-memory
+  post-filter pass. Preflight jobs represent a fraction of total `AsyncJob` volume; a dedicated
+  `preflights` table makes every row in the index a preflight by definition, keeping the index
+  small and the query clean with no cross-workflow contamination.
 
 The decision is to **introduce a dedicated `Preflight` entity in `spacecat-shared-data-access`**
 rather than extending `AsyncJob`. The `Preflight` entity owns the domain record; it may
