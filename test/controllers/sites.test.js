@@ -146,6 +146,17 @@ describe('Sites Controller', () => {
   let mockDataAccess;
   let sitesController;
   let context;
+  let updateRumConfigStub;
+  let SitesControllerMocked;
+
+  before(async () => {
+    updateRumConfigStub = sandbox.stub().resolves(true);
+    SitesControllerMocked = (await esmock('../../src/controllers/sites.js', {
+      '../../src/support/rum-config-service.js': {
+        updateRumConfig: updateRumConfigStub,
+      },
+    })).default;
+  });
 
   beforeEach(() => {
     sites = buildSites();
@@ -224,7 +235,7 @@ describe('Sites Controller', () => {
           RUM_DOMAIN_KEY: '42',
         }),
       });
-    sitesController = SitesController(context, loggerStub, context.env);
+    sitesController = SitesControllerMocked(context, loggerStub, context.env);
   });
 
   afterEach(() => {
@@ -262,6 +273,16 @@ describe('Sites Controller', () => {
     const site = await response.json();
     expect(site).to.have.property('id', SITE_IDS[0]);
     expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('returns 201 even when RUM config update fails after site creation', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+    updateRumConfigStub.rejects(new Error('RUM API unavailable'));
+
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    expect(response.status).to.equal(201);
   });
 
   it('creates a site for a non-admin user', async () => {
@@ -593,7 +614,7 @@ describe('Sites Controller', () => {
       .withProfile({ user_id: 'api-key-svc' })
       .withAuthenticated(true);
     mockDataAccess.Site.all.resolves(sites);
-    sitesController = SitesController(context, loggerStub, context.env);
+    sitesController = SitesControllerMocked(context, loggerStub, context.env);
 
     const result = await sitesController.getAll();
     const body = await result.json();

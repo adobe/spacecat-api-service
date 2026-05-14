@@ -1,3 +1,24 @@
+## [1.500.1](https://github.com/adobe/spacecat-api-service/compare/v1.500.0...v1.500.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **cdn-detection:** remove ipinfo.io ASN lookup and DNS-over-HTTPS fallbacks ([#2417](https://github.com/adobe/spacecat-api-service/issues/2417)) ([d64f25c](https://github.com/adobe/spacecat-api-service/commit/d64f25c505b3a9575602b82a9c4aa211e43425c6)), closes [#2456](https://github.com/adobe/spacecat-api-service/issues/2456)
+
+# [1.500.0](https://github.com/adobe/spacecat-api-service/compare/v1.499.0...v1.500.0) (2026-05-14)
+
+
+### Features
+
+* **plg:** stamp steps.preOnboarded=true when fast-tracking PRE_ONBOARDING to ONBOARDED ([#2395](https://github.com/adobe/spacecat-api-service/issues/2395)) ([a447e25](https://github.com/adobe/spacecat-api-service/commit/a447e257d94b45a7f8408e6cc71ea8278abf1d2b))
+
+# [1.499.0](https://github.com/adobe/spacecat-api-service/compare/v1.498.1...v1.499.0) (2026-05-14)
+
+
+### Features
+
+* persist RUM domain key availability on Site config ([#2367](https://github.com/adobe/spacecat-api-service/issues/2367)) ([e1687eb](https://github.com/adobe/spacecat-api-service/commit/e1687ebc46518f3085021cb953dc3758853cfb6b))
+
 ## [1.498.1](https://github.com/adobe/spacecat-api-service/compare/v1.498.0...v1.498.1) (2026-05-13)
 
 
