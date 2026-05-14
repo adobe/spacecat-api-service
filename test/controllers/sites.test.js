@@ -17,6 +17,8 @@ import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
+import { fileURLToPath } from 'url';
+
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import esmock from 'esmock';
@@ -41,8 +43,8 @@ describe('Sites Controller', () => {
   };
 
   const SITE_IDS = ['0b4dcf79-fe5f-410b-b11f-641f0bf56da3', 'c4420c67-b4e8-443d-b7ab-0099cfd5da20'];
-  const BRAND_PROFILE_TRIGGER_MODULE = new URL('../../src/support/brand-profile-trigger.js', import.meta.url).pathname;
-  const ACCESS_CONTROL_MODULE = new URL('../../src/support/access-control-util.js', import.meta.url).pathname;
+  const BRAND_PROFILE_TRIGGER_MODULE = fileURLToPath(new URL('../../src/support/brand-profile-trigger.js', import.meta.url));
+  const ACCESS_CONTROL_MODULE = fileURLToPath(new URL('../../src/support/access-control-util.js', import.meta.url));
 
   const defaultAuthAttributes = {
     attributes: {
@@ -144,6 +146,17 @@ describe('Sites Controller', () => {
   let mockDataAccess;
   let sitesController;
   let context;
+  let updateRumConfigStub;
+  let SitesControllerMocked;
+
+  before(async () => {
+    updateRumConfigStub = sandbox.stub().resolves(true);
+    SitesControllerMocked = (await esmock('../../src/controllers/sites.js', {
+      '../../src/support/rum-config-service.js': {
+        updateRumConfig: updateRumConfigStub,
+      },
+    })).default;
+  });
 
   beforeEach(() => {
     sites = buildSites();
@@ -222,7 +235,7 @@ describe('Sites Controller', () => {
           RUM_DOMAIN_KEY: '42',
         }),
       });
-    sitesController = SitesController(context, loggerStub, context.env);
+    sitesController = SitesControllerMocked(context, loggerStub, context.env);
   });
 
   afterEach(() => {
@@ -260,6 +273,16 @@ describe('Sites Controller', () => {
     const site = await response.json();
     expect(site).to.have.property('id', SITE_IDS[0]);
     expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('returns 201 even when RUM config update fails after site creation', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+    updateRumConfigStub.rejects(new Error('RUM API unavailable'));
+
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    expect(response.status).to.equal(201);
   });
 
   it('creates a site for a non-admin user', async () => {
@@ -591,7 +614,7 @@ describe('Sites Controller', () => {
       .withProfile({ user_id: 'api-key-svc' })
       .withAuthenticated(true);
     mockDataAccess.Site.all.resolves(sites);
-    sitesController = SitesController(context, loggerStub, context.env);
+    sitesController = SitesControllerMocked(context, loggerStub, context.env);
 
     const result = await sitesController.getAll();
     const body = await result.json();
@@ -4849,9 +4872,9 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('isSummitPlgEnabled', true);
     });
 
-    it('should set isSummitPlgEnabled to false when summit-plg is not enabled for site', async () => {
-      mockDataAccess.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: sandbox.stub().returns(false),
+    it('should set isSummitPlgEnabled to false when entitlement is not PLG', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getTier: () => 'FREE_TRIAL',
       });
 
       context.data = { organizationId: testOrganizations[0].getId() };
