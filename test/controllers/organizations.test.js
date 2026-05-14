@@ -96,6 +96,7 @@ describe('Organizations Controller', () => {
       organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f',
       name: 'Org 2',
       imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
+      semrushWorkspaceId: 'ws_test_org2',
     },
     {
       organizationId: 'org3',
@@ -120,6 +121,7 @@ describe('Organizations Controller', () => {
                 config: { type: 'any', get: (value) => Config(value) },
                 name: { type: 'string', get: (value) => value },
                 imsOrgId: { type: 'string', get: (value) => value },
+                semrushWorkspaceId: { type: 'string', get: (value) => value },
               },
             },
           },
@@ -400,6 +402,39 @@ describe('Organizations Controller', () => {
 
     const error = await response.json();
     expect(error).to.have.property('message', 'Only users belonging to the organization can update it');
+  });
+
+  it('PATCH organization semrushWorkspaceId succeeds for admin', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+      data: { semrushWorkspaceId: 'ws_admin_set' },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const organization = await response.json();
+    expect(organization).to.have.property('semrushWorkspaceId', 'ws_admin_set');
+  });
+
+  it('PATCH organization semrushWorkspaceId is forbidden for non-admin', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    // User belongs to the org (hasAccess true) but is not admin.
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(true);
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+      data: { semrushWorkspaceId: 'ws_non_admin_attempt' },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can set semrushWorkspaceId');
   });
 
   it('returns bad request when updating an organization if id not provided', async () => {
@@ -689,6 +724,15 @@ describe('Organizations Controller', () => {
     expect(organization).to.be.an('object');
     expect(result.status).to.equal(200);
     expect(organization).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
+  });
+
+  it('GET org by id includes semrushWorkspaceId on the response', async () => {
+    mockDataAccess.Organization.findById.resolves(organizations[1]);
+    const result = await organizationsController.getByID({ params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' }, ...context });
+    const organization = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(organization).to.have.property('semrushWorkspaceId', 'ws_test_org2');
   });
 
   it('gets an organization by id for non belonging organization', async () => {

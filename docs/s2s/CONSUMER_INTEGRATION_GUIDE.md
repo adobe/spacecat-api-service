@@ -16,6 +16,21 @@ This guide helps service teams request and integrate Service-to-Service (S2S) au
 
 ---
 
+## ⚠️ Host-driven product context
+
+**The Fastly edge sets the `x-product` request header based on the request `Host`. Any client-supplied `x-product` value is overwritten.** Choose the host that matches your product:
+
+| Consumer product | Production host | Dev / CI host |
+|---|---|---|
+| **LLMO** | `https://llmo.experiencecloud.live` | `https://llmo.experiencecloud.page` |
+| **ASO** (and everything else) | `https://spacecat.experiencecloud.live` | `https://spacecat.experiencecloud.live` |
+
+This affects every S2S call, including `/auth/s2s/login`. Mint your session token via the same host you intend to call APIs on. An LLMO consumer that mints a token via `spacecat.experiencecloud.live` receives an ASO-context JWT and will fail the per-product entitlement check on tenant-scoped reads even if the underlying org has a valid LLMO entitlement.
+
+The examples and URL table below use `spacecat.experiencecloud.live` for ASO consumers; LLMO consumers should substitute the LLMO host throughout.
+
+---
+
 ## Prerequisites
 
 Before requesting an S2S account, ensure you have:
@@ -544,15 +559,23 @@ curl -X POST 'https://ims-na1-stg1.adobelogin.com/ims/token/v3' \
 
 **Common Capability to Endpoint Mapping Examples**:
 ```
-GET /sites                              → site:read
+GET /sites                              → site:readAll        (cross-tenant LIST)
+GET /sites/{siteId}                     → site:read           (tenant-scoped READ)
 POST /sites                             → site:write
 GET /sites/{siteId}/audits              → audit:read
 POST /audits                            → audit:write
 GET /sites/{siteId}/opportunities       → opportunity:read
 POST /sites/{siteId}/opportunities      → opportunity:write
-GET /organizations                      → organization:read
+GET /organizations                      → organization:readAll (cross-tenant LIST)
+GET /organizations/{id}                 → organization:read    (tenant-scoped READ)
 PATCH /organizations/{id}               → organization:write
 ```
+
+> **`readAll` vs `read`**: list endpoints (`GET /sites`, `GET /organizations`) are
+> gated on the `readAll` capability; per-id reads (`GET /sites/{siteId}`,
+> `GET /organizations/{id}`) are gated on `read` and require a customer-scoped
+> S2S session token (one minted with the resource's owning `imsOrgId`).
+> See `READALL_CAPABILITY_DESIGN.md` for the trust model.
 
 ### Issue: Consumer Suspended
 
@@ -576,6 +599,40 @@ PATCH /organizations/{id}               → organization:write
 3. S2S Admin reviews and approves (or denies) request
 4. Test upgraded capabilities in dev first
 5. Request production upgrade after dev validation
+
+### Issue: `GET /sites` or `GET /organizations` returns 413 Payload Too Large
+
+**Symptoms**:
+```
+HTTP/2 413
+x-error: Response payload size exceeded maximum allowed payload size (6000000 bytes).
+```
+
+**Cause**: AWS Lambda caps response payloads at 6 MB. The full sites
+list (~7.5 MB uncompressed, 11k+ sites as of 2026-05-08) exceeds that.
+The SpaceCat API Gateway honours `Accept-Encoding`, and any of `gzip`,
+`deflate`, or `br` brings the response well under the cap.
+
+| Encoding | Compressed `/sites` size | Notes |
+|---|---|---|
+| `br` (Brotli) | ~865 KB | Best ratio. Server prefers this when offered. |
+| `gzip` | ~933 KB | Universally supported; Python `requests` decodes natively. |
+| (none) | ~7.5 MB → **413** | Default for raw `curl`. |
+
+**Resolution**: send `Accept-Encoding: gzip, deflate, br` (or any subset
+your client supports) on every request to `/sites` and `/organizations`.
+Most HTTP clients do this transparently:
+
+| Client | Behaviour |
+|---|---|
+| `curl` | does **not** send `Accept-Encoding` by default — pass `--compressed` or `-H 'Accept-Encoding: gzip, deflate, br'` |
+| Python `requests` | sends `Accept-Encoding: gzip, deflate` automatically and decodes transparently. For Brotli install the `brotli` package — otherwise stick to gzip (the size delta is ~7%). |
+| Node `fetch` / `axios` | send `Accept-Encoding` automatically; Node 18+ decodes Brotli natively. |
+| JVM `HttpClient` | sends `Accept-Encoding` automatically since Java 11; Brotli requires the `brotli4j` library. |
+
+If your client cannot send any compression, file an S2S admin ticket —
+the long-term fix is server-side cursor pagination (see
+`READALL_CAPABILITY_DESIGN.md` "Operational Bounds").
 
 ---
 
@@ -665,10 +722,21 @@ curl -X GET https://spacecat.experiencecloud.live/api/ci/sites/${SITE_ID}/opport
 
 ### Environment URLs
 
+The host you call determines the `x-product` value at the edge — see [Host-driven product context](#️-host-driven-product-context).
+
+**ASO consumers (and everything that is not LLMO):**
+
 | Environment | IMS Token Endpoint | SpaceCat S2S Login | SpaceCat API Base |
 |-------------|-------------------|-------------------|-------------------|
 | **Development/Stage** | `https://ims-na1-stg1.adobelogin.com/ims/token/v3` | `https://spacecat.experiencecloud.live/api/ci/auth/s2s/login` | `https://spacecat.experiencecloud.live/api/ci` |
 | **Production** | `https://ims-na1.adobelogin.com/ims/token/v3` | `https://spacecat.experiencecloud.live/api/v1/auth/s2s/login` | `https://spacecat.experiencecloud.live/api/v1` |
+
+**LLMO consumers:**
+
+| Environment | IMS Token Endpoint | SpaceCat S2S Login | SpaceCat API Base |
+|-------------|-------------------|-------------------|-------------------|
+| **Development/Stage** | `https://ims-na1-stg1.adobelogin.com/ims/token/v3` | `https://llmo.experiencecloud.page/api/ci/auth/s2s/login` | `https://llmo.experiencecloud.page/api/ci` |
+| **Production** | `https://ims-na1.adobelogin.com/ims/token/v3` | `https://llmo.experiencecloud.live/api/v1/auth/s2s/login` | `https://llmo.experiencecloud.live/api/v1` |
 
 ### Token Lifetimes
 

@@ -79,6 +79,7 @@ import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
+import FanoutReportController from './controllers/llmo/fanout-report.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
@@ -97,11 +98,12 @@ import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
-import routeRequiredCapabilities from './routes/required-capabilities.js';
+import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
+import AiVisibilityController from './controllers/ai-visibility.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -233,6 +235,7 @@ async function run(request, context) {
     const llmoController = LlmoController(context);
     const llmoMysticatController = LlmoMysticatController(context);
     const llmoOpportunitiesController = LlmoOpportunitiesController(context);
+    const fanoutReportController = FanoutReportController(context);
     const fixesController = new FixesController(context);
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
@@ -256,6 +259,7 @@ async function run(request, context) {
     const plgOnboardingController = PlgOnboardingController(context);
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
+    const aiVisibilityController = AiVisibilityController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -310,6 +314,8 @@ async function run(request, context) {
       plgOnboardingController,
       drsBpPgAuditController,
       webhooksController,
+      aiVisibilityController,
+      fanoutReportController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -384,7 +390,10 @@ const AUTH_HANDLERS = [
 ];
 
 const wrappedMain = wrap(run)
-  .with(readOnlyAdminWrapper, { routeCapabilities: routeRequiredCapabilities })
+  .with(readOnlyAdminWrapper, {
+    routeCapabilities: routeRequiredCapabilities,
+    internalRoutes: INTERNAL_ROUTES,
+  })
   .with(authWrapper, { authHandlers: AUTH_HANDLERS })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
