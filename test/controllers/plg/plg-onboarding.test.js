@@ -61,6 +61,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   let ldUpdateVariationValueStub;
   let ldCreateFromStub;
   let configToDynamoItemStub;
+  let updateRumConfigStub;
 
   // Mock objects
   let mockLog;
@@ -175,6 +176,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
     // RUM API client stubs
     rumRetrieveDomainkeyStub = sandbox.stub().resolves('test-domainkey');
+    updateRumConfigStub = sandbox.stub().resolves(true);
 
     // Shared-utils stubs
     composeBaseURLStub = sandbox.stub().returns(TEST_BASE_URL);
@@ -248,6 +250,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     mockSiteConfig = {
       getFetchConfig: sandbox.stub().returns({}),
       updateFetchConfig: sandbox.stub(),
+      updateRumConfig: sandbox.stub(),
       getImports: sandbox.stub().returns([]),
       enableImport: sandbox.stub(),
     };
@@ -426,6 +429,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           default: {
             fromContext: () => ({ hasAdminAccess: () => false, hasAdminReadAccess: () => false }),
           },
+        },
+        '../../../src/support/rum-config-service.js': {
+          updateRumConfig: updateRumConfigStub,
         },
       },
     )).default;
@@ -646,6 +652,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             default: {
               fromContext: () => ({ hasAdminAccess: () => true }),
             },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -911,6 +920,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => false }) },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
 
@@ -1015,6 +1027,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -1124,6 +1139,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -2018,6 +2036,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               fromContext: () => ({ hasAdminAccess: () => false }),
             },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
     });
@@ -2419,6 +2440,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => true }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -3004,6 +3028,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       siteWithOverride.getConfig.returns({
         getFetchConfig: () => fetchConfigWithOverride,
         updateFetchConfig: sandbox.stub(),
+        updateRumConfig: sandbox.stub(),
         getImports: () => [],
         enableImport: sandbox.stub(),
       });
@@ -4367,6 +4392,14 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           orgResolved: true,
           siteResolved: true,
           configUpdated: true,
+          preOnboarded: true,
+        }),
+      );
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match({
+          orgResolved: true,
+          siteResolved: true,
+          configUpdated: true,
           entitlementCreated: true,
         }),
       );
@@ -4396,6 +4429,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(response.status).to.equal(200);
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ preOnboarded: true });
       expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ entitlementCreated: true });
     });
 
@@ -4946,6 +4980,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               fromContext: () => ({ hasAdminAccess: () => true }),
             },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
     });
@@ -5090,6 +5127,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                   hasAdminReadAccess: () => true,
                 }),
               },
+            },
+            '../../../src/support/rum-config-service.js': {
+              updateRumConfig: updateRumConfigStub,
             },
           },
         )).default;
@@ -5669,6 +5709,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => true }) },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
     });
@@ -5765,6 +5808,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: sandbox.stub() },
             '../../../src/support/access-control-util.js': {
               default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+            },
+            '../../../src/support/rum-config-service.js': {
+              updateRumConfig: updateRumConfigStub,
             },
           },
         )).default;
