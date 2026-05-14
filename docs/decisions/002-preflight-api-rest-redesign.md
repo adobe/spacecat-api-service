@@ -75,7 +75,7 @@ previously provided by `findByPreviewURL`.
 
 `promiseToken` is passed via cookie for authenticated CMS pages (CS/CS_CW/AMS sites); it is not part of the request body.
 
-`createdBy` is derived server-side from the caller's IMS profile and is never supplied by the client. It is an object containing the IMS user ID (`profile.email`) and a display name composed from `profile.first_name` and `profile.last_name` (falling back to `profile.name`). No additional IMS lookup is required — both fields are available on the profile already.
+`createdBy` is derived server-side from the caller's IMS profile and is never supplied by the client. It is an object containing the IMS user email (`profile.email`) and a display name composed from `profile.first_name` and `profile.last_name` (falling back to `profile.name`). Both fields are stored in async job metadata at creation time. No additional IMS lookup is required — both are available on the authenticated profile.
 
 **Response** `202 Accepted`:
 
@@ -91,7 +91,7 @@ Body:
   "status": "IN_PROGRESS",
   "createdAt": "2026-05-11T10:00:00.000Z",
   "createdBy": {
-    "id": "ABC123@techacct.adobe.com",
+    "email": "ABC123@techacct.adobe.com",
     "displayName": "John Doe"
   }
 }
@@ -126,54 +126,52 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 
 ### GET /sites/:siteId/preflights
 
-**Response** `200 OK` — grouped by URL, with a nested array of preflights per page. A site can have preflights for multiple URLs. Results are capped at the 50 most recent preflights per site (sorted by `createdAt` descending across all URLs before grouping). Given the 7-day TTL on `AsyncJob` records the natural upper bound is low; full cursor-based pagination is deferred until there is evidence of consumers hitting the cap.
+**Query parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string (URI, URL-encoded) | No | When present, filters results to preflights for this specific page URL only |
+
+**Response** `200 OK` — a flat list of preflights for the site, sorted by `createdAt` descending. No cap is applied; the 7-day TTL on `AsyncJob` records provides the natural upper bound. Pagination is deferred until there is evidence of consumers needing it.
 ```json
 [
   {
+    "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "status": "COMPLETED",
     "url": "https://main--site--org.hlx.page/some-path",
-    "preflights": [
-      {
-        "preflightId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-        "status": "COMPLETED",
-        "createdAt": "2026-05-11T10:00:00.000Z",
-        "updatedAt": "2026-05-11T10:00:05.000Z",
-        "createdBy": { "id": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
-      },
-      {
-        "preflightId": "7c9b1e32-1234-4abc-b3fc-9f8a7c6d5e4f",
-        "status": "COMPLETED",
-        "createdAt": "2026-05-11T10:05:00.000Z",
-        "updatedAt": "2026-05-11T10:05:04.000Z",
-        "createdBy": { "id": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
-      }
-    ]
+    "createdAt": "2026-05-11T10:00:00.000Z",
+    "updatedAt": "2026-05-11T10:00:05.000Z",
+    "createdBy": { "email": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
   },
   {
+    "preflightId": "7c9b1e32-1234-4abc-b3fc-9f8a7c6d5e4f",
+    "status": "COMPLETED",
+    "url": "https://main--site--org.hlx.page/some-path",
+    "createdAt": "2026-05-11T10:05:00.000Z",
+    "updatedAt": "2026-05-11T10:05:04.000Z",
+    "createdBy": { "email": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
+  },
+  {
+    "preflightId": "a1b2c3d4-5678-4def-b3fc-0e1f2a3b4c5d",
+    "status": "IN_PROGRESS",
     "url": "https://main--site--org.hlx.page/another-path",
-    "preflights": [
-      {
-        "preflightId": "a1b2c3d4-5678-4def-b3fc-0e1f2a3b4c5d",
-        "status": "IN_PROGRESS",
-        "createdAt": "2026-05-11T10:10:00.000Z",
-        "updatedAt": "2026-05-11T10:10:00.000Z",
-        "createdBy": { "id": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
-      }
-    ]
+    "createdAt": "2026-05-11T10:10:00.000Z",
+    "updatedAt": "2026-05-11T10:10:00.000Z",
+    "createdBy": { "email": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
   }
 ]
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `preflightId` | UUID | Unique identifier for the preflight |
+| `status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
 | `url` | string | The page URL that was analyzed |
-| `preflights` | array | Preflights run against this URL |
-| `preflights[].preflightId` | UUID | Unique identifier for the preflight |
-| `preflights[].status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
-| `preflights[].createdAt` | ISO 8601 | When the preflight was created |
-| `preflights[].updatedAt` | ISO 8601 | When the preflight was last updated |
-| `preflights[].createdBy` | object | Caller identity — `{ id, displayName }` |
-| `preflights[].createdBy.id` | string | IMS user ID (`profile.email`) |
-| `preflights[].createdBy.displayName` | string | Full name from IMS profile |
+| `createdAt` | ISO 8601 | When the preflight was created |
+| `updatedAt` | ISO 8601 | When the preflight was last updated |
+| `createdBy` | object | Caller identity — `{ email, displayName }` |
+| `createdBy.email` | string | IMS user email (`profile.email`) |
+| `createdBy.displayName` | string | Full name from IMS profile |
 
 ---
 
@@ -187,15 +185,13 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
   "url": "https://main--site--org.hlx.page/some-path",
   "createdAt": "2026-05-11T10:00:00.000Z",
   "createdBy": {
-    "id": "ABC123@techacct.adobe.com",
+    "email": "ABC123@techacct.adobe.com",
     "displayName": "John Doe"
   },
   "updatedAt": "2026-05-11T10:00:05.000Z",
   "startedAt": "2026-05-11T10:00:01.000Z",
   "endedAt": "2026-05-11T10:00:05.000Z",
   "result": {},
-  "resultType": "INLINE",
-  "resultLocation": null,
   "error": null
 }
 ```
@@ -206,15 +202,13 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `status` | enum | `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` |
 | `url` | string | The page URL that was analyzed |
 | `createdAt` | ISO 8601 | When the preflight was created |
-| `createdBy` | object | Caller identity — `{ id, displayName }` |
-| `createdBy.id` | string | IMS user ID (`profile.email`) |
+| `createdBy` | object | Caller identity — `{ email, displayName }` |
+| `createdBy.email` | string | IMS user email (`profile.email`) |
 | `createdBy.displayName` | string | Full name from IMS profile |
 | `updatedAt` | ISO 8601 | When the preflight was last updated |
 | `startedAt` | ISO 8601 | When processing began |
 | `endedAt` | ISO 8601 | When processing completed |
-| `result` | object \| null | Audit results when `resultType` is `INLINE`; `null` otherwise |
-| `resultType` | enum \| null | `INLINE` — result is in the `result` field; `S3` or `URL` — result is at `resultLocation` and `result` is `null` |
-| `resultLocation` | string \| null | S3 URI or URL of the result when `resultType` is `S3` or `URL`; `null` when `resultType` is `INLINE` |
+| `result` | object \| null | Audit results; always stored inline in `async_jobs.result` — `null` when the job has not yet completed |
 | `error` | object \| null | `{ code, message }` if the job failed |
 
 **Ownership validation:** The handler loads the job by `preflightId` then verifies the stored `siteId` matches the path's `:siteId`. A mismatch returns `404 Not Found` — the same response as a non-existent `preflightId` — so callers cannot confirm a preflight exists by probing with a different site path.
@@ -236,9 +230,12 @@ Key changes:
   flow, making the field redundant. `promiseToken` (cookie) is retained unchanged. The existing
   `step` branching in `src/preflight/links.js:102` and `src/preflight/metatags.js:103` is dead
   code that will be removed as part of this implementation.
-- **`createdBy`** is captured server-side as `{ id, displayName }` from the caller's IMS
-  profile and stored in job metadata. It surfaces in all three endpoint responses for audit
-  purposes. No additional IMS lookup required — both fields are on the authenticated profile.
+- **`createdBy`** is captured server-side as `{ email, displayName }` from the caller's IMS
+  profile and stored in async job metadata at creation time. It surfaces in all three endpoint
+  responses for audit purposes. `email` is `profile.email` (the IMS user identifier — not
+  always a human-readable address for technical accounts). `displayName` is composed from
+  `profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`). No
+  additional IMS lookup required — both fields are on the authenticated profile.
 - **No phantom jobs for rejected requests.** If the site is not found, the caller lacks access,
   or preflight is not enabled for the site, the endpoint returns an error immediately without
   creating a job record. The previous behavior of creating a `CANCELLED` job in these cases
@@ -276,16 +273,17 @@ complexity for no real gain given the inherently transient nature of the data. E
 `AsyncJob` is low-friction and sufficient.
 
 The `GET /sites/:siteId/preflights` controller will query using both indexed top-level attributes
-via `allBySiteIdAndJobType(siteId, "preflight")` — no `metadata` scan needed. The `url` grouping
-for the list response is an in-memory `groupBy` on `metadata.url` after the indexed query;
-this is acceptable given the 50-record cap on the endpoint.
+via `allBySiteIdAndJobType(siteId, "preflight")` — no `metadata` scan needed. The optional
+`?url=` filter is applied in-memory on `metadata.url` after the indexed query. No cap is
+applied; all results are returned sorted by `createdAt` descending.
 
 `createdBy` is stored as a top-level metadata field at job creation time as an object
-`{ id, displayName }`, where `id` is `profile.email` (the IMS user ID) and `displayName` is
-composed from `profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`).
-No additional IMS lookup is required — both fields are available on the authenticated profile.
-It is never supplied by the client. This enables lightweight audit trails without a separate
-audit log and is easily extended with additional identity fields in future.
+`{ email, displayName }`, where `email` is `profile.email` (the IMS user identifier) and
+`displayName` is composed from `profile.first_name + ' ' + profile.last_name` (falling back
+to `profile.name`). No additional IMS lookup is required — both fields are available on the
+authenticated profile. It is never supplied by the client. This enables lightweight audit
+trails without a separate audit log and is easily extended with additional identity fields
+in future.
 
 Note: the `spacecat-shared-data-access` change is a prerequisite and must land before the
 controller work in this repo.
