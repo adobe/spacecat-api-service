@@ -1,3 +1,10 @@
+## [1.500.2](https://github.com/adobe/spacecat-api-service/compare/v1.500.1...v1.500.2) (2026-05-14)
+
+
+### Bug Fixes
+
+* onboard flow fixes around bot detection and resolve canonical urls for some sites ([#2243](https://github.com/adobe/spacecat-api-service/issues/2243)) ([3da7be3](https://github.com/adobe/spacecat-api-service/commit/3da7be3974eec6b555973d071f6537002c07ea2c))
+
 ## [1.500.1](https://github.com/adobe/spacecat-api-service/compare/v1.500.0...v1.500.1) (2026-05-14)
 
 
