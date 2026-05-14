@@ -13,6 +13,7 @@
 import {
   ok, badRequest, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
+import { cachedOk } from '../../support/cached-response.js';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 
 /**
@@ -44,6 +45,7 @@ const MAX_BY_URL_PAGE_SIZE = 1000;
 // Mirrors the CASE whitelist in rpc_referral_traffic_by_url for defence-in-depth.
 const VALID_BY_URL_SORT_COLUMNS = new Set([
   'total_pageviews', 'url_path', 'bounce_rate', 'consent_rate', 'page_intent',
+  'entries', 'exits', 'avg_time_on_site', 'revenue',
 ]);
 const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
 
@@ -244,7 +246,10 @@ export function createReferralTrafficKpisHandler(getSiteAndValidateAccess) {
 /**
  * GET /sites/:siteId/referral-traffic/trend
  *
- * Returns [{ date, pageviews }] aggregated per traffic_date, sorted ascending.
+ * Returns weekly aggregates for sparkline charts on stat cards.
+ * Extended to include business metrics (entries, revenue, bounce_rate,
+ * avg_session_duration, pages_per_visit, orders, conversion_rate) for AA and GA4.
+ * optel and cdn sources return null for those fields.
  */
 export function createReferralTrafficTrendHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficTrend(context) {
@@ -269,6 +274,15 @@ export function createReferralTrafficTrendHandler(getSiteAndValidateAccess) {
           trend: (data ?? []).map((row) => ({
             date: row.traffic_date,
             pageviews: Number(row.total_pageviews),
+            entries: row.entries != null ? Number(row.entries) : null,
+            revenue: row.revenue != null ? Number(row.revenue) : null,
+            bounceRate: row.bounce_rate != null ? Number(row.bounce_rate) : null,
+            consentRate: row.consent_rate != null ? Number(row.consent_rate) : null,
+            avgSessionDuration: row.avg_session_duration != null
+              ? Number(row.avg_session_duration) : null,
+            pagesPerVisit: row.pages_per_visit != null ? Number(row.pages_per_visit) : null,
+            orders: row.orders != null ? Number(row.orders) : null,
+            conversionRate: row.conversion_rate != null ? Number(row.conversion_rate) : null,
           })),
         });
       },
@@ -283,8 +297,10 @@ export function createReferralTrafficTrendHandler(getSiteAndValidateAccess) {
 /**
  * GET /sites/:siteId/referral-traffic/by-platform
  *
- * Returns [{ platform, pageviews }] sorted descending. Empty trf_platform values
- * are returned as 'unknown' by the RPC.
+ * Returns [{ platform, pageviews, bounceRate, channels, visits, avgTimeOnSite, revenue,
+ *          visitors, orders }]
+ * sorted descending. Empty trf_platform values are returned as 'unknown' by the RPC.
+ * visits/avgTimeOnSite/revenue/visitors/orders are null for optel and cdn sources.
  */
 export function createReferralTrafficByPlatformHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficByPlatform(context) {
@@ -311,12 +327,59 @@ export function createReferralTrafficByPlatformHandler(getSiteAndValidateAccess)
             pageviews: Number(row.total_pageviews),
             bounceRate: row.bounce_rate != null ? Number(row.bounce_rate) : null,
             channels: row.channels ?? [],
+            visits: row.visits != null ? Number(row.visits) : null,
+            avgTimeOnSite: row.avg_time_on_site != null ? Number(row.avg_time_on_site) : null,
+            revenue: row.revenue != null ? Number(row.revenue) : null,
+            visitors: row.visitors != null ? Number(row.visitors) : null,
+            orders: row.orders != null ? Number(row.orders) : null,
           })),
         });
       },
     );
   };
 }
+
+// ============================================================================
+// /by-device
+// ============================================================================
+
+/**
+ * GET /sites/:siteId/referral-traffic/by-device
+ *
+ * Returns [{ device, pageviews, bounceRate }] sorted descending.
+ * bounce_rate is null for cdn source.
+ */
+export function createReferralTrafficByDeviceHandler(getSiteAndValidateAccess) {
+  /* c8 ignore start — identical auth/error/mapping pattern covered by other handler tests */
+  return async function getReferralTrafficByDevice(context) {
+    return withReferralTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'by-device',
+      async (ctx, client, siteId) => {
+        const parsed = parseParams(ctx);
+        const { data, error } = await client.rpc(
+          'rpc_referral_traffic_by_device',
+          commonRpcParams(siteId, parsed),
+        );
+
+        if (error) {
+          ctx.log.error(`Referral traffic by-device PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch referral traffic by-device');
+        }
+
+        return ok({
+          rows: (data ?? []).map((row) => ({
+            device: row.device,
+            pageviews: Number(row.total_pageviews),
+            bounceRate: row.bounce_rate != null ? Number(row.bounce_rate) : null,
+          })),
+        });
+      },
+    );
+  };
+}
+/* c8 ignore stop */
 
 // ============================================================================
 // /by-region
@@ -387,10 +450,12 @@ export function createReferralTrafficByPageIntentHandler(getSiteAndValidateAcces
 
         /* c8 ignore next 2 — PostgREST guarantees non-null data when error is null */
         return ok({
-          rows: (data ?? []).map((row) => ({
-            pageIntent: row.page_intent,
-            pageviews: Number(row.total_pageviews),
-          })),
+          rows: (data ?? [])
+            .filter((row) => row.page_intent && row.page_intent !== '')
+            .map((row) => ({
+              pageIntent: row.page_intent,
+              pageviews: Number(row.total_pageviews),
+            })),
         });
       },
     );
@@ -462,6 +527,10 @@ export function createReferralTrafficByUrlHandler(getSiteAndValidateAccess) {
             bounceRate: row.bounce_rate != null ? Number(row.bounce_rate) : null,
             consentRate: row.consent_rate != null ? Number(row.consent_rate) : null,
             pageIntent: row.page_intent ?? null,
+            entries: row.entries != null ? Number(row.entries) : null,
+            exits: row.exits != null ? Number(row.exits) : null,
+            avgTimeOnSite: row.avg_time_on_site != null ? Number(row.avg_time_on_site) : null,
+            revenue: row.revenue != null ? Number(row.revenue) : null,
           })),
         });
       },
@@ -562,6 +631,59 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
  */
 const VALID_BUSINESS_IMPACT_SOURCES = new Set(['ga4', 'adobe_analytics']);
 
+// ============================================================================
+// /by-url-trend
+// ============================================================================
+
+/**
+ * GET /sites/:siteId/referral-traffic/by-url-trend
+ *
+ * Weekly pageview totals for a single URL path.
+ * Required query param: urlPath (exact path, e.g. /blog/my-post).
+ * Returns: { trend: [{ weekStart: "YYYY-MM-DD", pageviews: N }, ...] }
+ */
+export function createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess) {
+  return async function getReferralTrafficUrlTrend(context) {
+    return withReferralTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'by-url-trend',
+      async (ctx, client, siteId) => {
+        const q = ctx.data || {};
+        const urlPath = (q.urlPath || '').trim() || null;
+
+        if (!urlPath) {
+          return badRequest('urlPath query parameter is required');
+        }
+
+        const parsed = parseParams(ctx);
+
+        const { data, error } = await client.rpc('rpc_referral_traffic_url_trend', {
+          ...commonRpcParams(siteId, parsed),
+          p_url_path: urlPath,
+        });
+
+        if (error) {
+          ctx.log.error(`Referral traffic by-url-trend PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch referral traffic URL trend');
+        }
+
+        /* c8 ignore next 2 — same null-safety pattern as sibling handlers */
+        return ok({
+          trend: (data ?? []).map((row) => ({
+            weekStart: row.week_start,
+            pageviews: Number(row.total_pageviews),
+          })),
+        });
+      },
+    );
+  };
+}
+
+// ============================================================================
+// /business-impact
+// ============================================================================
+
 export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficBusinessImpact(context) {
     return withReferralTrafficAuth(
@@ -604,6 +726,68 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
             revenue: Number(row?.revenue ?? 0),
           },
         });
+      },
+    );
+  };
+}
+
+/**
+ * Traffic Insights sources — the only tables that feed the Traffic Insights tab.
+ * Business Impact (adobe_analytics, ga4) has its own DRS provider check and is
+ * intentionally excluded here.
+ *
+ * Order matters: optel is listed first because it is the preferred source.
+ * The has-data response preserves this order in availableSources so callers
+ * can pick the first entry as the active source (optel wins over cdn).
+ */
+const TRAFFIC_INSIGHTS_SOURCES = ['optel', 'cdn'];
+const TRAFFIC_INSIGHTS_TABLES = TRAFFIC_INSIGHTS_SOURCES.map((s) => SOURCE_TO_TABLE[s]);
+
+/**
+ * GET /sites/:siteId/referral-traffic/has-data
+ *
+ * Fast existence check for Traffic Insights data (optel and cdn).
+ * Business Impact sources (adobe_analytics, ga4) are gated separately via DRS.
+ *
+ * Response:
+ *   { hasData: boolean, availableSources: Array<'optel'|'cdn'> }
+ *
+ * availableSources lists whichever of optel/cdn has at least one row, in
+ * priority order (optel first). Callers should use the first entry as the
+ * active source so they naturally prefer optel over cdn.
+ * hasData is true iff availableSources is non-empty.
+ *
+ * Both tables are checked in parallel with limit(1) — no RPC required.
+ * Fails closed: if any query errors, returns 500 rather than a partial result.
+ */
+export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
+  return async function getReferralTrafficHasData(context) {
+    return withReferralTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'has-data',
+      async (ctx, client, siteId) => {
+        let results;
+        try {
+          results = await Promise.all(
+            TRAFFIC_INSIGHTS_TABLES.map((table) => client.from(table).select('traffic_date').eq('site_id', siteId).limit(1)),
+          );
+        } catch (err) {
+          ctx.log.error(`Referral traffic has-data PostgREST error: ${err.message} (siteId=${siteId})`);
+          return internalServerError('Failed to check referral traffic data');
+        }
+
+        for (const [i, result] of results.entries()) {
+          if (result.error) {
+            ctx.log.error(`Referral traffic has-data ${TRAFFIC_INSIGHTS_TABLES[i]} PostgREST error: ${result.error.message} (siteId=${siteId})`);
+            return internalServerError('Failed to check referral traffic data');
+          }
+        }
+
+        const availableSources = TRAFFIC_INSIGHTS_SOURCES.filter(
+          (_, i) => (results[i].data || []).length > 0,
+        );
+        return cachedOk({ hasData: availableSources.length > 0, availableSources });
       },
     );
   };

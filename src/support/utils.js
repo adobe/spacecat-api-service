@@ -36,6 +36,7 @@ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
+import { updateRumConfig } from './rum-config-service.js';
 // Two signals indicate a previous paid onboarding:
 // 1. ahref-paid-pages import — unique to the paid profile's import set.
 // 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
@@ -628,17 +629,7 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
         return true;
       }
     }
-    const { Configuration, Entitlement } = context.dataAccess || {};
-    if (!Configuration) {
-      return false;
-    }
-    const configuration = await Configuration.findLatest();
-    if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
-      return false;
-    }
-    if (!configuration.isHandlerEnabledForSite('summit-plg', site)) {
-      return false;
-    }
+    const { Entitlement } = context.dataAccess || {};
 
     const organizationId = site.getOrganizationId();
     if (!Entitlement || !organizationId) {
@@ -1731,6 +1722,8 @@ export const onboardSingleSite = async (
       ...(additionalParams.force ? { forcedOverride: true } : {}),
     }, { maxHistory: MAX_ONBOARD_HISTORY });
 
+    const hasDomainKey = await updateRumConfig(site, context, { save: false });
+    siteConfig.updateRumConfig(hasDomainKey);
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
       await site.save();
@@ -1944,6 +1937,26 @@ export const onboardSingleSite = async (
  * @param {String} productCode - The product code.
  * @returns {Array} - The filtered sites array.
  */
+/**
+ * Parses a comma-separated env var into a trimmed, non-empty string array.
+ * @param {string} value
+ * @returns {string[]}
+ */
+export function parseCommaSeparatedEnvList(value) {
+  return (value || '').split(',').map((id) => id.trim()).filter(Boolean);
+}
+
+/**
+ * Returns true if orgId (Spacecat UUID) is listed in the ASO_PLG_EXCLUDED_ORGS env var.
+ * Used to bypass PLG-wizard gating for internal / demo orgs whose tier is PRE_ONBOARD.
+ * @param {string} orgId - Spacecat organization UUID (not IMS org ID).
+ * @param {object} env
+ * @returns {boolean}
+ */
+export function isInternalOrg(orgId, env) {
+  return parseCommaSeparatedEnvList(env.ASO_PLG_EXCLUDED_ORGS).includes(orgId);
+}
+
 /**
  * Allow-list of entitlement tiers that are visible to customers via the API.
  * Any tier not in this list (e.g. PRE_ONBOARD) is treated as internal-only.
