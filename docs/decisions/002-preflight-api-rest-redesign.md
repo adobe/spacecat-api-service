@@ -41,13 +41,15 @@ Replace both endpoint pairs with three site-scoped REST endpoints:
 | GET | /sites/:siteId/preflights | Gets all preflight jobs for a site |
 | GET | /sites/:siteId/preflights/:preflightId | Gets a preflight job by ID |
 
-The existing endpoints are deprecated in the same change and remain functional in parallel until
-consumers have migrated:
+The `/preflight/beta/jobs` endpoints had no external consumers and are removed outright as part
+of this change — they were always an internal development path, never a durable API. The
+queue-based `/preflight/jobs` endpoints have external consumers and are deprecated in parallel
+until those consumers have migrated:
 
 | Endpoint | Action |
 |----------|--------|
-| POST /preflight/beta/jobs | **Deprecated** — internal use only; no external consumers |
-| GET /preflight/beta/jobs/:jobId | **Deprecated** — internal use only; no external consumers |
+| POST /preflight/beta/jobs | **Removed** — internal only; replaced by this redesign |
+| GET /preflight/beta/jobs/:jobId | **Removed** — internal only; replaced by this redesign |
 | POST /preflight/jobs | **Deprecated** — queue-based; migration timeline to be coordinated with consumers |
 | GET /preflight/jobs/:jobId | **Deprecated** — queue-based; migration timeline to be coordinated with consumers |
 
@@ -239,11 +241,12 @@ Key changes:
 - **No `organizationId` in the path.** `siteId` is a globally unique UUID, consistent with
   all other site-scoped resources in this service.
 
-**Both existing endpoint pairs are deprecated**, not removed. They will remain functional in
-parallel with the new endpoints until the MFE has migrated and a deletion milestone is agreed
-upon. Deprecation notices should be added to their OpenAPI spec entries and response headers
-(`Deprecation: true`, `Sunset: <date>`). The Sunset date will be set by PM at the time this ADR
-moves to Accepted, with a minimum of 90 days from MFE migration start.
+The `/preflight/beta/jobs` endpoints are removed, not deprecated — they were internal only and
+this redesign is their replacement. The `/preflight/jobs` endpoints are deprecated and remain
+functional until external consumers have migrated. Deprecation notices should be added to their
+OpenAPI spec entries and response headers (`Deprecation: true`, `Sunset: <date>`). The Sunset
+date will be set by PM at the time this ADR moves to Accepted, with a minimum of 90 days from
+MFE migration start.
 
 ## Data Model: Dedicated Preflight Entity
 
@@ -322,13 +325,10 @@ See SITES-44675 for the tracking ticket.
 - Server-side URL-to-site resolution is eliminated, reducing a class of failure.
 - Bulk preflight from the MFE is supported via multiple parallel requests — no API change
   needed as the feature grows.
-- `/preflight/beta/jobs` was used exclusively by the internal team. It is deprecated alongside
-  the new endpoints and removed once the MFE has migrated — no external consumer coordination
-  required.
+- `/preflight/beta/jobs` is removed outright — it was an internal development path and this
+  redesign is its replacement. No external consumer coordination required.
 - Existing consumers of `/preflight/jobs` are unaffected for now; migration timeline to be
   coordinated separately.
-- The `AsyncJob` model remains the backing store; `preflightId` maps to the underlying job ID
-  internally.
 - Job records are only created for requests that pass validation and access checks, keeping the
   job store clean. Callers that previously relied on polling a `CANCELLED` job to detect a
   disabled-preflight condition must handle `403` instead.
