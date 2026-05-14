@@ -47,6 +47,7 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
+import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
@@ -307,6 +308,9 @@ function SitesController(ctx, log, env) {
         organizationId: env.DEFAULT_ORGANIZATION_ID,
         ...context.data,
         baseURL, // override with normalized value
+      });
+      updateRumConfig(site, context).catch((e) => {
+        log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
       });
       return createResponse(SiteDto.toJSON(site), 201);
     } catch (error) {

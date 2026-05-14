@@ -327,20 +327,20 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.body.data).to.deep.equal([]);
     });
 
-    it('sorts merged results by volume descending', async () => {
+    it('sorts merged results by relevance descending', async () => {
       clients.topicClient.topicsByFTS.callsFake(({ llm: l, range }) => {
         if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
         if (l === FTS_LLMS[0]) {
           return Promise.resolve({
             topics: [{
-              id: '1', name: 'Low', volume: 50, promptsCount: 1,
+              id: '1', name: 'LowRelevance', volume: 500, promptsCount: 1, relevanceScore: 20,
             }],
           });
         }
         if (l === FTS_LLMS[1]) {
           return Promise.resolve({
             topics: [{
-              id: '2', name: 'High', volume: 500, promptsCount: 1,
+              id: '2', name: 'HighRelevance', volume: 50, promptsCount: 1, relevanceScore: 90,
             }],
           });
         }
@@ -351,13 +351,13 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.body.data[0].topicId).to.equal('2');
     });
 
-    it('sorts all-LLM merged topics by name when volume ties', async () => {
+    it('sorts all-LLM merged topics by name when relevance ties', async () => {
       clients.topicClient.topicsByFTS.callsFake(({ range }) => {
         if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
         return Promise.resolve({
           topics: [
-            { id: '1', name: 'Zebra', volume: 100, promptsCount: 1 },
-            { id: '2', name: 'Alpha', volume: 100, promptsCount: 1 },
+            { id: '1', name: 'Zebra', volume: 100, promptsCount: 1, relevanceScore: 50 },
+            { id: '2', name: 'Alpha', volume: 100, promptsCount: 1, relevanceScore: 50 },
           ],
         });
       });
@@ -368,7 +368,7 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.body.data[1].topic).to.equal('Zebra');
     });
 
-    it('strips internal volumeSortKey from output', async () => {
+    it('does not expose internal sort keys in output', async () => {
       clients.topicClient.topicsByFTS.callsFake(({ range }) => {
         if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
         return Promise.resolve({
@@ -380,6 +380,55 @@ describe('AI Visibility – topics handlers', () => {
       const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearch(sp, clients);
       expect(res.body.data[0]).to.not.have.property('volumeSortKey');
+    });
+
+    it('single LLM maps relevanceScore from gRPC field', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.resolve({
+          topics: [{
+            id: '1', name: 'T', volume: 100, promptsCount: 5, relevanceScore: 72,
+          }],
+        });
+      });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearch(sp, clients);
+      expect(res.body.data[0].relevanceScore).to.equal(72);
+    });
+
+    it('single LLM defaults relevanceScore to 0 when absent', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.resolve({
+          topics: [{
+            id: '1', name: 'T', volume: 100, promptsCount: 5,
+          }],
+        });
+      });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearch(sp, clients);
+      expect(res.body.data[0].relevanceScore).to.equal(0);
+    });
+
+    it('all LLMs keeps max relevanceScore when same topic_id appears from multiple LLMs', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ llm: l, range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        if (l === FTS_LLMS[0]) {
+          return Promise.resolve({
+            topics: [{ id: 'x', name: 'T', volume: 100, promptsCount: 1, relevanceScore: 40 }],
+          });
+        }
+        if (l === FTS_LLMS[1]) {
+          return Promise.resolve({
+            topics: [{ id: 'x', name: 'T', volume: 100, promptsCount: 1, relevanceScore: 85 }],
+          });
+        }
+        return Promise.resolve({ topics: [] });
+      });
+      const sp = new URLSearchParams('searchQuery=test');
+      const res = await handleTopicsResearch(sp, clients);
+      expect(res.body.data).to.have.length(1);
+      expect(res.body.data[0].relevanceScore).to.equal(85);
     });
   });
 

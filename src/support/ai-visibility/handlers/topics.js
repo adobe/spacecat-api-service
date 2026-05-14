@@ -108,12 +108,6 @@ function attachRelatedTopicsAiVolume(body, v) {
   return { ...body, relatedTopicsAiVolume: v };
 }
 
-function stripVolumeSortKey(row) {
-  const next = { ...row };
-  delete next.volumeSortKey;
-  return next;
-}
-
 function stripPromptDedupeKeys(row) {
   const next = { ...row };
   delete next.mentionSortKey;
@@ -319,7 +313,7 @@ export async function handleTopicsResearch(sp, clients) {
     const pair = await Promise.allSettled([
       countTopicRowsByTopicsByFtsPaging(country, q, llm, clients),
       clients.topicClient.topicsByFTS({
-        country, llm, query: q, order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME }, range: { limit, offset },
+        country, llm, query: q, order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.RELEVANCE_SCORE }, range: { limit, offset },
       }),
     ]);
     const listTotal = settledValueOrElse(pair[0], 0);
@@ -332,6 +326,7 @@ export async function handleTopicsResearch(sp, clients) {
       topicId: String(t.id),
       topicVolume: num(t.volume),
       promptsCount: num(t.promptsCount),
+      relevanceScore: num(t.relevanceScore),
     }));
     return {
       status: 200,
@@ -343,7 +338,7 @@ export async function handleTopicsResearch(sp, clients) {
   const pairAll = await Promise.all([
     countDistinctTopicIdsAcrossFtsLlms(country, q, clients),
     Promise.all(FTS_LLMS.map((l) => clients.topicClient.topicsByFTS({
-      country, llm: l, query: q, order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME }, range: { limit, offset },
+      country, llm: l, query: q, order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.RELEVANCE_SCORE }, range: { limit, offset },
     }).catch(() => ({ topics: [] })))),
   ]);
   const topicsTotalDistinct = pairAll[0];
@@ -358,15 +353,18 @@ export async function handleTopicsResearch(sp, clients) {
           topicId: id,
           topicVolume: num(t.volume),
           promptsCount: num(t.promptsCount),
-          volumeSortKey: num(t.volume),
+          relevanceScore: num(t.relevanceScore),
         });
+      } else {
+        const prev = seen.get(id);
+        prev.relevanceScore = Math.max(prev.relevanceScore, num(t.relevanceScore));
       }
     }
   }
   const merged = Array.from(seen.values()).sort(
-    (a, b) => b.volumeSortKey - a.volumeSortKey || a.topic.localeCompare(b.topic),
+    (a, b) => b.relevanceScore - a.relevanceScore || a.topic.localeCompare(b.topic),
   );
-  const data = merged.slice(0, limit).map(stripVolumeSortKey);
+  const data = merged.slice(0, limit);
   return {
     status: 200,
     body: {
