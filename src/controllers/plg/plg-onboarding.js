@@ -832,6 +832,7 @@ async function performAsoPlgOnboarding({
   // Fast path: preonboarded sites just need enrollment + ONBOARDED
   if (onboarding.getStatus() === STATUSES.PRE_ONBOARDING && onboarding.getSiteId()) {
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
+    onboarding.setSteps({ ...(onboarding.getSteps() || {}), preOnboarded: true });
     let site = await Site.findById(onboarding.getSiteId());
     if (site) {
       try {

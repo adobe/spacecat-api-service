@@ -4392,6 +4392,14 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           orgResolved: true,
           siteResolved: true,
           configUpdated: true,
+          preOnboarded: true,
+        }),
+      );
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match({
+          orgResolved: true,
+          siteResolved: true,
+          configUpdated: true,
           entitlementCreated: true,
         }),
       );
@@ -4421,6 +4429,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(response.status).to.equal(200);
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ preOnboarded: true });
       expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ entitlementCreated: true });
     });
 
