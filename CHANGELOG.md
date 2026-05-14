@@ -1,3 +1,17 @@
+## [1.498.1](https://github.com/adobe/spacecat-api-service/compare/v1.498.0...v1.498.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **plg:** remove summit-plg handler flag check in favour of entitlement ([#2364](https://github.com/adobe/spacecat-api-service/issues/2364)) ([ddb79e1](https://github.com/adobe/spacecat-api-service/commit/ddb79e10c6549964a9791fd1cf3246d4ff79d525))
+
+# [1.498.0](https://github.com/adobe/spacecat-api-service/compare/v1.497.1...v1.498.0) (2026-05-13)
+
+
+### Features
+
+* **llmo:** async URL CSV export for agentic traffic ([#2401](https://github.com/adobe/spacecat-api-service/issues/2401)) ([3151972](https://github.com/adobe/spacecat-api-service/commit/3151972210777ec672f13c6dffa574e4d339b0d4))
+
 ## [1.497.1](https://github.com/adobe/spacecat-api-service/compare/v1.497.0...v1.497.1) (2026-05-13)
 
 

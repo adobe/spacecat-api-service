@@ -54,6 +54,8 @@ import {
   createAgenticTrafficMoversHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
   createAgenticTrafficHasDataHandler,
+  createAgenticTrafficUrlsExportHandler,
+  createAgenticTrafficUrlsExportStatusHandler,
 } from './llmo-agentic-traffic.js';
 import {
   createReferralTrafficFilterDimensionsHandler,
@@ -204,6 +206,10 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
+  const exportAgenticTrafficUrls = createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficUrlsExportStatus = createAgenticTrafficUrlsExportStatusHandler(
+    getSiteAndValidateAccess,
+  );
 
   const getReferralTrafficFilterDimensions = createReferralTrafficFilterDimensionsHandler(
     getSiteAndValidateAccess,
@@ -268,6 +274,8 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficMovers,
     getAgenticTrafficUrlBrandPresence,
     getAgenticTrafficHasData,
+    exportAgenticTrafficUrls,
+    getAgenticTrafficUrlsExportStatus,
     getReferralTrafficFilterDimensions,
     getReferralTrafficKpis,
     getReferralTrafficTrend,

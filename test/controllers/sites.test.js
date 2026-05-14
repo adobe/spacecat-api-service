@@ -4851,9 +4851,9 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('isSummitPlgEnabled', true);
     });
 
-    it('should set isSummitPlgEnabled to false when summit-plg is not enabled for site', async () => {
-      mockDataAccess.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: sandbox.stub().returns(false),
+    it('should set isSummitPlgEnabled to false when entitlement is not PLG', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getTier: () => 'FREE_TRIAL',
       });
 
       context.data = { organizationId: testOrganizations[0].getId() };
