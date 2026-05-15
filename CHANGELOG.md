@@ -1,3 +1,10 @@
+## [1.500.4](https://github.com/adobe/spacecat-api-service/compare/v1.500.3...v1.500.4) (2026-05-15)
+
+
+### Bug Fixes
+
+* **plg:** grant broken-backlinks suggestions by authority score descending ([#2422](https://github.com/adobe/spacecat-api-service/issues/2422)) ([4cebb8b](https://github.com/adobe/spacecat-api-service/commit/4cebb8b52ee97fe7bec72e18be334f0a54cafd5d))
+
 ## [1.500.3](https://github.com/adobe/spacecat-api-service/compare/v1.500.2...v1.500.3) (2026-05-15)
 
 
