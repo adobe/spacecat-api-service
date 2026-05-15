@@ -221,10 +221,13 @@ const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.
 
 // RFC 1123 hostname optionally followed by a URL path; no scheme, port, query, or fragment.
 // Hostname: max 253 chars, labels 1-63 alphanumeric/hyphen separated by dots.
-// Path segments: alphanumeric, hyphens, underscores only (no dot-segments, empty segments).
-// Valid: nba.com, nba.com/kings  Invalid: https://nba.com, nba.com?q=1, nba.com/../etc
+// Path segments: alphanumeric/hyphens/underscores with optional internal dots (e.g. v1.0).
+// Leading dots, dot-segments (..), and empty segments are rejected.
+// Valid: nba.com, nba.com/kings, nba.com/v1.0  Invalid: https://nba.com, nba.com/../etc
+// NOTE: DOMAIN_RE must stay in sync with DOMAIN_PATTERN in spacecat-shared
+// (plg-onboarding.model.js) and getDomainFromUrl.ts in the ESS UI (LLMO-4187).
 // eslint-disable-next-line max-len
-const DOMAIN_RE = /^(?=[^/]{1,253}(?:\/|$))([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(\/[A-Za-z0-9_-]+)*$/;
+const DOMAIN_RE = /^(?=[^/]{1,253}(?:\/|$))([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)*$/;
 
 /**
  * Validates that a domain string is a syntactically valid hostname or hostname/path (RFC 1123).
@@ -237,6 +240,7 @@ function isValidDomain(domain) {
 
 /**
  * Validates that a domain is not a private/internal address to prevent SSRF.
+ * Assumes isValidDomain() has already accepted the input (no scheme, port, or IP literals).
  * @param {string} domain - The domain to validate (may include a path, e.g. "nba.com/kings").
  * @returns {boolean} true if safe, false if potentially dangerous.
  */

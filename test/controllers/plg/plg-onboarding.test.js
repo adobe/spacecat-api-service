@@ -761,6 +761,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       'nba.com/kings',
       'nba.com/us/kings',
       'www.example.com/blog',
+      'nba.com/v1.0',
+      'nba.com/kings.html',
     ];
 
     validSubpathDomains.forEach((domain) => {
