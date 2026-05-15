@@ -135,6 +135,7 @@ describe('Sites Controller', () => {
     'updateSite',
     'updateCdnLogsConfig',
     'getPageCitabilityCounts',
+    'patchPageCitabilityStatus',
     'getTopPages',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
