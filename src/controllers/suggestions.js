@@ -1151,13 +1151,22 @@ function SuggestionsController(ctx, sqs, env) {
         } else if (
           suggestion.getStatus() === SuggestionModel.STATUSES.NEW
           || suggestion.getStatus() === SuggestionModel.STATUSES.PENDING_VALIDATION
+          // OUTDATED suggestions are re-detections of previously-FIXED rows
+          // where the producer found the issue still present on the live URL
+          // (after the publish-lag reset gate). The UI surfaces them in the
+          // Current tab (alt-text PR #1914) so customers can retry the deploy
+          // — this allowlist makes that retry actually reach the autofix
+          // worker instead of being silently rejected.
+          // bulkUpdateStatus is source-status-agnostic (verified in
+          // spacecat-shared-data-access), so OUTDATED → IN_PROGRESS just works.
+          || suggestion.getStatus() === SuggestionModel.STATUSES.OUTDATED
         ) {
           validSuggestions.push(suggestion);
         } else {
           failedSuggestions.push({
             uuid: suggestion.getId(),
             index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Suggestion must be in NEW or PENDING_VALIDATION status for auto-fix',
+            message: 'Suggestion must be in NEW, PENDING_VALIDATION, or OUTDATED status for auto-fix',
             statusCode: 400,
           });
         }

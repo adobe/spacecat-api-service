@@ -4608,7 +4608,39 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 400);
       expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
-      expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion must be in NEW or PENDING_VALIDATION status for auto-fix');
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion must be in NEW, PENDING_VALIDATION, or OUTDATED status for auto-fix');
+    });
+
+    it('autofix suggestion accepts OUTDATED status (re-detect of previously FIXED row)', async () => {
+      // OUTDATED suggestions are surfaced in the Current tab by the alt-text
+      // UI (#1914) so customers can retry a deploy whose previous attempt
+      // didn't stick on the live URL. Allowing OUTDATED through this gate
+      // makes that retry actually reach the autofix worker.
+      const outdatedSugg = { ...suggs[0], status: 'OUTDATED' };
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(outdatedSugg)]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...outdatedSugg, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('total', 1);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
+      // OUTDATED → IN_PROGRESS transition must occur for the worker to pick it
+      // up via Suggestion.allByOpportunityIdAndStatus(opp, IN_PROGRESS).
+      expect(mockSuggestion.bulkUpdateStatus).to.have.been.calledOnce;
     });
 
     it('groups by relationshipContext.fixTargetPageId when fixTargetGroups is provided for a groupable type', async () => {
