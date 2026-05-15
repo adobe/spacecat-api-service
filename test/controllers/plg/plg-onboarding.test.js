@@ -7982,7 +7982,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               status: 'WAITLISTED',
               siteId: newSiteId,
               organizationId: newOrgId,
-              steps: { orgResolved: true, rumVerified: true },
+              steps: { orgResolved: true, rumVerified: true, preOnboarded: true },
               botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4'], userAgent: 'bot' },
               waitlistReason: 'pending review',
               updatedBy: 'admin@example.com',
@@ -8005,7 +8005,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('admin@example.com');
           expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('admin@example.com');
           expect(mockOnboarding.setSteps).to.have.been.calledWith(
-            { orgResolved: true, rumVerified: true },
+            { orgResolved: true, rumVerified: true, preOnboarded: true },
           );
           expect(mockOnboarding.save).to.have.been.called;
         });
