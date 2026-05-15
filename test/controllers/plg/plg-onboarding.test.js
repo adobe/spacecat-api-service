@@ -690,6 +690,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       'nba.com/../etc/passwd',
       'nba.com//kings',
       'nba.com/',
+      'nba.com/.hidden',
+      'nba.com/v1..0',
+      'nba.com/v1.0.',
     ];
 
     invalidDomains.forEach((invalidDomain) => {
@@ -726,7 +729,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     });
 
     // These fail domain validation before reaching SSRF check
-    const invalidAsHostnames = [
+    const invalidAsDomains = [
       'localhost',
       '127.0.0.1',
       '10.0.0.1',
@@ -737,7 +740,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       '[::1]',
     ];
 
-    invalidAsHostnames.forEach((domain) => {
+    invalidAsDomains.forEach((domain) => {
       it(`returns 400 for invalid/unsafe domain: ${domain}`, async () => {
         const context = buildContext({ domain });
 
