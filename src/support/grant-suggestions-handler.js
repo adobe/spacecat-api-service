@@ -345,20 +345,25 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   const newSuggestions = await Suggestion
     .allByOpportunityIdAndStatus(opptyId, SuggestionModel.STATUSES.NEW);
   const newSuggestionIds = newSuggestions.map((s) => s.getId());
-  if (!newSuggestionIds.length) {
-    return;
-  }
 
   const { grantedIds, grantIds, notGrantedIds } = await SuggestionGrant
     .splitSuggestionsByGrantStatus(newSuggestionIds);
 
-  const existingToken = await Token.findBySiteIdAndTokenType(siteId, tokenType);
+  let token = await Token.findBySiteIdAndTokenType(siteId, tokenType);
   const collections = { Suggestion, SuggestionGrant, Token };
   const ids = { siteId, tokenType, oppType };
 
-  const { token, didRevoke } = existingToken
-    ? await handleExistingTokenCycle(collections, ids, existingToken)
-    : await handleNewTokenCycle(collections, ids, { grantedIds, grantIds, newSuggestions });
+  let didRevoke;
+  if (token) {
+    ({ token, didRevoke } = await handleExistingTokenCycle(collections, ids, token));
+  } else {
+    const prevToken = await Token.findLastCreatedBySiteIdAndTokenType(siteId, tokenType);
+    if (prevToken) {
+      await handleExistingTokenCycle(collections, ids, prevToken);
+    }
+    const grants = { grantedIds, grantIds, newSuggestions };
+    ({ token, didRevoke } = await handleNewTokenCycle(collections, ids, grants));
+  }
 
   if (!token || token.getRemaining() <= 0) {
     return;
