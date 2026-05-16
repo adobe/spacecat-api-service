@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { randomUUID } from 'crypto';
 import { promises as dns } from 'dns';
 import { tracingFetch as fetch, SPACECAT_USER_AGENT } from '@adobe/spacecat-shared-utils';
 
@@ -168,6 +169,110 @@ async function detectAdobeManagedCdn(domain, log) {
   }
 
   return 'byocdn-other';
+}
+
+/* ============================================================================
+ * Phase 1.5 — Case 0 (WAF Simple Proxy) HTTP probe.
+ *
+ * When Phase 1 DNS resolves cleanly to non-Adobe IPs ('byocdn-other'), a WAF
+ * may sit in front of AEM CS Fastly. Three signals confirm this topology:
+ *   1. x-tokowaka-request-id or x-edgeoptimize-request-id present in every response
+ *   2. x-request-id unique across all 4 probed responses (WAF is not caching)
+ *   3. x-aem-debug response header contains host=<bare-domain>
+ *
+ * Two parallel batches × 2 sequential requests = 4 total probes. All three
+ * signals must hold across all 4 responses; any failure returns null.
+ * ========================================================================== */
+
+const CASE0_PROBE_TIMEOUT_MS = 5000;
+
+async function makeCase0Probe(domain, log) {
+  const url = `https://${domain}`;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), CASE0_PROBE_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      follow: 5,
+      headers: {
+        'x-correlation-id': randomUUID(),
+        'x-aem-debug': 'edge=true',
+        'User-Agent': 'AdobeEdgeOptimize-Test',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    const responseHeaders = {};
+    response.headers.forEach((value, key) => {
+      responseHeaders[key.toLowerCase()] = value;
+    });
+    if (response.body && typeof response.body.cancel === 'function') {
+      response.body.cancel();
+    }
+    return responseHeaders;
+  } catch (err) {
+    clearTimeout(id);
+    log?.warn?.('[cdn-detection] Phase 1.5 probe failed', { domain, message: err?.message });
+    return null;
+  }
+}
+
+/**
+ * Phase 1.5: Detect AEM CS Fastly behind a WAF simple proxy (Case 0).
+ *
+ * Sends 4 HTTP probes (2 parallel batches × 2 sequential each) and verifies
+ * three signals that uniquely identify AEM CS Fastly responses. Returns
+ * 'aem-cs-fastly' when all signals are confirmed, null otherwise.
+ */
+async function detectAemCsFastlyBehindWaf(domain, log) {
+  const runBatch = async () => {
+    const resp1 = await makeCase0Probe(domain, log);
+    if (!resp1) {
+      return null;
+    }
+    const resp2 = await makeCase0Probe(domain, log);
+    if (!resp2) {
+      return null;
+    }
+    return [resp1, resp2];
+  };
+
+  const [batch1, batch2] = await Promise.all([runBatch(), runBatch()]);
+  if (!batch1 || !batch2) {
+    return null;
+  }
+
+  const allResponses = [...batch1, ...batch2];
+  const expectedHost = domain.replace(/^www\./i, '');
+
+  // Signal 1: every response carries a Tokowaka/EdgeOptimize request-id header
+  const signal1 = allResponses.every(
+    (r) => r['x-tokowaka-request-id'] || r['x-edgeoptimize-request-id'],
+  );
+  if (!signal1) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 1 absent — no request-id header', { domain });
+    return null;
+  }
+
+  // Signal 2: x-request-id unique across all 4 responses (WAF is not caching)
+  const requestIds = allResponses.map((r) => r['x-request-id']);
+  if (requestIds.some((rid) => !rid) || new Set(requestIds).size < allResponses.length) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 2 absent — x-request-id not unique or missing', { domain });
+    return null;
+  }
+
+  // Signal 3: x-aem-debug response header contains host=<bare-domain>
+  const signal3 = allResponses.every(
+    (r) => (r['x-aem-debug'] || '').includes(`host=${expectedHost}`),
+  );
+  if (!signal3) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 3 absent — x-aem-debug host mismatch', { domain });
+    return null;
+  }
+
+  log?.info?.('[cdn-detection] Phase 1.5: all signals confirmed — AEM CS Fastly behind WAF', { domain });
+  return 'aem-cs-fastly';
 }
 
 /* ============================================================================
@@ -611,13 +716,17 @@ async function detectGenericCdnToken(url, log) {
 /**
  * Detects the CDN for a given hostname or URL.
  *
- * Two-phase detection:
- *   Phase 1 — DNS-only check for Adobe-managed CDNs (AEM CS Fastly,
- *             Adobe Commerce Cloud Fastly). Cheap and authoritative when matched.
- *   Phase 2 — When Phase 1 doesn't match, runs a multi-signal probe ported from
- *             spacecat-audit-worker (HTTP headers → CNAME chain → PTR keywords).
- *             Result is mapped from a descriptive label to the LLMO byocdn-X
- *             token via LABEL_TO_LLMO_TOKEN.
+ * Three-phase detection:
+ *   Phase 1   — DNS-only check for Adobe-managed CDNs (AEM CS Fastly,
+ *               Adobe Commerce Cloud Fastly). Cheap and authoritative when matched.
+ *   Phase 1.5 — Case 0 (WAF Simple Proxy): when Phase 1 DNS resolves cleanly to
+ *               non-Adobe IPs, an HTTP probe with three signals (request-id header,
+ *               unique x-request-id, x-aem-debug host) distinguishes AEM CS Fastly
+ *               behind a WAF from a genuine third-party CDN.
+ *   Phase 2   — When Phase 1 doesn't match, runs a multi-signal probe ported from
+ *               spacecat-audit-worker (HTTP headers → CNAME chain → PTR keywords).
+ *               Result is mapped from a descriptive label to the LLMO byocdn-X
+ *               token via LABEL_TO_LLMO_TOKEN.
  *
  * Returns:
  *   - 'aem-cs-fastly' | 'commerce-fastly'  — Phase 1 hit
@@ -672,6 +781,19 @@ export async function detectCdnForDomain(input, log) {
     const phase1 = await detectAdobeManagedCdn(bareDomain, log);
     if (phase1 === 'aem-cs-fastly' || phase1 === 'commerce-fastly') {
       return phase1;
+    }
+
+    // Phase 1.5: Case 0 — WAF in front of AEM CS Fastly.
+    // DNS resolved cleanly to non-Adobe IPs; an HTTP probe with three signals
+    // distinguishes WAF-proxied AEM CS from a genuine third-party CDN.
+    if (phase1 === 'byocdn-other') {
+      let case0Result = await detectAemCsFastlyBehindWaf(`www.${bareDomain}`, log);
+      if (!case0Result) {
+        case0Result = await detectAemCsFastlyBehindWaf(bareDomain, log);
+      }
+      if (case0Result === 'aem-cs-fastly') {
+        return case0Result;
+      }
     }
 
     const { token: phase2Token, probeSucceeded } = await detectGenericCdnToken(url, log);
