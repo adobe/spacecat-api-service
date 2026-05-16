@@ -613,10 +613,25 @@ describe('cdn-detection', () => {
       expect(result).to.equal('aem-cs-fastly');
     });
 
-    it('logs all three signal-absent messages via provided logger', async () => {
+    it('returns null when second probe in a batch fails (partial batch failure)', async () => {
+      // resp1 succeeds, resp2 fails — covers the `if (!resp2) return null` branch.
+      // Both www and bare batches hit this path so Phase 1.5 cannot confirm signals.
+      let n = 0;
+      fetchStub.callsFake(() => {
+        n += 1;
+        if (n % 2 === 0) {
+          return Promise.reject(new Error('second probe fails'));
+        }
+        return Promise.resolve(case0Response(n));
+      });
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('byocdn-other');
+    });
+
+    it('logs signal-absent message when signal 1 is missing', async () => {
       const log = { info: sinon.stub(), warn: sinon.stub() };
 
-      // Signal 1 absent scenario — just check we get the right log message
       let n = 0;
       fetchStub.callsFake(() => {
         n += 1;
