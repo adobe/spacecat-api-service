@@ -190,21 +190,19 @@ export const CASE0_PROBE_COUNT = 3;
 
 async function makeCase0Probe(domain, log) {
   const url = `https://${domain}/`;
-  // Use globalThis.fetch (Node.js native, backed by undici) instead of
-  // tracingFetch. tracingFetch (@adobe/fetch) implements RFC 7234 client-side
-  // HTTP caching: repeated calls to the same URL return a 0 ms cached response,
-  // so all probes would share the same x-request-id and Signal 2 would always
-  // fail. globalThis.fetch has no HTTP cache — every call hits the network.
+  // Disable @adobe/fetch caching so repeated Case 0 probes always hit the
+  // network and can validate unique x-request-id values.
   try {
-    const response = await globalThis.fetch(url, {
+    const response = await fetch(url, {
       method: 'GET',
       redirect: 'manual',
+      cache: 'no-store',
+      timeout: CASE0_PROBE_TIMEOUT_MS,
       headers: {
         'x-correlation-id': 'adobeedgetest',
         'x-aem-debug': 'edge=true',
         'User-Agent': 'AdobeEdgeOptimize-Test',
       },
-      signal: AbortSignal.timeout(CASE0_PROBE_TIMEOUT_MS),
     });
     const responseHeaders = {};
     response.headers.forEach((value, key) => {
@@ -250,7 +248,7 @@ export async function detectAemCsFastlyBehindWaf(domain, log) {
     return null;
   }
 
-  // Signal 2: x-request-id unique across all 4 responses (WAF is not caching)
+  // Signal 2: x-request-id unique across all probed responses (WAF is not caching)
   const requestIds = allResponses.map((r) => r['x-request-id']);
   if (requestIds.some((rid) => !rid) || new Set(requestIds).size < allResponses.length) {
     log?.info?.('[cdn-detection] Phase 1.5: signal 2 absent — x-request-id not unique or missing', { domain });
@@ -260,9 +258,10 @@ export async function detectAemCsFastlyBehindWaf(domain, log) {
   // Signal 3: x-aem-debug host= field equals the probed domain.
   // Must match the host= field exactly, not x-forwarded-host= (Case 1 sites have the AEM
   // origin in host= but the public domain in x-forwarded-host=, so substring includes()
-  // would produce a false positive for Case 1).
+  // would produce a false positive for Case 1). The host token can appear anywhere
+  // in the debug header, separated by spaces, semicolons, commas, or other text.
   const signal3 = allResponses.every((r) => {
-    const hostField = (r['x-aem-debug'] || '').match(/(?:^|,)host=([^,\s]+)/)?.[1] ?? '';
+    const hostField = (r['x-aem-debug'] || '').match(/(?:^|[^\w-])host=([^,\s;]+)/)?.[1] ?? '';
     return hostField === expectedHost;
   });
   if (!signal3) {
