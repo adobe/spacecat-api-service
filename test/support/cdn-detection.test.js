@@ -40,6 +40,10 @@ describe('cdn-detection', () => {
       reverse: sandbox.stub().rejects(dnsError('ENOTFOUND')),
     };
 
+    // Phase 1.5 probes use globalThis.fetch (no HTTP cache). Default to reject
+    // so Phase 1.5 always fails unless a test overrides it.
+    sandbox.stub(globalThis, 'fetch').rejects(new Error('test: network disabled'));
+
     // Default Phase 2 to a no-op: every HTTP probe (HEAD/GET) rejects,
     // so the detector falls back to DNS-only behaviour and existing Phase 1 tests
     // remain authoritative.
@@ -211,13 +215,15 @@ describe('cdn-detection', () => {
     expect(result).to.be.null;
   });
 
-  it('returns null when www DNS fails and bare returns other', async () => {
+  it('returns byocdn-other when www DNS fails but bare domain resolves to a non-Adobe CDN', async () => {
+    // www DNS fails but bare domain resolves cleanly — && null guard lets bare
+    // result (byocdn-other) surface, and Phase 2 CNAME chain confirms the CDN.
     dnsStubs.resolveCname.withArgs('www.example.com').rejects(dnsError('SERVFAIL'));
     dnsStubs.resolveCname.withArgs('example.com').resolves(['other-cdn.example.net.']);
     dnsStubs.resolve4.withArgs('example.com').resolves(['1.2.3.4']);
 
     const result = await detectCdnForDomain('example.com');
-    expect(result).to.be.null;
+    expect(result).to.equal('byocdn-other');
   });
 
   it('returns null when CNAME resolves non-matching but resolve4 fails with SERVFAIL', async () => {
@@ -340,7 +346,10 @@ describe('cdn-detection', () => {
       expect(result).to.equal('byocdn-other');
     });
 
-    it('returns null when AAAA lookup fails with SERVFAIL on www and bare returns other', async () => {
+    it('returns byocdn-other when AAAA fails on www but bare domain resolves to a non-Adobe CDN', async () => {
+      // www DNS fails on AAAA but bare domain resolves cleanly — the &&-only null
+      // guard lets detectAdobeManagedCdn return 'byocdn-other' so Phase 2 can
+      // confirm the CDN from the bare-domain CNAME chain.
       dnsStubs.resolveCname.withArgs('www.example.com').resolves([]);
       dnsStubs.resolve4.withArgs('www.example.com').resolves([]);
       dnsStubs.resolve6.withArgs('www.example.com').rejects(dnsError('SERVFAIL'));
@@ -349,7 +358,7 @@ describe('cdn-detection', () => {
       dnsStubs.resolve6.withArgs('example.com').resolves([]);
 
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.be.null;
+      expect(result).to.equal('byocdn-other');
     });
 
     it('AEM CS Fastly wins when both CNAME signature sets theoretically match at the CNAME layer', async () => {
@@ -464,8 +473,8 @@ describe('cdn-detection', () => {
   // Phase 1 DNS resolves to non-Adobe IPs ('byocdn-other'). Phase 1.5 runs
   // four HTTP probes (2 parallel × 2 sequential) and checks three signals:
   //   1. x-tokowaka-request-id or x-edgeoptimize-request-id present in all
-  //   2. x-request-id unique across all 4 responses (WAF is not caching)
-  //   3. x-aem-debug response header contains host=<bare-domain>
+  //   2. x-request-id unique across all CASE0_PROBE_COUNT probed responses (WAF is not caching)
+  //   3. x-aem-debug response header contains host=<probed-domain>
   // -----------------------------------------------------------------------
   describe('phase 1.5 — case 0: WAF in front of AEM CS Fastly', () => {
     // Helper: build a mock HTTP response carrying all three Case 0 signals.
@@ -492,26 +501,30 @@ describe('cdn-detection', () => {
       dnsStubs.resolve6.resolves([]);
     });
 
-    it('returns aem-cs-fastly when all three signals are confirmed in all 4 probes', async () => {
+    it('returns aem-cs-fastly when all three signals are confirmed in all 3 probes', async () => {
       let n = 0;
-      fetchStub.callsFake(() => {
+      globalThis.fetch.callsFake((url) => {
         n += 1;
-        return Promise.resolve(case0Response(n));
+        // Signal 3 checks host=<probed-domain>; echo back hostname so www probe succeeds.
+        const { hostname } = new URL(url);
+        return Promise.resolve(case0Response(n, { 'x-aem-debug': `host=${hostname} cache=MISS` }));
       });
 
       const result = await detectCdnForDomain('example.com');
       expect(result).to.equal('aem-cs-fastly');
-      // Phase 1.5 probes www.example.com 4 times; success means Phase 2 is skipped
-      expect(fetchStub.callCount).to.equal(4);
+      // Phase 1.5 probes www.example.com CASE0_PROBE_COUNT (3) times; Phase 2 is skipped
+      expect(globalThis.fetch.callCount).to.equal(3);
     });
 
     it('accepts x-tokowaka-request-id as the signal 1 header', async () => {
       let n = 0;
-      fetchStub.callsFake(() => {
+      globalThis.fetch.callsFake((url) => {
         n += 1;
+        const { hostname } = new URL(url);
         return Promise.resolve(case0Response(n, {
           'x-tokowaka-request-id': `tok-${n}`,
           'x-edgeoptimize-request-id': undefined,
+          'x-aem-debug': `host=${hostname} cache=MISS`,
         }));
       });
 
@@ -523,7 +536,7 @@ describe('cdn-detection', () => {
       // No request-id header in any response — Phase 1.5 cannot confirm signal 1.
       // Phase 2 then runs; DNS chain present → probeSucceeded=true → byocdn-other.
       let n = 0;
-      fetchStub.callsFake(() => {
+      globalThis.fetch.callsFake(() => {
         n += 1;
         const headers = new Map([
           ['x-request-id', `xreq-${n}`],
@@ -540,24 +553,33 @@ describe('cdn-detection', () => {
       expect(result).to.equal('byocdn-other');
     });
 
-    it('falls through when signal 2 fails — duplicate x-request-id across probes', async () => {
+    it('falls through when signal 2 fails — duplicate x-request-id across probes (caching detected)', async () => {
+      // All probes return the same x-request-id — a caching WAF or CDN
+      // serving the same cached response for every probe.
       let n = 0;
-      fetchStub.callsFake(() => {
+      globalThis.fetch.callsFake((url) => {
         n += 1;
-        return Promise.resolve(case0Response(n, { 'x-request-id': 'same-id-for-all' }));
+        const { hostname } = new URL(url);
+        return Promise.resolve(case0Response(n, {
+          'x-request-id': 'xreq-cached',
+          'x-aem-debug': `host=${hostname} cache=MISS`,
+        }));
       });
 
       const result = await detectCdnForDomain('example.com');
       expect(result).to.equal('byocdn-other');
     });
 
-    it('falls through when signal 2 fails — x-request-id absent in all responses', async () => {
-      // Every probe returns an empty x-request-id so both www and bare domain
-      // probes fail signal 2, ensuring Phase 1.5 cannot return aem-cs-fastly.
+    it('falls through when signal 2 fails — x-request-id absent from all responses', async () => {
+      // x-request-id not present — Signal 2 requires it to be present and unique.
       let n = 0;
-      fetchStub.callsFake(() => {
+      globalThis.fetch.callsFake((url) => {
         n += 1;
-        return Promise.resolve(case0Response(n, { 'x-request-id': '' }));
+        const { hostname } = new URL(url);
+        return Promise.resolve(case0Response(n, {
+          'x-request-id': '',
+          'x-aem-debug': `host=${hostname} cache=MISS`,
+        }));
       });
 
       const result = await detectCdnForDomain('example.com');
@@ -566,7 +588,7 @@ describe('cdn-detection', () => {
 
     it('falls through when signal 3 fails — x-aem-debug host mismatch in all probes', async () => {
       let n = 0;
-      fetchStub.callsFake(() => {
+      globalThis.fetch.callsFake(() => {
         n += 1;
         return Promise.resolve(case0Response(n, { 'x-aem-debug': 'host=wrong-domain.com' }));
       });
@@ -576,32 +598,26 @@ describe('cdn-detection', () => {
     });
 
     it('falls through to Phase 2 when probe network fails entirely', async () => {
-      // All fetches fail → Phase 1.5 cannot make probes → falls through.
-      // Phase 2 DNS chain succeeds (no-match.example.net.) → byocdn-other.
-      fetchStub.rejects(new Error('network error'));
-
+      // globalThis.fetch rejects by default (set in beforeEach) → Phase 1.5 cannot
+      // make probes → falls through. Phase 2 DNS chain succeeds → byocdn-other.
       const result = await detectCdnForDomain('example.com');
       expect(result).to.equal('byocdn-other');
     });
 
     it('skips Phase 1.5 entirely when Phase 1 returns aem-cs-fastly', async () => {
       dnsStubs.resolveCname.withArgs('www.example.com').resolves(['cdn.adobeaemcloud.com.']);
-      let n = 0;
-      fetchStub.callsFake(() => {
-        n += 1;
-        return Promise.resolve(case0Response(n));
-      });
 
       const result = await detectCdnForDomain('example.com');
       expect(result).to.equal('aem-cs-fastly');
-      expect(fetchStub.callCount).to.equal(0);
+      expect(globalThis.fetch.callCount).to.equal(0);
     });
 
     it('falls back to bare domain when www probe fails signal 3, bare probe succeeds', async () => {
       let n = 0;
-      fetchStub.callsFake((url) => {
+      globalThis.fetch.callsFake((url) => {
         n += 1;
-        if (url === 'https://www.example.com') {
+        const { hostname } = new URL(url);
+        if (hostname === 'www.example.com') {
           // www probes: signal 3 fails (wrong host in x-aem-debug)
           return Promise.resolve(case0Response(n, { 'x-aem-debug': 'host=wrong-domain.com' }));
         }
@@ -613,11 +629,11 @@ describe('cdn-detection', () => {
       expect(result).to.equal('aem-cs-fastly');
     });
 
-    it('returns null when second probe in a batch fails (partial batch failure)', async () => {
-      // resp1 succeeds, resp2 fails — covers the `if (!resp2) return null` branch.
-      // Both www and bare batches hit this path so Phase 1.5 cannot confirm signals.
+    it('falls through when a probe fails mid-sequence', async () => {
+      // Sequential probes: probe 1 succeeds, probe 2 rejects → Phase 1.5 returns null for
+      // www and bare. Phase 2 DNS chain succeeds → byocdn-other.
       let n = 0;
-      fetchStub.callsFake(() => {
+      globalThis.fetch.callsFake(() => {
         n += 1;
         if (n % 2 === 0) {
           return Promise.reject(new Error('second probe fails'));
@@ -633,7 +649,7 @@ describe('cdn-detection', () => {
       const log = { info: sinon.stub(), warn: sinon.stub() };
 
       let n = 0;
-      fetchStub.callsFake(() => {
+      globalThis.fetch.callsFake(() => {
         n += 1;
         const headers = new Map([['x-request-id', `xreq-${n}`], ['x-aem-debug', 'host=example.com']]);
         return Promise.resolve({
@@ -653,9 +669,10 @@ describe('cdn-detection', () => {
     it('logs Phase 1.5 success when all signals confirmed', async () => {
       const log = { info: sinon.stub(), warn: sinon.stub() };
       let n = 0;
-      fetchStub.callsFake(() => {
+      globalThis.fetch.callsFake((url) => {
         n += 1;
-        return Promise.resolve(case0Response(n));
+        const { hostname } = new URL(url);
+        return Promise.resolve(case0Response(n, { 'x-aem-debug': `host=${hostname} cache=MISS` }));
       });
 
       const result = await detectCdnForDomain('example.com', log);

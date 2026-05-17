@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-import { randomUUID } from 'crypto';
 import { promises as dns } from 'dns';
 import { tracingFetch as fetch, SPACECAT_USER_AGENT } from '@adobe/spacecat-shared-utils';
 
@@ -164,7 +163,7 @@ async function detectAdobeManagedCdn(domain, log) {
     return bareResult;
   }
 
-  if (wwwResult === null || bareResult === null) {
+  if (wwwResult === null && bareResult === null) {
     return null;
   }
 
@@ -177,32 +176,36 @@ async function detectAdobeManagedCdn(domain, log) {
  * When Phase 1 DNS resolves cleanly to non-Adobe IPs ('byocdn-other'), a WAF
  * may sit in front of AEM CS Fastly. Three signals confirm this topology:
  *   1. x-tokowaka-request-id or x-edgeoptimize-request-id present in every response
- *   2. x-request-id unique across all 4 probed responses (WAF is not caching)
- *   3. x-aem-debug response header contains host=<bare-domain>
+ *   2. x-request-id unique across all CASE0_PROBE_COUNT responses (WAF is not caching)
+ *   3. x-aem-debug response header contains host=<probed-domain>
  *
- * Two parallel batches × 2 sequential requests = 4 total probes. All three
- * signals must hold across all 4 responses; any failure returns null.
+ * CASE0_PROBE_COUNT sequential probes (default 3). All three signals must hold
+ * across every response; any failure returns null.
  * ========================================================================== */
 
 const CASE0_PROBE_TIMEOUT_MS = 5000;
+// Number of sequential probes sent to verify all three signals.
+// Increase to raise the false-positive bar; decrease to reduce latency.
+export const CASE0_PROBE_COUNT = 3;
 
 async function makeCase0Probe(domain, log) {
-  const url = `https://${domain}`;
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), CASE0_PROBE_TIMEOUT_MS);
+  const url = `https://${domain}/`;
+  // Use globalThis.fetch (Node.js native, backed by undici) instead of
+  // tracingFetch. tracingFetch (@adobe/fetch) implements RFC 7234 client-side
+  // HTTP caching: repeated calls to the same URL return a 0 ms cached response,
+  // so all probes would share the same x-request-id and Signal 2 would always
+  // fail. globalThis.fetch has no HTTP cache — every call hits the network.
   try {
-    const response = await fetch(url, {
+    const response = await globalThis.fetch(url, {
       method: 'GET',
-      redirect: 'follow',
-      follow: 5,
+      redirect: 'manual',
       headers: {
-        'x-correlation-id': randomUUID(),
+        'x-correlation-id': 'adobeedgetest',
         'x-aem-debug': 'edge=true',
         'User-Agent': 'AdobeEdgeOptimize-Test',
       },
-      signal: controller.signal,
+      signal: AbortSignal.timeout(CASE0_PROBE_TIMEOUT_MS),
     });
-    clearTimeout(id);
     const responseHeaders = {};
     response.headers.forEach((value, key) => {
       responseHeaders[key.toLowerCase()] = value;
@@ -212,7 +215,6 @@ async function makeCase0Probe(domain, log) {
     }
     return responseHeaders;
   } catch (err) {
-    clearTimeout(id);
     log?.warn?.('[cdn-detection] Phase 1.5 probe failed', { domain, message: err?.message });
     return null;
   }
@@ -221,30 +223,23 @@ async function makeCase0Probe(domain, log) {
 /**
  * Phase 1.5: Detect AEM CS Fastly behind a WAF simple proxy (Case 0).
  *
- * Sends 4 HTTP probes (2 parallel batches × 2 sequential each) and verifies
- * three signals that uniquely identify AEM CS Fastly responses. Returns
- * 'aem-cs-fastly' when all signals are confirmed, null otherwise.
+ * Sends CASE0_PROBE_COUNT sequential HTTP probes and verifies three signals
+ * that uniquely identify AEM CS Fastly responses. Returns 'aem-cs-fastly'
+ * when all signals are confirmed, null otherwise.
  */
-async function detectAemCsFastlyBehindWaf(domain, log) {
-  const runBatch = async () => {
-    const resp1 = await makeCase0Probe(domain, log);
-    if (!resp1) {
+export async function detectAemCsFastlyBehindWaf(domain, log) {
+  const allResponses = [];
+  /* eslint-disable no-await-in-loop -- sequential probes; each must see a unique x-request-id */
+  for (let i = 0; i < CASE0_PROBE_COUNT; i += 1) {
+    const resp = await makeCase0Probe(domain, log);
+    if (!resp) {
       return null;
     }
-    const resp2 = await makeCase0Probe(domain, log);
-    if (!resp2) {
-      return null;
-    }
-    return [resp1, resp2];
-  };
-
-  const [batch1, batch2] = await Promise.all([runBatch(), runBatch()]);
-  if (!batch1 || !batch2) {
-    return null;
+    allResponses.push(resp);
   }
+  /* eslint-enable no-await-in-loop */
 
-  const allResponses = [...batch1, ...batch2];
-  const expectedHost = domain.replace(/^www\./i, '');
+  const expectedHost = domain;
 
   // Signal 1: every response carries a Tokowaka/EdgeOptimize request-id header
   const signal1 = allResponses.every(
@@ -262,10 +257,14 @@ async function detectAemCsFastlyBehindWaf(domain, log) {
     return null;
   }
 
-  // Signal 3: x-aem-debug response header contains host=<bare-domain>
-  const signal3 = allResponses.every(
-    (r) => (r['x-aem-debug'] || '').includes(`host=${expectedHost}`),
-  );
+  // Signal 3: x-aem-debug host= field equals the probed domain.
+  // Must match the host= field exactly, not x-forwarded-host= (Case 1 sites have the AEM
+  // origin in host= but the public domain in x-forwarded-host=, so substring includes()
+  // would produce a false positive for Case 1).
+  const signal3 = allResponses.every((r) => {
+    const hostField = (r['x-aem-debug'] || '').match(/(?:^|,)host=([^,\s]+)/)?.[1] ?? '';
+    return hostField === expectedHost;
+  });
   if (!signal3) {
     log?.info?.('[cdn-detection] Phase 1.5: signal 3 absent — x-aem-debug host mismatch', { domain });
     return null;
