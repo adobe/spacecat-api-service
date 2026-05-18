@@ -9064,7 +9064,7 @@ describe('Suggestions Controller', () => {
       expect(options.updatedBy).to.equal('test@test.com');
     });
 
-    it('uses fallback updatedBy when profile email is missing', async () => {
+    it('passes undefined updatedBy when profile email is missing (shared client applies fallbacks)', async () => {
       const rollbackStub = sandbox.stub().resolves({
         succeededSuggestions: [tokowakaSuggestions[0]],
         failedSuggestions: [],
@@ -9090,7 +9090,7 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
       const [, , , options] = rollbackStub.firstCall.args;
-      expect(options.updatedBy).to.equal('tokowaka-rollback');
+      expect(options.updatedBy).to.be.undefined;
     });
 
     it('should return 400 for suggestions without edgeDeployed during rollback', async () => {
@@ -9480,7 +9480,7 @@ describe('Suggestions Controller', () => {
       expect(options.updatedBy).to.equal('test@test.com');
     });
 
-    it('uses fallback updatedBy when profile email is missing', async () => {
+    it('passes undefined updatedBy when profile email is missing (shared client applies fallbacks)', async () => {
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         attributes: {
@@ -9500,7 +9500,7 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
       const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
-      expect(options.updatedBy).to.equal('tokowaka-rollback');
+      expect(options.updatedBy).to.be.undefined;
     });
 
     it('should handle rollback failure from tokowaka client', async () => {
@@ -9762,7 +9762,7 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[0].message).to.include('Rollback failed: Internal server error');
     });
 
-    it('uses fallback updatedBy for path suggestion and covered suggestions when profile email is missing', async () => {
+    it('passes undefined updatedBy when profile email is missing (shared client applies path-rollback fallback)', async () => {
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         attributes: {
@@ -9776,9 +9776,9 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      // updatedBy fallback is passed to rollbackSuggestions which handles the cascade
+      // The api-service passes undefined; shared client applies 'path-rollback' fallback internally
       const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
-      expect(options.updatedBy).to.equal('tokowaka-rollback');
+      expect(options.updatedBy).to.be.undefined;
     });
   });
 
@@ -9931,7 +9931,7 @@ describe('Suggestions Controller', () => {
       expect(options.allSuggestions).to.include(pathCoveredSuggestion);
     });
 
-    it('uses fallback updatedBy for cascade path and its covered suggestions when profile email is missing', async () => {
+    it('passes undefined updatedBy when profile email is missing (shared client applies domain-wide-rollback-cascade fallback)', async () => {
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         attributes: {
@@ -9945,9 +9945,9 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      // updatedBy fallback is propagated to rollbackSuggestions which handles cascade
+      // The api-service passes undefined; shared client applies 'domain-wide-rollback-cascade' internally
       const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
-      expect(options.updatedBy).to.equal('tokowaka-rollback');
+      expect(options.updatedBy).to.be.undefined;
     });
 
     it('is a no-op cascade when no path suggestions are deployed', async () => {

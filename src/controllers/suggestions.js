@@ -2339,7 +2339,7 @@ function SuggestionsController(ctx, sqs, env) {
           validSuggestions,
           {
             allSuggestions,
-            updatedBy: profile?.email || 'tokowaka-rollback',
+            updatedBy: profile?.email,
           },
         );
 
