@@ -91,7 +91,7 @@
     "@adobe/spacecat-shared-http-utils": "1.27.2",
     "@adobe/spacecat-shared-ims-client": "1.12.7",
     "@adobe/spacecat-shared-launchdarkly-client": "^1.1.0",
-    "@adobe/spacecat-shared-tokowaka-client": "https://gist.github.com/dipratap/c893e5f937a62e34bee0a889b0b5287b/raw/6538660307a9dbd8e031ed5d0cd7d08fa6569fa1/adobe-spacecat-shared-tokowaka-client-1.16.2.tgz",
+    "@adobe/spacecat-shared-tokowaka-client": "https://gist.github.com/dipratap/c893e5f937a62e34bee0a889b0b5287b/raw/7d980ed0dbec65eb4f1422087b728a4694f9e180/adobe-spacecat-shared-tokowaka-client-1.16.2.tgz",
     "@adobe/spacecat-shared-rum-api-client": "2.40.13",
     "@adobe/spacecat-shared-scrape-client": "2.6.3",
     "@adobe/spacecat-shared-slack-client": "1.6.7",

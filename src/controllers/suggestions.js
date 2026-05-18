@@ -2346,19 +2346,19 @@ function SuggestionsController(ctx, sqs, env) {
             if (isNonEmptyArray(coveredSuggestions)) {
               context.log.info(`Rolling back ${coveredSuggestions.length} suggestions covered by domain-wide deployment`);
 
+              coveredSuggestions.forEach((coveredSuggestion) => {
+                const coveredData = coveredSuggestion.getData();
+                delete coveredData.edgeDeployed;
+                // TODO: To be removed, kept for backward compatibility
+                delete coveredData.tokowakaDeployed;
+                delete coveredData.coveredByDomainWide;
+                coveredSuggestion.setData(coveredData);
+                coveredSuggestion.setUpdatedBy(profile?.email || 'domain-wide-rollback');
+              });
               // eslint-disable-next-line no-await-in-loop
-              await Promise.all(
-                coveredSuggestions.map(async (coveredSuggestion) => {
-                  const coveredData = coveredSuggestion.getData();
-                  delete coveredData.edgeDeployed;
-                  // TODO: To be removed, kept for backward compatibility
-                  delete coveredData.tokowakaDeployed;
-                  delete coveredData.edgeDeployed;
-                  delete coveredData.coveredByDomainWide;
-                  coveredSuggestion.setData(coveredData);
-                  coveredSuggestion.setUpdatedBy(profile?.email || 'domain-wide-rollback');
-                  return coveredSuggestion.save();
-                }),
+              await coveredSuggestions[0].collection.saveMany(
+                coveredSuggestions,
+                { chunkSize: 50 },
               );
             }
           } catch (error) {

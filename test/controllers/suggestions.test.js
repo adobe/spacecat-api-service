@@ -9110,6 +9110,7 @@ describe('Suggestions Controller', () => {
       };
 
       // Create suggestions that were covered by the domain-wide deployment
+      const coveredCollection = { saveMany: sandbox.stub().resolves() };
       coveredSuggestions = [
         {
           getId: () => SUGGESTION_IDS[1],
@@ -9129,6 +9130,7 @@ describe('Suggestions Controller', () => {
           setData: sandbox.stub().returnsThis(),
           setUpdatedBy: sandbox.stub().returnsThis(),
           save: sandbox.stub().resolves(),
+          collection: coveredCollection,
         },
         {
           getId: () => SUGGESTION_IDS[2],
@@ -9148,6 +9150,7 @@ describe('Suggestions Controller', () => {
           setData: sandbox.stub().returnsThis(),
           setUpdatedBy: sandbox.stub().returnsThis(),
           save: sandbox.stub().resolves(),
+          collection: coveredCollection,
         },
       ];
 
@@ -9242,8 +9245,8 @@ describe('Suggestions Controller', () => {
         expect(suggestionData).to.not.have.property('edgeDeployed');
         expect(suggestionData).to.not.have.property('coveredByDomainWide');
         expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
-        expect(suggestion.save.calledOnce).to.be.true;
       });
+      expect(coveredSuggestions[0].collection.saveMany.calledOnceWith(coveredSuggestions)).to.be.true;
     });
 
     it('uses fallback updatedBy when profile email is missing', async () => {
