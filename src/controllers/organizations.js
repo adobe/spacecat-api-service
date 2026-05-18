@@ -358,27 +358,26 @@ function OrganizationsController(ctx, env) {
     }
 
     if (isObject(requestBody.config)) {
-      organization.setConfig(requestBody.config);
-      updates = true;
-    }
-
-    if (isObject(requestBody.config) && isObject(requestBody.config.defaults)) {
-      const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
-      for (const [productCode, entry] of Object.entries(requestBody.config.defaults)) {
-        if (!VALID_PRODUCT_CODES.has(productCode)) {
-          return badRequest(`Unknown product code in config.defaults: ${productCode}`);
-        }
-        if (isObject(entry) && entry.siteId != null) {
-          if (!isValidUUID(entry.siteId)) {
-            return badRequest(`Invalid siteId for product ${productCode} in config.defaults`);
+      if (isObject(requestBody.config.defaults)) {
+        const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
+        for (const [productCode, entry] of Object.entries(requestBody.config.defaults)) {
+          if (!VALID_PRODUCT_CODES.has(productCode)) {
+            return badRequest(`Unknown product code in config.defaults: ${productCode}`);
           }
-          // eslint-disable-next-line no-await-in-loop
-          const site = await Site.findById(entry.siteId);
-          if (!site || site.getOrganizationId() !== organization.getId()) {
-            return badRequest(`config.defaults.${productCode}: site not found or does not belong to this organization`);
+          if (isObject(entry) && entry.siteId != null) {
+            if (!isValidUUID(entry.siteId)) {
+              return badRequest(`Invalid siteId for product ${productCode} in config.defaults`);
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const site = await Site.findById(entry.siteId);
+            if (!site || site.getOrganizationId() !== organization.getId()) {
+              return badRequest(`config.defaults.${productCode}: site not found or does not belong to this organization`);
+            }
           }
         }
       }
+      organization.setConfig(requestBody.config);
+      updates = true;
     }
 
     if (updates) {

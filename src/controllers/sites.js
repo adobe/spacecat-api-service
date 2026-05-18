@@ -51,6 +51,18 @@ import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
+ * Builds the standard resolve-site success payload.
+ */
+async function buildResolveData(org, site, context) {
+  const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
+  return {
+    organization: OrganizationDto.toJSON(org),
+    site: SiteDto.toJSON(site),
+    isSummitPlgEnabled,
+  };
+}
+
+/**
  * Resolves the org's per-product default site from config.defaults, validating it belongs
  * to the org and is enrolled. Returns the resolved data object or null to fall through
  * to getFirstEnrollment().
@@ -90,12 +102,7 @@ export async function resolveOrgDefaultSite(org, productCode, context, ctx) {
       return null;
     }
 
-    const isSummitPlgEnabled = await getIsSummitPlgEnabled(defaultSite, context);
-    return {
-      organization: OrganizationDto.toJSON(org),
-      site: SiteDto.toJSON(defaultSite),
-      isSummitPlgEnabled,
-    };
+    return buildResolveData(org, defaultSite, context);
   } catch (e) {
     log.warn(
       `[resolveSite] resolveOrgDefaultSite failed for org ${org.getId()} product ${productCode} — falling back`,
@@ -1312,14 +1319,7 @@ function SitesController(ctx, log, env) {
 
       if (enrolledSite && (accessControlUtil.hasAdminAccess()
         || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
-        const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-        return ok({
-          data: {
-            organization: OrganizationDto.toJSON(org),
-            site: SiteDto.toJSON(enrolledSite),
-            isSummitPlgEnabled,
-          },
-        });
+        return ok({ data: await buildResolveData(org, enrolledSite, context) });
       }
 
       return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
@@ -1372,14 +1372,7 @@ function SitesController(ctx, log, env) {
                 return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
               }
 
-              const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
-              return ok({
-                data: {
-                  organization: OrganizationDto.toJSON(organization),
-                  site: SiteDto.toJSON(site),
-                  isSummitPlgEnabled,
-                },
-              });
+              return ok({ data: await buildResolveData(organization, site, context) });
             }
           }
         }
