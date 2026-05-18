@@ -226,8 +226,10 @@ async function checkHost(host, log) {
  */
 export async function detectAemCsFastlyForDomain(domain, log) {
   try {
-    log?.info(`[edge-routing-utils] Detecting AEM-CS Fastly for domain ${domain}`);
-    return await checkHost(domain, log);
+    log?.info(`[edge-routing-utils] Detecting AEM-CS Fastly for domain ${domain} (DNS-only, no WAF probe on this build)`);
+    const dnsResult = await checkHost(domain, log);
+    log?.info(`[edge-routing-utils] DNS result for ${domain}: ${dnsResult} — returning this as detected CDN`);
+    return dnsResult;
   } catch (err) {
     // DNS errors are treated as undetected — never break callers
     log?.error('detectAemCsFastlyForDomain error', err);

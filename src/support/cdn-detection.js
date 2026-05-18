@@ -154,19 +154,23 @@ async function checkHost(host, log) {
  */
 async function detectAdobeManagedCdn(domain, log) {
   const wwwResult = await checkHost(`www.${domain}`, log);
+  log?.info?.(`[cdn-detection] Phase 1 www result for ${domain}: ${wwwResult}`);
   if (wwwResult === 'aem-cs-fastly' || wwwResult === 'commerce-fastly') {
     return wwwResult;
   }
 
   const bareResult = await checkHost(domain, log);
+  log?.info?.(`[cdn-detection] Phase 1 bare result for ${domain}: ${bareResult}`);
   if (bareResult === 'aem-cs-fastly' || bareResult === 'commerce-fastly') {
     return bareResult;
   }
 
   if (wwwResult === null || bareResult === null) {
+    log?.info?.(`[cdn-detection] Phase 1 inconclusive for ${domain} — wwwResult=${wwwResult} bareResult=${bareResult}`);
     return null;
   }
 
+  log?.info?.(`[cdn-detection] Phase 1 result for ${domain}: byocdn-other (no Adobe CDN in DNS — will run Phase 2)`);
   return 'byocdn-other';
 }
 
@@ -670,6 +674,7 @@ export async function detectCdnForDomain(input, log) {
     log?.info?.(`[cdn-detection] Detecting CDN for domain ${bareDomain}`);
 
     const phase1 = await detectAdobeManagedCdn(bareDomain, log);
+    log?.info?.(`[cdn-detection] Phase 1 final for ${bareDomain}: ${phase1} — Phase 1.5 WAF probe does NOT exist on this build`);
     if (phase1 === 'aem-cs-fastly' || phase1 === 'commerce-fastly') {
       return phase1;
     }
