@@ -32,7 +32,7 @@ import {
   canonicalizeUrl,
   composeBaseURL,
 } from '@adobe/spacecat-shared-utils';
-import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { Site as SiteModel, Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
@@ -273,6 +273,28 @@ function SitesController(ctx, log, env) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
+   * Ensures the org has an entitlement for the given product and the site is enrolled
+   * under it. `TierClient.createEntitlement` is idempotent at the library level: existing
+   * entitlements/enrollments are returned as-is, missing pieces are filled in. Errors
+   * (invalid tier, DB failures) bubble up to the caller.
+   *
+   * Triggered when callers pass an `x-product` header on POST /sites; without the header
+   * the call is a no-op (preserves backward compatibility for existing integrations).
+   *
+   * @param {object} context - Request context (forwarded to TierClient).
+   * @param {object} site - The newly created or existing site entity.
+   * @param {string} productCode - Product code from the `x-product` header.
+   */
+  const ensureSiteEntitlementAndEnrollment = async (context, site, productCode) => {
+    const tierClient = await TierClient.createForSite(context, site, productCode);
+    const {
+      entitlement,
+      siteEnrollment,
+    } = await tierClient.createEntitlement(EntitlementModel.TIERS.FREE_TRIAL);
+    log.info(`Ensured ${productCode} entitlement ${entitlement.getId()} and enrollment ${siteEnrollment?.getId()} for site ${site.getId()}`);
+  };
+
+  /**
    * Creates a new site or returns an existing one if a site with the same baseURL already exists.
    * Implements idempotent-create semantics.
    *
@@ -286,6 +308,13 @@ function SitesController(ctx, log, env) {
    *
    * Alternative: If strict REST semantics are preferred, 409 Conflict is also valid.
    *
+   * Tier-model compliance: when the caller provides an `x-product` header, the site is
+   * auto-enrolled into a FREE_TRIAL entitlement for that product (the org-level entitlement
+   * is created if missing). This keeps the site visible in product-scoped listing endpoints
+   * (e.g. `GET /organizations/:organizationId/sites`) without a separate manual onboarding
+   * step. Enrollment failures return 500 — `TierClient.createEntitlement` is idempotent so
+   * retries are safe (the site lookup will return the already-persisted site).
+   *
    * @param {object} context - Request context containing site data
    * @returns {Promise<Response>} HTTP 200 with existing site or 201 with new site
    */
@@ -296,27 +325,43 @@ function SitesController(ctx, log, env) {
     if (!hasText(context.data?.baseURL)) {
       return badRequest('Base URL required');
     }
+    const productCode = context.pathInfo?.headers?.['x-product'];
+    let site;
+    let status;
     try {
       const baseURL = composeBaseURL(context.data.baseURL);
       const existingSite = await Site.findByBaseURL(baseURL);
       if (existingSite) {
         // Idempotent behavior: return existing site with 200 (not 409)
         log.info(`Site already exists for baseURL: ${baseURL}, returning existing site ${existingSite.getId()}`);
-        return createResponse(SiteDto.toJSON(existingSite), 200);
+        site = existingSite;
+        status = 200;
+      } else {
+        site = await Site.create({
+          organizationId: env.DEFAULT_ORGANIZATION_ID,
+          ...context.data,
+          baseURL, // override with normalized value
+        });
+        updateRumConfig(site, context).catch((e) => {
+          log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
+        });
+        status = 201;
       }
-      const site = await Site.create({
-        organizationId: env.DEFAULT_ORGANIZATION_ID,
-        ...context.data,
-        baseURL, // override with normalized value
-      });
-      updateRumConfig(site, context).catch((e) => {
-        log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
-      });
-      return createResponse(SiteDto.toJSON(site), 201);
     } catch (error) {
       log.error(`Error creating site: ${error.message}`, error);
       return internalServerError('Failed to create site');
     }
+
+    if (hasText(productCode)) {
+      try {
+        await ensureSiteEntitlementAndEnrollment(context, site, productCode);
+      } catch (error) {
+        log.error(`Error ensuring ${productCode} entitlement/enrollment for site ${site.getId()}: ${error.message}`, error);
+        return internalServerError(`Failed to ensure ${productCode} entitlement/enrollment for site`);
+      }
+    }
+
+    return createResponse(SiteDto.toJSON(site), status);
   };
 
   /**

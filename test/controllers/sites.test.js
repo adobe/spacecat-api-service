@@ -397,6 +397,99 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Failed to create site');
   });
 
+  describe('createSite auto-enrollment via x-product header', () => {
+    let tierClientStub;
+
+    beforeEach(() => {
+      tierClientStub = {
+        createEntitlement: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+          siteEnrollment: { getId: () => 'enrollment-123' },
+        }),
+      };
+      sandbox.stub(TierClient, 'createForSite').resolves(tierClientStub);
+    });
+
+    it('creates entitlement and enrollment for a newly created site when x-product header is set', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(201);
+      expect(TierClient.createForSite).to.have.been.calledOnce;
+      expect(TierClient.createForSite.firstCall.args[2]).to.equal('ASO');
+      expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('FREE_TRIAL');
+      expect(loggerStub.info).to.have.been.calledWithMatch(/Ensured ASO entitlement entitlement-123 and enrollment enrollment-123/);
+    });
+
+    it('creates entitlement and enrollment for an existing site when x-product header is set', async () => {
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockDataAccess.Site.create).to.have.not.been.called;
+      expect(TierClient.createForSite).to.have.been.calledOnce;
+      expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('FREE_TRIAL');
+    });
+
+    it('skips auto-enrollment when x-product header is missing', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: {} },
+      });
+
+      expect(response.status).to.equal(201);
+      expect(TierClient.createForSite).to.have.not.been.called;
+    });
+
+    it('skips auto-enrollment when x-product header is an empty string', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': '' } },
+      });
+
+      expect(response.status).to.equal(201);
+      expect(TierClient.createForSite).to.have.not.been.called;
+    });
+
+    it('returns 500 when TierClient.createEntitlement throws for a newly created site', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      tierClientStub.createEntitlement.rejects(new Error('Database error'));
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Failed to ensure ASO entitlement/enrollment for site');
+      expect(loggerStub.error).to.have.been.calledWithMatch(/Error ensuring ASO entitlement\/enrollment for site .*Database error/);
+    });
+
+    it('returns 500 when TierClient.createEntitlement throws for an existing site', async () => {
+      tierClientStub.createEntitlement.rejects(new Error('Database error'));
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Failed to ensure ASO entitlement/enrollment for site');
+    });
+  });
+
   it('updates a site', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
