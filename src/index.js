@@ -22,6 +22,7 @@ import {
   notFound,
   authWrapper,
   enrichPathInfo,
+  facsWrapper,
   LegacyApiKeyHandler,
   ScopedApiKeyHandler,
   AdobeImsHandler,
@@ -99,6 +100,7 @@ import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
+import routeFacsCapabilities from './routes/facs-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
@@ -368,6 +370,10 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // 3. readOnlyAdminWrapper — enforces read-only access for read-only admin tokens (see
 //    adobe/spacecat-shared#1469); routes not present in routeCapabilities default to deny
 //    (fail-closed), so unmapped routes are blocked for read-only admins
+// 4. facsWrapper — enforces FACS (MAC) permissions for external customer users on
+//    FACS-gated routes. Bypasses internal identities and non-enrolled product/orgs (per
+//    per-product LaunchDarkly flags); deny-by-default for enrolled products on unmapped
+//    routes. See mysticat-architecture/platform/decisions/mac-state-layer.md.
 //
 // authHandlers order contract:
 //  - SkipAuthHandler first: local-dev escape hatch (no-op in Lambda).
@@ -390,6 +396,7 @@ const AUTH_HANDLERS = [
 ];
 
 const wrappedMain = wrap(run)
+  .with(facsWrapper, { routeFacsCapabilities })
   .with(readOnlyAdminWrapper, {
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,
