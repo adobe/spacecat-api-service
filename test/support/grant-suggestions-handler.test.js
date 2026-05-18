@@ -132,7 +132,7 @@ describe('grant-suggestions-handler', () => {
       expect(groups[0].items).to.have.lengthOf(2);
     });
 
-    it('groups and ranks 10 broken-backlinks suggestions correctly', () => {
+    it('groups and ranks 10 broken-backlinks suggestions correctly, sorted by rank descending', () => {
       const mk = (id, rank, urlTo) => ({
         getId: () => id, getRank: () => rank, getData: () => ({ url_to: urlTo }),
       });
@@ -156,40 +156,64 @@ describe('grant-suggestions-handler', () => {
       expect(groups).to.have.lengthOf(4);
 
       // group ranks: A=900, B=800, D=700, C=400
-      // sorted ascending: C(400), D(700), B(800), A(900)
-      expect(groups[0].getRank()).to.equal(400);
-      expect(groups[1].getRank()).to.equal(700);
-      expect(groups[2].getRank()).to.equal(800);
-      expect(groups[3].getRank()).to.equal(900);
+      // sorted descending (highest authority first): A(900), B(800), D(700), C(400)
+      expect(groups[0].getRank()).to.equal(900);
+      expect(groups[1].getRank()).to.equal(800);
+      expect(groups[2].getRank()).to.equal(700);
+      expect(groups[3].getRank()).to.equal(400);
 
-      // verify group C (rank 400) — page-c items
-      const groupC = groups[0];
-      expect(groupC.items).to.have.lengthOf(3);
-      const groupCIds = groupC.items.map((s) => s.getId());
-      expect(groupCIds).to.include.members(['s04', 's07', 's10']);
-
-      // verify group D (rank 700) — page-d items
-      const groupD = groups[1];
-      expect(groupD.items).to.have.lengthOf(2);
-      const groupDIds = groupD.items.map((s) => s.getId());
-      expect(groupDIds).to.include.members(['s06', 's09']);
-
-      // verify group B (rank 800) — page-b items
-      const groupB = groups[2];
-      expect(groupB.items).to.have.lengthOf(2);
-      const groupBIds = groupB.items.map((s) => s.getId());
-      expect(groupBIds).to.include.members(['s02', 's05']);
-
-      // verify group A (rank 900) — page-a items
-      const groupA = groups[3];
+      // verify group A (rank 900) — page-a items granted first
+      const groupA = groups[0];
       expect(groupA.items).to.have.lengthOf(3);
       const groupAIds = groupA.items.map((s) => s.getId());
       expect(groupAIds).to.include.members(['s01', 's03', 's08']);
 
-      // slicing top 2 groups gives the two lowest-ranked groups
+      // verify group B (rank 800) — page-b items
+      const groupB = groups[1];
+      expect(groupB.items).to.have.lengthOf(2);
+      const groupBIds = groupB.items.map((s) => s.getId());
+      expect(groupBIds).to.include.members(['s02', 's05']);
+
+      // verify group D (rank 700) — page-d items
+      const groupD = groups[2];
+      expect(groupD.items).to.have.lengthOf(2);
+      const groupDIds = groupD.items.map((s) => s.getId());
+      expect(groupDIds).to.include.members(['s06', 's09']);
+
+      // verify group C (rank 400) — page-c items granted last
+      const groupC = groups[3];
+      expect(groupC.items).to.have.lengthOf(3);
+      const groupCIds = groupC.items.map((s) => s.getId());
+      expect(groupCIds).to.include.members(['s04', 's07', 's10']);
+
+      // slicing top 2 groups gives the two highest-ranked groups
       const top2 = groups.slice(0, 2);
-      expect(top2[0].getRank()).to.equal(400); // group C
-      expect(top2[1].getRank()).to.equal(700); // group D
+      expect(top2[0].getRank()).to.equal(900); // group A (most authoritative)
+      expect(top2[1].getRank()).to.equal(800); // group B
+    });
+
+    it('broken-backlinks: sorts groups by rank descending (highest authority first)', () => {
+      const mk = (id, rank, urlTo) => ({
+        getId: () => id, getRank: () => rank, getData: () => ({ url_to: urlTo }),
+      });
+      const s1 = mk('id-1', 30, 'https://example.com/low');
+      const s2 = mk('id-2', 90, 'https://example.com/high');
+      const s3 = mk('id-3', 60, 'https://example.com/mid');
+      const groups = getTopSuggestions([s1, s2, s3], 'broken-backlinks');
+      expect(groups[0].getRank()).to.equal(90); // highest authority granted first
+      expect(groups[1].getRank()).to.equal(60);
+      expect(groups[2].getRank()).to.equal(30);
+    });
+
+    it('broken-backlinks: breaks rank ties by first item id ascending', () => {
+      const mk = (id, rank, urlTo) => ({
+        getId: () => id, getRank: () => rank, getData: () => ({ url_to: urlTo }),
+      });
+      const s1 = mk('id-z', 50, 'https://example.com/z');
+      const s2 = mk('id-a', 50, 'https://example.com/a');
+      const groups = getTopSuggestions([s1, s2], 'broken-backlinks');
+      expect(groups[0].items[0]).to.equal(s2); // id-a before id-z on tie
+      expect(groups[1].items[0]).to.equal(s1);
     });
 
     it('falls back to defaults for objects missing rank and id', () => {

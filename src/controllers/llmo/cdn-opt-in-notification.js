@@ -17,7 +17,9 @@
  * - Triggered only on the first opt-in (isNewlyOpted=true) — not on subsequent config updates.
  * - CDN type is read from llmo.cdnBucketConfig.cdnProvider (populated by llmo-config-wrapper
  *   in auth-service during provisioning).
- * - Email failures never block the opt-in response — notification is fire-and-forget.
+ * - AEM CS Fastly opt-ins are excluded upstream in the LLMO opt-in handler (llmo.js) and
+ *   never reach this function. Any new caller should apply the same exclusion.
+ * - Email failures never block the opt-in response — errors are logged and swallowed.
  * - Recipients must be set via OPT_IN_NOTIFICATION_RECIPIENTS in Vault (comma-separated
  *   @adobe.com addresses). If missing, notification is skipped with an error log.
  * - BYOCDN sites: customer-facing onboarding email (header shows To/cc with customer + org).
@@ -56,7 +58,6 @@ const CDN_CONFIG = {
   [CDN_TYPES.BYOCDN_OTHER]: { adobeManaged: false },
   [CDN_TYPES.AMS_CLOUDFRONT]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
   [CDN_TYPES.AMS_FRONTDOOR]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
-  [CDN_TYPES.AEM_CS_FASTLY]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
   [CDN_TYPES.COMMERCE_FASTLY]: { adobeManaged: true, replyAllTeam: 'Adobe Commerce team', commerceManaged: true },
 };
 

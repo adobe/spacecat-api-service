@@ -39,24 +39,32 @@ export function getSkipReason(data, action, env) {
     return `auto-trigger not yet supported: ${action}`;
   }
 
-  // Invite-based trigger: reviewer must be the app
+  // Invite-based trigger: reviewer must be the configured login.
+  // GITHUB_REVIEWER_LOGIN replaces the entire expected reviewer string — use this
+  // when the reviewer is a plain user account (e.g. a shared service account)
+  // rather than a GitHub App bot.
   if (action === 'review_requested') {
     const reviewer = data.requested_reviewer?.login;
-    if (reviewer !== `${appSlug}[bot]`) {
-      return `reviewer ${reviewer} is not ${appSlug}`;
+    const expectedReviewer = env.GITHUB_REVIEWER_LOGIN?.trim() || `${appSlug}[bot]`;
+    if (reviewer !== expectedReviewer) {
+      return `reviewer ${reviewer} is not ${expectedReviewer}`;
     }
   }
 
-  // Label-based trigger: label must match
-  if (action === 'labeled') {
-    const label = data.label?.name;
-    if (label !== 'mysticat:review-requested') {
-      return `label ${label} does not match trigger`;
-    }
-  }
-
-  // Only review_requested and labeled are supported in Phase 2
-  if (action !== 'review_requested' && action !== 'labeled') {
+  // Only review_requested is supported. Label-based triggers were disabled
+  // because GitHub does not count label-triggered reviews toward branch
+  // protection / merge requirements: an approval only counts when the
+  // reviewer was explicitly *requested* (Reviewers panel) or is listed in
+  // CODEOWNERS for the changed paths. A bot that posts a review off the
+  // back of a label add appears under "Reviewers whose approvals may not
+  // affect merge requirements" — visible but non-binding.
+  //
+  // The env-configurable label hook (env.MYSTICAT_REVIEW_LABEL) and its
+  // dev/prod-specific Vault values were left in place for now. If we ever
+  // re-enable label triggers (e.g., a "comment-only / advisory" mode that
+  // does not pretend to count), restore the matching block here without
+  // re-doing the env-separation work.
+  if (action !== 'review_requested') {
     return `unsupported action: ${action}`;
   }
 
