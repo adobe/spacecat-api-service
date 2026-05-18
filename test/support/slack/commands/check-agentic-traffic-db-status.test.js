@@ -14,7 +14,7 @@ import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
-import CheckAgenticTrafficDbStatusCommand from '../../../../src/support/slack/commands/check-agentic-traffic-db-status.js';
+import CheckAgenticTrafficDbStatusCommand, { isTransientError } from '../../../../src/support/slack/commands/check-agentic-traffic-db-status.js';
 
 use(sinonChai);
 
@@ -492,17 +492,26 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   });
 
   it('recovers from transient gateway errors so the user sees a successful report', async () => {
+    // Fake timers keep the retry-backoff sleep from blocking real wall-clock
+    // time. We let the async retry chain race against an auto-advancing clock.
+    // `now` must be after the requested date so `isFutureUtcDate` returns false.
+    const clock = sinon.useFakeTimers({
+      now: new Date('2026-04-23T12:00:00Z').getTime(),
+      shouldAdvanceTime: true,
+      advanceTimeDelta: 1,
+    });
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://flaky.com'),
     ]);
     flakyByTable.agentic_traffic = {
       failuresLeft: 2,
-      error: { message: '502 Bad Gateway' },
+      error: { message: '502 Bad Gateway', status: 502 },
     };
     countsByTable = { agentic_traffic: 7, agentic_traffic_daily: 1 };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
+    clock.restore();
 
     const output = slackContext.say.args.flat().join('\n');
     // Despite two upstream 502s, the user sees the correct count from the
@@ -515,15 +524,58 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://strict.com'),
     ]);
-    // Non-transient (no 5xx / gateway / timeout markers).
-    tableErrorByName.agentic_traffic = { message: 'relation does not exist' };
+    // Non-transient (no 5xx / gateway / timeout markers). Include `code` so
+    // the wrapDbError code-preservation path is exercised.
+    tableErrorByName.agentic_traffic = { message: 'relation does not exist', code: '42P01' };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
-    // The retry behavior is observable only via the call count: a retry
-    // would re-issue the failing query.
+    // Behavior: the error reaches the user.
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('relation does not exist');
+    // And no retry happened — the only observable signal for that is the
+    // call count, since PostgREST is the boundary we want to verify.
     const rawCalls = postgrestStub.from.args.filter(([t]) => t === 'agentic_traffic');
     expect(rawCalls.length).to.equal(1);
+  });
+
+  describe('isTransientError', () => {
+    it('matches HTTP 5xx status codes', () => {
+      expect(isTransientError({ status: 502 })).to.be.true;
+      expect(isTransientError({ status: '503' })).to.be.true;
+      expect(isTransientError({ status: 504 })).to.be.true;
+    });
+
+    it('does not match HTTP 4xx status codes', () => {
+      expect(isTransientError({ status: 404 })).to.be.false;
+      expect(isTransientError({ status: 400 })).to.be.false;
+    });
+
+    it('matches known network/DB error codes', () => {
+      expect(isTransientError({ code: 'ECONNRESET' })).to.be.true;
+      expect(isTransientError({ code: 'ENOTFOUND' })).to.be.true;
+      expect(isTransientError({ code: 'EBUSY' })).to.be.true;
+      expect(isTransientError({ code: 'ETIMEDOUT' })).to.be.true;
+      expect(isTransientError({ code: 'PGRST002' })).to.be.true;
+    });
+
+    it('matches transient keywords in the error message', () => {
+      expect(isTransientError({ message: '502 Bad Gateway' })).to.be.true;
+      expect(isTransientError({ message: 'request timeout' })).to.be.true;
+      expect(isTransientError({ message: 'gateway error' })).to.be.true;
+    });
+
+    it('does not match non-transient errors', () => {
+      expect(isTransientError({ message: 'relation does not exist' })).to.be.false;
+      expect(isTransientError({ code: 'PGRST123' })).to.be.false;
+      // No false positive on a row count string containing "500".
+      expect(isTransientError({ message: '500 rows updated' })).to.be.false;
+    });
+
+    it('treats null/undefined as non-transient', () => {
+      expect(isTransientError(null)).to.be.false;
+      expect(isTransientError(undefined)).to.be.false;
+    });
   });
 });

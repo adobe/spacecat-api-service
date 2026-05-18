@@ -29,7 +29,10 @@ const CDN_LOGS_REPORT_AUDIT = 'cdn-logs-report';
 const SITE_CONCURRENCY = 5;
 const RETRY_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 250;
-const TRANSIENT_ERROR_RE = /5\d\d|timeout|gateway|ECONNRESET|ENOTFOUND|EBUSY|ETIMEDOUT|PGRST002/i;
+const SLACK_ERROR_MESSAGE_MAX_LEN = 200;
+const TRANSIENT_HTTP_STATUS_RE = /^5\d\d$/;
+const TRANSIENT_CODES = new Set(['ECONNRESET', 'ENOTFOUND', 'EBUSY', 'ETIMEDOUT', 'PGRST002']);
+const TRANSIENT_MESSAGE_RE = /\b(?:timeout|gateway|ECONNRESET|ENOTFOUND|EBUSY|ETIMEDOUT|PGRST002)\b/i;
 const AGENTIC_TRAFFIC_TABLES = [
   { key: 'raw', table: 'agentic_traffic', dateColumn: 'traffic_date' },
   { key: 'daily', table: 'agentic_traffic_daily', dateColumn: 'traffic_date' },
@@ -45,7 +48,37 @@ const sleep = (ms) => new Promise((resolve) => {
 });
 
 function isTransientError(error) {
-  return Boolean(error && TRANSIENT_ERROR_RE.test(String(error.message || '')));
+  if (!error) {
+    return false;
+  }
+  const status = String(error.status ?? '');
+  if (TRANSIENT_HTTP_STATUS_RE.test(status)) {
+    return true;
+  }
+  if (error.code && TRANSIENT_CODES.has(String(error.code))) {
+    return true;
+  }
+  return TRANSIENT_MESSAGE_RE.test(String(error.message || ''));
+}
+
+function sanitizeErrorMessage(message) {
+  return String(message || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, SLACK_ERROR_MESSAGE_MAX_LEN);
+}
+
+function wrapDbError(prefix, error) {
+  const message = sanitizeErrorMessage(error.message) || error.code || 'unknown error';
+  const wrapped = new Error(`${prefix}: ${message}`, { cause: error });
+  if (error.code) {
+    wrapped.code = error.code;
+  }
+  if (error.status) {
+    wrapped.status = error.status;
+  }
+  return wrapped;
 }
 
 async function withRetry(fn, attempts = RETRY_ATTEMPTS, baseDelay = RETRY_BASE_DELAY_MS) {
@@ -57,8 +90,11 @@ async function withRetry(fn, attempts = RETRY_ATTEMPTS, baseDelay = RETRY_BASE_D
       if (attempt >= attempts - 1 || !isTransientError(error)) {
         throw error;
       }
+      // Full jitter (AWS Architecture Blog "Exponential Backoff And Jitter")
+      // - eliminates retry-storm synchronization across concurrent workers.
+      const delay = baseDelay * 2 ** attempt * Math.random();
       // eslint-disable-next-line no-await-in-loop
-      await sleep(baseDelay * 2 ** attempt);
+      await sleep(delay);
     }
   }
 }
@@ -90,13 +126,14 @@ function renderOmittedSites(omitted) {
 }
 
 function renderSite(siteStatus) {
+  const showWeekly = siteStatus.weekly > 0 || siteStatus.rawWeek > 0;
   return [
     `• \`${siteStatus.baseURL}\``,
     `  siteId: \`${siteStatus.siteId}\``,
     `  raw: ${formatNumber(siteStatus.raw)} rows`,
     `  daily: ${formatNumber(siteStatus.daily)} rows`,
     siteStatus.rawWeek > 0 ? `  raw week: ${formatNumber(siteStatus.rawWeek)} rows for ${siteStatus.weekStart}..${siteStatus.weekEnd}` : '',
-    `  weekly: ${formatNumber(siteStatus.weekly)} rows for week ${siteStatus.weekStart}`,
+    showWeekly ? `  weekly: ${formatNumber(siteStatus.weekly)} rows for week ${siteStatus.weekStart}` : '',
     siteStatus.missing.length > 0 ? `  missing: ${siteStatus.missing.join(', ')}` : '',
   ].filter(Boolean).join('\n');
 }
@@ -109,7 +146,7 @@ async function countTable(postgrestClient, table, siteId, dateColumn, dateValue)
       .eq('site_id', siteId)
       .eq(dateColumn, dateValue);
     if (error) {
-      throw new Error(`${table}: ${error.message}`);
+      throw wrapDbError(table, error);
     }
     return count || 0;
   });
@@ -124,7 +161,7 @@ async function countRawWeek(postgrestClient, siteId, weekStartStr, weekEndStr) {
       .gte('traffic_date', weekStartStr)
       .lte('traffic_date', weekEndStr);
     if (error) {
-      throw new Error(`agentic_traffic weekly range: ${error.message}`);
+      throw wrapDbError('agentic_traffic weekly range', error);
     }
     return count || 0;
   });
@@ -377,4 +414,5 @@ function CheckAgenticTrafficDbStatusCommand(context) {
   return { ...baseCommand, handleExecution };
 }
 
+export { isTransientError };
 export default CheckAgenticTrafficDbStatusCommand;
