@@ -2358,7 +2358,7 @@ function SuggestionsController(ctx, sqs, env) {
               // eslint-disable-next-line no-await-in-loop
               await coveredSuggestions[0].collection.saveMany(
                 coveredSuggestions,
-                { chunkSize: 50 },
+                { chunkSize: 100 },
               );
             }
           } catch (error) {

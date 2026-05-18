@@ -9246,7 +9246,7 @@ describe('Suggestions Controller', () => {
         expect(suggestionData).to.not.have.property('coveredByDomainWide');
         expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
       });
-      expect(coveredSuggestions[0].collection.saveMany.calledOnceWith(coveredSuggestions)).to.be.true;
+      expect(coveredSuggestions[0].collection.saveMany.calledOnceWith(coveredSuggestions, { chunkSize: 100 })).to.be.true;
     });
 
     it('uses fallback updatedBy when profile email is missing', async () => {
