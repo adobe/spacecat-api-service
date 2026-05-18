@@ -698,7 +698,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     const invalidDomains = [
       '../../etc/passwd',
       'domain.com:8080',
-      'http://domain.com',
       '-invalid.com',
       `${'a'.repeat(254)}.com`,
       'domain..com',

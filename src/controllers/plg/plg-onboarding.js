@@ -239,6 +239,9 @@ async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
 // AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
 const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
 
+// Strip http:// or https:// scheme so callers can pass full URLs or bare hostnames interchangeably.
+const stripScheme = (s) => s.replace(/^https?:\/\//i, '');
+
 // RFC 1123 hostname optionally followed by a URL path; no scheme, port, query, or fragment.
 // Hostname: max 253 chars, labels 1-63 alphanumeric/hyphen separated by dots.
 // Path segments: alphanumeric/hyphens/underscores with optional internal dots (e.g. v1.0).
@@ -656,8 +659,9 @@ async function createOrFindProject(baseURL, organizationId, context) {
  * @returns {Promise<object>} PlgOnboarding record
  */
 async function performAsoPlgOnboarding({
-  domain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
+  domain: rawDomain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
 }, context) {
+  const domain = stripScheme(rawDomain);
   const { dataAccess, env, log } = context;
   const callerIdentity = getReviewerIdentity(context);
   const {
@@ -1445,11 +1449,13 @@ function PlgOnboardingController(ctx) {
       return badRequest('Request body is required');
     }
 
-    const { domain, imsOrgId: requestedImsOrgId } = data;
+    const { domain: rawDomain, imsOrgId: requestedImsOrgId } = data;
 
-    if (!hasText(domain)) {
+    if (!hasText(rawDomain)) {
       return badRequest('domain is required');
     }
+
+    const domain = stripScheme(rawDomain);
 
     const { authInfo } = attributes;
 
@@ -1894,8 +1900,9 @@ function PlgOnboardingController(ctx) {
 
           // Handle alternateDomain: retire current domain, onboard a new domain under current org
           if (hasText(siteConfig?.alternateDomain)) {
-            if (!isSafeDomain(siteConfig.alternateDomain)) {
-              return badRequest(`Invalid alternate domain: ${siteConfig.alternateDomain}`);
+            const altDomain = siteConfig.alternateDomain;
+            if (!isValidDomain(altDomain) || !isSafeDomain(altDomain)) {
+              return badRequest(`Invalid alternate domain: ${altDomain}`);
             }
             onboarding.setStatus(STATUSES.OUTDATED);
             onboarding.setWaitlistReason(null);
