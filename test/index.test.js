@@ -368,7 +368,7 @@ describe('Index Tests', () => {
     expect(context.dataAccess.Audit.findBySiteIdAndAuditTypeAndAuditedAt).to.have.been.calledOnce;
   });
 
-  it('wires readOnlyAdminWrapper with routeCapabilities', async () => {
+  it('wires readOnlyAdminWrapper with routeCapabilities and internalRoutes', async () => {
     let capturedOpts;
     const { main: testMain } = await esmock('../src/index.js', {
       '@adobe/spacecat-shared-http-utils': {
@@ -386,6 +386,12 @@ describe('Index Tests', () => {
     expect(capturedOpts.routeCapabilities, 'routeCapabilities must be a non-empty object').to.be.an('object').that.is.not.empty;
     // Sanity-check a known read route is present so an accidental empty map is caught
     expect(capturedOpts.routeCapabilities).to.have.property('GET /sites/:siteId');
+    // internalRoutes must also be wired so the readOnlyAdminWrapper can recognise
+    // routes that are intentionally excluded from S2S consumer access.
+    expect(capturedOpts, 'internalRoutes must be passed to readOnlyAdminWrapper').to.have.property('internalRoutes');
+    expect(capturedOpts.internalRoutes, 'internalRoutes must be a non-empty array').to.be.an('array').that.is.not.empty;
+    // Sanity-check a known internal route is present so an accidental empty list is caught
+    expect(capturedOpts.internalRoutes).to.include('POST /event/fulfillment');
     expect(testMain).to.exist; // reference to satisfy no-unused-vars
   });
 });

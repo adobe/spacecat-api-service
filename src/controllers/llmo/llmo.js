@@ -55,6 +55,7 @@ import {
   applyExclusions,
   applyGroups,
   applyMappings,
+  CDN_TYPES,
   LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
@@ -1312,6 +1313,23 @@ function LlmoController(ctx) {
       const currentConfig = site.getConfig();
       const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
       const isNewlyOpted = !existingEdgeConfig.opted;
+
+      // Kick off IMS + S3 in parallel with saveSiteConfig — all three are independent
+      let notificationPrep = null;
+      if (isNewlyOpted) {
+        const imsUserId = profile?.email;
+
+        const imsPromise = imsUserId && context.imsClient
+          ? Promise.resolve(context.imsClient.getImsAdminProfile(imsUserId))
+          : Promise.resolve(null);
+
+        const s3Promise = s3?.s3Client
+          ? Promise.resolve(readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket }))
+          : Promise.resolve(null);
+
+        notificationPrep = Promise.allSettled([imsPromise, s3Promise]);
+      }
+
       currentConfig.updateEdgeOptimizeConfig({
         ...existingEdgeConfig,
         opted: existingEdgeConfig.opted ?? Date.now(),
@@ -1340,53 +1358,39 @@ function LlmoController(ctx) {
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
         }
 
-        // Detached from the response path so the UI's enable click is not blocked
-        // by the IMS lookup, bot-blocker probe (5s timeout), S3 read, and email
-        // send. Lambda's default callbackWaitsForEmptyEventLoop=true keeps the
-        // invocation alive until this promise settles, so the email still goes out.
-        ((async () => {
-          // profile.email holds the IMS userId (sub claim) for IMS-authenticated
-          // callers, so we resolve the real email via IMS. Best-effort: non-IMS
-          // auth modes leave optedBy unset, which the email helper handles.
-          let optedBy;
-          const imsUserId = profile?.email;
-          if (imsUserId && context.imsClient) {
-            try {
-              const adminProfile = await context.imsClient.getImsAdminProfile(imsUserId);
-              optedBy = adminProfile?.email;
-            } catch (imsErr) {
-              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${imsErr.message}`);
-            }
-          }
-
-          /* CDN provider is managed by log-infra and stored in the S3 LLMO config
-          during provisioning. Site DynamoDB cdnBucketConfig does not store it,
-          so S3 is the primary source.
-          Fallback to request cdnType (e.g. AEM CS Fastly self-service)
-          when S3 config is not yet available. */
+        try {
+          const [adminProfile, llmoCfgResult] = await notificationPrep;
           let notificationCdnType;
-          try {
-            if (s3?.s3Client) {
-              const { config: llmoCfg } = await readConfig(siteId, s3.s3Client, {
-                s3Bucket: s3.s3Bucket,
-              });
-              notificationCdnType = llmoCfg?.cdnBucketConfig?.cdnProvider;
-            }
-          } catch (s3Err) {
-            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${s3Err.message}`);
+          if (llmoCfgResult.status === 'fulfilled') {
+            notificationCdnType = llmoCfgResult.value?.config?.cdnBucketConfig?.cdnProvider;
+          } else {
+            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${llmoCfgResult.reason?.message}`);
           }
           if (!hasText(notificationCdnType) && hasText(cdnType)) {
             notificationCdnType = cdnType;
           }
 
-          await notifyOptInIfNeeded(context, {
-            siteId,
-            siteBaseURL: baseURL,
-            cdnType: notificationCdnType,
-            orgId: site.getOrganizationId?.(),
-            optedBy,
-          });
-        })()).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
+          if (notificationCdnType === CDN_TYPES.AEM_CS_FASTLY) {
+            log.info(`[cdn-opt-in-notification] Email skipped for site=${siteId} reason=aem-cs-fastly`);
+          } else {
+            let optedBy;
+            if (adminProfile.status === 'fulfilled') {
+              optedBy = adminProfile.value?.email;
+            } else {
+              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${adminProfile.reason?.message}`);
+            }
+
+            await notifyOptInIfNeeded(context, {
+              siteId,
+              siteBaseURL: baseURL,
+              cdnType: notificationCdnType,
+              orgId: site.getOrganizationId?.(),
+              optedBy,
+            });
+          }
+        } catch (err) {
+          log.error('[cdn-opt-in-notification] Unhandled error:', err);
+        }
       }
 
       let cdnTypeNormalized = null;
