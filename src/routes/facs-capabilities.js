@@ -203,10 +203,6 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/questions': 'llmo/can_configure',
       'PATCH /sites/:siteId/llmo/questions/:questionKey': 'llmo/can_configure',
       'DELETE /sites/:siteId/llmo/questions/:questionKey': 'llmo/can_configure',
-      // Sheet data — topics, categories, aliases, competitors, etc.
-      'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'llmo/can_configure',
-      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'llmo/can_configure',
-      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'llmo/can_configure',
       // Strategy / opportunity review (state changes against configured content)
       'PUT /sites/:siteId/llmo/strategy': 'llmo/can_configure',
       'PUT /sites/:siteId/llmo/opportunities-reviewed': 'llmo/can_configure',
@@ -220,7 +216,10 @@ const routeFacsCapabilities = {
       // Top-level LLMO surfaces
       'GET /v2/regions': 'llmo/can_view',
       'GET /llmo/agentic-traffic/global': 'llmo/can_view',
-      'POST /llmo/agentic-traffic/global': 'llmo/can_view',
+      // Body-based queries that read sheet data (S2S: site:read).
+      'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'llmo/can_view',
+      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'llmo/can_view',
+      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'llmo/can_view',
 
       // AI visibility
       'GET /llmo/ai-visibility/brands/stats': 'llmo/can_view',
@@ -379,7 +378,6 @@ const routeFacsCapabilities = {
       'PATCH /sites/:siteId/config/cdn-logs': 'llmo/can_onboard',
 
       // ---- Deploy (edge optimizations + auto-fix) ------------------------
-      'POST /sites/:siteId/autofix-checks': 'llmo/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': 'llmo/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview': 'llmo/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview': 'llmo/can_deploy',
@@ -455,6 +453,10 @@ const routeFacsCapabilities = {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/categories': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/topics': 'llmo/can_configure',
+      // POSTs that S2S confirms are :write (not body-based queries).
+      'POST /llmo/agentic-traffic/global': 'llmo/can_configure',
+      'POST /sites/:siteId/traffic/predominant-type': 'llmo/can_configure',
+      'POST /sites/:siteId/traffic/predominant-type/:channel': 'llmo/can_configure',
 
       // ---- View (read-only) ----------------------------------------------
       // Cross-product GETs + POSTs that are body-based queries (no side
@@ -622,11 +624,12 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/categories': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/topics': 'llmo/can_view',
-      // POST as query / bulk-read
+      // POST as query / bulk-read (S2S confirms these are :read).
       'POST /organizations/:organizationId/userDetails': 'llmo/can_view',
       'POST /sites/:siteId/page-relationships/search': 'llmo/can_view',
-      'POST /sites/:siteId/traffic/predominant-type': 'llmo/can_view',
-      'POST /sites/:siteId/traffic/predominant-type/:channel': 'llmo/can_view',
+      // Autofix check returns recommendations without applying them
+      // (S2S: site:read).
+      'POST /sites/:siteId/autofix-checks': 'llmo/can_view',
 
     // ---- Manage user --------------------------------------------------
     // Phase 2: state-layer management endpoints (`/facs/access-mappings/*`)
