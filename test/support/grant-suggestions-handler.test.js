@@ -721,6 +721,112 @@ describe('grant-suggestions-handler', () => {
         expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       });
 
+      it('does not revoke V2 re-detected OUTDATED grant (has previousDeployment stamp)', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 1 };
+
+        // V2 re-detected OUTDATED: has previousDeployment stamp in data
+        const sugg2V2Outdated = {
+          getId: () => 'sugg-2',
+          getRank: () => 2,
+          getStatus: () => 'OUTDATED',
+          getData: () => ({
+            recommendations: [{ previousDeployment: { altText: 'old text', deployedAt: '2026-05-01' } }],
+          }),
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2V2Outdated],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+          ]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub(),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub().resolves(existingToken),
+        };
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // V2 OUTDATED grant must NOT be revoked — it's actionable work for PLG re-deploy
+        expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+        // Token had remaining=1, fill with the ungranted NEW suggestion
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
+      it('revokes V1 legacy OUTDATED grant (no previousDeployment stamp)', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
+        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 1 };
+
+        // V1 legacy OUTDATED: getData returns no previousDeployment stamp
+        const sugg2V1Outdated = {
+          getId: () => 'sugg-2',
+          getRank: () => 2,
+          getStatus: () => 'OUTDATED',
+          getData: () => ({ recommendations: [{ altText: 'some text' }] }),
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2V1Outdated],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+          ]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(existingToken)
+          .onSecondCall().resolves(tokenAfterRevoke);
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // V1 OUTDATED grant must be revoked (stale, no re-detection stamp)
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g2');
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
       it('revokes grants with PENDING_VALIDATION status as stale', async () => {
         const s1 = {
           getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',

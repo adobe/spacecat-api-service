@@ -217,8 +217,19 @@ const STALE_STATUSES = new Set([
   SuggestionModel.STATUSES.PENDING_VALIDATION,
 ]);
 
-const isRevocable = (status) => STALE_STATUSES.has(status)
-  || status === SuggestionModel.STATUSES.NEW;
+// V2 re-detected OUTDATED rows have a previousDeployment stamp and represent
+// actionable work — their grants must stay live so PLG customers can re-deploy.
+// V1 legacy OUTDATED rows (no stamp) are stale book-keeping and should be revoked.
+const isRevocable = (suggestion) => {
+  const status = suggestion.getStatus();
+  if (status === SuggestionModel.STATUSES.OUTDATED) {
+    const recs = suggestion.getData?.()?.recommendations;
+    const isV2Redetected = Array.isArray(recs) && recs.length > 0
+      && Boolean(recs[0]?.previousDeployment);
+    return !isV2Redetected;
+  }
+  return STALE_STATUSES.has(status) || status === SuggestionModel.STATUSES.NEW;
+};
 
 /**
  * Handles a new token cycle: creates the token and migrates
@@ -290,7 +301,7 @@ async function handleExistingTokenCycle(
     tokenGrants
       .filter((g) => {
         const s = grantedSuggestions.find((gs) => gs?.getId() === g.getSuggestionId());
-        return s && isRevocable(s.getStatus());
+        return s && isRevocable(s);
       })
       .map((g) => g.getGrantId()),
   )];
@@ -328,9 +339,10 @@ async function fillRemainingCapacity(
  *
  * **When a token already exists (current cycle):**
  * Fetches all grants for the current token. If any granted
- * suggestion is in a revocable state (OUTDATED, REJECTED,
+ * suggestion is in a revocable state (V1 OUTDATED, REJECTED,
  * PENDING_VALIDATION, NEW), revokes only those grants, leaving
- * permanent states (e.g. APPROVED) untouched. Fills remaining
+ * permanent states (e.g. APPROVED) and V2 re-detected OUTDATED
+ * (with previousDeployment stamp) untouched. Fills remaining
  * capacity from NEW ungranted suggestions.
  *
  * **When no token exists (new cycle):**
