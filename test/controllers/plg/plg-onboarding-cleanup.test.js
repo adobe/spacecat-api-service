@@ -16,10 +16,10 @@ import sinonChai from 'sinon-chai';
 
 import {
   cleanupPlgSiteSuggestionsAndFixes,
-  PLG_CLEANUP_OPPORTUNITY_TYPES,
   STATUSES_TO_OUTDATE,
   STATUSES_TO_RESET_TO_NEW,
 } from '../../../src/controllers/plg/plg-onboarding-cleanup.js';
+import { PLG_OPPORTUNITY_TYPES } from '../../../src/controllers/plg/plg-constants.js';
 
 use(sinonChai);
 
@@ -38,7 +38,6 @@ function createMockSuggestion(id, status) {
   return {
     getId: sinon.stub().returns(id),
     getStatus: sinon.stub().returns(status),
-    setStatus: sinon.stub(),
   };
 }
 
@@ -82,7 +81,7 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
   });
 
   it('exports the PLG opportunity types covered by cleanup', () => {
-    expect(PLG_CLEANUP_OPPORTUNITY_TYPES).to.deep.equal([
+    expect(PLG_OPPORTUNITY_TYPES).to.deep.equal([
       'cwv',
       'alt-text',
       'broken-backlinks',
@@ -100,12 +99,13 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
     expect([...STATUSES_TO_RESET_TO_NEW]).to.deep.equal(['PENDING_VALIDATION']);
   });
 
-  it('skips when no siteId is provided', async () => {
+  it('warns and skips when no siteId is provided (caller bug)', async () => {
     const result = await cleanupPlgSiteSuggestionsAndFixes(null, context);
 
     expect(result).to.deep.equal(EMPTY_RESULT);
     expect(dataAccess.Opportunity.allBySiteId).to.not.have.been.called;
-    expect(log.info).to.have.been.calledWithMatch(/no siteId provided, skipping/);
+    expect(log.warn).to.have.been.calledWithMatch(/no siteId provided, skipping/);
+    expect(log.info).to.not.have.been.calledWithMatch(/no siteId provided/);
   });
 
   it('returns zero counts when listing opportunities fails', async () => {
@@ -218,7 +218,7 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
     expect(dataAccess.FixEntity.removeByIds).to.have.been.calledWith(['f1', 'f2', 'f3']);
     expect(dataAccess.FixEntity.removeByIds).to.have.been.calledWith(['f4']);
 
-    expect(log.info).to.have.been.calledWithMatch(/PLG cleanup complete for site/);
+    expect(log.info).to.have.been.calledWithMatch(/PLG cleanup summary \[found=true\] for site/);
   });
 
   it('logs and continues when listing suggestions fails for one opportunity', async () => {
@@ -324,7 +324,7 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
     expect(dataAccess.FixEntity.removeByIds).to.not.have.been.called;
   });
 
-  it('skips bulkUpdateStatus calls when no suggestions match either transition set', async () => {
+  it('skips bulkUpdateStatus calls and emits a "found=false" summary when no suggestions match either transition set', async () => {
     dataAccess.Opportunity.allBySiteId.resolves([
       createMockOpportunity('o-cwv', 'cwv'),
     ]);
@@ -340,5 +340,6 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
     expect(result).to.deep.equal(EMPTY_RESULT);
     expect(dataAccess.Suggestion.bulkUpdateStatus).to.not.have.been.called;
     expect(dataAccess.FixEntity.removeByIds).to.not.have.been.called;
+    expect(log.info).to.have.been.calledWithMatch(/PLG cleanup summary \[found=false\] for site/);
   });
 });
