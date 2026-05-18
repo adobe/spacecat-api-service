@@ -49,6 +49,61 @@ import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validati
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
+ * Resolves the org's per-product default site from config.defaults, validating it belongs
+ * to the org and is enrolled. Returns the resolved data object or null to fall through
+ * to getFirstEnrollment().
+ * @param {object} org - Organization model instance.
+ * @param {string} productCode - Product code from x-product header.
+ * @param {object} context - Request context.
+ * @param {object} ctx - Controller context (provides dataAccess.Site and log).
+ * @returns {Promise<object|null>} Resolved data or null.
+ */
+export async function resolveOrgDefaultSite(org, productCode, context, ctx) {
+  const { dataAccess: { Site }, log } = ctx;
+  try {
+    const defaultSiteId = org.getConfig()?.defaults?.[productCode]?.siteId;
+    if (!hasText(defaultSiteId) || !isValidUUID(defaultSiteId)) {
+      return null;
+    }
+
+    const defaultSite = await Site.findById(defaultSiteId);
+    if (!defaultSite) {
+      log.warn(
+        `[resolveSite] stale config.defaults entry: site ${defaultSiteId} not found for org ${org.getId()} product ${productCode}`,
+      );
+      return null;
+    }
+    if (defaultSite.getOrganizationId() !== org.getId()) {
+      log.warn(
+        `[resolveSite] config.defaults cross-org mismatch: site ${defaultSiteId} belongs to org ${defaultSite.getOrganizationId()}, not ${org.getId()} — falling back`,
+      );
+      return null;
+    }
+
+    const siteTierClient = await TierClient.createForSite(context, defaultSite, productCode);
+    const { entitlement, enrollments } = await siteTierClient.getAllEnrollment();
+
+    const tierVisible = entitlement && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+    if (!tierVisible || !enrollments?.length) {
+      return null;
+    }
+
+    const isSummitPlgEnabled = await getIsSummitPlgEnabled(defaultSite, context);
+    return {
+      organization: OrganizationDto.toJSON(org),
+      site: SiteDto.toJSON(defaultSite),
+      isSummitPlgEnabled,
+    };
+  } catch (e) {
+    log.warn(
+      `[resolveSite] resolveOrgDefaultSite failed for org ${org.getId()} product ${productCode} — falling back`,
+      e,
+    );
+    return null;
+  }
+}
+
+/**
  * Sites controller. Provides methods to create, read, update and delete sites.
  * @param {object} ctx - Context of the request.
  * @returns {object} Sites controller.
@@ -1208,57 +1263,10 @@ function SitesController(ctx, log, env) {
         }
       }
 
-      // Resolves the org's per-product default site from config.defaults, validating it belongs
-      // to the org and is enrolled. Returns the resolved data object or null to fall through
-      // to getFirstEnrollment().
-      const resolveOrgDefaultSite = async (org) => {
-        try {
-          const defaultSiteId = org.getConfig()?.defaults?.[productCode]?.siteId;
-          if (!hasText(defaultSiteId) || !isValidUUID(defaultSiteId)) {
-            return null;
-          }
-
-          const defaultSite = await Site.findById(defaultSiteId);
-          if (!defaultSite) {
-            ctx.log.warn(
-              `[resolveSite] stale config.defaults entry: site ${defaultSiteId} not found for org ${org.getId()} product ${productCode}`,
-            );
-            return null;
-          }
-          if (defaultSite.getOrganizationId() !== org.getId()) {
-            ctx.log.warn(
-              `[resolveSite] config.defaults cross-org mismatch: site ${defaultSiteId} belongs to org ${defaultSite.getOrganizationId()}, not ${org.getId()} — falling back`,
-            );
-            return null;
-          }
-
-          const siteTierClient = await TierClient.createForSite(context, defaultSite, productCode);
-          const { entitlement, enrollments } = await siteTierClient.getAllEnrollment();
-
-          const tierVisible = entitlement && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
-          if (!tierVisible || !enrollments?.length) {
-            return null;
-          }
-
-          const isSummitPlgEnabled = await getIsSummitPlgEnabled(defaultSite, context);
-          return {
-            organization: OrganizationDto.toJSON(org),
-            site: SiteDto.toJSON(defaultSite),
-            isSummitPlgEnabled,
-          };
-        } catch (e) {
-          ctx.log.warn(
-            `[resolveSite] resolveOrgDefaultSite failed for org ${org.getId()} product ${productCode} — falling back`,
-            e,
-          );
-          return null;
-        }
-      };
-
       if (hasText(organizationId) && isValidUUID(organizationId)) {
         organization = await Organization.findById(organizationId);
         if (organization && await accessControlUtil.hasAccess(organization)) {
-          const defaultData = await resolveOrgDefaultSite(organization);
+          const defaultData = await resolveOrgDefaultSite(organization, productCode, context, ctx);
           if (defaultData) {
             return ok({ data: defaultData });
           }
@@ -1282,7 +1290,7 @@ function SitesController(ctx, log, env) {
       } else if (hasText(imsOrg)) {
         organization = await Organization.findByImsOrgId(imsOrg);
         if (organization && await accessControlUtil.hasAccess(organization)) {
-          const defaultData = await resolveOrgDefaultSite(organization);
+          const defaultData = await resolveOrgDefaultSite(organization, productCode, context, ctx);
           if (defaultData) {
             return ok({ data: defaultData });
           }
