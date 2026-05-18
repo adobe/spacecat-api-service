@@ -49,21 +49,18 @@ function isTransientError(error) {
 }
 
 async function withRetry(fn, attempts = RETRY_ATTEMPTS, baseDelay = RETRY_BASE_DELAY_MS) {
-  let lastError;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  for (let attempt = 0; ; attempt += 1) {
     try {
       // eslint-disable-next-line no-await-in-loop
       return await fn();
     } catch (error) {
-      lastError = error;
-      if (attempt === attempts - 1 || !isTransientError(error)) {
+      if (attempt >= attempts - 1 || !isTransientError(error)) {
         throw error;
       }
       // eslint-disable-next-line no-await-in-loop
       await sleep(baseDelay * 2 ** attempt);
     }
   }
-  throw lastError;
 }
 
 async function runWithConcurrency(items, concurrency, fn) {
