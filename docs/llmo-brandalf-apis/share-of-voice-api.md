@@ -25,9 +25,11 @@ Returns per-topic share-of-voice data including brand mentions, competitor break
 | `endDate` | `end_date` | string (YYYY-MM-DD) | today | End of date range |
 | `model` | — | string | `chatgpt` | LLM model (e.g. chatgpt, gemini, copilot) |
 | `siteId` | `site_id` | string (UUID) | — | Filter by site |
-| `categoryId` | `category_id` | string (UUID) | — | Filter by category (must be a valid UUID) |
+| `categoryId` | `category_id` | string (UUID) | — | Filter by category (must be a valid UUID for the RPC) |
+| `categoryIds` | `category_ids` | string or array | — | Only **one** category UUID is supported; multiple values return **400**. |
 | `topicIds` | — | string or array | — | Filter by topic UUID(s). Single UUID, comma-separated, or repeated param. Non-UUID values are ignored. |
 | `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, WW) |
+| `regionCodes` | `region_codes` | string or array | — | Only **one** region is supported at the RPC; multiple return **400**. |
 | `origin` | — | string | — | Filter by origin (case-insensitive; e.g. `human`, `ai`) |
 | `maxCompetitors` | `max_competitors` | integer | `5` | Max competitors returned per topic. Set higher (e.g. `50`) for detailed views. |
 
@@ -61,6 +63,8 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
 
 The API calls the `rpc_share_of_voice` PostgreSQL function via PostgREST. This function aggregates `brand_presence_executions` server-side, avoiding large payload transfers.
 
+The RPC accepts **`p_category_id` (UUID)** and **`p_region_code`** only; there is no `p_category_name` argument. Name-based category filters are therefore not applied inside this RPC (same contract as before). At most one UUID category and one region are allowed; otherwise the API returns **400** before calling the RPC.
+
 **PostgREST RPC call:**
 ```javascript
 client.rpc('rpc_share_of_voice', {
@@ -70,7 +74,7 @@ client.rpc('rpc_share_of_voice', {
   p_model: model,
   p_brand_id: brandId || null,
   p_site_id: siteId || null,
-  p_category_id: categoryId || null,
+  p_category_id: categoryUuid || null,
   p_topic_ids: topicIds || null,
   p_origin: origin || null,
   p_region_code: regionCode || null,

@@ -22,6 +22,7 @@ import {
   isValidUrl,
   hasText,
 } from '@adobe/spacecat-shared-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 /**
  * Scrape controller. Provides methods to create, read, and fetch the result of scrape jobs.
@@ -46,8 +47,12 @@ function ScrapeJobController(context) {
   const MAX_JOBS_BY_BASEURL = 100;
 
   function createErrorResponse(error) {
+    // cleanupHeaderValue strips chars HTTP headers can't carry (CR/LF and non-ASCII
+    // that would otherwise throw ERR_INVALID_CHAR). The `|| 'Internal server error'`
+    // fallback guards against empty messages, and the .slice caps the header size.
+    const safeMessage = cleanupHeaderValue(error.message || 'Internal server error').slice(0, 500);
     return createResponse({}, error.status || 500, {
-      [HEADER_ERROR]: error.message,
+      [HEADER_ERROR]: safeMessage,
     });
   }
 
@@ -208,6 +213,11 @@ function ScrapeJobController(context) {
     let decodedUrl = encodedUrl;
     try {
       decodedUrl = Buffer.from(encodedUrl, 'base64').toString('utf-8').trim();
+
+      if (!isValidUrl(decodedUrl)) {
+        return badRequest('Invalid request: url must be a valid URL');
+      }
+
       const scrapeUrls = await scrapeClient.getScrapeUrlsByProcessingType(
         decodedUrl,
         requestedProcessingType,

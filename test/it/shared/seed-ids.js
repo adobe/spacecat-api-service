@@ -122,6 +122,7 @@ export const TRIAL_USER_ACTIVITY_1_ID = 'c2222222-2222-4222-a222-222222222222'; 
 // ── AsyncJobs (preflight) ──
 
 export const ASYNC_JOB_1_ID = 'eeee1111-1111-4111-b111-111111111111'; // COMPLETED preflight job
+export const ASYNC_JOB_2_ID = 'eeee2222-2222-4222-a222-222222222222'; // IN_PROGRESS site-detection job
 export const NON_EXISTENT_JOB_ID = 'eeee9999-9999-4999-b999-999999999999';
 
 // ── Consumers (S2S) ──
@@ -131,15 +132,31 @@ export const CONSUMER_1_CLIENT_ID = '111111111111111111111111';
 export const CONSUMER_1_TECHNICAL_ACCOUNT_ID = '111111111111111111111111@techacct.adobe.com';
 export const CONSUMER_1_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
 
+// CONSUMER_2 — ACTIVE S2S consumer holding site:readAll + organization:readAll.
+// Used to exercise the readAll capability path through GET /sites and /organizations.
+export const CONSUMER_2_ID = '11111111-1111-4111-b112-222222222222';
+export const CONSUMER_2_CLIENT_ID = '222222222222222222222222';
+export const CONSUMER_2_TECHNICAL_ACCOUNT_ID = '222222222222222222222222@techacct.adobe.com';
+export const CONSUMER_2_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
+
 // ── PlgOnboardings ──
 
 export const PLG_ONBOARDING_1_ID = 'd1111111-1111-4111-b111-111111111111';
 export const PLG_ONBOARDING_1_DOMAIN = 'site1.example.com';
 export const PLG_ONBOARDING_2_ID = 'd2222222-2222-4222-b222-222222222222';
 export const PLG_ONBOARDING_2_DOMAIN = 'waitlisted-site.example.com';
-/** IN_PROGRESS — used to assert PATCH rejects non–WAITLISTED/ONBOARDED records */
+/** IN_PROGRESS — used to assert PATCH rejects non-WAITLISTED records */
 export const PLG_ONBOARDING_3_ID = 'd3333333-3333-4333-b333-333333333333';
 export const PLG_ONBOARDING_3_DOMAIN = 'in-progress-plg-it.example.com';
+/** WAITLISTED — dedicated record for transitionStatus WAITLISTED → OUTDATED test */
+export const PLG_ONBOARDING_4_ID = 'd4444444-4444-4444-b444-444444444444';
+export const PLG_ONBOARDING_4_DOMAIN = 'waitlisted-for-transition.example.com';
+/**
+ * REJECTED — dedicated record for transitionStatus REJECTED → OUTDATED test
+ * (no predecessor dependency)
+ */
+export const PLG_ONBOARDING_5_ID = 'd5555555-5555-4555-b555-555555555555';
+export const PLG_ONBOARDING_5_DOMAIN = 'rejected-plg-it.example.com';
 
 // ── ORG_3: Delegate Agency Org ──
 

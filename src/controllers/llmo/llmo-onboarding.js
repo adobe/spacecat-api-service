@@ -261,14 +261,48 @@ export async function ensureInitialCustomerConfigV2({
 }
 
 /**
- * Generates the data folder name from a domain.
- * @param {string} domain - The domain name
- * @param {string} env - The environment (prod, dev, etc.)
- * @returns {string} The data folder name
+ * Generates the SharePoint data folder name from a baseURL.
+ *
+ * The hostname (per RFC 1035, case-insensitive) and each URL path segment are
+ * percent-decoded and individually sanitized: runs of non-alphanumeric characters
+ * are replaced with a single `-`, leading/trailing `-` are trimmed, and the
+ * result is lowercased. Segments that reduce to empty after sanitization are
+ * dropped. Sanitized parts are joined with `--` as the path-segment delimiter.
+ *
+ * The `--` delimiter cannot appear inside a sanitized segment (any run of
+ * non-alphanumeric characters collapses to a single `-`), so URLs that differ
+ * in path structure produce distinct folder names. Path segments differing only
+ * in punctuation (e.g. `us-kings` vs `us_kings`) produce the same sanitized
+ * segment and therefore the same folder; this is an inherent limitation of
+ * lossy sanitization.
+ *
+ * Examples:
+ *   https://nba.com           -> nba-com
+ *   https://nba.com/kings     -> nba-com--kings
+ *   https://nba.com/us/kings  -> nba-com--us--kings
+ *
+ * @param {string} baseURL - The site's base URL (must be a fully-qualified URL).
+ * @param {string} env - The environment ('prod' for production, anything else is
+ *   treated as dev and prefixed with 'dev/').
+ * @returns {string} The data folder name (prefixed with 'dev/' for non-prod).
  */
 export function generateDataFolder(baseURL, env = 'dev') {
-  const { hostname } = new URL(baseURL);
-  const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  const url = new URL(baseURL);
+  if (!url.hostname) {
+    throw new TypeError('Invalid baseURL: hostname is required');
+  }
+  const sanitize = (s) => s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
+  const host = sanitize(url.hostname);
+  const segments = url.pathname.split('/').filter(Boolean)
+    .map((seg) => {
+      let decoded = seg;
+      try {
+        decoded = decodeURIComponent(seg);
+      } catch { /* keep raw on percent-encoded sequences that are not valid UTF-8 */ }
+      return sanitize(decoded);
+    })
+    .filter(Boolean);
+  const dataFolderName = segments.length > 0 ? `${host}--${segments.join('--')}` : host;
   return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 }
 
@@ -1195,6 +1229,8 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @param {string} [params.deliveryType] - The delivery type for site creation
  * @param {boolean} [params.tempOnboarding] - When true, skips updating helix-query.yaml in GitHub.
  *   HTTP clients set this via the `temp-onboarding` body field.
+ * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region code forwarded to V1 DRS
+ *   prompt generation. Omitted → DRS client default ('US') applies.
  * @param {object} context - The request context
  * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result
@@ -1202,7 +1238,7 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
-    tempOnboarding,
+    tempOnboarding, region,
   } = params;
   const { env, log } = context;
 
@@ -1377,16 +1413,56 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       }
     } else {
       log.info(`Skipping v2 customer config initialization and Brandalf flow for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
+
+      // V1 has no Brandalf trigger, so DRS will not submit prompt generation
+      // automatically. Submit it directly here so v1 onboardings still get
+      // prompts written to the legacy LLMO config (LLMO-4534).
+      try {
+        const drsClient = DrsClient.createFrom(context);
+        if (drsClient.isConfigured()) {
+          const trimmedBrand = brandName.trim();
+          const brandProfile = siteConfig.getBrandProfile?.();
+          // LLMO-4534: v1 fallback audience is English-only. v2 onboardings get a
+          // locale-aware audience from brand_profile.main_profile.target_audience.
+          const audience = brandProfile?.main_profile?.target_audience
+            || `General consumers interested in ${trimmedBrand} products and services`;
+
+          // The audit-worker `drs-prompt-generation` handler takes the legacy LLMO
+          // config write path when `onboarding_mode` is absent from the DRS job
+          // metadata. Do NOT pass `onboarding_mode` here — adding it would route v1
+          // prompts to the v2 customer-config storage and break v1 onboardings.
+          //
+          // LLMO-4683: forward operator-supplied `region` so the GPT prompt-generation
+          // job conditions on the brand's market. Omitted → DRS client default ('US')
+          // applies, preserving prior behavior.
+          if (region) {
+            log.info(`Using operator-supplied region "${region}" for v1 DRS prompt generation`);
+          }
+          const drsJob = await drsClient.submitPromptGenerationJob({
+            baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
+            brandName: trimmedBrand,
+            audience,
+            siteId: site.getId(),
+            imsOrgId,
+            ...(region ? { region } : {}),
+          });
+          if (!drsJob?.job_id) {
+            throw new Error('DRS submitPromptGenerationJob returned no job_id');
+          }
+          log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
+          say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+        } else {
+          log.debug('DRS client not configured, skipping prompt generation');
+        }
+      } catch (drsError) {
+        log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
+        say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
+      }
     }
 
     // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
     // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
     await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
-
-    // Prompt generation is deferred to DRS: when the Brandalf job completes
-    // and syncs brands (with correct regions) to SpaceCat, DRS automatically
-    // submits a prompt_generation_base_url job with the brand's region.
-    // This ensures prompts are generated in the correct language (LLMO-4258).
 
     return {
       site,

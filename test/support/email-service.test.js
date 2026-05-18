@@ -176,10 +176,23 @@ describe('email-service', () => {
       expect(result.error).to.equal('ADOBE_POSTOFFICE_ENDPOINT is not configured');
     });
 
-    it('should handle non-200 Post Office response', async () => {
+    it('should return error when ADOBE_POSTOFFICE_ENDPOINT uses HTTP instead of HTTPS', async () => {
+      mockContext.env.ADOBE_POSTOFFICE_ENDPOINT = 'http://postoffice.example.com';
+
+      const result = await sendEmail(mockContext, {
+        recipients: ['test@example.com'],
+        templateName: 'test-template',
+      });
+
+      expect(result.success).to.be.false;
+      expect(result.error).to.equal('ADOBE_POSTOFFICE_ENDPOINT must use HTTPS');
+      expect(fetchStub).to.not.have.been.called;
+    });
+
+    it('should handle non-200 Post Office response without leaking response body in result.error', async () => {
       fetchStub.resolves({
         status: 500,
-        text: async () => 'Internal Server Error',
+        text: async () => 'Internal Server Error with PII details',
       });
 
       const result = await sendEmail(mockContext, {
@@ -189,8 +202,24 @@ describe('email-service', () => {
 
       expect(result.success).to.be.false;
       expect(result.statusCode).to.equal(500);
-      expect(result.error).to.include('Post Office returned 500');
-      expect(mockContext.log.error).to.have.been.called;
+      expect(result.error).to.equal('Post Office returned 500');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        sinon.match(/Post Office returned 500.*Internal Server Error/),
+      );
+    });
+
+    it('should truncate long Post Office error responses in logs', async () => {
+      const longResponse = 'x'.repeat(300);
+      fetchStub.resolves({ status: 502, text: async () => longResponse });
+
+      await sendEmail(mockContext, {
+        recipients: ['test@example.com'],
+        templateName: 'test-template',
+      });
+
+      const logArg = mockContext.log.error.firstCall.args[0];
+      expect(logArg).to.include('…');
+      expect(logArg.length).to.be.lessThan(300);
     });
 
     it('should handle fetch errors gracefully (never throw)', async () => {

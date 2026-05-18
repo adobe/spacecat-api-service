@@ -49,6 +49,8 @@ const ALL_AUDITS = [
   'summarization',
   'faqs',
   'related-urls',
+  'money-pages',
+  'semantic-value-visibility',
 ];
 
 /**

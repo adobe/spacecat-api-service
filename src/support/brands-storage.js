@@ -23,6 +23,7 @@ const BRAND_SELECT = [
   'brand_earned_sources(name, url, regions)',
   'competitors(name, url, regions)',
   'brand_sites(site_id, paths, type, sites(base_url))',
+  'brand_urls(url)',
 ].join(', ');
 
 /**
@@ -44,13 +45,35 @@ function parseUrlParts(urlString) {
 /**
  * Maps a DB brand row (with all joined child tables) to the V2 config shape
  * the UI expects.
+ *
+ * `urls[]` unions `brand_urls` (raw user-submitted list) with `brand_sites`
+ * (join to the sites table). Each entry carries `onboarded` — true when the
+ * URL's base resolves to a site row in the org — and `siteId` for onboarded
+ * entries. Legacy brands with no `brand_urls` rows fall back to the
+ * `brand_sites` expansion, where every entry is by definition onboarded.
  */
 function mapDbBrandToV2(row) {
   const siteIds = (row.brand_sites || []).map((bs) => bs.site_id).filter(hasText);
 
-  // Expand brand_sites rows into a flat URL list: one entry per path (or one entry for the
-  // base URL itself when no paths are configured).
-  const urls = (row.brand_sites || []).flatMap((bs) => {
+  // Index brand_sites by normalized base URL so brand_urls entries can be
+  // tagged onboarded/siteId by matching their base. brand_sites.site_id is
+  // NOT NULL in the schema, so no defensive filter on it here.
+  const siteByBase = new Map();
+  (row.brand_sites || []).forEach((bs) => {
+    const base = bs.sites?.base_url;
+    if (!hasText(base)) {
+      return;
+    }
+    siteByBase.set(composeBaseURL(base), {
+      siteId: bs.site_id,
+      type: hasText(bs.type) ? bs.type : null,
+    });
+  });
+
+  // Legacy fallback: expand brand_sites paths into URL entries (one per path,
+  // or one for the base URL when no paths are set). Used when brand_urls is
+  // empty — i.e. the brand predates the brand_urls child table.
+  const brandSitesUrls = (row.brand_sites || []).flatMap((bs) => {
     const base = bs.sites?.base_url;
     if (!hasText(base)) {
       return [];
@@ -58,7 +81,11 @@ function mapDbBrandToV2(row) {
     const paths = bs.paths || [];
     const effectivePaths = paths.length === 0 ? ['/'] : paths;
     return effectivePaths.map((p) => {
-      const entry = { value: p === '/' ? base : `${base}${p}` };
+      const entry = {
+        value: p === '/' ? base : `${base}${p}`,
+        onboarded: true,
+        siteId: bs.site_id,
+      };
       // Only the root entry (/) carries the base-URL type; subpaths are plain URLs
       if (p === '/' && hasText(bs.type)) {
         entry.type = bs.type;
@@ -66,6 +93,24 @@ function mapDbBrandToV2(row) {
       return entry;
     });
   });
+
+  const brandUrlsEntries = (row.brand_urls || []).map((bu) => {
+    const { base } = parseUrlParts(bu.url);
+    const siteInfo = siteByBase.get(composeBaseURL(base));
+    const entry = { value: bu.url, onboarded: Boolean(siteInfo) };
+    if (siteInfo) {
+      entry.siteId = siteInfo.siteId;
+    }
+    // Propagate brand_sites.type for onboarded URLs so legacy readers that
+    // relied on type in the V2 response still see it. brand_urls itself
+    // carries no type column.
+    if (hasText(siteInfo?.type)) {
+      entry.type = siteInfo.type;
+    }
+    return entry;
+  });
+
+  const urls = brandUrlsEntries.length > 0 ? brandUrlsEntries : brandSitesUrls;
 
   return {
     id: row.id,
@@ -195,6 +240,34 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   if (error) {
     throw new Error(`Failed to sync brand_sites: ${error.message}`);
   }
+}
+
+/**
+ * Syncs the raw user-submitted URL list to the brand_urls table. Every URL the
+ * caller supplies is persisted, independent of whether it resolves to a
+ * brand_sites row. Values are normalized with composeBaseURL so storage keys
+ * match the form brand_sites uses and the response union in
+ * mapDbBrandToV2 can match bases exactly.
+ */
+async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, updatedBy) {
+  const seen = new Set();
+  const rows = (urls || [])
+    .map((u) => {
+      const value = typeof u === 'string' ? u : u?.value;
+      if (!hasText(value)) {
+        return null;
+      }
+      const { base, path } = parseUrlParts(value);
+      return { url: `${composeBaseURL(base)}${path}` };
+    })
+    .filter((u) => u && !seen.has(u.url) && seen.add(u.url))
+    .map((u) => ({
+      organization_id: organizationId,
+      brand_id: brandId,
+      url: u.url,
+      updated_by: updatedBy,
+    }));
+  await replaceChildRows('brand_urls', brandId, rows, 'brand_id,url', postgrestClient);
 }
 
 /**
@@ -339,6 +412,61 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
 }
 
 /**
+ * Resolves the single active brand for a given (organization, site) pair.
+ *
+ * Lookup is `brands.site_id === siteId` AND `status === 'active'` AND
+ * `organization_id === organizationId`. `brands.site_id` is the authoritative
+ * mapping from a brand to its primary site — set during v2 onboarding. Per
+ * LLMO-4592, ACTIVE brands have a unique `(organization_id, site_id)` pair
+ * when site_id is set.
+ *
+ * `brand_sites` is intentionally NOT used here: that join table also stores
+ * citation entries (sites the brand mentions), so a `brand_sites` row
+ * matching `site_id` does not mean the brand IS the brand for that site.
+ * Brands missing `site_id` are not considered v2-onboarded for this site
+ * and resolve to null (404 at the endpoint).
+ *
+ * If the data violates the LLMO-4592 invariant and multiple ACTIVE brands
+ * match, the first row (deterministic, ordered by name) is returned and a
+ * warning is logged so monitoring can surface the data integrity issue.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID
+ * @param {string} siteId - Site UUID
+ * @param {object} postgrestClient - PostgREST client
+ * @param {object} [log] - Optional logger for the multi-match warning path
+ * @returns {Promise<object|null>} Brand in V2 config shape or null
+ */
+export async function getBrandBySite(organizationId, siteId, postgrestClient, log) {
+  if (!postgrestClient?.from || !hasText(organizationId) || !hasText(siteId)) {
+    return null;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select(BRAND_SELECT)
+    .eq('organization_id', organizationId)
+    .eq('status', 'active')
+    .eq('site_id', siteId)
+    .order('name', { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to resolve brand for site: ${error.message}`);
+  }
+
+  if (!data || data.length === 0) {
+    return null;
+  }
+
+  if (data.length > 1) {
+    log?.warn?.(
+      `Multiple active brands for org ${organizationId} site ${siteId} `
+      + `(LLMO-4592 invariant violation): picking ${data[0].id} deterministically`,
+    );
+  }
+  return mapDbBrandToV2(data[0]);
+}
+
+/**
  * Creates or updates a brand in the normalized brands table,
  * including all nested child tables (aliases, competitors, social, earned, sites).
  *
@@ -426,7 +554,10 @@ export async function upsertBrand({
   ]);
 
   if (brand.urls !== undefined) {
-    await syncBrandSites(organizationId, brandId, brand.urls, postgrestClient, updatedBy);
+    await Promise.all([
+      syncBrandSites(organizationId, brandId, brand.urls, postgrestClient, updatedBy),
+      syncBrandUrls(organizationId, brandId, brand.urls, postgrestClient, updatedBy),
+    ]);
   }
 
   return getBrandById(organizationId, brandId, postgrestClient);
@@ -543,7 +674,10 @@ export async function updateBrand({
   }
 
   if (updates.urls !== undefined) {
-    await syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy);
+    await Promise.all([
+      syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
+      syncBrandUrls(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
+    ]);
   }
 
   return getBrandById(organizationId, brandId, postgrestClient);
