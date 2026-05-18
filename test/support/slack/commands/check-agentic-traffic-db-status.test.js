@@ -23,7 +23,12 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   let slackContext;
   let configStub;
   let postgrestStub;
-  let tableRows;
+  let countsByTable;
+  let rangeCountsByTable;
+  let countsBySiteTable;
+  let rangeCountsBySiteTable;
+  let tableErrorByName;
+  let rangeErrorByTable;
 
   const TARGET_SITE_ID = '11111111-2222-3333-4444-555555555555';
   const OTHER_SITE_ID = '22222222-3333-4444-5555-555555555555';
@@ -35,38 +40,56 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     getLatestAuditByAuditType: sinon.stub().resolves(null),
   });
 
-  const makePostgrestChain = (result) => {
-    const chain = {
-      select: sinon.stub(),
-      in: sinon.stub(),
-      eq: sinon.stub(),
-      gte: sinon.stub(),
-      lte: sinon.stub(),
-    };
-    chain.select.returns(chain);
-    chain.in.returns(chain);
-    chain.gte.returns(chain);
-    chain.eq.resolves(result);
-    chain.lte.resolves(result);
-    return chain;
-  };
-
-  const installPostgrestRows = () => {
-    postgrestStub.from.callsFake((table) => makePostgrestChain({
-      data: tableRows[table] || [],
-      error: null,
-    }));
+  const installPostgrestMock = () => {
+    postgrestStub.from.callsFake((table) => {
+      let siteId;
+      let isRange = false;
+      const chain = {
+        select: sinon.stub(),
+        eq: sinon.stub(),
+        gte: sinon.stub(),
+        lte: sinon.stub(),
+      };
+      chain.select.returns(chain);
+      chain.eq.callsFake((field, value) => {
+        if (field === 'site_id') {
+          siteId = value;
+        }
+        return chain;
+      });
+      chain.gte.callsFake(() => {
+        isRange = true;
+        return chain;
+      });
+      chain.lte.returns(chain);
+      chain.then = (resolve) => {
+        if (isRange && rangeErrorByTable[table]) {
+          resolve({ count: null, error: rangeErrorByTable[table] });
+          return;
+        }
+        if (!isRange && tableErrorByName[table]) {
+          resolve({ count: null, error: tableErrorByName[table] });
+          return;
+        }
+        const perSite = isRange ? rangeCountsBySiteTable : countsBySiteTable;
+        const fallback = isRange ? rangeCountsByTable : countsByTable;
+        const count = perSite[siteId]?.[table] ?? fallback[table] ?? 0;
+        resolve({ count, error: null });
+      };
+      return chain;
+    });
   };
 
   beforeEach(() => {
-    tableRows = {
-      agentic_traffic: [],
-      agentic_traffic_daily: [],
-      agentic_traffic_weekly: [],
-    };
+    countsByTable = {};
+    rangeCountsByTable = {};
+    countsBySiteTable = {};
+    rangeCountsBySiteTable = {};
+    tableErrorByName = {};
+    rangeErrorByTable = {};
     configStub = { isHandlerEnabledForSite: sinon.stub().returns(true) };
     postgrestStub = { from: sinon.stub() };
-    installPostgrestRows();
+    installPostgrestMock();
 
     context = {
       dataAccess: {
@@ -162,12 +185,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   it('filters the check to one requested baseUrl', async () => {
     const targetSite = makeSite(TARGET_SITE_ID, 'https://base-url.example.com');
     context.dataAccess.Site.findByBaseURL.resolves(targetSite);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 8, updated_at: '2026-04-22T08:00:00Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 8, updated_at: '2026-04-22T08:01:00Z' },
-    ];
+    countsByTable = { agentic_traffic: 1, agentic_traffic_daily: 1 };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22', 'baseUrl=https://base-url.example.com'], slackContext);
@@ -178,7 +196,8 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
       .to.have.been.calledWith('https://base-url.example.com');
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('for site `https://base-url.example.com`');
-    expect(output).to.include('Raw table: *1/1* sites, 1 rows / 8 hits');
+    expect(output).to.include('Raw table: *1/1* sites, 1 rows');
+    expect(output).to.not.include('hits');
   });
 
   it('reports when the requested baseUrl is not found', async () => {
@@ -226,36 +245,33 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   it('checks raw, daily, and weekly tables directly for one site', async () => {
     const targetSite = makeSite(TARGET_SITE_ID, 'https://wknd.site');
     context.dataAccess.Site.findById.resolves(targetSite);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 20, updated_at: '2026-05-04T10:07:12Z' },
-      { site_id: TARGET_SITE_ID, hits: 34, updated_at: '2026-05-04T10:07:13Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 54, updated_at: '2026-05-04T10:07:14Z' },
-    ];
-    tableRows.agentic_traffic_weekly = [
-      { site_id: TARGET_SITE_ID, hits: 500, updated_at: '2026-05-04T10:08:00Z' },
-    ];
+    countsByTable = {
+      agentic_traffic: 2,
+      agentic_traffic_daily: 1,
+      agentic_traffic_weekly: 1,
+    };
+    rangeCountsByTable = { agentic_traffic: 2 };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-05-03', `siteId=${TARGET_SITE_ID}`], slackContext);
 
     expect(targetSite.getLatestAuditByAuditType).not.to.have.been.called;
-    expect(postgrestStub.from.args.map(([table]) => table)).to.deep.equal([
-      'agentic_traffic',
-      'agentic_traffic_daily',
-      'agentic_traffic_weekly',
-      'agentic_traffic',
+    const tablesQueried = postgrestStub.from.args.map(([table]) => table);
+    expect(tablesQueried).to.include.members([
+      'agentic_traffic', 'agentic_traffic_daily', 'agentic_traffic_weekly',
     ]);
+    // raw is queried twice — once for eq date, once for the week range
+    expect(tablesQueried.filter((t) => t === 'agentic_traffic')).to.have.length(2);
 
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Agentic Traffic DB Table Status — 2026-05-03');
     expect(output).to.include('Outcome: *DASHBOARD_READY*');
-    expect(output).to.include('Raw table: *1/1* sites, 2 rows / 54 hits');
-    expect(output).to.include('Daily table: *1/1* sites, 1 rows / 54 hits');
-    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 2 rows / 54 hits');
-    expect(output).to.include('Weekly table (2026-04-27): *1/1* raw-week sites, 1 rows / 500 hits');
+    expect(output).to.include('Raw table: *1/1* sites, 2 rows');
+    expect(output).to.include('Daily table: *1/1* sites, 1 rows');
+    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 2 rows');
+    expect(output).to.include('Weekly table (2026-04-27): *1/1* raw-week sites, 1 rows');
     expect(output).to.include('https://wknd.site');
+    expect(output).to.not.include('hits');
   });
 
   it('caps long site detail lists and points to focused site checks', async () => {
@@ -265,16 +281,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
       return makeSite(siteId, `https://site-${index + 1}.example.com`);
     });
     context.dataAccess.Site.all.resolves(sites);
-    tableRows.agentic_traffic = sites.map((site) => ({
-      site_id: site.getId(),
-      hits: 10,
-      updated_at: '2026-04-22T08:00:00Z',
-    }));
-    tableRows.agentic_traffic_daily = sites.map((site) => ({
-      site_id: site.getId(),
-      hits: 10,
-      updated_at: '2026-04-22T08:01:00Z',
-    }));
+    countsByTable = { agentic_traffic: 1, agentic_traffic_daily: 1 };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
@@ -285,61 +292,11 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('... 1 more. Re-run with `siteId=<siteId>` for focused details.');
   });
 
-  it('ignores malformed table rows and prints invalid timestamps as-is', async () => {
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://defensive.com'),
-    ]);
-    tableRows.agentic_traffic = [
-      { hits: 999, updated_at: '2026-04-22T07:59:00Z' },
-      { site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-04-22T08:00:00Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 10, updated_at: 'not-a-date' },
-    ];
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Raw table: *1/1* sites, 1 rows / 10 hits');
-    expect(output).to.include('daily: 1 rows / 10 hits (updated not-a-date)');
-  });
-
-  it('handles missing hits, non-numeric hits, and null table responses', async () => {
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://odd-rows.com'),
-    ]);
-    postgrestStub.from.withArgs('agentic_traffic').returns(makePostgrestChain({
-      data: [
-        { site_id: TARGET_SITE_ID, updated_at: '2026-04-22T08:00:00Z' },
-        { site_id: TARGET_SITE_ID, hits: 'not-a-number' },
-      ],
-      error: null,
-    }));
-    postgrestStub.from.withArgs('agentic_traffic_daily').returns(makePostgrestChain({
-      data: null,
-      error: null,
-    }));
-    postgrestStub.from.withArgs('agentic_traffic_weekly').returns(makePostgrestChain({
-      data: [],
-      error: null,
-    }));
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Raw table: *1/1* sites, 2 rows / 0 hits');
-    expect(output).to.include('Daily table: *0/1* sites, 0 rows / 0 hits');
-  });
-
   it('reports missing daily rows when raw rows exist', async () => {
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://raw-only.com'),
     ]);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-04-22T08:00:00Z' },
-    ];
+    countsByTable = { agentic_traffic: 1 };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
@@ -365,8 +322,8 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Outcome: *NO_DB_ROWS_FOR_DATE*');
     expect(output).to.include('Missing raw import: *2*');
     expect(output).to.include('Missing daily serving: *2*');
-    expect(output).to.include('Raw table: *0/2* sites, 0 rows / 0 hits');
-    expect(output).to.include('Daily table: *0/2* sites, 0 rows / 0 hits');
+    expect(output).to.include('Raw table: *0/2* sites, 0 rows');
+    expect(output).to.include('Daily table: *0/2* sites, 0 rows');
   });
 
   it('does not report no DB rows when only weekly rows exist for a closed Sunday', async () => {
@@ -374,9 +331,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://weekly-only.com'),
     ]);
-    tableRows.agentic_traffic_weekly = [
-      { site_id: TARGET_SITE_ID, hits: 12, updated_at: '2026-05-04T08:02:00Z' },
-    ];
+    countsByTable = { agentic_traffic_weekly: 1 };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-05-03'], slackContext);
@@ -385,7 +340,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Outcome: *ACTION_REQUIRED*');
     expect(output).to.not.include('Outcome: *NO_DB_ROWS_FOR_DATE*');
-    expect(output).to.include('Weekly table (2026-04-27): *0/0* raw-week sites, 0 rows / 0 hits');
+    expect(output).to.include('Weekly table (2026-04-27): *0/0* raw-week sites, 0 rows');
   });
 
   it('marks weekly as required for a closed Sunday', async () => {
@@ -393,12 +348,11 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://closed-sunday.com'),
     ]);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-05-04T08:00:00Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-05-04T08:01:00Z' },
-    ];
+    countsByTable = {
+      agentic_traffic: 1,
+      agentic_traffic_daily: 1,
+    };
+    rangeCountsByTable = { agentic_traffic: 1 };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-05-03'], slackContext);
@@ -406,8 +360,8 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Missing weekly serving: *1*');
-    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 1 rows / 10 hits');
-    expect(output).to.include('Weekly table (2026-04-27): *0/1* raw-week sites, 0 rows / 0 hits');
+    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 1 rows');
+    expect(output).to.include('Weekly table (2026-04-27): *0/1* raw-week sites, 0 rows');
     expect(output).to.include('missing: weekly');
   });
 
@@ -416,12 +370,11 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://midweek-completed.com'),
     ]);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 7, updated_at: '2026-04-29T22:00:00Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 7, updated_at: '2026-04-29T22:01:00Z' },
-    ];
+    countsByTable = {
+      agentic_traffic: 1,
+      agentic_traffic_daily: 1,
+    };
+    rangeCountsByTable = { agentic_traffic: 1 };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-29'], slackContext);
@@ -430,8 +383,8 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Agentic Traffic DB Table Status — 2026-04-29');
     expect(output).to.include('Missing weekly serving: *1*');
-    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 1 rows / 7 hits');
-    expect(output).to.include('Weekly table (2026-04-27): *0/1* raw-week sites, 0 rows / 0 hits');
+    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 1 rows');
+    expect(output).to.include('Weekly table (2026-04-27): *0/1* raw-week sites, 0 rows');
     expect(output).to.include('missing: weekly');
   });
 
@@ -440,12 +393,10 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://midweek-current.com'),
     ]);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 3, updated_at: '2026-05-05T22:00:00Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 3, updated_at: '2026-05-05T22:01:00Z' },
-    ];
+    countsByTable = {
+      agentic_traffic: 1,
+      agentic_traffic_daily: 1,
+    };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-05-05'], slackContext);
@@ -468,64 +419,46 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Missing weekly serving: *0*');
-    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *0/1* sites, 0 rows / 0 hits');
-    expect(output).to.include('Weekly table (2026-04-27): *0/0* raw-week sites, 0 rows / 0 hits');
+    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *0/1* sites, 0 rows');
+    expect(output).to.include('Weekly table (2026-04-27): *0/0* raw-week sites, 0 rows');
   });
 
-  it('merges raw week batches and ignores empty batch responses', async () => {
+  it('handles many sites without batching and aggregates per-site counts', async () => {
     const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
-    const sites = Array.from({ length: 51 }, (_, index) => {
-      const id = index === 0 || index === 25
-        ? TARGET_SITE_ID
-        : `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
-      return makeSite(id, `https://batch-${index}.com`);
+    const sites = Array.from({ length: 30 }, (_, index) => {
+      const siteId = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+      return makeSite(siteId, `https://batch-${index}.com`);
     });
     context.dataAccess.Site.all.resolves(sites);
-    postgrestStub.from.resetBehavior();
-    for (let i = 0; i < 9; i += 1) {
-      postgrestStub.from.onCall(i).returns(makePostgrestChain({
-        data: [],
-        error: null,
-      }));
-    }
-    postgrestStub.from.onCall(9).returns(makePostgrestChain({
-      data: [{ site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-05-04T09:00:00Z' }],
-      error: null,
-    }));
-    postgrestStub.from.onCall(10).returns(makePostgrestChain({
-      data: [{ site_id: TARGET_SITE_ID, hits: 20, updated_at: '2026-05-04T08:00:00Z' }],
-      error: null,
-    }));
-    postgrestStub.from.onCall(11).returns(makePostgrestChain({
-      data: null,
-      error: null,
-    }));
+    // First site has full data; others have nothing.
+    const firstId = sites[0].getId();
+    countsBySiteTable = {
+      [firstId]: {
+        agentic_traffic: 5,
+        agentic_traffic_daily: 1,
+        agentic_traffic_weekly: 1,
+      },
+    };
+    rangeCountsBySiteTable = {
+      [firstId]: { agentic_traffic: 35 },
+    };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-05-03'], slackContext);
     clock.restore();
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Raw week (2026-04-27..2026-05-03):');
+    expect(output).to.include('Sites checked: *30*');
+    expect(output).to.include('Raw table: *1/30* sites, 5 rows');
+    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/30* sites, 35 rows');
+    expect(output).to.include('Weekly table (2026-04-27): *1/1* raw-week sites, 1 rows');
     expect(output).to.include('https://batch-0.com');
-    expect(output).to.include('raw week: 2 rows / 30 hits');
   });
 
   it('surfaces table query errors through the generic Slack error handler', async () => {
     const targetSite = makeSite(TARGET_SITE_ID, 'https://error.com');
     context.dataAccess.Site.all.resolves([targetSite]);
-    postgrestStub.from.withArgs('agentic_traffic').returns(makePostgrestChain({
-      data: null,
-      error: { message: 'relation missing' },
-    }));
-    postgrestStub.from.withArgs('agentic_traffic_daily').returns(makePostgrestChain({
-      data: [],
-      error: null,
-    }));
-    postgrestStub.from.withArgs('agentic_traffic_weekly').returns(makePostgrestChain({
-      data: [],
-      error: null,
-    }));
+    tableErrorByName.agentic_traffic = { message: 'relation missing' };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
@@ -543,23 +476,11 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://weekly-error.com'),
     ]);
-    postgrestStub.from.resetBehavior();
-    postgrestStub.from.onCall(0).returns(makePostgrestChain({
-      data: [{ site_id: TARGET_SITE_ID, hits: 10 }],
-      error: null,
-    }));
-    postgrestStub.from.onCall(1).returns(makePostgrestChain({
-      data: [{ site_id: TARGET_SITE_ID, hits: 10 }],
-      error: null,
-    }));
-    postgrestStub.from.onCall(2).returns(makePostgrestChain({
-      data: [],
-      error: null,
-    }));
-    postgrestStub.from.onCall(3).returns(makePostgrestChain({
-      data: null,
-      error: { message: 'weekly range failed' },
-    }));
+    countsByTable = {
+      agentic_traffic: 1,
+      agentic_traffic_daily: 1,
+    };
+    rangeErrorByTable.agentic_traffic = { message: 'weekly range failed' };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-05-03'], slackContext);

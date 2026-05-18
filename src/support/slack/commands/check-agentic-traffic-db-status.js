@@ -26,104 +26,37 @@ import { postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['check agentic traffic db status'];
 const CDN_LOGS_REPORT_AUDIT = 'cdn-logs-report';
-const BATCH_SIZE = 25;
+const SITE_CONCURRENCY = 10;
 const AGENTIC_TRAFFIC_TABLES = [
-  {
-    key: 'raw',
-    label: 'raw import',
-    table: 'agentic_traffic',
-    dateColumn: 'traffic_date',
-    select: 'site_id,hits,updated_at',
-  },
-  {
-    key: 'daily',
-    label: 'daily serving',
-    table: 'agentic_traffic_daily',
-    dateColumn: 'traffic_date',
-    select: 'site_id,hits,updated_at',
-  },
-  {
-    key: 'weekly',
-    label: 'weekly serving',
-    table: 'agentic_traffic_weekly',
-    dateColumn: 'week_start',
-    select: 'site_id,hits,updated_at',
-  },
+  { key: 'raw', table: 'agentic_traffic', dateColumn: 'traffic_date' },
+  { key: 'daily', table: 'agentic_traffic_daily', dateColumn: 'traffic_date' },
+  { key: 'weekly', table: 'agentic_traffic_weekly', dateColumn: 'week_start' },
 ];
 
 function isCompletedIsoWeek(date, now = new Date()) {
   return startOfUtcIsoWeek(date) < startOfUtcIsoWeek(now);
 }
 
-function chunkArray(items, size) {
-  const chunks = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
+async function runWithConcurrency(items, concurrency, fn) {
+  const results = [];
+  const executing = [];
+  for (const item of items) {
+    const promise = Promise.resolve().then(() => fn(item));
+    results.push(promise);
+    const tracked = promise.finally(() => {
+      executing.splice(executing.indexOf(tracked), 1);
+    });
+    executing.push(tracked);
+    if (executing.length >= concurrency) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.race(executing);
+    }
   }
-  return chunks;
-}
-
-function rowsEmptySummary() {
-  return { rows: 0, hits: 0, latestUpdate: null };
-}
-
-function addRowSummary(summaries, row) {
-  const siteId = row.site_id;
-  if (!siteId) {
-    return;
-  }
-  const summary = summaries.get(siteId) || rowsEmptySummary();
-  const hits = Number(row.hits || 0);
-  summary.rows += 1;
-  summary.hits += Number.isFinite(hits) ? hits : 0;
-  if (row.updated_at && (!summary.latestUpdate || row.updated_at > summary.latestUpdate)) {
-    summary.latestUpdate = row.updated_at;
-  }
-  summaries.set(siteId, summary);
-}
-
-function summarizeRows(rows = []) {
-  const summaries = new Map();
-  for (const row of rows) {
-    addRowSummary(summaries, row);
-  }
-  return summaries;
-}
-
-function getTableSummary(tableSummaries, tableKey, siteId) {
-  return tableSummaries[tableKey].get(siteId) || rowsEmptySummary();
+  return Promise.all(results);
 }
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString('en-US');
-}
-
-function formatUpdateTime(value) {
-  if (!value) {
-    return 'n/a';
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toISOString().slice(0, 16).replace('T', ' ');
-}
-
-function formatTableSummary(summary) {
-  return `${formatNumber(summary.rows)} rows / ${formatNumber(summary.hits)} hits`;
-}
-
-function sumTable(siteStatuses, tableKey) {
-  return siteStatuses.reduce((summary, siteStatus) => {
-    const tableSummary = siteStatus[tableKey];
-    return {
-      rows: summary.rows + tableSummary.rows,
-      hits: summary.hits + tableSummary.hits,
-      latestUpdate: !summary.latestUpdate || tableSummary.latestUpdate > summary.latestUpdate
-        ? tableSummary.latestUpdate
-        : summary.latestUpdate,
-    };
-  }, rowsEmptySummary());
 }
 
 function renderOmittedSites(omitted) {
@@ -134,75 +67,63 @@ function renderSite(siteStatus) {
   return [
     `• \`${siteStatus.baseURL}\``,
     `  siteId: \`${siteStatus.siteId}\``,
-    `  raw: ${formatTableSummary(siteStatus.raw)} (updated ${formatUpdateTime(siteStatus.raw.latestUpdate)})`,
-    `  daily: ${formatTableSummary(siteStatus.daily)} (updated ${formatUpdateTime(siteStatus.daily.latestUpdate)})`,
-    siteStatus.rawWeek.rows > 0 ? `  raw week: ${formatTableSummary(siteStatus.rawWeek)} for ${siteStatus.weekStart}..${siteStatus.weekEnd}` : '',
-    `  weekly: ${formatTableSummary(siteStatus.weekly)} for week ${siteStatus.weekStart} (updated ${formatUpdateTime(siteStatus.weekly.latestUpdate)})`,
+    `  raw: ${formatNumber(siteStatus.raw)} rows`,
+    `  daily: ${formatNumber(siteStatus.daily)} rows`,
+    siteStatus.rawWeek > 0 ? `  raw week: ${formatNumber(siteStatus.rawWeek)} rows for ${siteStatus.weekStart}..${siteStatus.weekEnd}` : '',
+    `  weekly: ${formatNumber(siteStatus.weekly)} rows for week ${siteStatus.weekStart}`,
     siteStatus.missing.length > 0 ? `  missing: ${siteStatus.missing.join(', ')}` : '',
   ].filter(Boolean).join('\n');
 }
 
-async function queryTable(postgrestClient, tableDef, siteIds, dateValue) {
-  const { data, error } = await postgrestClient
-    .from(tableDef.table)
-    .select(tableDef.select)
-    .in('site_id', siteIds)
-    .eq(tableDef.dateColumn, dateValue);
-
+async function countTable(postgrestClient, table, siteId, dateColumn, dateValue) {
+  const { count, error } = await postgrestClient
+    .from(table)
+    .select('*', { count: 'exact', head: true })
+    .eq('site_id', siteId)
+    .eq(dateColumn, dateValue);
   if (error) {
-    throw new Error(`${tableDef.table}: ${error.message}`);
+    throw new Error(`${table}: ${error.message}`);
   }
-  return data || [];
+  return count || 0;
 }
 
-async function queryRawWeekTable(postgrestClient, siteIds, weekStartStr, weekEndStr) {
-  const summaries = new Map();
-
-  for (const siteIdBatch of chunkArray(siteIds, BATCH_SIZE)) {
-    // eslint-disable-next-line no-await-in-loop
-    const { data, error } = await postgrestClient
-      .from('agentic_traffic')
-      .select('site_id,hits,updated_at')
-      .in('site_id', siteIdBatch)
-      .gte('traffic_date', weekStartStr)
-      .lte('traffic_date', weekEndStr);
-
-    if (error) {
-      throw new Error(`agentic_traffic weekly range: ${error.message}`);
-    }
-
-    const batchSummary = summarizeRows(data || []);
-    for (const [siteId, summary] of batchSummary.entries()) {
-      const existing = summaries.get(siteId) || rowsEmptySummary();
-      summaries.set(siteId, {
-        rows: existing.rows + summary.rows,
-        hits: existing.hits + summary.hits,
-        latestUpdate: !existing.latestUpdate || summary.latestUpdate > existing.latestUpdate
-          ? summary.latestUpdate
-          : existing.latestUpdate,
-      });
-    }
+async function countRawWeek(postgrestClient, siteId, weekStartStr, weekEndStr) {
+  const { count, error } = await postgrestClient
+    .from('agentic_traffic')
+    .select('*', { count: 'exact', head: true })
+    .eq('site_id', siteId)
+    .gte('traffic_date', weekStartStr)
+    .lte('traffic_date', weekEndStr);
+  if (error) {
+    throw new Error(`agentic_traffic weekly range: ${error.message}`);
   }
-
-  return summaries;
+  return count || 0;
 }
 
-async function queryTrafficTables(postgrestClient, siteIds, dateStr, weekStartStr) {
-  const summaries = { raw: new Map(), daily: new Map(), weekly: new Map() };
-
-  for (const siteIdBatch of chunkArray(siteIds, BATCH_SIZE)) {
-    for (const tableDef of AGENTIC_TRAFFIC_TABLES) {
-      const dateValue = tableDef.key === 'weekly' ? weekStartStr : dateStr;
-      // eslint-disable-next-line no-await-in-loop
-      const rows = await queryTable(postgrestClient, tableDef, siteIdBatch, dateValue);
-      summaries[tableDef.key] = new Map([
-        ...summaries[tableDef.key],
-        ...summarizeRows(rows),
-      ]);
-    }
-  }
-
-  return summaries;
+async function countSiteTables(
+  postgrestClient,
+  siteId,
+  dateStr,
+  weekStartStr,
+  weekEndStr,
+  weeklyExpected,
+) {
+  const tableCounts = await Promise.all(
+    AGENTIC_TRAFFIC_TABLES.map((t) => countTable(
+      postgrestClient,
+      t.table,
+      siteId,
+      t.dateColumn,
+      t.key === 'weekly' ? weekStartStr : dateStr,
+    )),
+  );
+  const [raw, daily, weekly] = tableCounts;
+  const rawWeek = weeklyExpected
+    ? await countRawWeek(postgrestClient, siteId, weekStartStr, weekEndStr)
+    : 0;
+  return {
+    raw, daily, weekly, rawWeek,
+  };
 }
 
 /**
@@ -260,6 +181,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       const dateStr = formatUtcDate(targetDate);
       const weekStartStr = formatUtcDate(startOfUtcIsoWeek(targetDate));
+      const weekEndStr = formatUtcDate(addUtcDays(startOfUtcIsoWeek(targetDate), 6));
       const weeklyExpected = isCompletedIsoWeek(targetDate);
       let siteScopeText = '';
       if (parsedArgs.siteId) {
@@ -290,80 +212,62 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       await say(`:gear: Checking ${enabledSites.length} site${enabledSites.length === 1 ? '' : 's'} with cdn-logs-report enabled...`);
 
-      const tableSummaries = await queryTrafficTables(
-        postgrestClient,
-        enabledSites.map((site) => site.getId()),
-        dateStr,
-        weekStartStr,
+      const siteStatuses = await runWithConcurrency(
+        enabledSites,
+        SITE_CONCURRENCY,
+        async (site) => {
+          const siteId = site.getId();
+          const counts = await countSiteTables(
+            postgrestClient,
+            siteId,
+            dateStr,
+            weekStartStr,
+            weekEndStr,
+            weeklyExpected,
+          );
+          const status = {
+            siteId,
+            baseURL: site.getBaseURL(),
+            weekStart: weekStartStr,
+            weekEnd: weekEndStr,
+            raw: counts.raw,
+            daily: counts.daily,
+            weekly: counts.weekly,
+            rawWeek: counts.rawWeek,
+            missing: [],
+          };
+          if (status.raw === 0) {
+            status.missing.push('raw');
+          }
+          if (status.daily === 0) {
+            status.missing.push('daily');
+          }
+          if (weeklyExpected && status.rawWeek > 0 && status.weekly === 0) {
+            status.missing.push('weekly');
+          }
+          return status;
+        },
       );
-      const weekEndStr = formatUtcDate(addUtcDays(startOfUtcIsoWeek(targetDate), 6));
-      tableSummaries.rawWeek = weeklyExpected
-        ? await queryRawWeekTable(
-          postgrestClient,
-          enabledSites.map((site) => site.getId()),
-          weekStartStr,
-          weekEndStr,
-        )
-        : new Map();
 
-      const dashboardReady = [];
-      const rawMissing = [];
-      const dailyMissing = [];
-      const weeklyMissing = [];
-
-      const siteStatuses = enabledSites.map((site) => {
-        const siteId = site.getId();
-        const status = {
-          siteId,
-          baseURL: site.getBaseURL(),
-          weekStart: weekStartStr,
-          weekEnd: weekEndStr,
-          raw: getTableSummary(tableSummaries, 'raw', siteId),
-          daily: getTableSummary(tableSummaries, 'daily', siteId),
-          weekly: getTableSummary(tableSummaries, 'weekly', siteId),
-          rawWeek: getTableSummary(tableSummaries, 'rawWeek', siteId),
-          missing: [],
-        };
-
-        if (status.raw.rows === 0) {
-          status.missing.push('raw');
-        }
-        if (status.daily.rows === 0) {
-          status.missing.push('daily');
-        }
-        if (weeklyExpected && status.rawWeek.rows > 0 && status.weekly.rows === 0) {
-          status.missing.push('weekly');
-        }
-
-        if (status.missing.length === 0) {
-          dashboardReady.push(status);
-        } else {
-          if (status.raw.rows === 0) {
-            rawMissing.push(status);
-          }
-          if (status.daily.rows === 0) {
-            dailyMissing.push(status);
-          }
-          if (weeklyExpected && status.rawWeek.rows > 0 && status.weekly.rows === 0) {
-            weeklyMissing.push(status);
-          }
-        }
-        return status;
-      });
-
-      const rawPresent = siteStatuses.filter((s) => s.raw.rows > 0).length;
-      const dailyPresent = siteStatuses.filter((s) => s.daily.rows > 0).length;
-      const weeklyPresent = siteStatuses.filter((s) => s.weekly.rows > 0).length;
-      const rawTotal = sumTable(siteStatuses, 'raw');
-      const dailyTotal = sumTable(siteStatuses, 'daily');
-      const weeklyTotal = sumTable(siteStatuses, 'weekly');
-      const weeklySourceStatuses = weeklyExpected
-        ? siteStatuses.filter((s) => s.rawWeek.rows > 0)
+      const dashboardReady = siteStatuses.filter((s) => s.missing.length === 0);
+      const rawMissing = siteStatuses.filter((s) => s.raw === 0);
+      const dailyMissing = siteStatuses.filter((s) => s.daily === 0);
+      const weeklyMissing = weeklyExpected
+        ? siteStatuses.filter((s) => s.rawWeek > 0 && s.weekly === 0)
         : [];
-      const rawWeekTotal = sumTable(weeklySourceStatuses, 'rawWeek');
-      const weeklyForRawWeekTotal = sumTable(weeklySourceStatuses, 'weekly');
-      const weeklyPresentForRawWeek = weeklySourceStatuses
-        .filter((s) => s.weekly.rows > 0).length;
+
+      const rawPresent = siteStatuses.filter((s) => s.raw > 0).length;
+      const dailyPresent = siteStatuses.filter((s) => s.daily > 0).length;
+      const weeklyPresent = siteStatuses.filter((s) => s.weekly > 0).length;
+      const rawTotal = siteStatuses.reduce((sum, s) => sum + s.raw, 0);
+      const dailyTotal = siteStatuses.reduce((sum, s) => sum + s.daily, 0);
+      const weeklyTotal = siteStatuses.reduce((sum, s) => sum + s.weekly, 0);
+      const weeklySourceStatuses = weeklyExpected
+        ? siteStatuses.filter((s) => s.rawWeek > 0)
+        : [];
+      const rawWeekTotal = weeklySourceStatuses.reduce((sum, s) => sum + s.rawWeek, 0);
+      const weeklyForRawWeekTotal = weeklySourceStatuses.reduce((sum, s) => sum + s.weekly, 0);
+      const weeklyPresentForRawWeek = weeklySourceStatuses.filter((s) => s.weekly > 0).length;
 
       let outcome = 'ACTION_REQUIRED';
       if (dashboardReady.length === enabledSites.length) {
@@ -382,12 +286,12 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         `:arrows_counterclockwise: Missing daily serving: *${dailyMissing.length}*`,
         weeklyExpected ? `:calendar: Missing weekly serving: *${weeklyMissing.length}*` : '',
         `Sites checked: *${enabledSites.length}*`,
-        `Raw table: *${rawPresent}/${enabledSites.length}* sites, ${formatTableSummary(rawTotal)}`,
-        `Daily table: *${dailyPresent}/${enabledSites.length}* sites, ${formatTableSummary(dailyTotal)}`,
-        weeklyExpected ? `Raw week (${weekStartStr}..${weekEndStr}): *${weeklySourceStatuses.length}/${enabledSites.length}* sites, ${formatTableSummary(rawWeekTotal)}` : '',
+        `Raw table: *${rawPresent}/${enabledSites.length}* sites, ${formatNumber(rawTotal)} rows`,
+        `Daily table: *${dailyPresent}/${enabledSites.length}* sites, ${formatNumber(dailyTotal)} rows`,
+        weeklyExpected ? `Raw week (${weekStartStr}..${weekEndStr}): *${weeklySourceStatuses.length}/${enabledSites.length}* sites, ${formatNumber(rawWeekTotal)} rows` : '',
         weeklyExpected
-          ? `Weekly table (${weekStartStr}): *${weeklyPresentForRawWeek}/${weeklySourceStatuses.length}* raw-week sites, ${formatTableSummary(weeklyForRawWeekTotal)}`
-          : `Weekly table (${weekStartStr}): *${weeklyPresent}/${enabledSites.length}* sites, ${formatTableSummary(weeklyTotal)}`,
+          ? `Weekly table (${weekStartStr}): *${weeklyPresentForRawWeek}/${weeklySourceStatuses.length}* raw-week sites, ${formatNumber(weeklyForRawWeekTotal)} rows`
+          : `Weekly table (${weekStartStr}): *${weeklyPresent}/${enabledSites.length}* sites, ${formatNumber(weeklyTotal)} rows`,
         '',
         '*Actionable insight:*',
       ].filter(Boolean);
