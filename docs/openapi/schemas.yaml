@@ -370,6 +370,20 @@ CdnLogsConfig:
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
+    - type: object
+      properties:
+        defaults:
+          description: >
+            Optional. Per-product default site overrides. Keys are product codes
+            (e.g. "ASO"). Each entry pins a preferred site for resolveSite so
+            customers are not subject to insertion-order dependence.
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              siteId:
+                description: The ID of the default site for this product. Set to null to clear.
+                $ref: '#/Id'
 SiteConfig:
   allOf:
     - $ref: '#/Config'

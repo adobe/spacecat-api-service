@@ -1208,9 +1208,61 @@ function SitesController(ctx, log, env) {
         }
       }
 
+      // Resolves the org's per-product default site from config.defaults, validating it belongs
+      // to the org and is enrolled. Returns the resolved data object or null to fall through
+      // to getFirstEnrollment().
+      const resolveOrgDefaultSite = async (org) => {
+        try {
+          const defaultSiteId = org.getConfig()?.defaults?.[productCode]?.siteId;
+          if (!hasText(defaultSiteId) || !isValidUUID(defaultSiteId)) {
+            return null;
+          }
+
+          const defaultSite = await Site.findById(defaultSiteId);
+          if (!defaultSite) {
+            ctx.log.warn(
+              `[resolveSite] stale config.defaults entry: site ${defaultSiteId} not found for org ${org.getId()} product ${productCode}`,
+            );
+            return null;
+          }
+          if (defaultSite.getOrganizationId() !== org.getId()) {
+            ctx.log.warn(
+              `[resolveSite] config.defaults cross-org mismatch: site ${defaultSiteId} belongs to org ${defaultSite.getOrganizationId()}, not ${org.getId()} — falling back`,
+            );
+            return null;
+          }
+
+          const siteTierClient = await TierClient.createForSite(context, defaultSite, productCode);
+          const { entitlement, enrollments } = await siteTierClient.getAllEnrollment();
+
+          const tierVisible = entitlement && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+          if (!tierVisible || !enrollments?.length) {
+            return null;
+          }
+
+          const isSummitPlgEnabled = await getIsSummitPlgEnabled(defaultSite, context);
+          return {
+            organization: OrganizationDto.toJSON(org),
+            site: SiteDto.toJSON(defaultSite),
+            isSummitPlgEnabled,
+          };
+        } catch (e) {
+          ctx.log.warn(
+            `[resolveSite] resolveOrgDefaultSite failed for org ${org.getId()} product ${productCode} — falling back`,
+            e,
+          );
+          return null;
+        }
+      };
+
       if (hasText(organizationId) && isValidUUID(organizationId)) {
         organization = await Organization.findById(organizationId);
         if (organization && await accessControlUtil.hasAccess(organization)) {
+          const defaultData = await resolveOrgDefaultSite(organization);
+          if (defaultData) {
+            return ok({ data: defaultData });
+          }
+
           const tierClient = TierClient.createForOrg(context, organization, productCode);
           const { entitlement: orgEntitlement, site: enrolledSite } = await tierClient
             .getFirstEnrollment();
@@ -1230,6 +1282,11 @@ function SitesController(ctx, log, env) {
       } else if (hasText(imsOrg)) {
         organization = await Organization.findByImsOrgId(imsOrg);
         if (organization && await accessControlUtil.hasAccess(organization)) {
+          const defaultData = await resolveOrgDefaultSite(organization);
+          if (defaultData) {
+            return ok({ data: defaultData });
+          }
+
           const tierClient = TierClient.createForOrg(context, organization, productCode);
           const { entitlement: imsOrgEntitlement, site: enrolledSite } = await tierClient
             .getFirstEnrollment();

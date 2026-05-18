@@ -5087,6 +5087,200 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
     });
+
+    describe('config.defaults resolution', () => {
+      // The context header 'x-product' is 'abcd', so productCode = 'abcd'.
+      // Must include Config methods because OrganizationDto.toJSON calls Config.toDynamoItem.
+      const makeConfigWithDefault = (siteId) => ({
+        defaults: { abcd: { siteId } },
+        getSlackConfig: () => undefined,
+        getHandlers: () => undefined,
+        getContentAiConfig: () => undefined,
+        getImports: () => undefined,
+        getFetchConfig: () => undefined,
+        getBrandConfig: () => undefined,
+        getBrandProfile: () => undefined,
+        getCdnLogsConfig: () => undefined,
+        getLlmoConfig: () => undefined,
+        getTokowakaConfig: () => undefined,
+        getEdgeOptimizeConfig: () => undefined,
+      });
+
+      it('should resolve config.defaults for organizationId path and skip getFirstEnrollment', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+        expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
+      });
+
+      it('should resolve config.defaults for imsOrg path and skip getFirstEnrollment', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { imsOrg: testOrganizations[0].getImsOrgId() };
+        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+        expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
+      });
+
+      it('should fall through to getFirstEnrollment if config.defaults site does not belong to org', async () => {
+        // testSites[1] belongs to testOrganizations[3], not testOrganizations[0]
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[1]));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        await sitesController.resolveSite(context);
+
+        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
+      });
+
+      it('should fall through to getFirstEnrollment if config.defaults site is not found', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(null);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        await sitesController.resolveSite(context);
+
+        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
+      });
+
+      it('should fall through to getFirstEnrollment if config.defaults site has no valid enrollment', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [],
+        });
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        await sitesController.resolveSite(context);
+
+        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
+      });
+
+      it('should fall through to getFirstEnrollment if config.defaults siteId is not a valid UUID', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(
+          makeConfigWithDefault('not-a-valid-uuid'),
+        );
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        await sitesController.resolveSite(context);
+
+        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
+        expect(mockDataAccess.Site.findById).to.not.have.been.called;
+      });
+
+      it('should fall through to getFirstEnrollment if config.defaults site has a non-customer-visible tier (PRE_ONBOARD)', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        await sitesController.resolveSite(context);
+
+        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
+      });
+
+      it('should fall through to getFirstEnrollment if config.defaults site has no entitlement', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: null,
+          enrollments: [],
+        });
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        await sitesController.resolveSite(context);
+
+        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
+      });
+
+      it('should fall through to getFirstEnrollment via imsOrg path if config.defaults site belongs to a different org', async () => {
+        // testSites[1] belongs to testOrganizations[3], not testOrganizations[0]
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[1]));
+        context.data = { imsOrg: testOrganizations[0].getImsOrgId() };
+        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        await sitesController.resolveSite(context);
+
+        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
+      });
+
+      it('should fall through to getFirstEnrollment if TierClient.createForSite throws', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        TierClient.createForSite.throws(new Error('TierClient error'));
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        // Should fall through (not throw a 500)
+        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
+        expect(response.status).to.not.equal(500);
+      });
+    });
   });
 
   describe('getBrandProfile', () => {
