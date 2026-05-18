@@ -9034,6 +9034,12 @@ describe('Suggestions Controller', () => {
     });
 
     it('should successfully rollback suggestions', async () => {
+      const rollbackStub = sandbox.stub().resolves({
+        succeededSuggestions: [tokowakaSuggestions[0]],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({ rollbackSuggestions: rollbackStub });
+
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         params: {
@@ -9051,20 +9057,20 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify edgeDeployed was removed
-      const suggestion = tokowakaSuggestions[0];
-      expect(suggestion.setData.calledOnce).to.be.true;
-      const dataArg = suggestion.setData.firstCall.args[0];
-      expect(dataArg).to.not.have.property('edgeDeployed');
-
-      // Verify setUpdatedBy was called
-      expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
-
-      // Verify save was called
-      expect(suggestion.save.calledOnce).to.be.true;
+      // Verify rollbackSuggestions was called with the suggestion and correct options
+      expect(rollbackStub.calledOnce).to.be.true;
+      const [, , suggestions, options] = rollbackStub.firstCall.args;
+      expect(suggestions).to.include(tokowakaSuggestions[0]);
+      expect(options.updatedBy).to.equal('test@test.com');
     });
 
     it('uses fallback updatedBy when profile email is missing', async () => {
+      const rollbackStub = sandbox.stub().resolves({
+        succeededSuggestions: [tokowakaSuggestions[0]],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({ rollbackSuggestions: rollbackStub });
+
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         attributes: {
@@ -9083,7 +9089,8 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(tokowakaSuggestions[0].setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      const [, , , options] = rollbackStub.firstCall.args;
+      expect(options.updatedBy).to.equal('tokowaka-rollback');
     });
 
     it('should return 400 for suggestions without edgeDeployed during rollback', async () => {
@@ -9120,12 +9127,12 @@ describe('Suggestions Controller', () => {
     });
 
     it('should support backward compatibility with legacy tokowakaDeployed property during rollback', async () => {
-      // Set up suggestion with legacy tokowakaDeployed property (no edgeDeployed)
+      // Set up suggestion with legacy tokowakaDeployed property alongside edgeDeployed
       const legacyTimestamp = Date.now() - 10000;
       tokowakaSuggestions[0].getData = () => ({
         type: 'headings',
         checkType: 'heading-empty',
-        url: 'https://example.com/page1', // URL is required for rollback
+        url: 'https://example.com/page1',
         edgeDeployed: legacyTimestamp,
         tokowakaDeployed: legacyTimestamp, // Legacy property
         recommendedAction: 'New Heading Title',
@@ -9134,6 +9141,12 @@ describe('Suggestions Controller', () => {
           selector: 'h1:nth-of-type(1)',
         },
       });
+
+      const rollbackStub = sandbox.stub().resolves({
+        succeededSuggestions: [tokowakaSuggestions[0]],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({ rollbackSuggestions: rollbackStub });
 
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
@@ -9152,13 +9165,19 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify both properties are removed
-      const dataArg = tokowakaSuggestions[0].setData.getCall(0).args[0];
-      expect(dataArg).to.not.have.property('edgeDeployed');
-      expect(dataArg).to.not.have.property('tokowakaDeployed');
+      // The suggestion was treated as deployed (edgeDeployed present) and passed to the client
+      // Removal of edgeDeployed/tokowakaDeployed is handled by rollbackSuggestions (tested in shared pkg)
+      const [, , suggestions] = rollbackStub.firstCall.args;
+      expect(suggestions).to.include(tokowakaSuggestions[0]);
     });
 
     it('should handle multiple suggestions rollback', async () => {
+      const rollbackStub = sandbox.stub().resolves({
+        succeededSuggestions: [...tokowakaSuggestions],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({ rollbackSuggestions: rollbackStub });
+
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         params: {
@@ -9176,12 +9195,12 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(2);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify both suggestions were updated
-      tokowakaSuggestions.forEach((suggestion) => {
-        expect(suggestion.setData.calledOnce).to.be.true;
-        expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
-        expect(suggestion.save.calledOnce).to.be.true;
-      });
+      // Verify both suggestions were passed to rollbackSuggestions with correct options
+      expect(rollbackStub.calledOnce).to.be.true;
+      const [, , suggestions, options] = rollbackStub.firstCall.args;
+      expect(suggestions).to.include(tokowakaSuggestions[0]);
+      expect(suggestions).to.include(tokowakaSuggestions[1]);
+      expect(options.updatedBy).to.equal('test@test.com');
     });
 
     it('should handle rollback failure gracefully', async () => {
@@ -9408,15 +9427,13 @@ describe('Suggestions Controller', () => {
           .resolves(suggestion);
       });
 
-      // Mock TokowakaClient
+      // Mock TokowakaClient — rollbackSuggestions now handles all suggestion types
+      // (domain-wide, path-level, and per-URL) including covered suggestion cleanup.
       tokowakaClientStub = {
-        fetchMetaconfig: sandbox.stub().resolves({
-          prerender: {
-            enabled: true,
-            patterns: ['/*'],
-          },
+        rollbackSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion],
+          failedSuggestions: [],
         }),
-        uploadMetaconfig: sandbox.stub().resolves(),
       };
 
       sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
@@ -9455,28 +9472,12 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify metaconfig was updated (prerender removed)
-      expect(tokowakaClientStub.fetchMetaconfig.calledOnce).to.be.true;
-      expect(tokowakaClientStub.uploadMetaconfig.calledOnce).to.be.true;
-      const uploadedMetaconfig = tokowakaClientStub.uploadMetaconfig.firstCall.args[1];
-      expect(uploadedMetaconfig).to.not.have.property('prerender');
-
-      // Verify domain-wide suggestion data was updated
-      expect(domainWideSuggestion.setData.calledOnce).to.be.true;
-      const domainWideData = domainWideSuggestion.setData.firstCall.args[0];
-      expect(domainWideData).to.not.have.property('edgeDeployed');
-      expect(domainWideSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
-      expect(domainWideSuggestion.save.calledOnce).to.be.true;
-
-      // Verify covered suggestions were also rolled back
-      coveredSuggestions.forEach((suggestion) => {
-        expect(suggestion.setData.calledOnce).to.be.true;
-        const suggestionData = suggestion.setData.firstCall.args[0];
-        expect(suggestionData).to.not.have.property('edgeDeployed');
-        expect(suggestionData).to.not.have.property('coveredByDomainWide');
-        expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
-        expect(suggestion.save.calledOnce).to.be.true;
-      });
+      // Verify rollbackSuggestions was called with allSuggestions and updatedBy
+      expect(tokowakaClientStub.rollbackSuggestions.calledOnce).to.be.true;
+      const [, , suggestions, options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(suggestions).to.include(domainWideSuggestion);
+      expect(options.allSuggestions).to.include(domainWideSuggestion);
+      expect(options.updatedBy).to.equal('test@test.com');
     });
 
     it('uses fallback updatedBy when profile email is missing', async () => {
@@ -9498,14 +9499,12 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
-      coveredSuggestions.forEach((suggestion) => {
-        expect(suggestion.setUpdatedBy.calledWith('domain-wide-rollback')).to.be.true;
-      });
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.updatedBy).to.equal('tokowaka-rollback');
     });
 
-    it('should handle error when metaconfig fetch fails', async () => {
-      tokowakaClientStub.fetchMetaconfig.rejects(new Error('Failed to fetch metaconfig'));
+    it('should handle rollback failure from tokowaka client', async () => {
+      tokowakaClientStub.rollbackSuggestions.rejects(new Error('Failed to rollback suggestions'));
 
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
@@ -9527,10 +9526,12 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[0].message).to.include('Rollback failed');
     });
 
-    it('should continue with domain-wide rollback even if metaconfig has no prerender config', async () => {
-      // Return metaconfig without prerender property
-      tokowakaClientStub.fetchMetaconfig.resolves({
-        someOtherConfig: true,
+    it('should handle ineligible suggestions returned from rollback', async () => {
+      tokowakaClientStub.rollbackSuggestions.resolves({
+        succeededSuggestions: [],
+        failedSuggestions: [
+          { suggestion: domainWideSuggestion, reason: 'No metaconfig found', statusCode: 400 },
+        ],
       });
 
       const response = await suggestionsController.rollbackSuggestionFromEdge({
@@ -9548,15 +9549,10 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
 
       // Should still succeed
-      expect(body.metadata.success).to.equal(1);
-      expect(body.metadata.failed).to.equal(0);
-
-      // Verify metaconfig fetch was attempted but upload was not called (no prerender to remove)
-      expect(tokowakaClientStub.fetchMetaconfig.calledOnce).to.be.true;
-      expect(tokowakaClientStub.uploadMetaconfig.called).to.be.false;
-
-      // Verify domain-wide suggestion was still rolled back
-      expect(domainWideSuggestion.save.calledOnce).to.be.true;
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(400);
+      expect(body.suggestions[0].message).to.equal('No metaconfig found');
     });
 
     it('should handle error when TokowakaClient.createFrom fails', async () => {
@@ -9578,7 +9574,6 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const body = await response.json();
 
-      // Should fail all domain-wide suggestions
       expect(body.metadata.success).to.equal(0);
       expect(body.metadata.failed).to.equal(1);
       expect(body.suggestions[0].uuid).to.equal(SUGGESTION_IDS[0]);
@@ -9663,12 +9658,10 @@ describe('Suggestions Controller', () => {
       mockSuggestion.findById.withArgs(SUGGESTION_IDS[1]).resolves(coveredPerUrlSuggestion);
 
       tokowakaClientStub = {
-        fetchMetaconfig: sandbox.stub().resolves({
-          prerender: {
-            allowList: ['/products', '/blog'],
-          },
+        rollbackSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [pathSuggestion],
+          failedSuggestions: [],
         }),
-        uploadMetaconfig: sandbox.stub().resolves(),
       };
       sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
 
@@ -9699,24 +9692,13 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify metaconfig was updated with /products removed
-      expect(tokowakaClientStub.fetchMetaconfig.calledOnce).to.be.true;
-      expect(tokowakaClientStub.uploadMetaconfig.calledOnce).to.be.true;
-      const uploadedMetaconfig = tokowakaClientStub.uploadMetaconfig.firstCall.args[1];
-      expect(uploadedMetaconfig.prerender.allowList).to.deep.equal(['/blog']);
-
-      // Verify edgeDeployed was cleared on path suggestion
-      expect(pathSuggestion.setData.calledOnce).to.be.true;
-      const savedData = pathSuggestion.setData.firstCall.args[0];
-      expect(savedData).to.not.have.property('edgeDeployed');
-      expect(pathSuggestion.save.calledOnce).to.be.true;
+      // Verify rollbackSuggestions was called with the path suggestion
+      expect(tokowakaClientStub.rollbackSuggestions.calledOnce).to.be.true;
+      const [, , suggestions] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(suggestions).to.include(pathSuggestion);
     });
 
     it('deletes entire prerender key when allowList becomes empty after removal', async () => {
-      tokowakaClientStub.fetchMetaconfig.resolves({
-        prerender: { allowList: ['/products'] },
-      });
-
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -9727,8 +9709,8 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.metadata.success).to.equal(1);
 
-      const uploadedMetaconfig = tokowakaClientStub.uploadMetaconfig.firstCall.args[1];
-      expect(uploadedMetaconfig).to.not.have.property('prerender');
+      // The allowList cleanup is handled by rollbackSuggestions in the shared client
+      expect(tokowakaClientStub.rollbackSuggestions.calledOnce).to.be.true;
     });
 
     it('clears coveredByDomainWide on per-URL suggestions covered by this path', async () => {
@@ -9740,16 +9722,13 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      // Verify coveredByDomainWide cleared on covered per-URL suggestion
-      expect(coveredPerUrlSuggestion.setData.calledOnce).to.be.true;
-      const coveredData = coveredPerUrlSuggestion.setData.firstCall.args[0];
-      expect(coveredData).to.not.have.property('coveredByDomainWide');
-      expect(coveredPerUrlSuggestion.setUpdatedBy.calledOnce).to.be.true;
-      expect(coveredPerUrlSuggestion.save.calledOnce).to.be.true;
+      // Verify allSuggestions is passed so the client can clean up covered suggestions
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.allSuggestions).to.include(coveredPerUrlSuggestion);
     });
 
     it('handles error during path rollback and marks suggestion as failed', async () => {
-      tokowakaClientStub.fetchMetaconfig.rejects(new Error('Network timeout'));
+      tokowakaClientStub.rollbackSuggestions.rejects(new Error('Network timeout'));
 
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
@@ -9780,7 +9759,7 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(0);
       expect(body.metadata.failed).to.equal(1);
       expect(body.suggestions[0].statusCode).to.equal(500);
-      expect(body.suggestions[0].message).to.include('Path rollback failed: Internal server error');
+      expect(body.suggestions[0].message).to.include('Rollback failed: Internal server error');
     });
 
     it('uses fallback updatedBy for path suggestion and covered suggestions when profile email is missing', async () => {
@@ -9797,8 +9776,9 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(pathSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
-      expect(coveredPerUrlSuggestion.setUpdatedBy.calledWith('path-rollback')).to.be.true;
+      // updatedBy fallback is passed to rollbackSuggestions which handles the cascade
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.updatedBy).to.equal('tokowaka-rollback');
     });
   });
 
@@ -9897,10 +9877,10 @@ describe('Suggestions Controller', () => {
       mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(domainWideSuggestion);
 
       tokowakaClientStub = {
-        fetchMetaconfig: sandbox.stub().resolves({
-          prerender: { enabled: true, patterns: ['/*'] },
+        rollbackSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion],
+          failedSuggestions: [],
         }),
-        uploadMetaconfig: sandbox.stub().resolves(),
       };
       sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
 
@@ -9930,15 +9910,11 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.metadata.success).to.equal(1);
 
-      // Deployed path suggestion must have edgeDeployed cleared via cascade
-      expect(deployedPathSuggestion.setData.calledOnce).to.be.true;
-      const pathData = deployedPathSuggestion.setData.firstCall.args[0];
-      expect(pathData).to.not.have.property('edgeDeployed');
-      expect(deployedPathSuggestion.setUpdatedBy.calledOnce).to.be.true;
-      expect(deployedPathSuggestion.save.calledOnce).to.be.true;
-
-      // Verify cascade log
-      expect(context.log.info.calledWithMatch('Domain-wide cascade')).to.be.true;
+      // Verify rollbackSuggestions was called with allSuggestions (for cascade cleanup)
+      expect(tokowakaClientStub.rollbackSuggestions.calledOnce).to.be.true;
+      const [, , suggestions, options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(suggestions).to.include(domainWideSuggestion);
+      expect(options.allSuggestions).to.include(deployedPathSuggestion);
     });
 
     it('clears coveredByDomainWide on per-URL suggestions covered by the path during cascade', async () => {
@@ -9950,10 +9926,9 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      expect(pathCoveredSuggestion.setData.calledOnce).to.be.true;
-      const coveredData = pathCoveredSuggestion.setData.firstCall.args[0];
-      expect(coveredData).to.not.have.property('coveredByDomainWide');
-      expect(pathCoveredSuggestion.setUpdatedBy.calledOnce).to.be.true;
+      // Verify allSuggestions contains the covered suggestion so the client can clean it up
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.allSuggestions).to.include(pathCoveredSuggestion);
     });
 
     it('uses fallback updatedBy for cascade path and its covered suggestions when profile email is missing', async () => {
@@ -9970,12 +9945,9 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      // domain-wide suggestion itself uses 'tokowaka-rollback' fallback
-      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
-      // cascade resets path suggestion with 'domain-wide-rollback-cascade' fallback
-      expect(deployedPathSuggestion.setUpdatedBy.calledWith('domain-wide-rollback-cascade')).to.be.true;
-      // cascade clears path-covered suggestion with same fallback
-      expect(pathCoveredSuggestion.setUpdatedBy.calledWith('domain-wide-rollback-cascade')).to.be.true;
+      // updatedBy fallback is propagated to rollbackSuggestions which handles cascade
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.updatedBy).to.equal('tokowaka-rollback');
     });
 
     it('is a no-op cascade when no path suggestions are deployed', async () => {
@@ -10012,12 +9984,11 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
       const body = await response.json();
-      // Domain-wide rollback still succeeds
+      // Domain-wide rollback still succeeds (rollbackSuggestions returns it)
       expect(body.metadata.success).to.equal(1);
-      // undeployedPathSuggestion.save must NOT have been called (cascade skipped)
-      expect(undeployedPathSuggestion.save.called).to.be.false;
-      // No cascade log
-      expect(context.log.info.calledWithMatch('Domain-wide cascade')).to.be.false;
+      // Verify allSuggestions is passed so the client can determine no cascade is needed
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.allSuggestions).to.include(undeployedPathSuggestion);
     });
   });
 

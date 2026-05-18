@@ -2326,226 +2326,30 @@ function SuggestionsController(ctx, sqs, env) {
       failedSuggestions count: ${failedSuggestions.length}`);
     let succeededSuggestions = [];
 
-    // Separate domain-wide, path-level, and regular suggestions
-    const domainWideSuggestions = validSuggestions.filter((s) => isDomainWideSuggestion(s));
-    const regularSuggestions = validSuggestions.filter((s) => !isDomainWideSuggestion(s));
-    const pathSuggestions = regularSuggestions.filter((s) => isPathSuggestion(s));
-    const nonPathRegularSuggestions = regularSuggestions.filter((s) => !isPathSuggestion(s));
-
-    // Handle domain-wide rollbacks separately (for prerender)
-    if (isNonEmptyArray(domainWideSuggestions)) {
-      try {
-        const tokowakaClient = TokowakaClient.createFrom(context);
-        const baseURL = site.getBaseURL();
-
-        for (const suggestion of domainWideSuggestions) {
-          try {
-            // Fetch existing metaconfig
-            // eslint-disable-next-line no-await-in-loop
-            const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
-
-            if (metaconfig && metaconfig.prerender) {
-              // Remove prerender configuration from metaconfig
-              delete metaconfig.prerender;
-
-              // Upload updated metaconfig
-              // eslint-disable-next-line no-await-in-loop
-              await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
-
-              context.log.info(`Removed prerender config from metaconfig for domain-wide suggestion ${suggestion.getId()}`);
-            }
-
-            // Remove edgeDeployed (and legacy tokowakaDeployed) from the domain-wide suggestion
-            const currentData = suggestion.getData();
-            delete currentData.edgeDeployed;
-            // TODO: To be removed, kept for backward compatibility
-            delete currentData.tokowakaDeployed;
-            delete currentData.edgeDeployed;
-            suggestion.setData(currentData);
-            suggestion.setUpdatedBy(profile?.email || 'tokowaka-rollback');
-            // eslint-disable-next-line no-await-in-loop
-            await suggestion.save();
-
-            succeededSuggestions.push(suggestion);
-
-            // Find and update all suggestions that were covered by this domain-wide deployment
-            const coveredSuggestions = allSuggestions.filter(
-              (s) => s.getData()?.coveredByDomainWide === suggestion.getId(),
-            );
-
-            if (isNonEmptyArray(coveredSuggestions)) {
-              context.log.info(`Rolling back ${coveredSuggestions.length} suggestions covered by domain-wide deployment`);
-
-              // eslint-disable-next-line no-await-in-loop
-              await Promise.all(
-                coveredSuggestions.map(async (coveredSuggestion) => {
-                  const coveredData = coveredSuggestion.getData();
-                  delete coveredData.edgeDeployed;
-                  // TODO: To be removed, kept for backward compatibility
-                  delete coveredData.tokowakaDeployed;
-                  delete coveredData.edgeDeployed;
-                  delete coveredData.coveredByDomainWide;
-                  coveredSuggestion.setData(coveredData);
-                  coveredSuggestion.setUpdatedBy(profile?.email || 'domain-wide-rollback');
-                  return coveredSuggestion.save();
-                }),
-              );
-            }
-
-            // Cascade: domain-wide rollback wipes entire prerender key — reset all deployed paths
-            const deployedPaths = allSuggestions.filter(
-              (s) => isPathSuggestion(s) && !!s.getData()?.edgeDeployed,
-            );
-            if (isNonEmptyArray(deployedPaths)) {
-              // eslint-disable-next-line no-await-in-loop
-              await Promise.all(deployedPaths.map(async (pathSugg) => {
-                const d = pathSugg.getData();
-                delete d.edgeDeployed;
-                pathSugg.setData(d);
-                pathSugg.setUpdatedBy(profile?.email || 'domain-wide-rollback-cascade');
-                await pathSugg.save();
-
-                const pathCovered = allSuggestions.filter(
-                  (s) => s.getData()?.coveredByDomainWide === pathSugg.getId(),
-                );
-                await Promise.all(pathCovered.map(async (s) => {
-                  const cd = s.getData();
-                  delete cd.coveredByDomainWide;
-                  s.setData(cd);
-                  s.setUpdatedBy(profile?.email || 'domain-wide-rollback-cascade');
-                  return s.save();
-                }));
-              }));
-              context.log.info(`[edge-rollback] Domain-wide cascade: reset ${deployedPaths.length} deployed path suggestions`);
-            }
-          } catch (error) {
-            context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error rolling back domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
-            failedSuggestions.push({
-              uuid: suggestion.getId(),
-              index: suggestionIds.indexOf(suggestion.getId()),
-              message: `Rollback failed: ${error.message}`,
-              statusCode: 500,
-            });
-          }
-        }
-      } catch (error) {
-        context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during domain-wide rollback: ${error.message}`, error);
-        domainWideSuggestions.forEach((suggestion) => {
-          failedSuggestions.push({
-            uuid: suggestion.getId(),
-            index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Rollback failed: Internal server error',
-            statusCode: 500,
-          });
-        });
-      }
-    }
-
-    // Handle path-level rollbacks (remove one pattern from allowList)
-    if (isNonEmptyArray(pathSuggestions)) {
-      try {
-        const tokowakaClient = TokowakaClient.createFrom(context);
-        const baseURL = site.getBaseURL();
-
-        for (const suggestion of pathSuggestions) {
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
-            const patternToRemove = suggestion.getData().pathPattern;
-
-            if (metaconfig?.prerender?.allowList && patternToRemove) {
-              const updatedAllowList = metaconfig.prerender.allowList.filter(
-                (p) => p !== patternToRemove,
-              );
-              if (updatedAllowList.length === 0) {
-                delete metaconfig.prerender;
-              } else {
-                metaconfig.prerender = { allowList: updatedAllowList };
-              }
-              // eslint-disable-next-line no-await-in-loop
-              await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
-              context.log.info(`[edge-rollback] Removed path pattern ${patternToRemove} from allowList`);
-            }
-
-            const currentData = suggestion.getData();
-            delete currentData.edgeDeployed;
-            suggestion.setData(currentData);
-            suggestion.setUpdatedBy(profile?.email || 'tokowaka-rollback');
-            // eslint-disable-next-line no-await-in-loop
-            await suggestion.save();
-            succeededSuggestions.push(suggestion);
-
-            // Clear coveredByDomainWide on suggestions covered by this path suggestion
-            const coveredSuggestions = allSuggestions.filter(
-              (s) => s.getData()?.coveredByDomainWide === suggestion.getId(),
-            );
-            if (isNonEmptyArray(coveredSuggestions)) {
-              // eslint-disable-next-line no-await-in-loop
-              await Promise.all(coveredSuggestions.map(async (cs) => {
-                const coveredData = cs.getData();
-                delete coveredData.coveredByDomainWide;
-                cs.setData(coveredData);
-                cs.setUpdatedBy(profile?.email || 'path-rollback');
-                return cs.save();
-              }));
-            }
-          } catch (error) {
-            context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error rolling back path suggestion ${suggestion.getId()}: ${error.message}`, error);
-            failedSuggestions.push({
-              uuid: suggestion.getId(),
-              index: suggestionIds.indexOf(suggestion.getId()),
-              message: `Rollback failed: ${error.message}`,
-              statusCode: 500,
-            });
-          }
-        }
-      } catch (error) {
-        context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during path rollback: ${error.message}`, error);
-        pathSuggestions.forEach((suggestion) => {
-          failedSuggestions.push({
-            uuid: suggestion.getId(),
-            index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Path rollback failed: Internal server error',
-            statusCode: 500,
-          });
-        });
-      }
-    }
-
-    // Only attempt rollback if we have regular (non-domain-wide, non-path) suggestions
-    if (isNonEmptyArray(nonPathRegularSuggestions)) {
+    // Delegate all rollback to the tokowaka client — domain-wide, path-level, and per-URL
+    // suggestions are all handled uniformly. The client also cleans up suggestions that were
+    // covered by a domain-wide or path-level pattern deployment.
+    if (isNonEmptyArray(validSuggestions)) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
 
-        // Rollback suggestions
         const result = await tokowakaClient.rollbackSuggestions(
           site,
           opportunity,
-          nonPathRegularSuggestions,
+          validSuggestions,
+          {
+            allSuggestions,
+            updatedBy: profile?.email || 'tokowaka-rollback',
+          },
         );
 
-        // Process results
         const {
           succeededSuggestions: processedSuggestions,
           failedSuggestions: ineligibleSuggestions,
         } = result;
 
-        // Update successfully rolled back suggestions
-        // - remove edgeDeployed (and legacy tokowakaDeployed) timestamp
-        succeededSuggestions = await Promise.all(
-          processedSuggestions.map(async (suggestion) => {
-            const currentData = suggestion.getData();
-            delete currentData.edgeDeployed;
-            // TODO: To be removed, kept for backward compatibility
-            delete currentData.tokowakaDeployed;
-            delete currentData.edgeDeployed;
-            suggestion.setData(currentData);
-            suggestion.setUpdatedBy(profile?.email || 'tokowaka-rollback');
-            return suggestion.save();
-          }),
-        );
+        succeededSuggestions = processedSuggestions;
 
-        // Add ineligible suggestions to failed list
         ineligibleSuggestions.forEach((item) => {
           context.log.info(`[edge-rollback-failed] site: ${apexBaseUrl}, ${opportunity.getType()}`
           + ` suggestion ${item.suggestion.getId()} is ineligible: ${item.reason}`);
@@ -2553,15 +2357,14 @@ function SuggestionsController(ctx, sqs, env) {
             uuid: item.suggestion.getId(),
             index: suggestionIds.indexOf(item.suggestion.getId()),
             message: item.reason,
-            statusCode: 400,
+            statusCode: item.statusCode || 400,
           });
         });
 
         context.log.info(`[edge-rollback] Successfully rolled back ${succeededSuggestions.length} suggestions from Edge by ${profile?.email || 'tokowaka-rollback'}`);
       } catch (error) {
-        context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during Tokowaka rollback: ${error.message}`, error);
-        // If rollback fails, mark all non-path regular suggestions as failed
-        nonPathRegularSuggestions.forEach((suggestion) => {
+        context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during rollback: ${error.message}`, error);
+        validSuggestions.forEach((suggestion) => {
           failedSuggestions.push({
             uuid: suggestion.getId(),
             index: suggestionIds.indexOf(suggestion.getId()),
