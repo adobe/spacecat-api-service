@@ -29,6 +29,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   let rangeCountsBySiteTable;
   let tableErrorByName;
   let rangeErrorByTable;
+  let flakyByTable;
 
   const TARGET_SITE_ID = '11111111-2222-3333-4444-555555555555';
   const OTHER_SITE_ID = '22222222-3333-4444-5555-555555555555';
@@ -63,6 +64,13 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
       });
       chain.lte.returns(chain);
       chain.then = (resolve) => {
+        const flakyKey = isRange ? `${table}:range` : table;
+        const flaky = flakyByTable[flakyKey];
+        if (flaky && flaky.failuresLeft > 0) {
+          flaky.failuresLeft -= 1;
+          resolve({ count: null, error: flaky.error });
+          return;
+        }
         if (isRange && rangeErrorByTable[table]) {
           resolve({ count: null, error: rangeErrorByTable[table] });
           return;
@@ -87,6 +95,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     rangeCountsBySiteTable = {};
     tableErrorByName = {};
     rangeErrorByTable = {};
+    flakyByTable = {};
     configStub = { isHandlerEnabledForSite: sinon.stub().returns(true) };
     postgrestStub = { from: sinon.stub() };
     installPostgrestMock();
@@ -492,5 +501,45 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     );
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('weekly range failed');
+  });
+
+  it('retries transient gateway errors and recovers', async () => {
+    context.dataAccess.Site.all.resolves([
+      makeSite(TARGET_SITE_ID, 'https://flaky.com'),
+    ]);
+    flakyByTable.agentic_traffic = {
+      failuresLeft: 2,
+      error: { message: '502 Bad Gateway' },
+    };
+    countsByTable = { agentic_traffic: 7, agentic_traffic_daily: 1 };
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    expect(context.log.error).not.to.have.been.called;
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Raw table: *1/1* sites, 7 rows');
+    // 3 attempts on agentic_traffic eq-date (2 failures + 1 success), plus
+    // 1 follow-up call for the raw range-week query.
+    const rawCalls = postgrestStub.from.args.filter(([t]) => t === 'agentic_traffic');
+    expect(rawCalls.length).to.equal(4);
+  });
+
+  it('does not retry non-transient errors', async () => {
+    context.dataAccess.Site.all.resolves([
+      makeSite(TARGET_SITE_ID, 'https://strict.com'),
+    ]);
+    // Non-transient (no 5xx / gateway / timeout markers) — fails on first try.
+    tableErrorByName.agentic_traffic = { message: 'relation does not exist' };
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    expect(context.log.error).to.have.been.calledWith(
+      'Error in check-agentic-traffic-db-status:',
+      sinon.match.instanceOf(Error),
+    );
+    const rawCalls = postgrestStub.from.args.filter(([t]) => t === 'agentic_traffic');
+    expect(rawCalls.length).to.equal(1);
   });
 });

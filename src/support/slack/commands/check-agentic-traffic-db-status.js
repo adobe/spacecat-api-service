@@ -26,7 +26,10 @@ import { postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['check agentic traffic db status'];
 const CDN_LOGS_REPORT_AUDIT = 'cdn-logs-report';
-const SITE_CONCURRENCY = 10;
+const SITE_CONCURRENCY = 5;
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 250;
+const TRANSIENT_ERROR_RE = /5\d\d|timeout|gateway|ECONNRESET|ENOTFOUND|EBUSY|ETIMEDOUT|PGRST002/i;
 const AGENTIC_TRAFFIC_TABLES = [
   { key: 'raw', table: 'agentic_traffic', dateColumn: 'traffic_date' },
   { key: 'daily', table: 'agentic_traffic_daily', dateColumn: 'traffic_date' },
@@ -35,6 +38,32 @@ const AGENTIC_TRAFFIC_TABLES = [
 
 function isCompletedIsoWeek(date, now = new Date()) {
   return startOfUtcIsoWeek(date) < startOfUtcIsoWeek(now);
+}
+
+const sleep = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
+
+function isTransientError(error) {
+  return Boolean(error && TRANSIENT_ERROR_RE.test(String(error.message || '')));
+}
+
+async function withRetry(fn, attempts = RETRY_ATTEMPTS, baseDelay = RETRY_BASE_DELAY_MS) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1 || !isTransientError(error)) {
+        throw error;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(baseDelay * 2 ** attempt);
+    }
+  }
+  throw lastError;
 }
 
 async function runWithConcurrency(items, concurrency, fn) {
@@ -76,28 +105,32 @@ function renderSite(siteStatus) {
 }
 
 async function countTable(postgrestClient, table, siteId, dateColumn, dateValue) {
-  const { count, error } = await postgrestClient
-    .from(table)
-    .select('*', { count: 'exact', head: true })
-    .eq('site_id', siteId)
-    .eq(dateColumn, dateValue);
-  if (error) {
-    throw new Error(`${table}: ${error.message}`);
-  }
-  return count || 0;
+  return withRetry(async () => {
+    const { count, error } = await postgrestClient
+      .from(table)
+      .select('*', { count: 'exact', head: true })
+      .eq('site_id', siteId)
+      .eq(dateColumn, dateValue);
+    if (error) {
+      throw new Error(`${table}: ${error.message}`);
+    }
+    return count || 0;
+  });
 }
 
 async function countRawWeek(postgrestClient, siteId, weekStartStr, weekEndStr) {
-  const { count, error } = await postgrestClient
-    .from('agentic_traffic')
-    .select('*', { count: 'exact', head: true })
-    .eq('site_id', siteId)
-    .gte('traffic_date', weekStartStr)
-    .lte('traffic_date', weekEndStr);
-  if (error) {
-    throw new Error(`agentic_traffic weekly range: ${error.message}`);
-  }
-  return count || 0;
+  return withRetry(async () => {
+    const { count, error } = await postgrestClient
+      .from('agentic_traffic')
+      .select('*', { count: 'exact', head: true })
+      .eq('site_id', siteId)
+      .gte('traffic_date', weekStartStr)
+      .lte('traffic_date', weekEndStr);
+    if (error) {
+      throw new Error(`agentic_traffic weekly range: ${error.message}`);
+    }
+    return count || 0;
+  });
 }
 
 async function countSiteTables(
@@ -108,15 +141,17 @@ async function countSiteTables(
   weekEndStr,
   weeklyExpected,
 ) {
-  const tableCounts = await Promise.all(
-    AGENTIC_TRAFFIC_TABLES.map((t) => countTable(
+  const tableCounts = [];
+  for (const t of AGENTIC_TRAFFIC_TABLES) {
+    // eslint-disable-next-line no-await-in-loop
+    tableCounts.push(await countTable(
       postgrestClient,
       t.table,
       siteId,
       t.dateColumn,
       t.key === 'weekly' ? weekStartStr : dateStr,
-    )),
-  );
+    ));
+  }
   const [raw, daily, weekly] = tableCounts;
   const rawWeek = weeklyExpected
     ? await countRawWeek(postgrestClient, siteId, weekStartStr, weekEndStr)
