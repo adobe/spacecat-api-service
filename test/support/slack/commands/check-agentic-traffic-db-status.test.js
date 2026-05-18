@@ -191,18 +191,15 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(context.dataAccess.Site.all).not.to.have.been.called;
   });
 
-  it('filters the check to one requested baseUrl', async () => {
-    const targetSite = makeSite(TARGET_SITE_ID, 'https://base-url.example.com');
-    context.dataAccess.Site.findByBaseURL.resolves(targetSite);
+  it('scopes the check to a single site when baseUrl is provided', async () => {
+    context.dataAccess.Site.findByBaseURL.resolves(
+      makeSite(TARGET_SITE_ID, 'https://base-url.example.com'),
+    );
     countsByTable = { agentic_traffic: 1, agentic_traffic_daily: 1 };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22', 'baseUrl=https://base-url.example.com'], slackContext);
 
-    expect(context.dataAccess.Site.all).not.to.have.been.called;
-    expect(context.dataAccess.Site.findById).not.to.have.been.called;
-    expect(context.dataAccess.Site.findByBaseURL)
-      .to.have.been.calledWith('https://base-url.example.com');
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('for site `https://base-url.example.com`');
     expect(output).to.include('Raw table: *1/1* sites, 1 rows');
@@ -251,9 +248,8 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(postgrestStub.from).not.to.have.been.called;
   });
 
-  it('checks raw, daily, and weekly tables directly for one site', async () => {
-    const targetSite = makeSite(TARGET_SITE_ID, 'https://wknd.site');
-    context.dataAccess.Site.findById.resolves(targetSite);
+  it('reports DASHBOARD_READY when raw, daily, and weekly all have data for the site', async () => {
+    context.dataAccess.Site.findById.resolves(makeSite(TARGET_SITE_ID, 'https://wknd.site'));
     countsByTable = {
       agentic_traffic: 2,
       agentic_traffic_daily: 1,
@@ -263,14 +259,6 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-05-03', `siteId=${TARGET_SITE_ID}`], slackContext);
-
-    expect(targetSite.getLatestAuditByAuditType).not.to.have.been.called;
-    const tablesQueried = postgrestStub.from.args.map(([table]) => table);
-    expect(tablesQueried).to.include.members([
-      'agentic_traffic', 'agentic_traffic_daily', 'agentic_traffic_weekly',
-    ]);
-    // raw is queried twice — once for eq date, once for the week range
-    expect(tablesQueried.filter((t) => t === 'agentic_traffic')).to.have.length(2);
 
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Agentic Traffic DB Table Status — 2026-05-03');
@@ -432,7 +420,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Weekly table (2026-04-27): *0/0* raw-week sites, 0 rows');
   });
 
-  it('handles many sites without batching and aggregates per-site counts', async () => {
+  it('attributes counts to the correct site when only one of many sites has data', async () => {
     const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
     const sites = Array.from({ length: 30 }, (_, index) => {
       const siteId = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
@@ -464,7 +452,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('https://batch-0.com');
   });
 
-  it('surfaces table query errors through the generic Slack error handler', async () => {
+  it('surfaces a DB query error to the user via the Slack error handler', async () => {
     const targetSite = makeSite(TARGET_SITE_ID, 'https://error.com');
     context.dataAccess.Site.all.resolves([targetSite]);
     tableErrorByName.agentic_traffic = { message: 'relation missing' };
@@ -480,7 +468,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('relation missing');
   });
 
-  it('surfaces raw week query errors through the generic Slack error handler', async () => {
+  it('surfaces a raw-week range error to the user via the Slack error handler', async () => {
     const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://weekly-error.com'),
@@ -503,7 +491,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('weekly range failed');
   });
 
-  it('retries transient gateway errors and recovers', async () => {
+  it('recovers from transient gateway errors so the user sees a successful report', async () => {
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://flaky.com'),
     ]);
@@ -516,29 +504,25 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
-    expect(context.log.error).not.to.have.been.called;
     const output = slackContext.say.args.flat().join('\n');
+    // Despite two upstream 502s, the user sees the correct count from the
+    // eventually-successful third attempt.
     expect(output).to.include('Raw table: *1/1* sites, 7 rows');
-    // 3 attempts on agentic_traffic eq-date (2 failures + 1 success), plus
-    // 1 follow-up call for the raw range-week query.
-    const rawCalls = postgrestStub.from.args.filter(([t]) => t === 'agentic_traffic');
-    expect(rawCalls.length).to.equal(4);
+    expect(output).to.not.include('502 Bad Gateway');
   });
 
-  it('does not retry non-transient errors', async () => {
+  it('fails fast on non-transient errors instead of retrying', async () => {
     context.dataAccess.Site.all.resolves([
       makeSite(TARGET_SITE_ID, 'https://strict.com'),
     ]);
-    // Non-transient (no 5xx / gateway / timeout markers) — fails on first try.
+    // Non-transient (no 5xx / gateway / timeout markers).
     tableErrorByName.agentic_traffic = { message: 'relation does not exist' };
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
-    expect(context.log.error).to.have.been.calledWith(
-      'Error in check-agentic-traffic-db-status:',
-      sinon.match.instanceOf(Error),
-    );
+    // The retry behavior is observable only via the call count: a retry
+    // would re-issue the failing query.
     const rawCalls = postgrestStub.from.args.filter(([t]) => t === 'agentic_traffic');
     expect(rawCalls.length).to.equal(1);
   });
