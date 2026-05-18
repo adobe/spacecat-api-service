@@ -1,3 +1,38 @@
+## [1.500.5](https://github.com/adobe/spacecat-api-service/compare/v1.500.4...v1.500.5) (2026-05-18)
+
+
+### Bug Fixes
+
+* updated the createdBy in plg onboarding ([#2398](https://github.com/adobe/spacecat-api-service/issues/2398)) ([7032ed2](https://github.com/adobe/spacecat-api-service/commit/7032ed257e2c1a6b3285de708eef069e3997fcff))
+
+## [1.500.4](https://github.com/adobe/spacecat-api-service/compare/v1.500.3...v1.500.4) (2026-05-15)
+
+
+### Bug Fixes
+
+* **plg:** grant broken-backlinks suggestions by authority score descending ([#2422](https://github.com/adobe/spacecat-api-service/issues/2422)) ([4cebb8b](https://github.com/adobe/spacecat-api-service/commit/4cebb8b52ee97fe7bec72e18be334f0a54cafd5d))
+
+## [1.500.3](https://github.com/adobe/spacecat-api-service/compare/v1.500.2...v1.500.3) (2026-05-15)
+
+
+### Bug Fixes
+
+* **plg:** allow preOnboarded onboarding step patch ([#2423](https://github.com/adobe/spacecat-api-service/issues/2423)) ([70f8204](https://github.com/adobe/spacecat-api-service/commit/70f820453a6fc20b2ae0fd65d65c043692def7fe))
+
+## [1.500.2](https://github.com/adobe/spacecat-api-service/compare/v1.500.1...v1.500.2) (2026-05-14)
+
+
+### Bug Fixes
+
+* onboard flow fixes around bot detection and resolve canonical urls for some sites ([#2243](https://github.com/adobe/spacecat-api-service/issues/2243)) ([3da7be3](https://github.com/adobe/spacecat-api-service/commit/3da7be3974eec6b555973d071f6537002c07ea2c))
+
+## [1.500.1](https://github.com/adobe/spacecat-api-service/compare/v1.500.0...v1.500.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **cdn-detection:** remove ipinfo.io ASN lookup and DNS-over-HTTPS fallbacks ([#2417](https://github.com/adobe/spacecat-api-service/issues/2417)) ([d64f25c](https://github.com/adobe/spacecat-api-service/commit/d64f25c505b3a9575602b82a9c4aa211e43425c6)), closes [#2456](https://github.com/adobe/spacecat-api-service/issues/2456)
+
 # [1.500.0](https://github.com/adobe/spacecat-api-service/compare/v1.499.0...v1.500.0) (2026-05-14)
 
 

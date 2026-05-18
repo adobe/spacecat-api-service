@@ -704,6 +704,9 @@ async function performAsoPlgOnboarding({
     }
   }
   onboarding.setUpdatedBy(callerIdentity);
+  if ([STATUSES.PRE_ONBOARDING, STATUSES.INACTIVE].includes(onboarding.getStatus())) {
+    onboarding.setCreatedBy(callerIdentity);
+  }
 
   // Guard: only one domain per IMS org can be onboarded
   const existingRecords = await PlgOnboarding.allByImsOrgId(imsOrgId);
@@ -2095,7 +2098,7 @@ function PlgOnboardingController(ctx) {
         'orgResolved', 'rumVerified', 'siteCreated', 'siteResolved', 'siteOrgReassigned',
         'authorUrlResolved', 'hlxConfigSet', 'codeConfigResolved', 'configUpdated',
         'auditsEnabled', 'deliveryConfigQueued', 'entitlementCreated', 'entitlementFailed',
-        'orgResolutionFailed',
+        'orgResolutionFailed', 'preOnboarded',
       ]);
       const invalidKeys = Object.keys(steps).filter((k) => !VALID_STEP_KEYS.has(k));
       if (invalidKeys.length > 0) {
