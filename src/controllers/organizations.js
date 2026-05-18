@@ -333,29 +333,11 @@ function OrganizationsController(ctx, env) {
       updates = true;
     }
 
-    // Validate config.defaults entries if present. setConfig/updates=true are handled by the
-    // isObject(requestBody.config) block above; this block only validates and may return early.
     if (isObject(requestBody.config) && isObject(requestBody.config.defaults)) {
       const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
-      for (const [productCode, entry] of Object.entries(requestBody.config.defaults)) {
+      for (const [productCode] of Object.entries(requestBody.config.defaults)) {
         if (!VALID_PRODUCT_CODES.has(productCode)) {
           return badRequest(`Unknown product code in config.defaults: ${productCode}`);
-        }
-        if (entry !== null && entry !== undefined) {
-          if (!isObject(entry)) {
-            return badRequest(`config.defaults.${productCode} must be an object with a siteId field`);
-          }
-          const { siteId } = entry;
-          if (siteId !== null && siteId !== undefined) {
-            if (!isValidUUID(siteId)) {
-              return badRequest(`Invalid siteId for product ${productCode} in config.defaults`);
-            }
-            // eslint-disable-next-line no-await-in-loop
-            const site = await Site.findById(siteId);
-            if (!site || site.getOrganizationId() !== organization.getId()) {
-              return badRequest(`config.defaults.${productCode}: site not found or does not belong to this organization`);
-            }
-          }
         }
       }
     }
