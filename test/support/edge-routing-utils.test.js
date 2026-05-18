@@ -351,9 +351,10 @@ describe('edge-routing-utils', () => {
       dnsPromises.resolve4.withArgs('example.com').resolves(['8.8.8.8']);
       const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com', dnsLog);
       expect(result).to.equal(null);
-      expect(dnsLog.info).to.have.been.calledThrice;
+      expect(dnsLog.info.callCount).to.equal(4);
       expect(dnsLog.info.secondCall.args[0]).to.include('CNAMES');
       expect(dnsLog.info.thirdCall.args[0]).to.include('IPs');
+      expect(dnsLog.info.getCall(3).args[0]).to.include('DNS result');
     });
   });
 
