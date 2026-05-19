@@ -24,6 +24,8 @@ export const CDN_TYPES = {
   AMS_CLOUDFRONT: 'ams-cloudfront',
   AMS_FRONTDOOR: 'ams-frontdoor',
   AEM_CS_FASTLY: 'aem-cs-fastly',
+  // BYOCDN Fastly where the customer must manually apply routing YAML (Case 1 + Case 2).
+  AEM_CS_FASTLY_SIMPLE_PROXY: 'aem-cs-fastly-simple-proxy',
   COMMERCE_FASTLY: 'commerce-fastly',
 };
 
@@ -38,6 +40,7 @@ export const CDN_DISPLAY_NAMES = {
   [CDN_TYPES.AMS_CLOUDFRONT]: 'Adobe Managed Services CloudFront',
   [CDN_TYPES.AMS_FRONTDOOR]: 'Adobe Managed Services Front Door',
   [CDN_TYPES.AEM_CS_FASTLY]: 'AEM Cloud Service Managed CDN (Fastly)',
+  [CDN_TYPES.AEM_CS_FASTLY_SIMPLE_PROXY]: 'AEM Cloud Service with Customer-Managed CDN (Fastly)',
   [CDN_TYPES.COMMERCE_FASTLY]: 'Adobe Commerce Cloud - PaaS (Fastly)',
 };
 

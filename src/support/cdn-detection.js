@@ -294,6 +294,53 @@ export async function detectAemCsFastlyBehindWaf(domain, log) {
   return 'aem-cs-fastly';
 }
 
+/**
+ * Phase 1.5: Detect AEM CS Fastly behind a customer-managed (BYO) CDN (Cases 1 and 2).
+ *
+ * Makes a single probe and inspects x-aem-debug:
+ *   Case 1: byocdn=true  — customer's CDN already has routing YAML applied.
+ *   Case 2: byocdn=false AND host≠domain — AEM CS behind a custom BYO CDN without routing.
+ *
+ * Both cases return 'aem-cs-fastly-simple-proxy'. The caller (llmo.js) returns
+ * the API key and signals the UI to show a manual YAML setup dialog instead of
+ * auto-routing via the CDN API.
+ *
+ * Returns 'aem-cs-fastly-simple-proxy' on match, null otherwise. Never throws.
+ *
+ * @param {string} domain - Hostname to check.
+ * @param {object} [log] - Optional logger.
+ * @returns {Promise<string|null>}
+ */
+export async function detectAemCsFastlyByocdn(domain, log) {
+  const resp = await makeCase0Probe(domain, log);
+  if (!resp) {
+    return null;
+  }
+
+  const aemDebug = resp[HEADER_AEM_DEBUG] || '';
+  if (!aemDebug) {
+    return null;
+  }
+
+  const byoCdnMatch = aemDebug.match(/(?:^|[^\w-])byocdn=(\w+)/);
+  const byoCdnValue = byoCdnMatch?.[1];
+
+  if (byoCdnValue === 'true') {
+    log?.info?.('[cdn-detection] Phase 1.5 Case 1: byocdn=true — customer CDN with YAML', { domain });
+    return 'aem-cs-fastly-simple-proxy';
+  }
+
+  if (byoCdnValue === 'false') {
+    const hostField = (aemDebug.match(/(?:^|[^\w-])host=([^,\s;]+)/)?.[1] ?? '').replace(/\.$/, '');
+    if (hostField && hostField !== domain) {
+      log?.info?.('[cdn-detection] Phase 1.5 Case 2: byocdn=false + host mismatch', { domain, hostField });
+      return 'aem-cs-fastly-simple-proxy';
+    }
+  }
+
+  return null;
+}
+
 /* ============================================================================
  * Phase 2 — Generic multi-signal CDN fingerprinting.
  *
@@ -738,20 +785,24 @@ async function detectGenericCdnToken(url, log) {
  * Three-phase detection:
  *   Phase 1   — DNS-only check for Adobe-managed CDNs (AEM CS Fastly,
  *               Adobe Commerce Cloud Fastly). Cheap and authoritative when matched.
- *   Phase 1.5 — Case 0 (WAF Simple Proxy): when Phase 1 DNS resolves cleanly to
- *               non-Adobe IPs, an HTTP probe with four signals (correlation echo,
- *               request-id header, unique x-request-id, x-aem-debug host)
- *               distinguishes AEM CS Fastly behind a WAF from a genuine third-party CDN.
+ *   Phase 1.5 — When Phase 1 DNS resolves to non-Adobe IPs, HTTP probes distinguish
+ *               AEM CS Fastly behind a proxy from a genuine third-party CDN:
+ *               • Case 0 (WAF simple proxy): four signals (correlation echo, request-id
+ *                 header, unique x-request-id, x-aem-debug host) confirm routing is active.
+ *               • Cases 1 & 2 (BYO CDN): x-aem-debug byocdn field identifies AEM CS Fastly
+ *                 behind a customer-managed CDN that needs manual YAML setup.
  *   Phase 2   — When Phase 1 doesn't match, runs a multi-signal probe ported from
  *               spacecat-audit-worker (HTTP headers → CNAME chain → PTR keywords).
  *               Result is mapped from a descriptive label to the LLMO byocdn-X
  *               token via LABEL_TO_LLMO_TOKEN.
  *
  * Returns:
- *   - 'aem-cs-fastly' | 'commerce-fastly'  — Phase 1 hit
- *   - 'byocdn-<provider>'                  — Phase 2 hit (mapped via adapter)
- *   - 'byocdn-other'                       — both phases ran cleanly, nothing matched
- *   - null                                  — at least one signal failed (inconclusive)
+ *   - 'aem-cs-fastly'              — Phase 1 hit or Phase 1.5 Case 0
+ *   - 'aem-cs-fastly-simple-proxy' — Phase 1.5 Case 1 or Case 2 (BYO CDN, manual setup)
+ *   - 'commerce-fastly'            — Phase 1 hit
+ *   - 'byocdn-<provider>'          — Phase 2 hit (mapped via adapter)
+ *   - 'byocdn-other'               — both phases ran cleanly, nothing matched
+ *   - null                         — at least one signal failed (inconclusive)
  *
  * The result is always a `CDN_TYPES` value (see
  * `src/controllers/llmo/llmo-utils.js#CDN_TYPES`); `'byocdn-other'` is the
@@ -802,16 +853,24 @@ export async function detectCdnForDomain(input, log) {
       return phase1;
     }
 
-    // Phase 1.5: Case 0 — WAF in front of AEM CS Fastly.
-    // DNS resolved cleanly to non-Adobe IPs; an HTTP probe with four signals
-    // distinguishes WAF-proxied AEM CS from a genuine third-party CDN.
+    // Phase 1.5 — AEM CS Fastly behind a proxy (DNS resolved to non-Adobe IPs).
     if (phase1 === 'byocdn-other') {
+      // Case 0: WAF simple proxy — four signals (correlation echo, request-id header,
+      // unique x-request-id, x-aem-debug host match) confirm routing is already active.
       let case0Result = await detectAemCsFastlyBehindWaf(`www.${bareDomain}`, log);
       if (!case0Result) {
         case0Result = await detectAemCsFastlyBehindWaf(bareDomain, log);
       }
       if (case0Result === 'aem-cs-fastly') {
         return case0Result;
+      }
+
+      // Cases 1 & 2: Customer-managed (BYO) CDN in front of AEM CS Fastly.
+      // x-aem-debug byocdn field distinguishes these from genuine third-party CDNs.
+      const byoCdnResult = (await detectAemCsFastlyByocdn(`www.${bareDomain}`, log))
+        || (await detectAemCsFastlyByocdn(bareDomain, log));
+      if (byoCdnResult) {
+        return byoCdnResult;
       }
     }
 

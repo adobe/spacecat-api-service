@@ -277,6 +277,7 @@ describe('edge-routing-utils', () => {
     let dnsPromises;
     let edgeUtilsDns;
     let detectCdnStub;
+    let byoCdnStub;
 
     beforeEach(async () => {
       dnsPromises = {
@@ -284,6 +285,7 @@ describe('edge-routing-utils', () => {
         resolve4: sandbox.stub(),
       };
       detectCdnStub = sandbox.stub().resolves(null);
+      byoCdnStub = sandbox.stub().resolves(null);
       edgeUtilsDns = await esmock('../../src/support/edge-routing-utils.js', {
         dns: { promises: dnsPromises },
         '@adobe/spacecat-shared-utils': {
@@ -304,6 +306,7 @@ describe('edge-routing-utils', () => {
           AEM_CS_FASTLY_CNAME_PATTERNS: ['cdn.adobeaemcloud.com', 'adobe-aem.map.fastly.net'],
           AEM_CS_FASTLY_IPS: new Set(['151.101.195.10', '151.101.67.10', '151.101.3.10', '151.101.131.10']),
           detectAemCsFastlyBehindWaf: detectCdnStub,
+          detectAemCsFastlyByocdn: byoCdnStub,
         },
       });
     });
@@ -372,10 +375,21 @@ describe('edge-routing-utils', () => {
       expect(detectCdnStub).to.have.been.calledOnceWith('example.com', undefined);
     });
 
-    it('returns null when DNS misses and Phase 1.5 probes are inconclusive', async () => {
+    it('returns aem-cs-fastly-simple-proxy when DNS misses, Case 0 fails, and Case 1/2 detects BYOCDN', async () => {
       dnsPromises.resolveCname.resolves([]);
       dnsPromises.resolve4.resolves([]);
       detectCdnStub.resolves(null);
+      byoCdnStub.resolves(CDN_TYPES.AEM_CS_FASTLY_SIMPLE_PROXY);
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
+      expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY_SIMPLE_PROXY);
+      expect(byoCdnStub).to.have.been.calledOnceWith('example.com', undefined);
+    });
+
+    it('returns null when DNS misses, Case 0 fails, and Case 1/2 probe is also inconclusive', async () => {
+      dnsPromises.resolveCname.resolves([]);
+      dnsPromises.resolve4.resolves([]);
+      detectCdnStub.resolves(null);
+      byoCdnStub.resolves(null);
       const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
       expect(result).to.equal(null);
     });

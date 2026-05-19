@@ -18,6 +18,7 @@ import {
   AEM_CS_FASTLY_CNAME_PATTERNS,
   AEM_CS_FASTLY_IPS,
   detectAemCsFastlyBehindWaf,
+  detectAemCsFastlyByocdn,
 } from './cdn-detection.js';
 
 // Per-CDN strategies for edge optimize routing.
@@ -230,9 +231,14 @@ export async function detectAemCsFastlyForDomain(domain, log) {
     if (dnsResult) {
       return dnsResult;
     }
-    // DNS missed — a WAF or reverse proxy may be hiding AEM CS Fastly.
-    // Run Phase 1.5 HTTP probes directly (no Phase 2 — we only care about AEM CS).
-    return await detectAemCsFastlyBehindWaf(domain, log);
+    // DNS missed — a proxy may be hiding AEM CS Fastly.
+    // Case 0: WAF simple proxy (routing already active, four HTTP signals).
+    const case0Result = await detectAemCsFastlyBehindWaf(domain, log);
+    if (case0Result) {
+      return case0Result;
+    }
+    // Cases 1 & 2: BYO CDN in front of AEM CS (customer must apply routing YAML manually).
+    return await detectAemCsFastlyByocdn(domain, log);
   } catch (err) {
     log?.error('detectAemCsFastlyForDomain error', err);
   }

@@ -1398,8 +1398,9 @@ function LlmoController(ctx) {
         log.info(`[edge-optimize-routing] ${baseURL} CDN routing config requested for site ${siteId},`
           + ` cdnType: ${cdnType}, enabled: ${enabled}`);
         const cdnTypeTrimmed = cdnType.toLowerCase().trim();
-        cdnTypeNormalized = SUPPORTED_EDGE_ROUTING_CDN_TYPES.includes(cdnTypeTrimmed)
-          ? cdnTypeTrimmed : null;
+        const isAutoRoutingType = SUPPORTED_EDGE_ROUTING_CDN_TYPES.includes(cdnTypeTrimmed);
+        const isManualRoutingType = cdnTypeTrimmed === CDN_TYPES.AEM_CS_FASTLY_SIMPLE_PROXY;
+        cdnTypeNormalized = (isAutoRoutingType || isManualRoutingType) ? cdnTypeTrimmed : null;
         if (!cdnTypeNormalized) {
           log.error(`[edge-optimize-routing-failed] ${baseURL} cdnType: ${cdnType} not eligible for automated routing`);
         } else {
@@ -1419,6 +1420,38 @@ function LlmoController(ctx) {
           }
         }
       }
+      // BYOCDN manual routing (Cases 1 & 2): customer applies routing YAML themselves.
+      // Auth is still required but we skip the CDN API call and return the API key
+      // plus a routingType hint so the UI can show the manual setup dialog.
+      if (cdnTypeNormalized === CDN_TYPES.AEM_CS_FASTLY_SIMPLE_PROXY) {
+        let imsUserToken;
+        try {
+          imsUserToken = await getImsTokenFromPromiseToken(context);
+          log.info(`[edge-optimize-routing] IMS user token obtained for site ${siteId} (byocdn-manual)`);
+        } catch (tokenError) {
+          log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to get IMS user token: ${tokenError.message}`);
+          return createResponse({ message: tokenError.message }, tokenError.status ?? 401);
+        }
+
+        const org = await site.getOrganization();
+        const imsOrgId = org.getImsOrgId();
+        try {
+          await authorizeEdgeCdnRouting(
+            context,
+            {
+              org, imsOrgId, imsUserToken, siteId,
+            },
+            log,
+          );
+        } catch (authErr) {
+          log.error(`[edge-optimize-routing-failed] ${baseURL} Authorization failed: ${authErr.message}`);
+          return createResponse({ message: authErr.message }, authErr.status ?? 403);
+        }
+
+        log.info(`[edge-optimize-routing] ${baseURL} BYOCDN manual routing — returning API key for manual YAML setup`);
+        return ok({ ...metaconfig, routingType: 'byocdn-manual' });
+      }
+
       // CDN routing — only when cdnType is provided
       if (cdnTypeNormalized) {
         // Exchange promise token from cookie for an IMS user token

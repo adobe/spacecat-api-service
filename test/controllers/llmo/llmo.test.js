@@ -6007,6 +6007,72 @@ describe('LlmoController', () => {
       });
     }); // end describe('CDN routing')
 
+    describe('BYOCDN manual routing (aem-cs-fastly-simple-proxy)', () => {
+      function makeByoCdnCtx(overrides = {}) {
+        const { data: overrideData, pathInfo: overridePathInfo, ...restOverrides } = overrides;
+        const mergedHeaders = {
+          ...(edgeConfigContext.pathInfo?.headers || {}),
+          ...(overridePathInfo?.headers || {}),
+        };
+        if (!('cookie' in mergedHeaders)) {
+          mergedHeaders.cookie = 'promiseToken=test-token';
+        }
+        return {
+          ...edgeConfigContext,
+          ...restOverrides,
+          data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY_SIMPLE_PROXY, ...overrideData },
+          env: { ...edgeConfigContext.env, ENV: 'prod' },
+          pathInfo: {
+            ...(edgeConfigContext.pathInfo || {}),
+            ...(overridePathInfo || {}),
+            headers: mergedHeaders,
+          },
+        };
+      }
+
+      beforeEach(() => {
+        mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now() });
+        mockConfig.updateEdgeOptimizeConfig = sinon.stub();
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com');
+        mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['byocdn-api-key'] });
+        mockTokowakaClient.updateMetaconfig.resolves({ apiKeys: ['byocdn-api-key'] });
+        mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+          getId: sinon.stub().returns('ent-1'),
+          getTier: sinon.stub().returns('PAID'),
+        });
+        getImsUserProfileStub.resolves({ projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }] });
+        detectCdnForDomainStub.resolves(LOG_SOURCES.AEM_CS_FASTLY_SIMPLE_PROXY);
+      });
+
+      it('returns 200 with routingType byocdn-manual and apiKeys without calling CDN API', async () => {
+        const result = await controller.createOrUpdateEdgeConfig(makeByoCdnCtx());
+        expect(result.status).to.equal(200);
+        const body = await result.json();
+        expect(body.routingType).to.equal('byocdn-manual');
+        expect(body.apiKeys).to.deep.equal(['byocdn-api-key']);
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+      });
+
+      it('returns 400 when detected CDN does not match requested aem-cs-fastly-simple-proxy', async () => {
+        detectCdnForDomainStub.resolves('byocdn-fastly');
+        const result = await controller.createOrUpdateEdgeConfig(makeByoCdnCtx());
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('does not match the detected CDN');
+      });
+
+      it('returns 401 when promiseToken is missing', async () => {
+        getImsTokenFromPromiseTokenStub.rejects(Object.assign(new Error('mandatory token missing'), { status: 400 }));
+        const result = await controller.createOrUpdateEdgeConfig(makeByoCdnCtx());
+        expect(result.status).to.equal(400);
+      });
+
+      it('returns 403 when authorization fails', async () => {
+        authorizeEdgeCdnRoutingStub.rejects(Object.assign(new Error('Not authorized'), { status: 403 }));
+        const result = await controller.createOrUpdateEdgeConfig(makeByoCdnCtx());
+        expect(result.status).to.equal(403);
+      });
+    });
+
     it('should call hasAccess before isLLMOAdministrator before isOwnerOfSite', async () => {
       const hasAccessStub = sinon.stub().resolves(true);
       const isLLMOAdminStub = sinon.stub().returns(true);

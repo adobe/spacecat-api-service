@@ -809,6 +809,88 @@ describe('cdn-detection', () => {
   });
 
   // -----------------------------------------------------------------------
+  // Phase 1.5 — Cases 1 & 2: BYO CDN in front of AEM CS Fastly.
+  //
+  // Phase 1 DNS resolves to non-Adobe IPs ('byocdn-other'). Phase 1.5 Case 0
+  // probes fail (no x-tokowaka-request-id). A single additional probe reads
+  // x-aem-debug to detect the BYO CDN topology:
+  //   Case 1: byocdn=true  — customer's CDN has YAML applied.
+  //   Case 2: byocdn=false AND host≠domain — AEM CS behind a custom BYO CDN.
+  // Both return 'aem-cs-fastly-simple-proxy'.
+  // -----------------------------------------------------------------------
+  describe('phase 1.5 — cases 1 & 2: BYO CDN in front of AEM CS Fastly', () => {
+    // Force Phase 1 to byocdn-other and Phase 1.5 Case 0 to fail (no signals).
+    beforeEach(() => {
+      dnsStubs.resolveCname.resolves(['no-match.example.net.']);
+      dnsStubs.resolve4.resolves(['1.2.3.4']);
+      dnsStubs.resolve6.resolves([]);
+      // case0FetchStub is shared with Case 0; default is reject.
+      // Individual tests override it with BYOCDN responses.
+    });
+
+    function byoCdnResponse(headers = {}) {
+      const lower = new Map(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+      return {
+        ok: true,
+        headers: { forEach: (cb) => lower.forEach((v, k) => cb(v, k)) },
+        body: { cancel: () => {} },
+      };
+    }
+
+    it('returns aem-cs-fastly-simple-proxy when x-aem-debug contains byocdn=true (Case 1)', async () => {
+      case0FetchStub.resolves(byoCdnResponse({ 'x-aem-debug': 'host=origin.example.com byocdn=true' }));
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('aem-cs-fastly-simple-proxy');
+    });
+
+    it('returns aem-cs-fastly-simple-proxy when byocdn=false and host differs from probed domain (Case 2)', async () => {
+      // www probe: host in x-aem-debug is the AEM origin, not the public domain
+      case0FetchStub.resolves(byoCdnResponse({ 'x-aem-debug': 'host=origin.adobeaemcloud.com byocdn=false' }));
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('aem-cs-fastly-simple-proxy');
+    });
+
+    it('does not trigger on byocdn=false when host matches the probed domain (not a BYO site)', async () => {
+      // www probe: host=www.example.com (matches probed domain) → not Case 2
+      case0FetchStub.onFirstCall().resolves(byoCdnResponse({ 'x-aem-debug': 'host=www.example.com byocdn=false' }));
+      // bare probe: host=example.com (matches probed domain) → not Case 2
+      case0FetchStub.onSecondCall().resolves(byoCdnResponse({ 'x-aem-debug': 'host=example.com byocdn=false' }));
+      const result = await detectCdnForDomain('example.com');
+      // Falls through to Phase 2; no HTTP probe headers → unknown, Phase 1 was byocdn-other
+      expect(result).to.not.equal('aem-cs-fastly-simple-proxy');
+    });
+
+    it('does not trigger when x-aem-debug header is absent', async () => {
+      case0FetchStub.resolves(byoCdnResponse({ server: 'fastly' }));
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.not.equal('aem-cs-fastly-simple-proxy');
+    });
+
+    it('returns null for BYOCDN probe when the probe fails', async () => {
+      case0FetchStub.rejects(new Error('network error'));
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.not.equal('aem-cs-fastly-simple-proxy');
+    });
+
+    it('Case 0 takes precedence: all four Case 0 signals present → aem-cs-fastly, not simple-proxy', async () => {
+      let n = 0;
+      case0FetchStub.callsFake((url) => {
+        n += 1;
+        const { hostname } = new URL(url);
+        return Promise.resolve(byoCdnResponse({
+          'x-correlation-id': 'adobeedgetest',
+          'x-edgeoptimize-request-id': `ereq-${n}`,
+          'x-request-id': `xreq-${n}`,
+          'x-aem-debug': `host=${hostname} byocdn=true`,
+        }));
+      });
+      const result = await detectCdnForDomain('example.com');
+      // Case 0 signals win (correlation echo + request-id + unique x-request-id + host match)
+      expect(result).to.equal('aem-cs-fastly');
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Phase 2 — generic multi-signal CDN fingerprinting (ported from
   // spacecat-audit-worker). Phase 1 is forced to byocdn-other (clean DNS,
   // no Adobe match) so Phase 2 owns the result, then we assert the adapter
