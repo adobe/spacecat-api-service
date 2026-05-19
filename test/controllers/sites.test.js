@@ -4689,7 +4689,7 @@ describe('Sites Controller', () => {
 
     // Must include Config methods because OrganizationDto.toJSON calls Config.toDynamoItem.
     const makeConfigWithDefault = (siteId) => ({
-      defaults: { abcd: { siteId } },
+      getDefaults: () => ({ abcd: { siteId } }),
       getSlackConfig: () => undefined,
       getHandlers: () => undefined,
       getContentAiConfig: () => undefined,
@@ -5455,7 +5455,7 @@ describe('Sites Controller', () => {
       });
 
       it('returns null when org has no default configured for the product', async () => {
-        org.getConfig.returns({ defaults: {} });
+        org.getConfig.returns({ getDefaults: () => ({}) });
 
         const result = await resolveOrgDefaultSite(org, productCode, context, mockCtx);
 

@@ -75,7 +75,7 @@ async function buildResolveData(org, site, context) {
 export async function resolveOrgDefaultSite(org, productCode, context, ctx) {
   const { dataAccess: { Site }, log } = ctx;
   try {
-    const defaultSiteId = org.getConfig()?.defaults?.[productCode]?.siteId;
+    const defaultSiteId = org.getConfig()?.getDefaults()?.[productCode]?.siteId;
     if (!hasText(defaultSiteId) || !isValidUUID(defaultSiteId)) {
       return null;
     }
