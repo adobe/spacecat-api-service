@@ -1185,9 +1185,16 @@ describe('Sites Controller', () => {
   });
 
   it('logs error and returns zeroed metrics when rum query fails', async () => {
+    // Apex has a domain key; www probe fails so shared wwwUrlResolver never runs
+    // isHttpsReachable (HEAD with 5s timeout), which exceeds Mocha's default 2000ms.
     const rumApiClient = {
       query: sandbox.stub().rejects(new Error('RUM query failed')),
-      retrieveDomainkey: sandbox.stub().resolves('domain-key'),
+      retrieveDomainkey: sandbox.stub().callsFake((hostname) => {
+        if (String(hostname).startsWith('www.')) {
+          return Promise.reject(new Error('no RUM key for www'));
+        }
+        return Promise.resolve('domain-key');
+      }),
     };
     const s3 = {
       s3Client: { send: sandbox.stub().resolves({ Body: { transformToString: () => '[]' } }) },

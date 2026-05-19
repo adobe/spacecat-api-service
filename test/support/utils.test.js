@@ -219,6 +219,8 @@ describe('utils', () => {
 
     it('returns resolved author URL when RUM bundle has an AEM CS publish host', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      // wwwUrlResolver probes HTTPS reachability for the toggled hostname
+      nock('https://example.com').head('/').reply(200);
 
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
@@ -248,6 +250,7 @@ describe('utils', () => {
 
     it('returns resolved author URL when RUM bundle has an AEM CS .net publish host', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      nock('https://example.com').head('/').reply(200);
 
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
@@ -305,6 +308,7 @@ describe('utils', () => {
 
     it('returns host only when host is not an AEM CS publish host', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      nock('https://example.com').head('/').reply(200);
 
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
@@ -327,6 +331,7 @@ describe('utils', () => {
 
     it('returns null when no RUM bundles are returned', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      nock('https://example.com').head('/').reply(200);
 
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
@@ -341,6 +346,7 @@ describe('utils', () => {
 
     it('returns null when fetch fails', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      nock('https://example.com').head('/').reply(200);
 
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
@@ -364,6 +370,7 @@ describe('utils', () => {
 
     it('returns host object when first bundle host is undefined', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      nock('https://example.com').head('/').reply(200);
 
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
