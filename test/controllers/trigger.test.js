@@ -105,4 +105,13 @@ describe('trigger handler', () => {
     context.sqs = { sendMessage: () => {} };
     await expect(handler(context)).to.be.fulfilled;
   });
+
+  it('successfully triggers rum-config-refresh audit', async () => {
+    context.data.type = 'rum-config-refresh';
+    context.env = {
+      AUDIT_JOBS_QUEUE_URL: 'queueUrl',
+    };
+    context.sqs = { sendMessage: () => {} };
+    await expect(handler(context)).to.be.fulfilled;
+  });
 });
