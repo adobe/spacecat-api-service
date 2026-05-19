@@ -15,6 +15,8 @@ import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
+import nock from 'nock';
+import { tracingFetch as realTracingFetch } from '@adobe/spacecat-shared-utils';
 
 use(sinonChai);
 
@@ -29,6 +31,7 @@ describe('cdn-detection', () => {
   let detectCdnForDomain;
   let dnsStubs;
   let fetchStub;
+  let case0FetchStub;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
@@ -40,9 +43,9 @@ describe('cdn-detection', () => {
       reverse: sandbox.stub().rejects(dnsError('ENOTFOUND')),
     };
 
-    // Phase 1.5 probes use globalThis.fetch (no HTTP cache). Default to reject
+    // Phase 1.5 probes use tracingFetch with cache: 'no-store'. Default to reject
     // so Phase 1.5 always fails unless a test overrides it.
-    sandbox.stub(globalThis, 'fetch').rejects(new Error('test: network disabled'));
+    case0FetchStub = sandbox.stub().rejects(new Error('test: network disabled'));
 
     // Default Phase 2 to a no-op: every HTTP probe (HEAD/GET) rejects,
     // so the detector falls back to DNS-only behaviour and existing Phase 1 tests
@@ -52,13 +55,20 @@ describe('cdn-detection', () => {
     ({ detectCdnForDomain } = await esmock('../../src/support/cdn-detection.js', {
       dns: { promises: dnsStubs },
       '@adobe/spacecat-shared-utils': {
-        tracingFetch: fetchStub,
+        tracingFetch: (...args) => {
+          const headers = args[1]?.headers || {};
+          if (headers['x-aem-debug'] === 'edge=true') {
+            return case0FetchStub(...args);
+          }
+          return fetchStub(...args);
+        },
         SPACECAT_USER_AGENT: 'spacecat-cdn-detection-test',
       },
     }));
   });
 
   afterEach(() => {
+    nock.cleanAll();
     sandbox.restore();
   });
 
@@ -471,16 +481,18 @@ describe('cdn-detection', () => {
   // Phase 1.5 — Case 0 (WAF Simple Proxy): AEM CS Fastly behind a WAF.
   //
   // Phase 1 DNS resolves to non-Adobe IPs ('byocdn-other'). Phase 1.5 runs
-  // four HTTP probes (2 parallel × 2 sequential) and checks three signals:
-  //   1. x-tokowaka-request-id or x-edgeoptimize-request-id present in all
-  //   2. x-request-id unique across all CASE0_PROBE_COUNT probed responses (WAF is not caching)
-  //   3. x-aem-debug response header contains host=<probed-domain>
+  // CASE0_PROBE_COUNT sequential HTTP probes and checks four signals:
+  //   1. x-correlation-id echoed unchanged in all responses
+  //   2. x-tokowaka-request-id or x-edgeoptimize-request-id present in all
+  //   3. x-request-id unique across all CASE0_PROBE_COUNT probed responses (WAF is not caching)
+  //   4. x-aem-debug response header contains host=<probed-domain>
   // -----------------------------------------------------------------------
   describe('phase 1.5 — case 0: WAF in front of AEM CS Fastly', () => {
-    // Helper: build a mock HTTP response carrying all three Case 0 signals.
+    // Helper: build a mock HTTP response carrying all four Case 0 signals.
     // n is the call counter; unique per call so x-request-id is distinct.
     function case0Response(n, overrides = {}) {
       const base = {
+        'x-correlation-id': 'adobeedgetest',
         'x-edgeoptimize-request-id': `ereq-${n}`,
         'x-request-id': `xreq-${n}`,
         'x-aem-debug': 'host=example.com cache=MISS',
@@ -501,11 +513,11 @@ describe('cdn-detection', () => {
       dnsStubs.resolve6.resolves([]);
     });
 
-    it('returns aem-cs-fastly when all three signals are confirmed in all 3 probes', async () => {
+    it('returns aem-cs-fastly when all four signals are confirmed in all 3 probes', async () => {
       let n = 0;
-      globalThis.fetch.callsFake((url) => {
+      case0FetchStub.callsFake((url) => {
         n += 1;
-        // Signal 3 checks host=<probed-domain>; echo back hostname so www probe succeeds.
+        // Signal 4 checks host=<probed-domain>; echo back hostname so www probe succeeds.
         const { hostname } = new URL(url);
         return Promise.resolve(case0Response(n, { 'x-aem-debug': `host=${hostname} cache=MISS` }));
       });
@@ -513,12 +525,18 @@ describe('cdn-detection', () => {
       const result = await detectCdnForDomain('example.com');
       expect(result).to.equal('aem-cs-fastly');
       // Phase 1.5 probes www.example.com CASE0_PROBE_COUNT (3) times; Phase 2 is skipped
-      expect(globalThis.fetch.callCount).to.equal(3);
+      expect(case0FetchStub.callCount).to.equal(3);
+      expect(case0FetchStub.firstCall.args[1]).to.include({
+        method: 'GET',
+        redirect: 'manual',
+        cache: 'no-store',
+        timeout: 3000,
+      });
     });
 
-    it('accepts x-tokowaka-request-id as the signal 1 header', async () => {
+    it('accepts x-tokowaka-request-id as the signal 2 header', async () => {
       let n = 0;
-      globalThis.fetch.callsFake((url) => {
+      case0FetchStub.callsFake((url) => {
         n += 1;
         const { hostname } = new URL(url);
         return Promise.resolve(case0Response(n, {
@@ -532,13 +550,29 @@ describe('cdn-detection', () => {
       expect(result).to.equal('aem-cs-fastly');
     });
 
-    it('falls through to Phase 2 when signal 1 is absent in all probes', async () => {
-      // No request-id header in any response — Phase 1.5 cannot confirm signal 1.
+    it('falls through when signal 1 fails — x-correlation-id is not echoed unchanged', async () => {
+      let n = 0;
+      case0FetchStub.callsFake((url) => {
+        n += 1;
+        const { hostname } = new URL(url);
+        return Promise.resolve(case0Response(n, {
+          'x-correlation-id': 'rewritten-by-proxy',
+          'x-aem-debug': `host=${hostname} cache=MISS`,
+        }));
+      });
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('byocdn-other');
+    });
+
+    it('falls through to Phase 2 when signal 2 is absent in all probes', async () => {
+      // No request-id header in any response — Phase 1.5 cannot confirm signal 2.
       // Phase 2 then runs; DNS chain present → probeSucceeded=true → byocdn-other.
       let n = 0;
-      globalThis.fetch.callsFake(() => {
+      case0FetchStub.callsFake(() => {
         n += 1;
         const headers = new Map([
+          ['x-correlation-id', 'adobeedgetest'],
           ['x-request-id', `xreq-${n}`],
           ['x-aem-debug', 'host=example.com'],
         ]);
@@ -553,11 +587,11 @@ describe('cdn-detection', () => {
       expect(result).to.equal('byocdn-other');
     });
 
-    it('falls through when signal 2 fails — duplicate x-request-id across probes (caching detected)', async () => {
+    it('falls through when signal 3 fails — duplicate x-request-id across probes (caching detected)', async () => {
       // All probes return the same x-request-id — a caching WAF or CDN
       // serving the same cached response for every probe.
       let n = 0;
-      globalThis.fetch.callsFake((url) => {
+      case0FetchStub.callsFake((url) => {
         n += 1;
         const { hostname } = new URL(url);
         return Promise.resolve(case0Response(n, {
@@ -570,10 +604,10 @@ describe('cdn-detection', () => {
       expect(result).to.equal('byocdn-other');
     });
 
-    it('falls through when signal 2 fails — x-request-id absent from all responses', async () => {
-      // x-request-id not present — Signal 2 requires it to be present and unique.
+    it('falls through when signal 3 fails — x-request-id absent from all responses', async () => {
+      // x-request-id not present — Signal 3 requires it to be present and unique.
       let n = 0;
-      globalThis.fetch.callsFake((url) => {
+      case0FetchStub.callsFake((url) => {
         n += 1;
         const { hostname } = new URL(url);
         return Promise.resolve(case0Response(n, {
@@ -586,9 +620,23 @@ describe('cdn-detection', () => {
       expect(result).to.equal('byocdn-other');
     });
 
-    it('falls through when signal 3 fails — x-aem-debug host mismatch in all probes', async () => {
+    it('accepts x-aem-debug host token after semicolon and spaces', async () => {
       let n = 0;
-      globalThis.fetch.callsFake(() => {
+      case0FetchStub.callsFake((url) => {
+        n += 1;
+        const { hostname } = new URL(url);
+        return Promise.resolve(case0Response(n, {
+          'x-aem-debug': `edge=true; cache=MISS ; host=${hostname}; x-forwarded-host=wrong-domain.com`,
+        }));
+      });
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('aem-cs-fastly');
+    });
+
+    it('falls through when signal 4 fails — x-aem-debug host mismatch in all probes', async () => {
+      let n = 0;
+      case0FetchStub.callsFake(() => {
         n += 1;
         return Promise.resolve(case0Response(n, { 'x-aem-debug': 'host=wrong-domain.com' }));
       });
@@ -597,8 +645,22 @@ describe('cdn-detection', () => {
       expect(result).to.equal('byocdn-other');
     });
 
+    it('does not treat x-forwarded-host as the signal 4 host token', async () => {
+      let n = 0;
+      case0FetchStub.callsFake((url) => {
+        n += 1;
+        const { hostname } = new URL(url);
+        return Promise.resolve(case0Response(n, {
+          'x-aem-debug': `x-forwarded-host=${hostname}; host=wrong-domain.com`,
+        }));
+      });
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('byocdn-other');
+    });
+
     it('falls through to Phase 2 when probe network fails entirely', async () => {
-      // globalThis.fetch rejects by default (set in beforeEach) → Phase 1.5 cannot
+      // case0FetchStub rejects by default (set in beforeEach) → Phase 1.5 cannot
       // make probes → falls through. Phase 2 DNS chain succeeds → byocdn-other.
       const result = await detectCdnForDomain('example.com');
       expect(result).to.equal('byocdn-other');
@@ -609,16 +671,16 @@ describe('cdn-detection', () => {
 
       const result = await detectCdnForDomain('example.com');
       expect(result).to.equal('aem-cs-fastly');
-      expect(globalThis.fetch.callCount).to.equal(0);
+      expect(case0FetchStub.callCount).to.equal(0);
     });
 
-    it('falls back to bare domain when www probe fails signal 3, bare probe succeeds', async () => {
+    it('falls back to bare domain when www probe fails signal 4, bare probe succeeds', async () => {
       let n = 0;
-      globalThis.fetch.callsFake((url) => {
+      case0FetchStub.callsFake((url) => {
         n += 1;
         const { hostname } = new URL(url);
         if (hostname === 'www.example.com') {
-          // www probes: signal 3 fails (wrong host in x-aem-debug)
+          // www probes: signal 4 fails (wrong host in x-aem-debug)
           return Promise.resolve(case0Response(n, { 'x-aem-debug': 'host=wrong-domain.com' }));
         }
         // Bare domain probes: all signals pass
@@ -633,7 +695,7 @@ describe('cdn-detection', () => {
       // Sequential probes: probe 1 succeeds, probe 2 rejects → Phase 1.5 returns null for
       // www and bare. Phase 2 DNS chain succeeds → byocdn-other.
       let n = 0;
-      globalThis.fetch.callsFake(() => {
+      case0FetchStub.callsFake(() => {
         n += 1;
         if (n % 2 === 0) {
           return Promise.reject(new Error('second probe fails'));
@@ -645,13 +707,37 @@ describe('cdn-detection', () => {
       expect(result).to.equal('byocdn-other');
     });
 
-    it('logs signal-absent message when signal 1 is missing', async () => {
+    it('logs signal-absent message when correlation echo is missing', async () => {
       const log = { info: sinon.stub(), warn: sinon.stub() };
 
       let n = 0;
-      globalThis.fetch.callsFake(() => {
+      case0FetchStub.callsFake((url) => {
         n += 1;
-        const headers = new Map([['x-request-id', `xreq-${n}`], ['x-aem-debug', 'host=example.com']]);
+        const { hostname } = new URL(url);
+        return Promise.resolve(case0Response(n, {
+          'x-correlation-id': '',
+          'x-aem-debug': `host=${hostname} cache=MISS`,
+        }));
+      });
+
+      await detectCdnForDomain('example.com', log);
+      expect(log.info).to.have.been.calledWith(
+        '[cdn-detection] Phase 1.5: signal 1 absent — x-correlation-id not echoed',
+        sinon.match.any,
+      );
+    });
+
+    it('logs signal-absent message when AEM request-id header is missing', async () => {
+      const log = { info: sinon.stub(), warn: sinon.stub() };
+
+      let n = 0;
+      case0FetchStub.callsFake(() => {
+        n += 1;
+        const headers = new Map([
+          ['x-correlation-id', 'adobeedgetest'],
+          ['x-request-id', `xreq-${n}`],
+          ['x-aem-debug', 'host=example.com'],
+        ]);
         return Promise.resolve({
           ok: true,
           headers: { forEach: (cb) => headers.forEach((v, k) => cb(v, k)) },
@@ -661,7 +747,7 @@ describe('cdn-detection', () => {
 
       await detectCdnForDomain('example.com', log);
       expect(log.info).to.have.been.calledWith(
-        '[cdn-detection] Phase 1.5: signal 1 absent — no request-id header',
+        '[cdn-detection] Phase 1.5: signal 2 absent — no request-id header',
         sinon.match.any,
       );
     });
@@ -669,7 +755,7 @@ describe('cdn-detection', () => {
     it('logs Phase 1.5 success when all signals confirmed', async () => {
       const log = { info: sinon.stub(), warn: sinon.stub() };
       let n = 0;
-      globalThis.fetch.callsFake((url) => {
+      case0FetchStub.callsFake((url) => {
         n += 1;
         const { hostname } = new URL(url);
         return Promise.resolve(case0Response(n, { 'x-aem-debug': `host=${hostname} cache=MISS` }));
@@ -681,6 +767,44 @@ describe('cdn-detection', () => {
         '[cdn-detection] Phase 1.5: all signals confirmed — AEM CS Fastly behind WAF',
         sinon.match.any,
       );
+    });
+
+    it('does not send Cache-Control or Pragma headers when using cache: no-store', async () => {
+      let receivedHeaders;
+      nock('https://case0-cache-option.test')
+        .get('/')
+        .reply(function handleRequest() {
+          receivedHeaders = this.req.headers;
+          return [
+            200,
+            'ok',
+            {
+              'x-correlation-id': receivedHeaders['x-correlation-id'] || '',
+              'x-edgeoptimize-request-id': 'edge-request-id',
+              'x-request-id': 'aem-request-id',
+              'x-aem-debug': 'host=case0-cache-option.test',
+            },
+          ];
+        });
+
+      const response = await realTracingFetch('https://case0-cache-option.test/', {
+        method: 'GET',
+        redirect: 'manual',
+        cache: 'no-store',
+        timeout: 3000,
+        headers: {
+          'x-correlation-id': 'adobeedgetest',
+          'x-aem-debug': 'edge=true',
+          'User-Agent': 'AdobeEdgeOptimize-Test',
+        },
+      });
+      await response.text();
+
+      expect(receivedHeaders['x-correlation-id']).to.equal('adobeedgetest');
+      expect(receivedHeaders['x-aem-debug']).to.equal('edge=true');
+      expect(receivedHeaders['user-agent']).to.equal('AdobeEdgeOptimize-Test');
+      expect(receivedHeaders).to.not.have.property('cache-control');
+      expect(receivedHeaders).to.not.have.property('pragma');
     });
   });
 
