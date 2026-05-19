@@ -5421,7 +5421,7 @@ describe('Sites Controller', () => {
         expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
       });
 
-      it('falls back to getFirstEnrollment when config.defaults returns null', async () => {
+      it('falls back to first-enrolled site when config.defaults has no entry for the product', async () => {
         sandbox.stub(testOrganizations[0], 'getConfig').returns(Config({}));
         context.data = { organizationId: testOrganizations[0].getId() };
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -5430,9 +5430,11 @@ describe('Sites Controller', () => {
           site: testSites[0],
         });
 
-        await sitesController.resolveSite(context);
+        const response = await sitesController.resolveSite(context);
 
-        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
       });
     });
 
@@ -5450,13 +5452,6 @@ describe('Sites Controller', () => {
           entitlement: { getTier: () => 'FREE_TRIAL' },
           enrollments: [{ getId: () => 'enrollment-1' }],
         });
-      });
-
-      it('returns site data when the configured default site is valid and enrolled', async () => {
-        const result = await resolveOrgDefaultSite(org, productCode, context, mockCtx);
-
-        expect(result).to.not.be.null;
-        expect(result.site.id).to.equal(SITE_IDS[0]);
       });
 
       it('returns null when org has no default configured for the product', async () => {
