@@ -239,26 +239,49 @@ async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
 // AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
 const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
 
-// RFC 1123 hostname: labels of 1-63 alphanumeric/hyphen chars, separated by dots, max 253 chars
-const HOSTNAME_RE = /^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+// Strip http:// or https:// scheme so callers can pass either scheme-prefixed input or a bare
+// hostname/path. Only the scheme is removed — port, userinfo, query, and fragment are NOT
+// stripped and will be rejected by DOMAIN_RE downstream.
+const stripScheme = (s) => s.replace(/^https?:\/\//i, '');
+
+// RFC 1123 hostname optionally followed by a URL path; no scheme, port, query, or fragment.
+// Hostname: max 253 chars, labels 1-63 alphanumeric/hyphen separated by dots.
+// Path segments: alphanumeric/hyphens/underscores with optional internal dots (e.g. v1.0).
+// Leading dots, dot-segments (..), and empty segments are rejected.
+// Valid: nba.com, nba.com/kings, nba.com/v1.0  Invalid: https://nba.com, nba.com/../etc
+// NOTE: DOMAIN_RE must stay in sync with DOMAIN_PATTERN in spacecat-shared
+// (plg-onboarding.model.js) and getDomainFromUrl.ts in the ESS UI (LLMO-4187).
+// eslint-disable-next-line max-len
+const DOMAIN_RE = /^(?=[^/]{1,253}(?:\/|$))([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)*$/;
 
 /**
- * Validates that a domain is a syntactically valid hostname (RFC 1123).
- * @param {string} domain - The domain to validate.
- * @returns {boolean} true if valid hostname, false otherwise.
+ * Validates that a domain string is a syntactically valid hostname or hostname/path.
+ * The hostname portion follows RFC 1123; the optional path portion is an extension to support
+ * subpath onboarding (e.g. "nba.com/kings"). Scheme, port, query, and fragment are rejected.
+ * @param {string} domain - The domain to validate (e.g. "nba.com" or "nba.com/kings").
+ * @returns {boolean} true if valid, false otherwise.
  */
-function isValidHostname(domain) {
-  return HOSTNAME_RE.test(domain);
+function isValidDomain(domain) {
+  return DOMAIN_RE.test(domain);
 }
 
 /**
  * Validates that a domain is not a private/internal address to prevent SSRF.
- * @param {string} domain - The domain to validate.
+ *
+ * IMPORTANT ordering contract: callers MUST invoke stripScheme() and isValidDomain() BEFORE
+ * this function. The hostname is extracted via `split('/')[0]`, so if a raw scheme-prefixed
+ * input like "https://10.0.0.1" reaches this function, the split yields "https:" and the
+ * private-IP blocklist is bypassed. isValidDomain() rejects any scheme-prefixed input, which
+ * is what makes this contract safe.
+ *
+ * @param {string} domain - The domain to validate (may include a path, e.g. "nba.com/kings").
  * @returns {boolean} true if safe, false if potentially dangerous.
  */
 function isSafeDomain(domain) {
+  const hostname = domain.split('/')[0];
   const blocked = [
     /^localhost$/i,
+    /\.localhost$/i,
     /^127\./,
     /^10\./,
     /^172\.(1[6-9]|2\d|3[01])\./,
@@ -270,7 +293,7 @@ function isSafeDomain(domain) {
     /\.internal$/i,
     /\.private\./i,
   ];
-  return !blocked.some((pattern) => pattern.test(domain));
+  return !blocked.some((pattern) => pattern.test(hostname));
 }
 
 function getReviewerIdentity(context) {
@@ -646,8 +669,9 @@ async function createOrFindProject(baseURL, organizationId, context) {
  * @returns {Promise<object>} PlgOnboarding record
  */
 async function performAsoPlgOnboarding({
-  domain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
+  domain: rawDomain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
 }, context) {
+  const domain = stripScheme(rawDomain);
   const { dataAccess, env, log } = context;
   const callerIdentity = getReviewerIdentity(context);
   const {
@@ -655,9 +679,9 @@ async function performAsoPlgOnboarding({
   } = dataAccess;
 
   /* c8 ignore next 7 */
-  if (!isValidHostname(domain)) {
+  if (!isValidDomain(domain)) {
     throw Object.assign(
-      new Error('Invalid domain: must be a valid hostname'),
+      new Error('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)'),
       { clientError: true },
     );
   }
@@ -1435,11 +1459,13 @@ function PlgOnboardingController(ctx) {
       return badRequest('Request body is required');
     }
 
-    const { domain, imsOrgId: requestedImsOrgId } = data;
+    const { domain: rawDomain, imsOrgId: requestedImsOrgId } = data;
 
-    if (!hasText(domain)) {
+    if (!hasText(rawDomain)) {
       return badRequest('domain is required');
     }
+
+    const domain = stripScheme(rawDomain);
 
     const { authInfo } = attributes;
 
@@ -1477,8 +1503,8 @@ function PlgOnboardingController(ctx) {
       }
     }
 
-    if (!isValidHostname(domain)) {
-      return badRequest('Invalid domain: must be a valid hostname');
+    if (!isValidDomain(domain)) {
+      return badRequest('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)');
     }
 
     try {
@@ -1884,8 +1910,12 @@ function PlgOnboardingController(ctx) {
 
           // Handle alternateDomain: retire current domain, onboard a new domain under current org
           if (hasText(siteConfig?.alternateDomain)) {
-            if (!isSafeDomain(siteConfig.alternateDomain)) {
-              return badRequest(`Invalid alternate domain: ${siteConfig.alternateDomain}`);
+            const altDomain = stripScheme(siteConfig.alternateDomain);
+            if (!isValidDomain(altDomain)) {
+              return badRequest(`Invalid alternate domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings): ${altDomain}`);
+            }
+            if (!isSafeDomain(altDomain)) {
+              return badRequest(`Invalid alternate domain: ${altDomain}`);
             }
             onboarding.setStatus(STATUSES.OUTDATED);
             onboarding.setWaitlistReason(null);
