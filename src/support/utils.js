@@ -36,7 +36,6 @@ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
-import { updateRumConfig } from './rum-config-service.js';
 // Two signals indicate a previous paid onboarding:
 // 1. ahref-paid-pages import — unique to the paid profile's import set.
 // 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
@@ -1698,9 +1697,22 @@ export const onboardSingleSite = async (
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
     // Falsy check covers null (timeout), undefined (unexpected), and '' (empty resolution)
     if (!resolvedUrl) {
-      log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
-      await say(`:warning: Could not resolve canonical URL for ${baseURL}. Using base URL as fallback.`);
-      resolvedUrl = baseURL;
+      // Apex may have SSL issues (e.g., krisshop.com.au). Try www variant before giving up.
+      const { hostname } = new URL(baseURL);
+      const wwwVariant = hostname.startsWith('www.')
+        ? baseURL
+        : baseURL.replace(`://${hostname}`, `://www.${hostname}`);
+      if (wwwVariant !== baseURL) {
+        resolvedUrl = await resolveCanonicalUrl(wwwVariant);
+        if (resolvedUrl) {
+          log.info(`Canonical URL resolved via www fallback: ${resolvedUrl} for site ${siteID}`);
+        }
+      }
+      if (!resolvedUrl) {
+        log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
+        await say(`:warning: Could not resolve canonical URL for ${baseURL}. Using base URL as fallback.`);
+        resolvedUrl = baseURL;
+      }
     }
 
     const { pathname: baseUrlPathName, origin: baseUrlOrigin } = new URL(baseURL);
@@ -1726,8 +1738,6 @@ export const onboardSingleSite = async (
       ...(additionalParams.force ? { forcedOverride: true } : {}),
     }, { maxHistory: MAX_ONBOARD_HISTORY });
 
-    const hasDomainKey = await updateRumConfig(site, context, { save: false });
-    siteConfig.updateRumConfig(hasDomainKey);
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
       await site.save();
