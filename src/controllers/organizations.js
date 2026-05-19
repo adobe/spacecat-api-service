@@ -13,6 +13,7 @@
 import {
   createResponse,
   badRequest,
+  internalServerError,
   notFound,
   ok, forbidden,
 } from '@adobe/spacecat-shared-http-utils';
@@ -22,6 +23,8 @@ import {
   isString,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
@@ -58,7 +61,37 @@ function OrganizationsController(ctx, env) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
+   * Ensures the organization has an entitlement for the given product.
+   * `TierClient.createEntitlement` is idempotent at the library level: an existing
+   * entitlement is returned as-is, otherwise a new one is created. Errors (invalid tier,
+   * DB failures) bubble up to the caller.
+   *
+   * Triggered when callers pass an `x-product` header on POST /organizations; without the
+   * header the call is a no-op (preserves backward compatibility for existing integrations).
+   *
+   * @param {object} context - Request context (forwarded to TierClient).
+   * @param {object} organization - The newly created or existing organization entity.
+   * @param {string} productCode - Product code from the `x-product` header.
+   */
+  const ensureOrgEntitlement = async (context, organization, productCode) => {
+    const { log } = ctx;
+    const tierClient = await TierClient.createForOrg(context, organization, productCode);
+    const { entitlement } = await tierClient.createEntitlement(
+      EntitlementModel.TIERS.FREE_TRIAL,
+    );
+    log.info(`Ensured ${productCode} entitlement ${entitlement.getId()} for organization ${organization.getId()}`);
+  };
+
+  /**
    * Creates an organization. The organization ID is generated automatically.
+   *
+   * Tier-model compliance: when the caller provides an `x-product` header, a FREE_TRIAL
+   * entitlement for that product is created for the organization (idempotent — existing
+   * entitlements are reused). This brings POST /organizations in line with the entitlement
+   * model so that downstream product-scoped APIs can resolve the org without a separate
+   * manual provisioning step. Entitlement failures return 500 — `TierClient.createEntitlement`
+   * is idempotent so retries are safe.
+   *
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Organization response.
    */
@@ -66,18 +99,34 @@ function OrganizationsController(ctx, env) {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new Organizations');
     }
+    const productCode = context.pathInfo?.headers?.['x-product'];
+    let organization;
+    let status;
     // check if the organization already exists
-    const organization = await Organization.findByImsOrgId(context.data.imsOrgId);
-    if (organization) {
-      return createResponse(OrganizationDto.toJSON(organization), 200);
+    const existingOrganization = await Organization.findByImsOrgId(context.data.imsOrgId);
+    if (existingOrganization) {
+      organization = existingOrganization;
+      status = 200;
+    } else {
+      try {
+        organization = await Organization.create(context.data);
+        status = 201;
+      } catch (e) {
+        return badRequest(e.message);
+      }
     }
 
-    try {
-      const organizationCreated = await Organization.create(context.data);
-      return createResponse(OrganizationDto.toJSON(organizationCreated), 201);
-    } catch (e) {
-      return badRequest(e.message);
+    if (hasText(productCode)) {
+      try {
+        await ensureOrgEntitlement(context, organization, productCode);
+      } catch (error) {
+        const { log } = ctx;
+        log.error(`Error ensuring ${productCode} entitlement for organization ${organization.getId()}: ${error.message}`, error);
+        return internalServerError(`Failed to ensure ${productCode} entitlement for organization`);
+      }
     }
+
+    return createResponse(OrganizationDto.toJSON(organization), status);
   };
 
   /**
