@@ -13,7 +13,7 @@
 import { fromJson, toJson } from '@bufbuild/protobuf';
 import { COUNTRY_ENUM, LLM_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
-  PromptsRequestSchema,
+  PromptRequestSchema,
   PromptResponseSchema,
 } from '@quazar/ai-seo-ts/ai-pr/messages_pb.js';
 import {
@@ -37,7 +37,7 @@ export async function handlePromptResponse(sp, clients) {
   const serpId = sp.get('serpId');
 
   const promptResponseRequest = fromJson(
-    PromptsRequestSchema,
+    PromptRequestSchema,
     {
       country,
       llm: engine,
