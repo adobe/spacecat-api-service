@@ -44,6 +44,10 @@ function GetObjectCommand(input) {
   this.input = input;
 }
 
+function PutObjectCommand(input) {
+  this.input = input;
+}
+
 /**
  * Minimal chainable PostgREST client mock.
  * rpcResults: { [rpcName]: { data, error } }
@@ -105,6 +109,9 @@ function stubS3({ keys = [], echoPrefix = false, metadata } = {}) {
         : keys.map((Key) => ({ Key }));
       return Promise.resolve({ Contents });
     }
+    if (command instanceof PutObjectCommand) {
+      return Promise.resolve({});
+    }
     if (metadata === undefined) {
       const error = new Error('not found');
       error.name = 'NoSuchKey';
@@ -121,6 +128,9 @@ function makeExportContext(overrides = {}) {
     if (command instanceof ListObjectsV2Command) {
       return Promise.resolve({ Contents: [], NextContinuationToken: undefined });
     }
+    if (command instanceof PutObjectCommand) {
+      return Promise.resolve({});
+    }
     const error = new Error('not found');
     error.name = 'NoSuchKey';
     return Promise.reject(error);
@@ -130,6 +140,7 @@ function makeExportContext(overrides = {}) {
     s3Bucket: 'default-bucket',
     ListObjectsV2Command,
     GetObjectCommand,
+    PutObjectCommand,
     getSignedUrl: sinon.stub().resolves('https://signed.example.com/export.csv'),
     ...overrides.s3,
   };
@@ -1254,10 +1265,6 @@ describe('llmo-agentic-traffic', () => {
     });
 
     it('re-enqueues when a prior attempt failed (failed metadata is retriable)', async () => {
-      // POST is the user's "I want this export" signal — a previously
-      // failed attempt with the same filters shouldn't permanently lock
-      // the cache key. Status reporting on 'failed' is the GET endpoint's
-      // job, not POST's.
       const ctx = makeExportContext();
       ctx.s3.s3Client.send = stubS3({
         metadata: { status: 'failed', failureReason: 'db error' },
@@ -1270,16 +1277,64 @@ describe('llmo-agentic-traffic', () => {
       expect(body.status).to.equal('processing');
       expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
     });
+
+    it('does not enqueue when CAS write loses the race', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        if (command instanceof PutObjectCommand) {
+          const error = new Error('precondition failed');
+          error.name = 'PreconditionFailed';
+          return Promise.reject(error);
+        }
+        const error = new Error('not found');
+        error.name = 'NoSuchKey';
+        return Promise.reject(error);
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('writes processing metadata with IfNoneMatch:* before enqueueing on first POST', async () => {
+      const ctx = makeExportContext();
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const putCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof PutObjectCommand);
+      expect(putCalls).to.have.length(1);
+      expect(putCalls[0].args[0].input.IfNoneMatch).to.equal('*');
+      const written = JSON.parse(putCalls[0].args[0].input.Body);
+      expect(written.status).to.equal('processing');
+      expect(written.kind).to.equal('agentic-traffic-urls');
+      expect(written.createdAt).to.be.a('string');
+    });
   });
 
   describe('createAgenticTrafficUrlsExportStatusHandler', () => {
-    it('returns processing when no CSV or metadata exists', async () => {
+    it('returns 200 processing when fresh processing metadata exists', async () => {
       const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'processing', createdAt: new Date().toISOString() },
+      });
       const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body).to.deep.equal({ exportId: EXPORT_ID, status: 'processing' });
+    });
+
+    it('returns 404 when no CSV or metadata exists (unknown exportId)', async () => {
+      // POST writes processing metadata atomically before enqueueing, so an
+      // unknown exportId on GET means it was never POSTed (typo, forged) or
+      // metadata has been evicted — terminal, not "still processing".
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(404);
     });
 
     it('returns ready with presigned URLs for split CSV parts', async () => {

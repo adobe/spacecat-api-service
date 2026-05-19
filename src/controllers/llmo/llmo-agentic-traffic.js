@@ -11,9 +11,10 @@
  */
 
 import {
-  accepted, badRequest, forbidden, internalServerError, ok,
+  accepted, badRequest, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { S3Client } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 import { parseAgentTypes } from './llmo-agent-types.js';
@@ -38,7 +39,10 @@ const VALID_INTERVALS = new Set(['day', 'week', 'month']);
 const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
 const VALID_SUCCESS_RATE_BUCKETS = new Set(['high', 'medium', 'low']);
 const EXPORT_VERSION = 'v1';
-const EXPORT_TYPE = 'agentic-traffic-urls-export';
+const EXPORT_CANONICAL_VERSION = 1;
+const EXPORT_KIND = 'agentic-traffic-urls';
+const EXPORT_TYPE = `${EXPORT_KIND}-export`;
+const EXPORT_FORMAT = 'csv';
 const EXPORT_ID_PATTERN = /^[a-f0-9]{64}$/;
 // Allowlists mirror the CASE whitelists in the DB RPCs — unknown values are already
 // rejected server-side, but we validate here too for defence-in-depth.
@@ -160,7 +164,10 @@ function buildRpcParams(siteId, parsed) {
 
 function canonicalizeExportPayload(siteId, parsed) {
   return {
-    version: EXPORT_VERSION,
+    kind: EXPORT_KIND,
+    v: 1,
+    c: EXPORT_CANONICAL_VERSION,
+    format: EXPORT_FORMAT,
     siteId,
     startDate: parsed.startDate,
     endDate: parsed.endDate,
@@ -171,26 +178,43 @@ function canonicalizeExportPayload(siteId, parsed) {
     contentType: parsed.contentType,
     successRate: parsed.successRate,
     urlPathSearch: parsed.urlPathSearch,
-    format: 'csv',
   };
 }
 
-// Order-stable JSON serialisation. The canonical export payload is a flat
-// object of primitives, so the recursive object branch is enough — no array
-// handling needed.
-function stableStringify(value) {
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+// RFC 8785 JSON Canonicalization Scheme (JCS) — limited to the subset we
+// produce: objects of primitives (string, number, boolean, null). Sorted keys,
+// no whitespace, JS Number.toString() is RFC-compatible for finite values.
+function jcsStringify(value) {
+  if (value === null) {
+    return 'null';
   }
-  return JSON.stringify(value);
+  if (typeof value === 'string') {
+    return JSON.stringify(value);
+  }
+  /* c8 ignore next 9 -- payload uses only string/null today */
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false';
+  }
+  if (typeof value === 'number') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(jcsStringify).join(',')}]`;
+  }
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${jcsStringify(value[k])}`).join(',')}}`;
+  }
+  /* c8 ignore next -- unreachable for our payload shape */
+  throw new TypeError(`JCS: unsupported type ${typeof value}`);
 }
 
 function buildExportId(payload) {
-  return crypto.createHash('sha256').update(stableStringify(payload)).digest('hex');
+  return crypto.createHash('sha256').update(jcsStringify(payload)).digest('hex');
 }
 
-// EXPORT_VERSION is intentionally in both the key prefix (physical isolation)
-// and the canonical payload (forces hash invalidation on bump). Keep both.
+// Schema/canonical version live in the hash payload (kind/v/c/format).
+// Path stays `v1` for now; `v1c1` migration is a coordinated worker + producer change.
 function buildExportKeys(siteId, exportId) {
   const prefix = `agentic-traffic/url-exports/${siteId}/${EXPORT_VERSION}/${exportId}`;
   return {
@@ -247,6 +271,40 @@ async function listExportCsvObjects(ctx, bucket, csvKey) {
   });
 }
 
+// Writes processing metadata as a compare-and-set claim. Returns true if we
+// won the race (proceed to enqueue), false if another POST beat us (don't
+// enqueue, just return 202 processing). `casOnly` uses IfNoneMatch:* so the
+// PUT fails when the object already exists — used on the no-metadata path.
+// Stale/failed retries pass casOnly=false and just overwrite.
+async function claimProcessingMetadata(ctx, bucket, metadataKey, exportId, siteId, casOnly) {
+  const { s3 } = ctx;
+  const body = JSON.stringify({
+    status: 'processing',
+    exportId,
+    siteId,
+    kind: EXPORT_KIND,
+    format: EXPORT_FORMAT,
+    createdAt: new Date().toISOString(),
+  });
+  const command = new s3.PutObjectCommand({
+    Bucket: bucket,
+    Key: metadataKey,
+    Body: body,
+    ContentType: 'application/json',
+    ...(casOnly ? { IfNoneMatch: '*' } : {}),
+  });
+  try {
+    await s3.s3Client.send(command);
+    return true;
+  } catch (error) {
+    if (error.name === 'PreconditionFailed' || error.$metadata?.httpStatusCode === 412) {
+      return false;
+    }
+    /* c8 ignore next 2 -- propagated to the route's catch-all */
+    throw error;
+  }
+}
+
 async function getExportMetadata(ctx, bucket, metadataKey) {
   const { s3 } = ctx;
   try {
@@ -267,12 +325,25 @@ async function getExportMetadata(ctx, bucket, metadataKey) {
 const PRESIGNED_URL_TTL_SECONDS = 60 * 60;
 const MAX_EXPORT_DOWNLOAD_URLS = 50;
 
+// Customer-facing presigned URLs sign against the s3-accelerate endpoint so
+// the AWS region is hidden from the URL. Bucket-side acceleration is enabled
+// in spacecat-infrastructure.
+let acceleratedS3Client;
+function getAcceleratedS3Client(region) {
+  if (!acceleratedS3Client) {
+    acceleratedS3Client = new S3Client({ region, useAccelerateEndpoint: true });
+  }
+  return acceleratedS3Client;
+}
+
 async function buildExportReadyResponse(ctx, bucket, exportId, csvKeys, metadata = null) {
   const expiresIn = PRESIGNED_URL_TTL_SECONDS;
   const keysToSign = csvKeys.slice(0, MAX_EXPORT_DOWNLOAD_URLS);
+  const { s3Region } = getExportConfig(ctx);
+  const signingClient = getAcceleratedS3Client(s3Region);
   const downloadUrls = await Promise.all(keysToSign.map(async (key) => {
     const command = new ctx.s3.GetObjectCommand({ Bucket: bucket, Key: key });
-    return ctx.s3.getSignedUrl(ctx.s3.s3Client, command, { expiresIn });
+    return ctx.s3.getSignedUrl(signingClient, command, { expiresIn });
   }));
   // Computed after signing so callers see the floor of the URL window.
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
@@ -707,7 +778,7 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
         const { s3, sqs } = ctx;
         /* c8 ignore start -- deploy-time misconfig guard, not exercised in unit tests */
         if (!s3?.s3Client || !s3?.ListObjectsV2Command || !s3?.GetObjectCommand
-          || !s3?.getSignedUrl || !sqs?.sendMessage) {
+          || !s3?.PutObjectCommand || !s3?.getSignedUrl || !sqs?.sendMessage) {
           return badRequest('Agentic traffic export requires S3 and SQS configuration');
         }
 
@@ -739,8 +810,20 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
             });
           }
 
-          // Failed / stale-processing / no-metadata → re-enqueue. The worker
-          // overwrites metadata on retry; GET reports `failed` to the UI.
+          // Claim the slot with CAS (IfNoneMatch:*) so concurrent POSTs can't double-enqueue.
+          const casOnly = metadata === null;
+          const claimed = await claimProcessingMetadata(
+            ctx,
+            s3Bucket,
+            metadataKey,
+            exportId,
+            siteId,
+            casOnly,
+          );
+          if (!claimed) {
+            return accepted({ exportId, status: 'processing' });
+          }
+
           await sqs.sendMessage(queueUrl, {
             type: EXPORT_TYPE,
             data: {
@@ -827,6 +910,13 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
               status: 'failed',
               failureReason: 'Export timed out — please retry',
             });
+          }
+
+          // No metadata and no CSV → never POSTed (or evicted). Distinct from
+          // "POSTed, worker hasn't started yet" because POST writes processing
+          // metadata atomically before enqueueing.
+          if (!metadata && csvKeys.length === 0) {
+            return notFound(`No export found for exportId ${exportId}`);
           }
 
           return ok({
