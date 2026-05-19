@@ -1411,7 +1411,18 @@ function LlmoController(ctx) {
             const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : baseURL;
             const hostname = calculateForwardedHost(effectiveBaseUrl, log);
             const detectedCdn = await detectAemCsFastlyForDomain(hostname, log);
-            if (!detectedCdn || detectedCdn !== cdnTypeNormalized) {
+
+            // When the UI sends 'aem-cs-fastly' but detection reveals AEM CS is behind a
+            // customer-managed CDN (BYOCDN), upgrade the request to the manual YAML path.
+            // This handles sites onboarded before Case 1/2 detection existed as well as
+            // sites where the UI selected "AEM CS Fastly" (no BYOCDN-specific option yet).
+            if (
+              cdnTypeNormalized === CDN_TYPES.AEM_CS_FASTLY
+              && detectedCdn === CDN_TYPES.AEM_CS_FASTLY_SIMPLE_PROXY
+            ) {
+              log.info(`[edge-optimize-routing] ${baseURL} Upgrading 'aem-cs-fastly' to 'aem-cs-fastly-simple-proxy' — BYOCDN detected`);
+              cdnTypeNormalized = CDN_TYPES.AEM_CS_FASTLY_SIMPLE_PROXY;
+            } else if (!detectedCdn || detectedCdn !== cdnTypeNormalized) {
               log.error(`[edge-optimize-routing-failed] ${baseURL} Requested cdnType: '${cdnTypeNormalized}', detected CDN: '${detectedCdn}'`);
               return badRequest(`Requested CDN type '${cdnTypeNormalized}' does not match the detected CDN for this domain`);
             }

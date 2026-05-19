@@ -6053,6 +6053,17 @@ describe('LlmoController', () => {
         expect(callCdnRoutingApiStub).to.not.have.been.called;
       });
 
+      it('upgrades aem-cs-fastly to aem-cs-fastly-simple-proxy when BYOCDN detected, returns 200 byocdn-manual', async () => {
+        // Simulates a site onboarded as 'aem-cs-fastly' before Case 1/2 detection existed.
+        // The UI sends cdnType:'aem-cs-fastly', detection returns 'aem-cs-fastly-simple-proxy'.
+        const ctx = makeByoCdnCtx({ data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY } });
+        const result = await controller.createOrUpdateEdgeConfig(ctx);
+        expect(result.status).to.equal(200);
+        const body = await result.json();
+        expect(body.routingType).to.equal('byocdn-manual');
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+      });
+
       it('returns 400 when detected CDN does not match requested aem-cs-fastly-simple-proxy', async () => {
         detectCdnForDomainStub.resolves('byocdn-fastly');
         const result = await controller.createOrUpdateEdgeConfig(makeByoCdnCtx());
