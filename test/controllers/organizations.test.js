@@ -499,7 +499,8 @@ describe('Organizations Controller', () => {
       ...context,
     });
 
-    expect(organizations[0].setConfig).to.have.been.calledOnce;
+    const expectedConfig = { defaults: { ASO: { siteId } } };
+    expect(organizations[0].setConfig).to.have.been.calledOnceWith(expectedConfig);
     expect(organizations[0].save).to.have.been.calledOnce;
     expect(response.status).to.equal(200);
   });

@@ -5481,10 +5481,21 @@ describe('Sites Controller', () => {
         expect(mockCtx.log.warn).to.have.been.called;
       });
 
-      it('returns null when the configured site is not actively enrolled', async () => {
+      it('returns null when the configured site has no active enrollments', async () => {
         mockTierClientStub.getAllEnrollment.resolves({
           entitlement: { getTier: () => 'FREE_TRIAL' },
           enrollments: [],
+        });
+
+        const result = await resolveOrgDefaultSite(org, productCode, context, mockCtx);
+
+        expect(result).to.be.null;
+      });
+
+      it('returns null when the configured site is on a non-customer-visible tier', async () => {
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
         });
 
         const result = await resolveOrgDefaultSite(org, productCode, context, mockCtx);
