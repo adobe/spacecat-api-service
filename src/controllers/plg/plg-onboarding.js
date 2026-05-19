@@ -49,6 +49,7 @@ import {
 } from '../../support/utils.js';
 import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
+import { updateRumConfig } from '../../support/rum-config-service.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { cleanupPlgSiteSuggestionsAndFixes } from './plg-onboarding-cleanup.js';
@@ -703,6 +704,9 @@ async function performAsoPlgOnboarding({
     }
   }
   onboarding.setUpdatedBy(callerIdentity);
+  if ([STATUSES.PRE_ONBOARDING, STATUSES.INACTIVE].includes(onboarding.getStatus())) {
+    onboarding.setCreatedBy(callerIdentity);
+  }
 
   // Guard: only one domain per IMS org can be onboarded
   const existingRecords = await PlgOnboarding.allByImsOrgId(imsOrgId);
@@ -831,6 +835,7 @@ async function performAsoPlgOnboarding({
   // Fast path: preonboarded sites just need enrollment + ONBOARDED
   if (onboarding.getStatus() === STATUSES.PRE_ONBOARDING && onboarding.getSiteId()) {
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
+    onboarding.setSteps({ ...(onboarding.getSteps() || {}), preOnboarded: true });
     let site = await Site.findById(onboarding.getSiteId());
     if (site) {
       try {
@@ -1242,6 +1247,10 @@ async function performAsoPlgOnboarding({
     if (!site.getProjectId()) {
       site.setProjectId(project.getId());
     }
+
+    // Perform a live RUM domain-key check and persist the result.
+    const hasDomainKey = await updateRumConfig(site, context, { save: false });
+    siteConfig.updateRumConfig(hasDomainKey);
 
     // Save site with updated config
     site.setConfig(Config.toDynamoItem(siteConfig));
@@ -2089,7 +2098,7 @@ function PlgOnboardingController(ctx) {
         'orgResolved', 'rumVerified', 'siteCreated', 'siteResolved', 'siteOrgReassigned',
         'authorUrlResolved', 'hlxConfigSet', 'codeConfigResolved', 'configUpdated',
         'auditsEnabled', 'deliveryConfigQueued', 'entitlementCreated', 'entitlementFailed',
-        'orgResolutionFailed',
+        'orgResolutionFailed', 'preOnboarded',
       ]);
       const invalidKeys = Object.keys(steps).filter((k) => !VALID_STEP_KEYS.has(k));
       if (invalidKeys.length > 0) {

@@ -61,6 +61,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   let ldUpdateVariationValueStub;
   let ldCreateFromStub;
   let configToDynamoItemStub;
+  let updateRumConfigStub;
 
   // Mock objects
   let mockLog;
@@ -175,6 +176,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
     // RUM API client stubs
     rumRetrieveDomainkeyStub = sandbox.stub().resolves('test-domainkey');
+    updateRumConfigStub = sandbox.stub().resolves(true);
 
     // Shared-utils stubs
     composeBaseURLStub = sandbox.stub().returns(TEST_BASE_URL);
@@ -248,6 +250,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     mockSiteConfig = {
       getFetchConfig: sandbox.stub().returns({}),
       updateFetchConfig: sandbox.stub(),
+      updateRumConfig: sandbox.stub(),
       getImports: sandbox.stub().returns([]),
       enableImport: sandbox.stub(),
     };
@@ -426,6 +429,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           default: {
             fromContext: () => ({ hasAdminAccess: () => false, hasAdminReadAccess: () => false }),
           },
+        },
+        '../../../src/support/rum-config-service.js': {
+          updateRumConfig: updateRumConfigStub,
         },
       },
     )).default;
@@ -646,6 +652,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             default: {
               fromContext: () => ({ hasAdminAccess: () => true }),
             },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -911,6 +920,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => false }) },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
 
@@ -1015,6 +1027,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -1124,6 +1139,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -2018,6 +2036,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               fromContext: () => ({ hasAdminAccess: () => false }),
             },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
     });
@@ -2419,6 +2440,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => true }) },
+          },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
           },
         },
       )).default;
@@ -3004,6 +3028,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       siteWithOverride.getConfig.returns({
         getFetchConfig: () => fetchConfigWithOverride,
         updateFetchConfig: sandbox.stub(),
+        updateRumConfig: sandbox.stub(),
         getImports: () => [],
         enableImport: sandbox.stub(),
       });
@@ -3182,6 +3207,32 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('stamps customer identity as createdBy when existing record is PRE_ONBOARDING', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('customer@example.com');
+    });
+
+    it('stamps customer identity as createdBy when existing record is INACTIVE', async () => {
+      mockOnboarding.getStatus.returns('INACTIVE');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('customer@example.com');
+    });
+
+    it('does not overwrite createdBy when status is not PRE_ONBOARDING or INACTIVE', async () => {
+      mockOnboarding.getStatus.returns('IN_PROGRESS');
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
     });
 
     it('allows onboarding when other domains exist but none are onboarded', async () => {
@@ -4367,6 +4418,14 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           orgResolved: true,
           siteResolved: true,
           configUpdated: true,
+          preOnboarded: true,
+        }),
+      );
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match({
+          orgResolved: true,
+          siteResolved: true,
+          configUpdated: true,
           entitlementCreated: true,
         }),
       );
@@ -4396,6 +4455,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(response.status).to.equal(200);
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ preOnboarded: true });
       expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ entitlementCreated: true });
     });
 
@@ -4946,6 +5006,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               fromContext: () => ({ hasAdminAccess: () => true }),
             },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
     });
@@ -5090,6 +5153,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                   hasAdminReadAccess: () => true,
                 }),
               },
+            },
+            '../../../src/support/rum-config-service.js': {
+              updateRumConfig: updateRumConfigStub,
             },
           },
         )).default;
@@ -5669,6 +5735,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '../../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAdminAccess: () => true }) },
           },
+          '../../../src/support/rum-config-service.js': {
+            updateRumConfig: updateRumConfigStub,
+          },
         },
       )).default;
     });
@@ -5765,6 +5834,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: sandbox.stub() },
             '../../../src/support/access-control-util.js': {
               default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+            },
+            '../../../src/support/rum-config-service.js': {
+              updateRumConfig: updateRumConfigStub,
             },
           },
         )).default;
@@ -7936,7 +8008,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               status: 'WAITLISTED',
               siteId: newSiteId,
               organizationId: newOrgId,
-              steps: { orgResolved: true, rumVerified: true },
+              steps: { orgResolved: true, rumVerified: true, preOnboarded: true },
               botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4'], userAgent: 'bot' },
               waitlistReason: 'pending review',
               updatedBy: 'admin@example.com',
@@ -7959,7 +8031,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('admin@example.com');
           expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('admin@example.com');
           expect(mockOnboarding.setSteps).to.have.been.calledWith(
-            { orgResolved: true, rumVerified: true },
+            { orgResolved: true, rumVerified: true, preOnboarded: true },
           );
           expect(mockOnboarding.save).to.have.been.called;
         });
