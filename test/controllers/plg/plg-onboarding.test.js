@@ -7154,6 +7154,33 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setStatus).to.not.have.been.called;
       });
 
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: rejects syntactically-valid SSRF target (foo.localhost)', async () => {
+        // Covers the isSafeDomain branch: input passes isValidDomain (has a dot, alphabetic TLD)
+        // but matches the \.localhost$ blocklist entry.
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Use alternate', siteConfig: { alternateDomain: 'foo.localhost' } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid alternate domain');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
       it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: retires current domain and onboards alternate domain', async () => {
         const record = createMockOnboarding({
           status: 'WAITLISTED',
