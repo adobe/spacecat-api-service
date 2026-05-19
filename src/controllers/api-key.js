@@ -132,10 +132,11 @@ function ApiKeyController(context) {
     }
 
     const profile = authInfo.getProfile?.();
-    // profile.email is the caller's real email address. ApiKeyImsHandler
-    // normalises IMS auth to use the real email (overriding the user_id alias
-    // set by AdobeImsHandler.transformProfile), so both the IMS and JWT paths
-    // store the same stable identity on ApiKey records.
+    // profile.email is the IMS user_id alias (e.g. ABC123@AdobeID) for IMS
+    // callers (AdobeImsHandler.transformProfile intentionally maps email →
+    // user_id) and the same alias for JWT callers (the spacecat auth service
+    // puts user_id in the JWT email claim). ApiKey records use this alias as
+    // the stable imsUserId — never the real address.
     const imsUserId = profile?.email;
     if (!hasText(imsUserId)) {
       throw new ErrorWithStatusCode('Invalid request: caller profile is missing email/user_id', STATUS_UNAUTHORIZED);

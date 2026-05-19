@@ -214,9 +214,9 @@ describe('ApiKeyController tests', () => {
       expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
     });
 
-    it('should create a new API key with a username prefix (JWT caller, real email)', async () => {
-      // JWT auth surfaces the caller's real email on profile.email, so the
-      // generated key reads `<emailLocalPart>-<uuid>`.
+    it('should create a new API key with a username prefix (JWT caller)', async () => {
+      // JWT profile.email is the IMS user_id alias (e.g. ABC123@AdobeID); the
+      // default makeAuthInfo uses test@example.com so the prefix is `test`.
       context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
@@ -226,11 +226,9 @@ describe('ApiKeyController tests', () => {
       expect(responseJson.apiKey).to.match(/^test-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     });
 
-    it('should generate a GUID-style prefix when profile.email has GUID-style format', async () => {
-      // ApiKeyImsHandler normalises profile.email to the real address for IMS
-      // callers, so `ABC123@AdobeID` reaching the controller is a synthetic
-      // scenario (e.g. a future handler that doesn't normalise). The prefix
-      // logic must still derive `ABC123` correctly in that case.
+    it('should generate a GUID-style prefix for IMS callers (alias format)', async () => {
+      // IMS callers surface profile.email = payload.user_id (e.g. ABC123@AdobeID).
+      // The prefix strips everything after @ so the key reads `ABC123-<uuid>`.
       context.attributes.authInfo = makeAuthInfo({ profileEmail: 'ABC123@AdobeID' });
       apiKeyController = ApiKeyController(context);
       context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);

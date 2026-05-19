@@ -91,11 +91,14 @@ describe('ApiKeyImsHandler', () => {
     );
   });
 
-  it('normalises profile.email to trial_email (real address) when present', async () => {
+  it('preserves profile.email as the IMS user_id alias (does NOT normalise to trial_email)', async () => {
+    // AdobeImsHandler.transformProfile sets profile.email = payload.user_id
+    // (e.g. ABC123@AdobeID). ApiKey records store this alias as imsUserId —
+    // never the real address — so we must not overwrite profile.email here.
     const profile = { email: 'ABC123@AdobeID', trial_email: 'real@adobe.com' };
     superCheckAuthStub.resolves({ getProfile: () => profile });
     await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' } });
-    expect(profile.email).to.equal('real@adobe.com');
+    expect(profile.email).to.equal('ABC123@AdobeID');
   });
 
   it('leaves profile.email unchanged when trial_email is absent', async () => {
