@@ -4,6 +4,13 @@
   "extends": [
     "local>adobe/spacecat-api-service"
   ],
+  // Pin Renovate's worker to Node 24 so `npm install` succeeds against the
+  // repo's strict engines.node range. Without this, Renovate silently skips
+  // updating package-lock.json on every dep PR, breaking `npm ci` on main
+  // until someone re-syncs the lock manually.
+  "constraints": {
+    "node": "24"
+  },
   "packageRules": [
     {
       "matchPackageNames": [
