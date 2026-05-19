@@ -1,3 +1,10 @@
+## [1.500.5](https://github.com/adobe/spacecat-api-service/compare/v1.500.4...v1.500.5) (2026-05-18)
+
+
+### Bug Fixes
+
+* updated the createdBy in plg onboarding ([#2398](https://github.com/adobe/spacecat-api-service/issues/2398)) ([7032ed2](https://github.com/adobe/spacecat-api-service/commit/7032ed257e2c1a6b3285de708eef069e3997fcff))
+
 ## [1.500.4](https://github.com/adobe/spacecat-api-service/compare/v1.500.3...v1.500.4) (2026-05-15)
 
 
