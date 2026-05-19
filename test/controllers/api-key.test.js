@@ -32,11 +32,17 @@ use(chaiAsPromised);
  * Builds a stub authInfo whose hasOrganization() returns true for the given orgId
  * and whose getProfile() returns the provided profile.
  */
-function makeAuthInfo({ profileEmail = 'test@example.com', orgs = ['test-org'], type = 'ims' } = {}) {
+function makeAuthInfo({
+  profileEmail = 'test@example.com',
+  orgs = ['test-org'],
+  type = 'ims',
+  isAdmin = false,
+} = {}) {
   return {
     getType: () => type,
     getProfile: () => ({ email: profileEmail }),
     hasOrganization: (orgId) => orgs.includes(orgId),
+    hasScope: (scope) => scope === 'admin' && isAdmin,
   };
 }
 
@@ -153,6 +159,17 @@ describe('ApiKeyController tests', () => {
       apiKeyController = ApiKeyController(context);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_UNAUTHORIZED);
+    });
+
+    it('should allow an admin caller even when hasOrganization returns false', async () => {
+      // Admins bypass the tenant-membership check. AdobeImsHandler does not
+      // populate profile.tenants for admin users (only sets the admin scope),
+      // so hasOrganization() always returns false for them.
+      context.attributes.authInfo = makeAuthInfo({ orgs: [], isAdmin: true, type: 'jwt' });
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
+      apiKeyController = ApiKeyController(context);
+      const response = await apiKeyController.createApiKey({ ...requestContext });
+      expect(response.status).to.equal(STATUS_CREATED);
     });
 
     it('should throw an error if authInfo is missing on attributes (no auth middleware)', async () => {

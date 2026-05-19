@@ -144,7 +144,11 @@ function ApiKeyController(context) {
     if (typeof authInfo.hasOrganization !== 'function') {
       throw new ErrorWithStatusCode('Unauthorized: authInfo missing hasOrganization', STATUS_INTERNAL_SERVER_ERROR);
     }
-    if (!authInfo.hasOrganization(imsOrgId)) {
+    // Admins bypass the tenant-membership check (consistent with hasAdminAccess()
+    // policy elsewhere). For IMS admin users, AdobeImsHandler does not populate
+    // profile.tenants (it only sets the admin scope), so hasOrganization() would
+    // always return false for them even when the request is legitimate.
+    if (!authInfo.hasScope('admin') && !authInfo.hasOrganization(imsOrgId)) {
       throw new ErrorWithStatusCode('Invalid request: Unable to find a reference to the Organization provided.', STATUS_UNAUTHORIZED);
     }
 
