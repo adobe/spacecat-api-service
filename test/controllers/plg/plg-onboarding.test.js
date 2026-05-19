@@ -792,6 +792,53 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         const context = buildContext({ domain });
         const res = await controller.onboard(context);
         expect(res.status).to.equal(200);
+
+        // Lock in that the full subpath flows through end-to-end (no silent path-stripping)
+        expect(composeBaseURLStub).to.have.been.calledWith(domain);
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ domain }),
+        );
+      });
+    });
+
+    it('accepts scheme-prefixed subpath input (strips https://)', async () => {
+      const context = buildContext({ domain: 'https://nba.com/kings' });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(composeBaseURLStub).to.have.been.calledWith('nba.com/kings');
+      expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+        sinon.match({ domain: 'nba.com/kings' }),
+      );
+    });
+
+    // Pins stripScheme behavior via the controller boundary (the helper itself is not exported).
+    const stripSchemeCases = [
+      { input: 'http://nba.com/kings', expected: 'nba.com/kings', desc: 'lowercase http://' },
+      { input: 'HTTP://nba.com/kings', expected: 'nba.com/kings', desc: 'uppercase HTTP://' },
+      { input: 'HtTpS://nba.com', expected: 'nba.com', desc: 'mixed-case scheme' },
+      { input: 'nba.com', expected: 'nba.com', desc: 'schemeless passthrough' },
+    ];
+
+    stripSchemeCases.forEach(({ input, expected, desc }) => {
+      it(`stripScheme: ${desc} -> ${expected}`, async () => {
+        const context = buildContext({ domain: input });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(200);
+        expect(composeBaseURLStub).to.have.been.calledWith(expected);
+      });
+    });
+
+    // Non-http schemes and protocol-relative inputs are NOT stripped; DOMAIN_RE rejects them.
+    const stripSchemeRejectCases = [
+      { input: 'ftp://nba.com', desc: 'non-http scheme not stripped' },
+      { input: '//nba.com', desc: 'protocol-relative not stripped' },
+    ];
+
+    stripSchemeRejectCases.forEach(({ input, desc }) => {
+      it(`stripScheme: ${desc} -> 400`, async () => {
+        const context = buildContext({ domain: input });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(400);
       });
     });
   });
@@ -7070,6 +7117,33 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           dataAccess: mockDataAccess,
           params: { onboardingId: TEST_ONBOARDING_ID },
           data: { decision: 'BYPASSED', justification: 'Use alternate', siteConfig: { alternateDomain: 'localhost' } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid alternate domain');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: rejects scheme-prefixed internal IP (regression for isSafeDomain bypass)', async () => {
+        // Regression: previously `https://10.0.0.1` slipped past isSafeDomain because
+        // split('/')[0] returned `https:` instead of the IP. isValidDomain now runs first.
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Use alternate', siteConfig: { alternateDomain: 'https://10.0.0.1' } },
           attributes: adminAuthAttributes,
           env: mockEnv,
           log: mockLog,

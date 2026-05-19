@@ -239,7 +239,9 @@ async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
 // AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
 const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
 
-// Strip http:// or https:// scheme so callers can pass full URLs or bare hostnames interchangeably.
+// Strip http:// or https:// scheme so callers can pass either scheme-prefixed input or a bare
+// hostname/path. Only the scheme is removed — port, userinfo, query, and fragment are NOT
+// stripped and will be rejected by DOMAIN_RE downstream.
 const stripScheme = (s) => s.replace(/^https?:\/\//i, '');
 
 // RFC 1123 hostname optionally followed by a URL path; no scheme, port, query, or fragment.
@@ -253,7 +255,9 @@ const stripScheme = (s) => s.replace(/^https?:\/\//i, '');
 const DOMAIN_RE = /^(?=[^/]{1,253}(?:\/|$))([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)*$/;
 
 /**
- * Validates that a domain string is a syntactically valid hostname or hostname/path (RFC 1123).
+ * Validates that a domain string is a syntactically valid hostname or hostname/path.
+ * The hostname portion follows RFC 1123; the optional path portion is an extension to support
+ * subpath onboarding (e.g. "nba.com/kings"). Scheme, port, query, and fragment are rejected.
  * @param {string} domain - The domain to validate (e.g. "nba.com" or "nba.com/kings").
  * @returns {boolean} true if valid, false otherwise.
  */
@@ -263,7 +267,13 @@ function isValidDomain(domain) {
 
 /**
  * Validates that a domain is not a private/internal address to prevent SSRF.
- * Assumes isValidDomain() has already accepted the input (no scheme, port, or IP literals).
+ *
+ * IMPORTANT ordering contract: callers MUST invoke stripScheme() and isValidDomain() BEFORE
+ * this function. The hostname is extracted via `split('/')[0]`, so if a raw scheme-prefixed
+ * input like "https://10.0.0.1" reaches this function, the split yields "https:" and the
+ * private-IP blocklist is bypassed. isValidDomain() rejects any scheme-prefixed input, which
+ * is what makes this contract safe.
+ *
  * @param {string} domain - The domain to validate (may include a path, e.g. "nba.com/kings").
  * @returns {boolean} true if safe, false if potentially dangerous.
  */
@@ -1900,8 +1910,11 @@ function PlgOnboardingController(ctx) {
 
           // Handle alternateDomain: retire current domain, onboard a new domain under current org
           if (hasText(siteConfig?.alternateDomain)) {
-            const altDomain = siteConfig.alternateDomain;
-            if (!isValidDomain(altDomain) || !isSafeDomain(altDomain)) {
+            const altDomain = stripScheme(siteConfig.alternateDomain);
+            if (!isValidDomain(altDomain)) {
+              return badRequest(`Invalid alternate domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings): ${altDomain}`);
+            }
+            if (!isSafeDomain(altDomain)) {
               return badRequest(`Invalid alternate domain: ${altDomain}`);
             }
             onboarding.setStatus(STATUSES.OUTDATED);
