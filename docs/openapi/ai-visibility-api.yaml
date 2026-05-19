@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 26 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – 25 GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 

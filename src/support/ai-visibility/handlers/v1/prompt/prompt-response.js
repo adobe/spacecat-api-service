@@ -36,17 +36,26 @@ export async function handlePromptResponse(sp, clients) {
   const promptHash = sp.get('promptHash');
   const serpId = sp.get('serpId');
 
-  const promptResponseRequest = fromJson(
-    PromptRequestSchema,
-    {
-      country,
-      llm: engine,
-      prompt_hash: promptHash,
-      serp_id: serpId,
-      topic_id: topicId,
-    },
-    FROM_JSON,
-  );
+  let promptResponseRequest;
+  try {
+    promptResponseRequest = fromJson(
+      PromptRequestSchema,
+      {
+        country,
+        llm: engine,
+        prompt_hash: promptHash,
+        serp_id: serpId,
+        topic_id: topicId,
+      },
+      FROM_JSON,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid prompt request';
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message },
+    };
+  }
 
   try {
     const promptsMessage = await clients.prRelationsClient.prompt(
