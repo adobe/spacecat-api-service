@@ -422,6 +422,165 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(403);
     });
+
+    describe('Brand Governance Agent priority chain', () => {
+      const BRAND_GOV_ENV = {
+        IMS_HOST: 'https://ims-na1.adobelogin.com',
+        BRAND_GOV_IMS_CLIENT_ID: 'gov-client-id',
+        BRAND_GOV_IMS_CLIENT_CODE: 'gov-client-code',
+        BRAND_GOV_IMS_CLIENT_SECRET: 'gov-client-secret',
+      };
+
+      const makeSiteWithoutBrand = () => new Site(
+        {
+          entities: {
+            site: {
+              model: {
+                indexes: {},
+                schema: {
+                  attributes: {
+                    config: { type: 'any', name: 'config', get: (value) => Config(value) },
+                    organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
+                  },
+                },
+              },
+              patch: sinon.stub().returns({
+                composite: () => ({ go: () => {} }),
+                set: () => {},
+              }),
+            },
+          },
+        },
+        {
+          log: loggerStub,
+          getCollection: stub().returns({ schema: SiteSchema, findById: stub() }),
+        },
+        SiteSchema,
+        { siteId: SITE_ID, config: Config({}) },
+        loggerStub,
+      );
+
+      it('returns Brand Governance guidelines and skips Brand Publish when site is registered in governance', async () => {
+        const mockGovGuidelines = {
+          id: 'frescopa-2A53',
+          name: 'Frescopa Coffee',
+          imsOrgId: IMS_ORG_ID,
+          guidelines: [{ name: 'Sophisticated Voice', text: 'Use sensory language' }],
+        };
+        const brandGovClientStub = {
+          getBrandGuidelinesForUrl: sinon.stub().resolves(mockGovGuidelines),
+        };
+        const brandClientStub = { getBrandGuidelines: sinon.stub() };
+        const govContext = {
+          ...context,
+          brandGovernanceClient: brandGovClientStub,
+          brandClient: brandClientStub,
+        };
+        const govEnv = { ...mockEnv, ...BRAND_GOV_ENV };
+        const govController = BrandsController(govContext, loggerStub, govEnv);
+
+        const response = await govController.getBrandGuidelinesForSite({
+          ...govContext,
+          params: { siteId: SITE_ID },
+        });
+
+        expect(response.status).to.equal(200);
+        const guidelines = await response.json();
+        expect(guidelines).to.deep.equal(mockGovGuidelines);
+        expect(brandGovClientStub.getBrandGuidelinesForUrl).to.have.been.calledOnceWith(
+          'https://site1.com',
+          IMS_ORG_ID,
+          {
+            host: BRAND_GOV_ENV.IMS_HOST,
+            clientId: BRAND_GOV_ENV.BRAND_GOV_IMS_CLIENT_ID,
+            clientCode: BRAND_GOV_ENV.BRAND_GOV_IMS_CLIENT_CODE,
+            clientSecret: BRAND_GOV_ENV.BRAND_GOV_IMS_CLIENT_SECRET,
+          },
+        );
+        expect(brandClientStub.getBrandGuidelines).to.not.have.been.called;
+      });
+
+      it('falls back to Brand Publish when Brand Governance returns null (site not in governance)', async () => {
+        const mockGuidelines = { theme: 'dark', colors: ['#000', '#fff'] };
+        const brandGovClientStub = {
+          getBrandGuidelinesForUrl: sinon.stub().resolves(null),
+        };
+        const brandClientStub = { getBrandGuidelines: sinon.stub().resolves(mockGuidelines) };
+        const govContext = {
+          ...context,
+          brandGovernanceClient: brandGovClientStub,
+          brandClient: brandClientStub,
+        };
+        const govEnv = { ...mockEnv, ...BRAND_GOV_ENV };
+        const govController = BrandsController(govContext, loggerStub, govEnv);
+
+        const response = await govController.getBrandGuidelinesForSite({
+          ...govContext,
+          params: { siteId: SITE_ID },
+          env: { BRAND_API_BASE_URL: 'https://brand-api.com', BRAND_API_KEY: 'brand-api-key' },
+        });
+
+        expect(response.status).to.equal(200);
+        const guidelines = await response.json();
+        expect(guidelines).to.deep.equal(mockGuidelines);
+        expect(brandGovClientStub.getBrandGuidelinesForUrl).to.have.been.calledOnce;
+        expect(brandClientStub.getBrandGuidelines).to.have.been.calledOnce;
+      });
+
+      it('returns 404 when Brand Governance returns null and brand config is also missing', async () => {
+        mockDataAccess.Site.findById.resolves(makeSiteWithoutBrand());
+        const brandGovClientStub = { getBrandGuidelinesForUrl: sinon.stub().resolves(null) };
+        const govContext = { ...context, brandGovernanceClient: brandGovClientStub };
+        const govEnv = { ...mockEnv, ...BRAND_GOV_ENV };
+        const govController = BrandsController(govContext, loggerStub, govEnv);
+
+        const response = await govController.getBrandGuidelinesForSite({
+          ...govContext,
+          params: { siteId: SITE_ID },
+          env: { BRAND_API_BASE_URL: 'https://brand-api.com', BRAND_API_KEY: 'brand-api-key' },
+        });
+
+        expect(response.status).to.equal(404);
+        const error = await response.json();
+        expect(error).to.have.property('message', `Brand config is missing, brandId or userId for site ID: ${SITE_ID}`);
+      });
+
+      it('skips Brand Governance and uses Brand Publish when gov env vars are not configured', async () => {
+        const mockGuidelines = { theme: 'light' };
+        const brandClientStub = { getBrandGuidelines: sinon.stub().resolves(mockGuidelines) };
+        const govClientStub = { getBrandGuidelinesForUrl: sinon.stub() };
+        // mockEnv has no BRAND_GOV_IMS_* vars — govConfig will be null, gov path skipped
+        const noGovContext = {
+          ...context, brandClient: brandClientStub, brandGovernanceClient: govClientStub,
+        };
+
+        const response = await brandsController.getBrandGuidelinesForSite({
+          ...noGovContext,
+          params: { siteId: SITE_ID },
+          env: { BRAND_API_BASE_URL: 'https://brand-api.com', BRAND_API_KEY: 'brand-api-key' },
+        });
+
+        expect(response.status).to.equal(200);
+        expect(govClientStub.getBrandGuidelinesForUrl).to.not.have.been.called;
+        expect(brandClientStub.getBrandGuidelines).to.have.been.calledOnce;
+      });
+
+      it('returns error response when Brand Governance client throws', async () => {
+        const brandGovClientStub = {
+          getBrandGuidelinesForUrl: sinon.stub().rejects(new Error('Brand Governance API unavailable')),
+        };
+        const govContext = { ...context, brandGovernanceClient: brandGovClientStub };
+        const govEnv = { ...mockEnv, ...BRAND_GOV_ENV };
+        const govController = BrandsController(govContext, loggerStub, govEnv);
+
+        const response = await govController.getBrandGuidelinesForSite({
+          ...govContext,
+          params: { siteId: SITE_ID },
+        });
+
+        expect(response.status).to.equal(500);
+      });
+    });
   });
 
   describe('listPromptsByBrand (brand-scoped prompts CRUD)', () => {
