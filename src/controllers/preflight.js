@@ -192,7 +192,7 @@ function PreflightController(ctx, log, env) {
         site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
       }
 
-      log.debug(`createPreflightJob url: ${url}, siteId: ${data.siteId}}, step: ${step}`);
+      log.debug(`createPreflightJob url: ${url}, siteId: ${data.siteId}, step: ${step}`);
 
       if (!site) {
         throw new Error(`No site found for preview URL: ${previewBaseURL}`);
@@ -219,7 +219,7 @@ function PreflightController(ctx, log, env) {
         enableAuthentication,
       };
 
-      log.debug('createPreflightJob creating async job with payload: ', jobPayload);
+      log.debug(`createPreflightJob creating async job with payload: ${JSON.stringify(jobPayload)}`);
 
       const job = await dataAccess.AsyncJob.create({
         status: 'IN_PROGRESS',
@@ -239,11 +239,12 @@ function PreflightController(ctx, log, env) {
           ...(ctx.traceId && { traceId: ctx.traceId }),
         };
 
+        // remove the promiseToken from the message if it exists from the debug log
+        log.debug(`createPreflightJob sending message to SQS with payload: ${JSON.stringify(sqsMessage)}`);
+
         if (PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
           sqsMessage.promiseToken = promiseTokenResponse;
         }
-
-        log.debug(`createPreflightJob sending message to SQS with payload: ${JSON.stringify(sqsMessage)}`);
 
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);
       } catch (error) {
