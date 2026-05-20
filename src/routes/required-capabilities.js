@@ -196,6 +196,15 @@ export const INTERNAL_ROUTES = [
   // bucket like `monitoring:read` that would re-create the same problem for the next
   // monitoring endpoint.
   'GET /monitoring/drs-bp-pg-audit',
+
+  // FACS Phase 2 state-layer management endpoints. Customer-org admins
+  // manage their own ReBAC grants here, gated by llmo/can_manage_user
+  // in facs-capabilities.js. Never S2S — automated consumers must never
+  // be able to grant themselves access to customer resources.
+  'GET /facs/access-mappings',
+  'POST /facs/access-mappings',
+  'DELETE /facs/access-mappings',
+  'DELETE /facs/access-mappings/:id',
 ];
 
 /**

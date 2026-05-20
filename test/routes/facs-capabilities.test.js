@@ -60,8 +60,13 @@ describe('routeFacsCapabilities', () => {
   });
 
   describe('top-level shape', () => {
-    it('exposes exactly INTERNAL_ROUTES and PRODUCTS_ROUTES', () => {
-      expect(routeFacsCapabilities).to.have.all.keys('INTERNAL_ROUTES', 'PRODUCTS_ROUTES');
+    it('exposes the Phase 1 + Phase 2 keys', () => {
+      expect(routeFacsCapabilities).to.have.all.keys(
+        'INTERNAL_ROUTES',
+        'PRODUCTS_ROUTES',
+        'PRODUCTS_FACS_RESOURCE_PARAM_ALIASES',
+        'FACS_NON_RESOURCE_PARAMS',
+      );
     });
 
     it('INTERNAL_ROUTES is an array', () => {
@@ -168,6 +173,116 @@ describe('routeFacsCapabilities', () => {
           `${product} is missing ${missing.length} routes that are not in INTERNAL_ROUTES: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`,
         ).to.deep.equal([]);
       });
+    });
+  });
+
+  /**
+   * Phase 2 — Resource Identification.
+   *
+   * Pins the structural contract for `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES`
+   * and the exhaustive classification invariant against every `:param` in
+   * `src/routes/index.js` (see mac-state-layer.md §"Resource Identification").
+   */
+  describe('PRODUCTS_FACS_RESOURCE_PARAM_ALIASES', () => {
+    let allRouteParams;
+    before(() => {
+      const source = readFileSync(join(projectRoot, 'src/routes/index.js'), 'utf8');
+      allRouteParams = new Set();
+      // Extract `:param` segments from route patterns.
+      const re = /:([a-zA-Z_][a-zA-Z0-9_]*)/g;
+      for (const m of source.matchAll(re)) {
+        allRouteParams.add(m[1]);
+      }
+    });
+
+    function unionOfProductAliases() {
+      return new Set(
+        Object.values(routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES)
+          .flatMap((perProductResources) => Object.values(perProductResources).flat()),
+      );
+    }
+
+    it('keys are uppercase product codes that exist in PRODUCTS_ROUTES', () => {
+      const productKeys = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES);
+      Object.keys(routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES).forEach((p) => {
+        expect(p, `product '${p}' must be uppercase`).to.equal(p.toUpperCase());
+        expect(productKeys, `product '${p}' must also exist in PRODUCTS_ROUTES`).to.include(p);
+      });
+    });
+
+    it('each product value is an object', () => {
+      Object.values(routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES).forEach((m) => {
+        expect(m).to.be.an('object');
+      });
+    });
+
+    it('each resource value is a non-empty array of strings', () => {
+      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES)
+        .forEach(([product, resourceMap]) => {
+          Object.entries(resourceMap).forEach(([resource, aliases]) => {
+            expect(aliases, `${product}.${resource} must be an array`).to.be.an('array');
+            aliases.forEach((alias) => {
+              expect(alias, `${product}.${resource} aliases must be strings`).to.be.a('string');
+            });
+          });
+        });
+    });
+
+    it('within each product, no alias appears under more than one resource', () => {
+      for (const [product, resourceMap] of Object.entries(
+        routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES,
+      )) {
+        const seen = new Map();
+        for (const [resource, aliases] of Object.entries(resourceMap)) {
+          for (const alias of aliases) {
+            expect(
+              seen.has(alias),
+              `${product}: alias '${alias}' declared under both '${seen.get(alias)}' and '${resource}'`,
+            ).to.be.false;
+            seen.set(alias, resource);
+          }
+        }
+      }
+    });
+
+    it('PRODUCTS_FACS_RESOURCE_PARAM_ALIASES and FACS_NON_RESOURCE_PARAMS are disjoint', () => {
+      const claimedByAnyProduct = unionOfProductAliases();
+      const nonResource = new Set(routeFacsCapabilities.FACS_NON_RESOURCE_PARAMS);
+      const overlap = [...claimedByAnyProduct].filter((p) => nonResource.has(p));
+      expect(
+        overlap,
+        `params claimed by a product AND in FACS_NON_RESOURCE_PARAMS (remove from the latter): ${overlap.join(', ')}`,
+      ).to.deep.equal([]);
+    });
+
+    it('every alias claimed by any product corresponds to a real :param in src/routes/index.js', () => {
+      const claimedByAnyProduct = unionOfProductAliases();
+      const stale = [...claimedByAnyProduct].filter((alias) => !allRouteParams.has(alias));
+      expect(
+        stale,
+        `stale aliases not found as :param in any route: ${stale.join(', ')}`,
+      ).to.deep.equal([]);
+    });
+
+    it('every :param in src/routes/index.js is classified (resource OR non-resource)', () => {
+      const claimedByAnyProduct = unionOfProductAliases();
+      const nonResource = new Set(routeFacsCapabilities.FACS_NON_RESOURCE_PARAMS);
+      const unclassified = [...allRouteParams].filter(
+        (p) => !claimedByAnyProduct.has(p) && !nonResource.has(p),
+      );
+      expect(
+        unclassified,
+        `unclassified params (add to PRODUCTS_FACS_RESOURCE_PARAM_ALIASES.<product>.<resource> or FACS_NON_RESOURCE_PARAMS): ${unclassified.join(', ')}`,
+      ).to.deep.equal([]);
+    });
+
+    it('FACS_NON_RESOURCE_PARAMS does not contain stale entries', () => {
+      const nonResource = routeFacsCapabilities.FACS_NON_RESOURCE_PARAMS;
+      const stale = nonResource.filter((p) => !allRouteParams.has(p));
+      expect(
+        stale,
+        `FACS_NON_RESOURCE_PARAMS contains params not used in any route: ${stale.join(', ')}`,
+      ).to.deep.equal([]);
     });
   });
 });

@@ -100,6 +100,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
+ * @param {Object} facsAccessMappingsController - FACS Phase 2 state-layer mappings controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -157,6 +158,7 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
+  facsAccessMappingsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -655,6 +657,16 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/topics/stats': aiVisibilityController.getTopicsStats,
     'GET /llmo/ai-visibility/v1/topic/brand-topics': aiVisibilityController.getV1TopicBrandTopics,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
+
+    // FACS Phase 2 state-layer management endpoints. Gated by:
+    //  - facsWrapper (PRODUCTS_ROUTES.LLMO: llmo/can_manage_user on writes,
+    //    llmo/can_view on the list)
+    //  - required-capabilities.INTERNAL_ROUTES (S2S consumers excluded)
+    // See platform/decisions/mac-state-layer.md "State Layer Management Endpoints".
+    'GET /facs/access-mappings': facsAccessMappingsController.listMappings,
+    'POST /facs/access-mappings': facsAccessMappingsController.createMappings,
+    'DELETE /facs/access-mappings': facsAccessMappingsController.deleteMappingsBulk,
+    'DELETE /facs/access-mappings/:id': facsAccessMappingsController.deleteMappingById,
   };
 
   // Initialization of static and dynamic routes

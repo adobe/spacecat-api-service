@@ -458,6 +458,16 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/traffic/predominant-type': 'llmo/can_configure',
       'POST /sites/:siteId/traffic/predominant-type/:channel': 'llmo/can_configure',
 
+      // ---- Manage user (Phase 2 state-layer management) -----------------
+      // Customer org admins assign / revoke ReBAC grants via these endpoints.
+      // Also listed in required-capabilities.INTERNAL_ROUTES — never S2S.
+      // Listing is gated the same as writes: viewing who has access to what
+      // is itself a sensitive operation that only org admins should see.
+      'GET /facs/access-mappings': 'llmo/can_manage_user',
+      'POST /facs/access-mappings': 'llmo/can_manage_user',
+      'DELETE /facs/access-mappings': 'llmo/can_manage_user',
+      'DELETE /facs/access-mappings/:id': 'llmo/can_manage_user',
+
       // ---- View (read-only) ----------------------------------------------
       // Cross-product GETs + POSTs that are body-based queries (no side
       // effects beyond a read / lookup). Admin-only reads live in
@@ -649,6 +659,69 @@ const routeFacsCapabilities = {
     ACO: {
     },
   },
+
+  /**
+   * Phase 2: per-product map of FACS-controlled resources → list of param
+   * aliases that identify each resource in the route surface. Each product
+   * decides independently which resources go through the state-layer
+   * (ReBAC) check. Phase 2 starts with LLMO/brand only.
+   *
+   * Adding `siteId`, `organizationId`, etc. into a product's map graduates
+   * those params from `FACS_NON_RESOURCE_PARAMS` below — the coverage test
+   * enforces exhaustive classification.
+   *
+   * See mac-state-layer.md §"Resource Identification".
+   */
+  PRODUCTS_FACS_RESOURCE_PARAM_ALIASES: {
+    LLMO: {
+      brand: ['brandId'],
+    },
+    ASO: {},
+    ACO: {},
+  },
+
+  /**
+   * Every `:param` from `src/routes/index.js` that no product currently
+   * treats as a FACS resource. Together with the union of every product's
+   * resource aliases above, this exhaustively classifies every `:param`
+   * in the route surface — enforced by
+   * `test/routes/facs-capabilities.test.js`.
+   *
+   * Classification rule (each `:param` is in EXACTLY ONE bucket):
+   *   - in some product's resource map → ReBAC for that product
+   *   - here in FACS_NON_RESOURCE_PARAMS → no product gates on it
+   *   - never both, never neither
+   *
+   * siteId / organizationId / orgId / spaceCatId / projectId live here
+   * while their resources are out of Phase 2 scope; they move into
+   * PRODUCTS_FACS_RESOURCE_PARAM_ALIASES when a product brings them
+   * into ReBAC.
+   */
+  FACS_NON_RESOURCE_PARAMS: [
+    // Domain identifiers / sub-resource ids — never independently
+    // ReBAC-controlled at the wrapper layer:
+    'auditType', 'auditedAt', 'categoryId', 'configName', 'executionId',
+    'fixId', 'geoExperimentId', 'guidelineId', 'intentKey',
+    'jobId', 'jobType', 'onboardingId', 'opportunityId', 'plgOnboardingId',
+    'promptId', 'questionKey', 'reportId', 'suggestionId', 'tokenId',
+    'topicId',
+    // Resources not yet in any product's FACS scope (graduate to a product
+    // map when ReBAC is added):
+    'siteId', 'organizationId', 'spaceCatId', 'projectId',
+    // External / shared identifiers:
+    'accessId', 'batchId', 'clientId', 'consumerId', 'contactSalesLeadId',
+    'externalUserId', 'imsOrgId', 'grantId', 'userId',
+    // Filter / pagination / format params (not entities):
+    'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
+    'dataSource', 'deliveryType', 'endDate', 'eventType',
+    'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
+    'metric', 'processingType', 'product', 'projectName',
+    'sheetType', 'source', 'startDate', 'status', 'tokenType', 'type',
+    'url', 'version', 'week',
+    // Single-row id used by the Phase 2 state-layer management endpoints
+    // (the row's own UUID, never a resource being granted).
+    'id',
+  ],
 };
 
 export default routeFacsCapabilities;

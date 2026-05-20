@@ -498,6 +498,13 @@ describe('getRouteHandlers', () => {
     getFanoutReport: sinon.stub(),
   };
 
+  const mockFacsAccessMappingsController = {
+    listMappings: sinon.stub(),
+    createMappings: sinon.stub(),
+    deleteMappingsBulk: sinon.stub(),
+    deleteMappingById: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -554,6 +561,7 @@ describe('getRouteHandlers', () => {
       mockWebhooksController,
       mockAiVisibilityController,
       mockFanoutReportController,
+      mockFacsAccessMappingsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -623,6 +631,9 @@ describe('getRouteHandlers', () => {
       'POST /consumers/register',
       'POST /ephemeral-run/batch',
       'GET /v2/regions',
+      'GET /facs/access-mappings',
+      'POST /facs/access-mappings',
+      'DELETE /facs/access-mappings',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -1053,6 +1064,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/referral-traffic/business-impact',
       'GET /sites/:siteId/referral-traffic/weeks',
       'GET /admin/users/:userId',
+      'DELETE /facs/access-mappings/:id',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
