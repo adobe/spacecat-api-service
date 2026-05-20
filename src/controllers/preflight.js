@@ -161,7 +161,14 @@ function PreflightController(ctx, log, env) {
     return getIMSPromiseToken(context);
   }
 
+  // Temporary: logs the x-preflight-request-id header (or undefined if not present).
+  // Remove or improve once the structured logging changes are implemented.
+  function logPreflightRequestIdHeader(context, label) {
+    log.info(`${label} x-preflight-request-id: ${context.pathInfo?.headers?.['x-preflight-request-id']}`);
+  }
+
   const createPreflightJob = async (context) => {
+    logPreflightRequestIdHeader(context, '[preflight]');
     const { data } = context;
     try {
       validateRequestData(data);
@@ -348,6 +355,7 @@ function PreflightController(ctx, log, env) {
    * @returns {Promise<Object>} The HTTP response object
    */
   const createBetaPreflightJob = async (context) => {
+    logPreflightRequestIdHeader(context, '[preflight-beta]');
     const { data } = context;
 
     if (!isNonEmptyObject(data)) {
