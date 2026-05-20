@@ -1,3 +1,10 @@
+## [1.502.1](https://github.com/adobe/spacecat-api-service/compare/v1.502.0...v1.502.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* **slack:** use HEAD count for agentic-traffic DB status check ([#2430](https://github.com/adobe/spacecat-api-service/issues/2430)) ([4049453](https://github.com/adobe/spacecat-api-service/commit/4049453065ea317afc35775a87fe32639ee34f08)), closes [#2429](https://github.com/adobe/spacecat-api-service/issues/2429)
+
 # [1.502.0](https://github.com/adobe/spacecat-api-service/compare/v1.501.0...v1.502.0) (2026-05-20)
 
 
