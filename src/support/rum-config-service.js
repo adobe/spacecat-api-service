@@ -38,7 +38,8 @@ const RUM_CHECK_TIMEOUT_MS = 3000;
  */
 export async function updateRumConfig(site, context, { save = true } = {}) {
   const { log } = context;
-  const domain = new URL(site.getBaseURL()).hostname;
+  const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+  const domain = new URL(overrideBaseURL || site.getBaseURL()).hostname;
 
   let hasDomainKey = false;
   let timeoutId;
