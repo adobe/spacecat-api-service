@@ -53,15 +53,12 @@ export const FixDto = {
       origin: fix.getOrigin(),
     };
 
-    // Include resolved display name when user was found in the TrialUser store
+    // Include resolved user details when user was found in the TrialUser store
     // eslint-disable-next-line no-underscore-dangle
     if (fix._executedByUser) {
       // eslint-disable-next-line no-underscore-dangle
-      const { firstName, lastName } = fix._executedByUser;
-      const name = [firstName, lastName].filter((n) => n && n !== '-').join(' ');
-      if (name) {
-        result.executedByName = name;
-      }
+      const { firstName, lastName, email } = fix._executedByUser;
+      result.executedByUser = { firstName, lastName, email };
     }
 
     // Include suggestions if they are attached to the fix entity

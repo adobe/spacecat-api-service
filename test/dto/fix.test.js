@@ -164,42 +164,41 @@ describe('Fix DTO', () => {
       expect(json).to.not.have.property('suggestions');
     });
 
-    it('includes executedByName when _executedByUser is set', () => {
+    it('includes executedByUser when _executedByUser is set', () => {
       const fix = createMockFix({
         _executedByUser: { firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
       });
 
       const json = FixDto.toJSON(fix);
 
-      expect(json).to.have.property('executedByName', 'Jane Doe');
+      expect(json).to.have.property('executedByUser');
+      expect(json.executedByUser).to.deep.equal({
+        firstName: 'Jane',
+        lastName: 'Doe',
+        email: 'jane@example.com',
+      });
     });
 
-    it('excludes executedByName when _executedByUser is not set', () => {
+    it('excludes executedByUser when _executedByUser is not set', () => {
       const fix = createMockFix();
 
       const json = FixDto.toJSON(fix);
 
-      expect(json).to.not.have.property('executedByName');
+      expect(json).to.not.have.property('executedByUser');
     });
 
-    it('excludes executedByName when both firstName and lastName are placeholder dashes', () => {
+    it('passes through placeholder dash values without modification', () => {
       const fix = createMockFix({
         _executedByUser: { firstName: '-', lastName: '-', email: 'unknown@example.com' },
       });
 
       const json = FixDto.toJSON(fix);
 
-      expect(json).to.not.have.property('executedByName');
-    });
-
-    it('includes executedByName with only firstName when lastName is a placeholder', () => {
-      const fix = createMockFix({
-        _executedByUser: { firstName: 'Jane', lastName: '-', email: 'jane@example.com' },
+      expect(json.executedByUser).to.deep.equal({
+        firstName: '-',
+        lastName: '-',
+        email: 'unknown@example.com',
       });
-
-      const json = FixDto.toJSON(fix);
-
-      expect(json).to.have.property('executedByName', 'Jane');
     });
 
     it('correctly maps suggestions using SuggestionDto.toJSON', () => {
