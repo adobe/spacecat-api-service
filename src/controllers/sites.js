@@ -1249,8 +1249,8 @@ function SitesController(ctx, log, env) {
    *   - 'no_entitlement_for_product' — org has no entitlement for the requested x-product.
    *   - 'aso_pre_onboard' — entitlement tier is not in CUSTOMER_VISIBLE_TIERS (e.g. PRE_ONBOARD).
    *   - 'site_not_enrolled' — entitlement is visible but no SiteEnrollment links this site.
-   * `details` shape varies by path: siteId path includes `{ productCode, siteId, organizationId }`,
-   * organizationId/imsOrg paths include `{ productCode, organizationId }` (no siteId).
+   * `details` shape is `{ productCode, siteId, organizationId }` for all three statuses
+   * (these branches are reached only via the siteId path, so siteId is always present).
    * Unspecified 404s fall through without resolveStatus (unknown/generic not-found).
    *
    * @param {object} context - Context of the request.
@@ -1325,7 +1325,6 @@ function SitesController(ctx, log, env) {
       }
 
       if (enrolledSite && (accessControlUtil.hasAdminAccess()
-        || callerIsInternal
         || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
         return ok({ data: await buildResolveData(org, enrolledSite, context) });
       }
@@ -1370,10 +1369,10 @@ function SitesController(ctx, log, env) {
               }
 
               if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
-                if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+                if (!callerIsInternal) {
                   return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
                 }
-                log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
+                log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
               }
 
               if (!enrollments?.length) {
