@@ -1,3 +1,10 @@
+# [1.502.0](https://github.com/adobe/spacecat-api-service/compare/v1.501.0...v1.502.0) (2026-05-20)
+
+
+### Features
+
+* ai vis prompt response | LLMO-4959 ([#2440](https://github.com/adobe/spacecat-api-service/issues/2440)) ([da73043](https://github.com/adobe/spacecat-api-service/commit/da73043f3751da1daabb2c421d20063780b8f7df))
+
 # [1.501.0](https://github.com/adobe/spacecat-api-service/compare/v1.500.6...v1.501.0) (2026-05-20)
 
 
