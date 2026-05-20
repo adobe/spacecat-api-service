@@ -70,6 +70,8 @@ export class FixesController {
   /** @type {SuggestionCollection} */
   #Suggestion;
 
+  #TrialUser;
+
   /** @type {AccessControlUtil} */
   #accessControl;
 
@@ -87,6 +89,7 @@ export class FixesController {
     this.#Opportunity = dataAccess.Opportunity;
     this.#Site = dataAccess.Site;
     this.#Suggestion = dataAccess.Suggestion;
+    this.#TrialUser = dataAccess.TrialUser;
     this.#accessControl = accessControl;
   }
 
@@ -132,6 +135,7 @@ export class FixesController {
         return res;
       }
 
+      await this.#enrichFixesWithUserNames(fixEntities, siteId);
       fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
       return ok(fixes);
     }
@@ -145,6 +149,7 @@ export class FixesController {
       return res;
     }
 
+    await this.#enrichFixesWithUserNames(fixEntities, siteId);
     fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);
   }
@@ -676,6 +681,50 @@ export class FixesController {
       return createResponse({
         message: `Error rolling back fix: ${e.message}`,
       }, 500);
+    }
+  }
+
+  /**
+   * Attaches `_executedByUser` to each fix whose `executedBy` matches a TrialUser
+   * in the site's organization. Fails silently so callers always get a response.
+   * @param {FixEntity[]} fixes
+   * @param {string} siteId
+   */
+  async #enrichFixesWithUserNames(fixes, siteId) {
+    if (!this.#TrialUser) {
+      return;
+    }
+
+    const userIds = [...new Set(fixes.map((f) => f.getExecutedBy()).filter(Boolean))];
+    if (!userIds.length) {
+      return;
+    }
+
+    try {
+      const site = await this.#Site.findById(siteId);
+      const organizationId = site?.getOrganizationId();
+      if (!organizationId) {
+        return;
+      }
+
+      const trialUsers = await this.#TrialUser.allByOrganizationId(organizationId);
+      const userMap = new Map(
+        trialUsers.map((u) => [u.getExternalUserId(), {
+          firstName: u.getFirstName(),
+          lastName: u.getLastName(),
+          email: u.getEmailId(),
+        }]),
+      );
+
+      for (const fix of fixes) {
+        const userId = fix.getExecutedBy();
+        if (userId && userMap.has(userId)) {
+          // eslint-disable-next-line no-underscore-dangle
+          fix._executedByUser = userMap.get(userId);
+        }
+      }
+    } catch (e) {
+      this.#ctx.log?.warn?.(`Could not enrich fixes with user names: ${e.message}`);
     }
   }
 

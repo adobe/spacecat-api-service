@@ -164,6 +164,44 @@ describe('Fix DTO', () => {
       expect(json).to.not.have.property('suggestions');
     });
 
+    it('includes executedByName when _executedByUser is set', () => {
+      const fix = createMockFix({
+        _executedByUser: { firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json).to.have.property('executedByName', 'Jane Doe');
+    });
+
+    it('excludes executedByName when _executedByUser is not set', () => {
+      const fix = createMockFix();
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json).to.not.have.property('executedByName');
+    });
+
+    it('excludes executedByName when both firstName and lastName are placeholder dashes', () => {
+      const fix = createMockFix({
+        _executedByUser: { firstName: '-', lastName: '-', email: 'unknown@example.com' },
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json).to.not.have.property('executedByName');
+    });
+
+    it('includes executedByName with only firstName when lastName is a placeholder', () => {
+      const fix = createMockFix({
+        _executedByUser: { firstName: 'Jane', lastName: '-', email: 'jane@example.com' },
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json).to.have.property('executedByName', 'Jane');
+    });
+
     it('correctly maps suggestions using SuggestionDto.toJSON', () => {
       const suggestion = createMockSuggestion('suggestion-id-123');
       const fix = createMockFix({

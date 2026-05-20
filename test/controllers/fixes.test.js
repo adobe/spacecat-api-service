@@ -69,6 +69,15 @@ describe('Fixes Controller', () => {
 
   const siteId = '86ef4aae-7296-417d-9658-8cd4c7edc374';
   const opportunityId = 'a3d2f1e9-5f4c-4e6b-8c7d-0c7b5a2f1a2f';
+  const testOrgId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+  const testExternalUserId = 'ABCD1234@AdobeOrg';
+
+  const mockTrialUser = {
+    getExternalUserId: () => testExternalUserId,
+    getFirstName: () => 'John',
+    getLastName: () => 'Doe',
+    getEmailId: () => 'john.doe@example.com',
+  };
 
   const log = {
     ...console, debug: () => undefined, info: () => undefined, warn: () => undefined,
@@ -106,12 +115,15 @@ describe('Fixes Controller', () => {
     sandbox.stub(fixEntitySuggestionCollection, 'allBySuggestionId');
     sandbox.stub(suggestionCollection, 'batchGetByKeys');
     sandbox.stub(dataAccess.Site.entity, 'get').returns({
-      go: async () => ({ data: { siteId } }),
+      go: async () => ({ data: { siteId, organizationId: testOrgId } }),
     });
+    dataAccess.TrialUser = {
+      allByOrganizationId: sandbox.stub().resolves([mockTrialUser]),
+    };
 
     accessControlUtil = sandbox.createStubInstance(AccessControlUtil);
     accessControlUtil.hasAccess.resolves(true);
-    fixesController = new FixesController({ dataAccess }, accessControlUtil);
+    fixesController = new FixesController({ dataAccess, log }, accessControlUtil);
     requestContext = {
       params: { siteId, opportunityId },
     };
@@ -155,6 +167,56 @@ describe('Fixes Controller', () => {
 
       expect(response).includes({ status: 200 });
       expect(await response.json()).deep.equals(fixEntities.map(FixDto.toJSON));
+    });
+
+    it('hydrates executedByName when executedBy matches a TrialUser', async () => {
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: testExternalUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.have.property('executedByName', 'John Doe');
+      expect(result[0]).to.have.property('executedBy', testExternalUserId);
+    });
+
+    it('omits executedByName when executedBy does not match any TrialUser', async () => {
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: 'unknown-user@AdobeOrg',
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.not.have.property('executedByName');
+    });
+
+    it('does not fail when TrialUser lookup throws', async () => {
+      dataAccess.TrialUser.allByOrganizationId.rejects(new Error('DB error'));
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: testExternalUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.not.have.property('executedByName');
     });
 
     it('responds 404 if the fix does not belong to the given opportunity', async () => {
