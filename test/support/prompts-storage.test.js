@@ -114,10 +114,24 @@ describe('prompts-storage', () => {
       expect(result).to.be.null;
     });
 
-    it('returns category id when found', async () => {
+    it('returns category id when found by business key', async () => {
       const client = { from: () => makeChain({ data: { id: 'cat-uuid' }, error: null }) };
       const result = await resolveCategoryUuid(ORG_ID, 'cat-1', client);
       expect(result).to.equal('cat-uuid');
+    });
+
+    it('resolves by primary key scoped to org when categoryId is a valid UUID', async () => {
+      const uuid = 'a1111111-1111-4111-b111-111111111111';
+      const client = { from: () => makeChain({ data: { id: uuid }, error: null }) };
+      const result = await resolveCategoryUuid(ORG_ID, uuid, client);
+      expect(result).to.equal(uuid);
+    });
+
+    it('returns null when UUID does not belong to the organization', async () => {
+      const uuid = 'a1111111-1111-4111-b111-111111111111';
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await resolveCategoryUuid(ORG_ID, uuid, client);
+      expect(result).to.be.null;
     });
   });
 
@@ -127,7 +141,7 @@ describe('prompts-storage', () => {
       expect(result).to.be.null;
     });
 
-    it('returns topic id when found', async () => {
+    it('returns topic id when found by business key', async () => {
       const client = { from: () => makeChain({ data: { id: 'topic-uuid' }, error: null }) };
       const result = await resolveTopicUuid(ORG_ID, 'topic-1', client);
       expect(result).to.equal('topic-uuid');
@@ -136,6 +150,20 @@ describe('prompts-storage', () => {
     it('returns null when topic is not found', async () => {
       const client = { from: () => makeChain({ data: null, error: null }) };
       const result = await resolveTopicUuid(ORG_ID, 'nonexistent', client);
+      expect(result).to.be.null;
+    });
+
+    it('resolves by primary key scoped to org when topicId is a valid UUID', async () => {
+      const uuid = 'b2222222-2222-4222-b222-222222222222';
+      const client = { from: () => makeChain({ data: { id: uuid }, error: null }) };
+      const result = await resolveTopicUuid(ORG_ID, uuid, client);
+      expect(result).to.equal(uuid);
+    });
+
+    it('returns null when UUID does not belong to the organization', async () => {
+      const uuid = 'b2222222-2222-4222-b222-222222222222';
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await resolveTopicUuid(ORG_ID, uuid, client);
       expect(result).to.be.null;
     });
   });
