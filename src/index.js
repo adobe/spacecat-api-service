@@ -346,6 +346,9 @@ async function run(request, context) {
       if (params.executionId && !isValidUUID(params.executionId)) {
         return badRequest('Execution Id is invalid. Please provide a valid UUID.');
       }
+      if (params.jobId && !isValidUUIDV4(params.jobId)) {
+        return badRequest('Job Id is invalid. Please provide a valid UUID.');
+      }
       context.params = params;
       context.request = request;
 
