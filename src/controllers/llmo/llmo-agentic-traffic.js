@@ -181,21 +181,23 @@ function canonicalizeExportPayload(siteId, parsed) {
   };
 }
 
-// RFC 8785 JSON Canonicalization Scheme (JCS) — limited to the subset we
-// produce: objects of primitives (string, number, boolean, null). Sorted keys,
-// no whitespace, JS Number.toString() is RFC-compatible for finite values.
-function jcsStringify(value) {
+// RFC 8785 JSON Canonicalization Scheme (JCS) — strict on the subset we use
+// (string, number, boolean, null, array, object of these). Non-finite numbers
+// throw per JCS semantics rather than serialising as 'NaN'/'Infinity'.
+export function jcsStringify(value) {
   if (value === null) {
     return 'null';
   }
   if (typeof value === 'string') {
     return JSON.stringify(value);
   }
-  /* c8 ignore next 9 -- payload uses only string/null today */
   if (typeof value === 'boolean') {
     return value ? 'true' : 'false';
   }
   if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new TypeError('JCS: non-finite numbers are not permitted');
+    }
     return String(value);
   }
   if (Array.isArray(value)) {
@@ -213,14 +215,26 @@ function buildExportId(payload) {
   return crypto.createHash('sha256').update(jcsStringify(payload)).digest('hex');
 }
 
-// `v{N}c{M}` path matches the s3-export-framework ADR. Worker accepts both
-// `v1` (legacy) and `v1c1` during the rollout (PR adobe/spacecat-reporting-worker#619).
+// `v{N}c{M}` path matches the s3-export-framework ADR.
+function buildExportPrefix(siteId, exportId) {
+  return `agentic-traffic/url-exports/${siteId}/${EXPORT_VERSION}c${EXPORT_CANONICAL_VERSION}/${exportId}`;
+}
+
 function buildExportKeys(siteId, exportId) {
-  const prefix = `agentic-traffic/url-exports/${siteId}/${EXPORT_VERSION}c${EXPORT_CANONICAL_VERSION}/${exportId}`;
+  const prefix = buildExportPrefix(siteId, exportId);
   return {
     csvKey: `${prefix}/urls.csv`,
     metadataKey: `${prefix}/metadata.json`,
   };
+}
+
+// Defense in depth: the worker writes `metadata.files[]` and the producer signs
+// presigned URLs for each entry. A worker bug or compromise could put arbitrary
+// keys in `files[]`; this filter rejects anything outside the deterministic
+// export prefix, falling back to ListObjectsV2 which already constrains shape.
+function validateFilesAgainstPrefix(files, siteId, exportId) {
+  const expectedPrefix = `${buildExportPrefix(siteId, exportId)}/`;
+  return files.filter((k) => typeof k === 'string' && k.startsWith(expectedPrefix));
 }
 
 // Caps defend status-polling against a pathological prefix (malicious
@@ -297,7 +311,9 @@ async function claimProcessingMetadata(ctx, bucket, metadataKey, exportId, siteI
     await s3.s3Client.send(command);
     return true;
   } catch (error) {
-    if (error.name === 'PreconditionFailed' || error.$metadata?.httpStatusCode === 412) {
+    // 412 is the canonical IfNoneMatch race-loss; SDK error names vary across versions.
+    if (error.$metadata?.httpStatusCode === 412 || error.name === 'PreconditionFailed') {
+      ctx.log.info(`Agentic traffic export: CAS race-loss on metadata.json (exportId=${exportId})`);
       return false;
     }
     /* c8 ignore next 2 -- propagated to the route's catch-all */
@@ -307,17 +323,24 @@ async function claimProcessingMetadata(ctx, bucket, metadataKey, exportId, siteI
 
 async function getExportMetadata(ctx, bucket, metadataKey) {
   const { s3 } = ctx;
+  let body;
   try {
     const command = new s3.GetObjectCommand({ Bucket: bucket, Key: metadataKey });
     const result = await s3.s3Client.send(command);
-    const body = await result.Body.transformToString();
-    return JSON.parse(body);
+    body = await result.Body.transformToString();
   } catch (error) {
     if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
       return null;
     }
     /* c8 ignore next 2 -- propagated to the route's catch-all; not exercised in unit tests */
     throw error;
+  }
+  // Treat truncated/corrupt metadata as absent so retry paths heal instead of 500-looping.
+  try {
+    return JSON.parse(body);
+  } catch (parseError) {
+    ctx.log.warn(`Agentic traffic export: metadata.json is not valid JSON; treating as absent (key=${metadataKey})`);
+    return null;
   }
 }
 
@@ -327,13 +350,14 @@ const MAX_EXPORT_DOWNLOAD_URLS = 50;
 
 // Customer-facing presigned URLs sign against the s3-accelerate endpoint so
 // the AWS region is hidden from the URL. Bucket-side acceleration is enabled
-// in spacecat-infrastructure.
-let acceleratedS3Client;
+// in spacecat-infrastructure. Cached per-region so a multi-region runtime
+// can't accidentally sign with the wrong client.
+const acceleratedS3Clients = new Map();
 function getAcceleratedS3Client(region) {
-  if (!acceleratedS3Client) {
-    acceleratedS3Client = new S3Client({ region, useAccelerateEndpoint: true });
+  if (!acceleratedS3Clients.has(region)) {
+    acceleratedS3Clients.set(region, new S3Client({ region, useAccelerateEndpoint: true }));
   }
-  return acceleratedS3Client;
+  return acceleratedS3Clients.get(region);
 }
 
 async function buildExportReadyResponse(ctx, bucket, exportId, csvKeys, metadata = null) {
@@ -796,10 +820,16 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
         try {
           const metadata = await getExportMetadata(ctx, s3Bucket, metadataKey);
 
-          // Fast path: worker wrote `files[]` (s3-export-framework ADR) — sign directly.
+          // Fast path: worker wrote `files[]` (s3-export-framework ADR). Validate
+          // prefix before signing — defense in depth against a worker bug or
+          // compromise writing keys outside the deterministic export prefix.
           if (metadata?.status === 'success'
             && Array.isArray(metadata.files) && metadata.files.length > 0) {
-            return buildExportReadyResponse(ctx, s3Bucket, exportId, metadata.files, metadata);
+            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId);
+            if (safeFiles.length === metadata.files.length) {
+              return buildExportReadyResponse(ctx, s3Bucket, exportId, safeFiles, metadata);
+            }
+            ctx.log.warn(`Agentic traffic export: metadata.files contained out-of-prefix keys; falling back to ListObjectsV2 (exportId=${exportId})`);
           }
 
           const csvKeys = await listExportCsvObjects(ctx, s3Bucket, csvKey);
@@ -815,8 +845,11 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
             });
           }
 
-          // Claim the slot with CAS (IfNoneMatch:*) so concurrent POSTs can't double-enqueue.
-          const casOnly = metadata === null;
+          // Claim the slot with CAS (IfNoneMatch:*) so concurrent POSTs can't
+          // double-enqueue, and don't clobber `success` metadata if CSVs were
+          // evicted (let CAS fail → 202 processing without destroying state).
+          // Stale/failed retries overwrite via casOnly=false.
+          const casOnly = metadata === null || metadata.status === 'success';
           const claimed = await claimProcessingMetadata(
             ctx,
             s3Bucket,
@@ -893,10 +926,16 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
         try {
           const metadata = await getExportMetadata(ctx, s3Bucket, metadataKey);
 
-          // Fast path: worker wrote `files[]` (s3-export-framework ADR) — sign directly.
+          // Fast path: worker wrote `files[]` (s3-export-framework ADR). Validate
+          // prefix before signing — defense in depth against a worker bug or
+          // compromise writing keys outside the deterministic export prefix.
           if (metadata?.status === 'success'
             && Array.isArray(metadata.files) && metadata.files.length > 0) {
-            return buildExportReadyResponse(ctx, s3Bucket, exportId, metadata.files, metadata);
+            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId);
+            if (safeFiles.length === metadata.files.length) {
+              return buildExportReadyResponse(ctx, s3Bucket, exportId, safeFiles, metadata);
+            }
+            ctx.log.warn(`Agentic traffic export: metadata.files contained out-of-prefix keys; falling back to ListObjectsV2 (exportId=${exportId})`);
           }
 
           const csvKeys = await listExportCsvObjects(ctx, s3Bucket, csvKey);

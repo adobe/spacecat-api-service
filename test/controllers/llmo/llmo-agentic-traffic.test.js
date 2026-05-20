@@ -29,6 +29,7 @@ import {
   createAgenticTrafficHasDataHandler,
   createAgenticTrafficUrlsExportHandler,
   createAgenticTrafficUrlsExportStatusHandler,
+  jcsStringify,
 } from '../../../src/controllers/llmo/llmo-agentic-traffic.js';
 
 use(sinonChai);
@@ -92,7 +93,7 @@ function makeContext(overrides = {}) {
       },
       ...overrides.dataAccess,
     },
-    log: { error: sinon.stub(), info: sinon.stub() },
+    log: { error: sinon.stub(), info: sinon.stub(), warn: sinon.stub() },
     ...overrides.context,
   };
 }
@@ -1176,6 +1177,49 @@ describe('llmo-agentic-traffic', () => {
     });
   });
 
+  // ── JCS hash invariants ────────────────────────────────────────────────────
+
+  describe('jcsStringify', () => {
+    it('canonicalises primitives + objects with sorted keys', () => {
+      expect(jcsStringify(null)).to.equal('null');
+      expect(jcsStringify('a')).to.equal('"a"');
+      expect(jcsStringify(true)).to.equal('true');
+      expect(jcsStringify(0)).to.equal('0');
+      expect(jcsStringify([1, 'a', null])).to.equal('[1,"a",null]');
+      expect(jcsStringify({ b: 2, a: 1 })).to.equal('{"a":1,"b":2}');
+    });
+
+    it('throws on non-finite numbers per JCS', () => {
+      expect(() => jcsStringify(NaN)).to.throw(TypeError);
+      expect(() => jcsStringify(Infinity)).to.throw(TypeError);
+    });
+
+    it('locks the hash for a known canonical payload (worker must produce the same)', async () => {
+      // Cross-service contract: spacecat-reporting-worker must hash the same
+      // input to the same exportId. If this golden value changes, the worker
+      // PR needs to match — coordinate before merging.
+      const crypto = await import('node:crypto');
+      const payload = {
+        kind: 'agentic-traffic-urls',
+        v: 1,
+        c: 1,
+        format: 'csv',
+        siteId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        startDate: '2026-01-01',
+        endDate: '2026-01-31',
+        platform: null,
+        categoryName: null,
+        agentType: null,
+        userAgent: null,
+        contentType: null,
+        successRate: null,
+        urlPathSearch: null,
+      };
+      const hash = crypto.createHash('sha256').update(jcsStringify(payload)).digest('hex');
+      expect(hash).to.equal('6e6f6d808e6760960dc7540c3b28d991375852b56981bc66fca91e708b812101');
+    });
+  });
+
   // ── URL Export ─────────────────────────────────────────────────────────────
 
   describe('createAgenticTrafficUrlsExportHandler', () => {
@@ -1205,16 +1249,19 @@ describe('llmo-agentic-traffic', () => {
 
     it('skips ListObjectsV2 when metadata.files is present (fast path)', async () => {
       const ctx = makeExportContext();
+      // Echo the metadata's key prefix back as files[] so the fast-path
+      // prefix-validation accepts the entries (mirrors what the worker writes).
       ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
         if (command instanceof ListObjectsV2Command) {
           return Promise.reject(new Error('should not be called'));
         }
+        const prefix = command.input.Key.replace(/\/metadata\.json$/, '');
         return Promise.resolve({
           Body: {
             transformToString: () => Promise.resolve(JSON.stringify({
               status: 'success',
               rowCount: 42,
-              files: ['agentic-traffic/url-exports/x/v1/y/urls.csv'],
+              files: [`${prefix}/urls.csv`],
             })),
           },
         });
@@ -1228,6 +1275,34 @@ describe('llmo-agentic-traffic', () => {
       const listCalls = ctx.s3.s3Client.send.getCalls()
         .filter((c) => c.args[0] instanceof ListObjectsV2Command);
       expect(listCalls).to.have.length(0);
+    });
+
+    it('falls back to ListObjectsV2 when metadata.files contains out-of-prefix keys', async () => {
+      // Defense in depth: worker bug / compromise writes wrong keys in files[];
+      // producer must not sign URLs against them — falls back to ListObjectsV2
+      // which constrains by prefix.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [{ Key: command.input.Prefix }] });
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 1,
+              files: ['agentic-traffic/url-exports/EVIL_SITE/v1c1/EVIL_EXPORT/urls.csv'],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const listCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof ListObjectsV2Command);
+      expect(listCalls).to.have.length(1);
+      expect(ctx.log.warn).to.have.been.calledWithMatch(/out-of-prefix/);
     });
 
     it('produces the same exportId for the same filter set across calls', async () => {
@@ -1341,6 +1416,119 @@ describe('llmo-agentic-traffic', () => {
       expect(written.status).to.equal('processing');
       expect(written.kind).to.equal('agentic-traffic-urls');
       expect(written.createdAt).to.be.a('string');
+      // PUT must happen before SQS sendMessage — locks the claim-before-enqueue order.
+      const putOrder = ctx.s3.s3Client.send.firstCall.calledBefore(ctx.sqs.sendMessage.firstCall);
+      expect(putOrder).to.equal(true);
+    });
+
+    it('uses CAS (IfNoneMatch:*) when retrying against success metadata so success records are not clobbered', async () => {
+      // If CSV was evicted but success metadata remained, an unconditional
+      // overwrite would destroy the success record. CAS lets us fall through
+      // to 202 processing without touching state.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        if (command instanceof PutObjectCommand) {
+          // CAS should fail because the object exists.
+          if (command.input.IfNoneMatch === '*') {
+            const error = new Error('precondition failed');
+            error.$metadata = { httpStatusCode: 412 };
+            return Promise.reject(error);
+          }
+          return Promise.resolve({});
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success', rowCount: 5,
+              // No files[] — exercises the legacy success-without-files path.
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      const putCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof PutObjectCommand);
+      expect(putCalls).to.have.length(1);
+      expect(putCalls[0].args[0].input.IfNoneMatch).to.equal('*');
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('uses unconditional overwrite when retrying against stale processing metadata', async () => {
+      const ctx = makeExportContext();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        if (command instanceof PutObjectCommand) {
+          return Promise.resolve({});
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'processing', createdAt: oldDate,
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      const putCall = ctx.s3.s3Client.send.getCalls()
+        .find((c) => c.args[0] instanceof PutObjectCommand);
+      expect(putCall.args[0].input.IfNoneMatch).to.equal(undefined);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('treats corrupt metadata.json as absent (heals via re-enqueue rather than 500-looping)', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        if (command instanceof PutObjectCommand) {
+          return Promise.resolve({});
+        }
+        return Promise.resolve({
+          Body: { transformToString: () => Promise.resolve('{not-json') },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('signs customer presigned URLs against the s3-accelerate endpoint, not the regional client', async () => {
+      const ctx = makeExportContext();
+      // The metadata-fetch stub also serves as the success path. Echo the
+      // metadata's prefix into files[] so the fast path accepts it.
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        const prefix = command.input.Key.replace(/\/metadata\.json$/, '');
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success', rowCount: 1, files: [`${prefix}/urls.csv`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      // The first arg to getSignedUrl must NOT be the regional ctx.s3.s3Client
+      // — it should be the accelerated client constructed inside the handler.
+      const signingClient = ctx.s3.getSignedUrl.firstCall.args[0];
+      expect(signingClient).to.not.equal(ctx.s3.s3Client);
+      // The accelerated client carries the useAccelerateEndpoint flag (boolean or provider).
+      expect(signingClient.config?.useAccelerateEndpoint).to.not.equal(undefined);
     });
   });
 
@@ -1368,7 +1556,7 @@ describe('llmo-agentic-traffic', () => {
             transformToString: () => Promise.resolve(JSON.stringify({
               status: 'success',
               rowCount: 7,
-              files: [`agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv`],
+              files: [`agentic-traffic/url-exports/${SITE_ID}/v1c1/${EXPORT_ID}/urls.csv`],
             })),
           },
         });
@@ -1379,6 +1567,31 @@ describe('llmo-agentic-traffic', () => {
       expect(res.status).to.equal(200);
       expect(body.status).to.equal('ready');
       expect(body.downloadUrls).to.have.length(1);
+    });
+
+    it('GET falls back to ListObjectsV2 when metadata.files contains out-of-prefix keys', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({
+            Contents: [{ Key: `agentic-traffic/url-exports/${SITE_ID}/v1c1/${EXPORT_ID}/urls.csv` }],
+          });
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              files: ['agentic-traffic/url-exports/EVIL/v1c1/EVIL/urls.csv'],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const listCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof ListObjectsV2Command);
+      expect(listCalls).to.have.length(1);
     });
 
     it('returns 404 when no CSV or metadata exists (unknown exportId)', async () => {
