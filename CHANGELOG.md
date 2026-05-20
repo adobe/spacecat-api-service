@@ -1,3 +1,10 @@
+# [1.503.0](https://github.com/adobe/spacecat-api-service/compare/v1.502.1...v1.503.0) (2026-05-20)
+
+
+### Features
+
+* enable trace-id propagation through preflight ([#2447](https://github.com/adobe/spacecat-api-service/issues/2447)) ([6418216](https://github.com/adobe/spacecat-api-service/commit/64182165c66cef9a4e603c73c40bc8f30545b781))
+
 ## [1.502.1](https://github.com/adobe/spacecat-api-service/compare/v1.502.0...v1.502.1) (2026-05-20)
 
 
