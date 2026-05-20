@@ -794,10 +794,15 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
         const { csvKey, metadataKey } = buildExportKeys(siteId, exportId);
 
         try {
-          const [csvKeys, metadata] = await Promise.all([
-            listExportCsvObjects(ctx, s3Bucket, csvKey),
-            getExportMetadata(ctx, s3Bucket, metadataKey),
-          ]);
+          const metadata = await getExportMetadata(ctx, s3Bucket, metadataKey);
+
+          // Fast path: worker wrote `files[]` (s3-export-framework ADR) — sign directly.
+          if (metadata?.status === 'success'
+            && Array.isArray(metadata.files) && metadata.files.length > 0) {
+            return buildExportReadyResponse(ctx, s3Bucket, exportId, metadata.files, metadata);
+          }
+
+          const csvKeys = await listExportCsvObjects(ctx, s3Bucket, csvKey);
 
           if (isExportReady(csvKeys, metadata)) {
             return buildExportReadyResponse(ctx, s3Bucket, exportId, csvKeys, metadata);
@@ -887,10 +892,15 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
         const { csvKey, metadataKey } = buildExportKeys(siteId, exportId);
 
         try {
-          const [csvKeys, metadata] = await Promise.all([
-            listExportCsvObjects(ctx, s3Bucket, csvKey),
-            getExportMetadata(ctx, s3Bucket, metadataKey),
-          ]);
+          const metadata = await getExportMetadata(ctx, s3Bucket, metadataKey);
+
+          // Fast path: worker wrote `files[]` (s3-export-framework ADR) — sign directly.
+          if (metadata?.status === 'success'
+            && Array.isArray(metadata.files) && metadata.files.length > 0) {
+            return buildExportReadyResponse(ctx, s3Bucket, exportId, metadata.files, metadata);
+          }
+
+          const csvKeys = await listExportCsvObjects(ctx, s3Bucket, csvKey);
 
           if (isExportReady(csvKeys, metadata)) {
             return buildExportReadyResponse(ctx, s3Bucket, exportId, csvKeys, metadata);

@@ -1179,7 +1179,7 @@ describe('llmo-agentic-traffic', () => {
   // ── URL Export ─────────────────────────────────────────────────────────────
 
   describe('createAgenticTrafficUrlsExportHandler', () => {
-    it('returns a cached download URL when the CSV already exists', async () => {
+    it('returns a cached download URL when the CSV already exists (legacy: no files[])', async () => {
       const ctx = makeExportContext();
       ctx.s3.s3Client.send = stubS3({
         echoPrefix: true,
@@ -1191,13 +1191,43 @@ describe('llmo-agentic-traffic', () => {
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.status).to.equal('ready');
-      // Lock the S3 key shape; a refactor flipping the prefix surfaces here.
-      const listCmd = ctx.s3.s3Client.send.firstCall.args[0];
+      // ListObjectsV2 is the fallback when metadata.files is missing — verify
+      // the prefix it asked for matches the deterministic key shape.
+      const listCmd = ctx.s3.s3Client.send.getCalls()
+        .map((c) => c.args[0])
+        .find((cmd) => cmd instanceof ListObjectsV2Command);
       expect(listCmd.input.Prefix).to.match(
         new RegExp(`^agentic-traffic/url-exports/${SITE_ID}/v1/[a-f0-9]{64}/urls\\.csv$`),
       );
       expect(body.downloadUrls).to.deep.equal(['https://signed.example.com/export.csv']);
       expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('skips ListObjectsV2 when metadata.files is present (fast path)', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.reject(new Error('should not be called'));
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 42,
+              files: ['agentic-traffic/url-exports/x/v1/y/urls.csv'],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      expect(body.downloadUrls).to.have.length(1);
+      const listCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof ListObjectsV2Command);
+      expect(listCalls).to.have.length(0);
     });
 
     it('produces the same exportId for the same filter set across calls', async () => {
@@ -1325,6 +1355,30 @@ describe('llmo-agentic-traffic', () => {
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body).to.deep.equal({ exportId: EXPORT_ID, status: 'processing' });
+    });
+
+    it('GET skips ListObjectsV2 when metadata.files is present', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.reject(new Error('should not be called'));
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 7,
+              files: [`agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      expect(body.downloadUrls).to.have.length(1);
     });
 
     it('returns 404 when no CSV or metadata exists (unknown exportId)', async () => {
