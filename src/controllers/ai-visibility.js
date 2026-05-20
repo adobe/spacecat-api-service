@@ -51,6 +51,7 @@ import {
 } from '../support/ai-visibility/handlers/topics.js';
 import { handleBrandTopics as handleBrandTopicsV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics.js';
 import { handleBrandPrompts as handleBrandPromptsV1 } from '../support/ai-visibility/handlers/v1/prompt/brand-prompts.js';
+import { handlePromptResponse as handlePromptResponseV1 } from '../support/ai-visibility/handlers/v1/prompt/prompt-response.js';
 import { handleMeta } from '../support/ai-visibility/handlers/meta.js';
 
 const ROUTE_MAP = [
@@ -78,6 +79,7 @@ const ROUTE_MAP = [
   ['/topics/stats', handleTopicsStats],
   ['/v1/topic/brand-topics', handleBrandTopicsV1],
   ['/v1/prompt/brand-prompts', handleBrandPromptsV1],
+  ['/v1/prompt/prompt-response', handlePromptResponseV1],
 ];
 
 function extractSearchParams(context) {
