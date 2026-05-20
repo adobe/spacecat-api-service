@@ -169,7 +169,7 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals(fixEntities.map(FixDto.toJSON));
     });
 
-    it('hydrates executedByName when executedBy matches a TrialUser', async () => {
+    it('hydrates executedByUser when executedBy matches a TrialUser', async () => {
       const fixEntity = await fixEntityCollection.create({
         type: Suggestion.TYPES.CONTENT_UPDATE,
         opportunityId,
@@ -182,11 +182,16 @@ describe('Fixes Controller', () => {
 
       expect(response).includes({ status: 200 });
       const result = await response.json();
-      expect(result[0]).to.have.property('executedByName', 'John Doe');
+      expect(result[0]).to.have.property('executedByUser');
+      expect(result[0].executedByUser).to.deep.equal({
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+      });
       expect(result[0]).to.have.property('executedBy', testExternalUserId);
     });
 
-    it('omits executedByName when executedBy does not match any TrialUser', async () => {
+    it('omits executedByUser when executedBy does not match any TrialUser', async () => {
       const fixEntity = await fixEntityCollection.create({
         type: Suggestion.TYPES.CONTENT_UPDATE,
         opportunityId,
@@ -199,7 +204,7 @@ describe('Fixes Controller', () => {
 
       expect(response).includes({ status: 200 });
       const result = await response.json();
-      expect(result[0]).to.not.have.property('executedByName');
+      expect(result[0]).to.not.have.property('executedByUser');
     });
 
     it('does not fail when TrialUser lookup throws', async () => {
@@ -216,7 +221,7 @@ describe('Fixes Controller', () => {
 
       expect(response).includes({ status: 200 });
       const result = await response.json();
-      expect(result[0]).to.not.have.property('executedByName');
+      expect(result[0]).to.not.have.property('executedByUser');
     });
 
     it('responds 404 if the fix does not belong to the given opportunity', async () => {
