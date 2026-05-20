@@ -1635,10 +1635,14 @@ describe('llmo-agentic-traffic', () => {
       expect(body.bytesUploaded).to.equal(1000);
     });
 
-    it('returns failed when metadata reports a failed export', async () => {
+    it('returns failed (ADR enum + message) when metadata reports a failed export', async () => {
       const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
       ctx.s3.s3Client.send = stubS3({
-        metadata: { status: 'failed', failureReason: 'db error' },
+        metadata: {
+          status: 'failed',
+          failureReason: 'db_error',
+          failureMessage: 'connection lost',
+        },
       });
 
       const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
@@ -1648,11 +1652,12 @@ describe('llmo-agentic-traffic', () => {
       expect(body).to.deep.equal({
         exportId: EXPORT_ID,
         status: 'failed',
-        failureReason: 'db error',
+        failureReason: 'db_error',
+        failureMessage: 'connection lost',
       });
     });
 
-    it('surfaces stale `processing` metadata as failed (timeout) so the UI can retry', async () => {
+    it('surfaces stale `processing` metadata as failed/timeout so the UI can retry', async () => {
       const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
       const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       ctx.s3.s3Client.send = stubS3({
@@ -1664,7 +1669,8 @@ describe('llmo-agentic-traffic', () => {
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.status).to.equal('failed');
-      expect(body.failureReason).to.match(/timed out/i);
+      expect(body.failureReason).to.equal('timeout');
+      expect(body.failureMessage).to.match(/timed out/i);
     });
 
     it('rejects invalid export ids', async () => {

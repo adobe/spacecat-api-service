@@ -948,7 +948,9 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
             return ok({
               exportId,
               status: 'failed',
-              failureReason: metadata.failureReason ?? 'Export failed',
+              /* c8 ignore next 2 -- defaults for malformed worker metadata */
+              failureReason: metadata.failureReason ?? 'unknown',
+              failureMessage: metadata.failureMessage ?? 'Export failed',
             });
           }
 
@@ -956,7 +958,8 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
             return ok({
               exportId,
               status: 'failed',
-              failureReason: 'Export timed out — please retry',
+              failureReason: 'timeout',
+              failureMessage: 'Export timed out — please retry',
             });
           }
 
