@@ -1197,7 +1197,7 @@ describe('llmo-agentic-traffic', () => {
         .map((c) => c.args[0])
         .find((cmd) => cmd instanceof ListObjectsV2Command);
       expect(listCmd.input.Prefix).to.match(
-        new RegExp(`^agentic-traffic/url-exports/${SITE_ID}/v1/[a-f0-9]{64}/urls\\.csv$`),
+        new RegExp(`^agentic-traffic/url-exports/${SITE_ID}/v1c1/[a-f0-9]{64}/urls\\.csv$`),
       );
       expect(body.downloadUrls).to.deep.equal(['https://signed.example.com/export.csv']);
       expect(ctx.sqs.sendMessage).to.not.have.been.called;
@@ -1278,7 +1278,7 @@ describe('llmo-agentic-traffic', () => {
       expect(queueUrl).to.equal('https://sqs.example.com/report-jobs');
       expect(message.type).to.equal('agentic-traffic-urls-export');
       expect(message.data.filters.platform).to.equal('ChatGPT');
-      expect(message.data.s3Key).to.include(`/v1/${body.exportId}/urls.csv`);
+      expect(message.data.s3Key).to.include(`/v1c1/${body.exportId}/urls.csv`);
       expect(message.data.requestedBy).to.equal('user@example.com');
     });
 
@@ -1395,8 +1395,8 @@ describe('llmo-agentic-traffic', () => {
       const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
       ctx.s3.s3Client.send = stubS3({
         keys: [
-          `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv_part2`,
-          `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv`,
+          `agentic-traffic/url-exports/${SITE_ID}/v1c1/${EXPORT_ID}/urls.csv_part2`,
+          `agentic-traffic/url-exports/${SITE_ID}/v1c1/${EXPORT_ID}/urls.csv`,
         ],
         metadata: {
           status: 'success', rowCount: 10, filesUploaded: 2, bytesUploaded: 1000,
