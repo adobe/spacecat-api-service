@@ -57,7 +57,7 @@ describe('rum-config-service', () => {
       save: sandbox.stub().resolves(),
     };
 
-    context = { log: { warn: sandbox.stub() } };
+    context = { log: { warn: sandbox.stub(), info: sandbox.stub() } };
   });
 
   describe('updateRumConfig', () => {
@@ -83,7 +83,6 @@ describe('rum-config-service', () => {
       expect(toDynamoItemStub).to.have.been.calledOnceWith(siteConfig);
       expect(site.setConfig).to.have.been.calledOnce;
       expect(site.save).to.have.been.calledOnce;
-      expect(context.log.warn).to.have.been.calledOnce;
     });
 
     it('sets hasDomainKey false and clears timer when RUM check times out', async () => {

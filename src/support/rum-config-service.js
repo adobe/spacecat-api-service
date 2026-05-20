@@ -39,22 +39,10 @@ const RUM_CHECK_TIMEOUT_MS = 3000;
 export async function updateRumConfig(site, context, { save = true } = {}) {
   const { log } = context;
 
-  /* c8 ignore start */
-  // TEMP DEBUG: trace overrideBaseURL resolution
-  try {
-    const cfg = site.getConfig();
-    const fetchConfig = cfg?.getFetchConfig?.();
-    log.info?.(`[rum-config-service][DEBUG] siteId=${site.getId?.()} baseURL=${site.getBaseURL?.()} cfgType=${typeof cfg} hasGetFetchConfig=${typeof cfg?.getFetchConfig === 'function'} fetchConfigType=${typeof fetchConfig} fetchConfigKeys=${fetchConfig ? Object.keys(fetchConfig).join(',') : 'n/a'} overrideBaseURL=${fetchConfig?.overrideBaseURL}`);
-  } catch (debugErr) {
-    log.info?.(`[rum-config-service][DEBUG] override lookup threw: ${debugErr.message}`);
-  }
-  /* c8 ignore end */
-
   const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
   const domain = new URL(overrideBaseURL || site.getBaseURL()).hostname;
 
-  /* c8 ignore next */
-  log.info?.(`[rum-config-service][DEBUG] resolved domain for retrieveDomainkey: ${domain} (from ${overrideBaseURL ? 'overrideBaseURL' : 'baseURL'})`);
+  log.info(`[rum-config-service] resolving RUM domain key for siteId=${site.getId?.()} domain=${domain} source=${overrideBaseURL ? 'overrideBaseURL' : 'baseURL'}`);
 
   let hasDomainKey = false;
   let timeoutId;
