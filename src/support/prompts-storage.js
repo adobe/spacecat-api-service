@@ -55,11 +55,11 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
 }
 
 /**
- * Resolves category business key (or UUID) to categories.id (uuid).
- * If categoryId is already a valid UUID it is returned directly — the UI
- * derives category identifiers from category.id (UUID PK) in prompt responses,
- * so bypassing the business-key lookup avoids a spurious miss and ensures the
- * filter is never silently skipped.
+ * Resolves category business key or UUID to categories.id (uuid).
+ * When categoryId is a UUID it is looked up by primary key scoped to the
+ * organization (consistent with resolveBrandUuid) — this validates org
+ * ownership rather than blindly trusting the caller-supplied UUID.
+ * When categoryId is a business key it is looked up by category_id as before.
  *
  * @param {string} organizationId - SpaceCat organization UUID
  * @param {string} categoryId - Business key or UUID
@@ -70,24 +70,20 @@ export async function resolveCategoryUuid(organizationId, categoryId, postgrestC
   if (!hasText(categoryId) || !postgrestClient?.from) {
     return null;
   }
-  if (isValidUUID(categoryId)) {
-    return categoryId;
-  }
-  const { data, error } = await postgrestClient
-    .from('categories')
-    .select('id')
-    .eq('organization_id', organizationId)
-    .eq('category_id', categoryId)
-    .maybeSingle();
+  const query = postgrestClient.from('categories').select('id').eq('organization_id', organizationId);
+  const { data, error } = await (isValidUUID(categoryId)
+    ? query.eq('id', categoryId)
+    : query.eq('category_id', categoryId)
+  ).maybeSingle();
   return !error && data?.id ? data.id : null;
 }
 
 /**
- * Resolves topic business key (or UUID) to topics.id (uuid).
- * If topicId is already a valid UUID it is returned directly — the UI
- * derives topic identifiers from topic.id (UUID PK) in prompt responses,
- * so bypassing the business-key lookup avoids a spurious miss and ensures the
- * filter is never silently skipped.
+ * Resolves topic business key or UUID to topics.id (uuid).
+ * When topicId is a UUID it is looked up by primary key scoped to the
+ * organization (consistent with resolveBrandUuid) — this validates org
+ * ownership rather than blindly trusting the caller-supplied UUID.
+ * When topicId is a business key it is looked up by topic_id as before.
  *
  * @param {string} organizationId - SpaceCat organization UUID
  * @param {string} topicId - Business key or UUID
@@ -98,15 +94,11 @@ export async function resolveTopicUuid(organizationId, topicId, postgrestClient)
   if (!hasText(topicId) || !postgrestClient?.from) {
     return null;
   }
-  if (isValidUUID(topicId)) {
-    return topicId;
-  }
-  const { data, error } = await postgrestClient
-    .from('topics')
-    .select('id')
-    .eq('organization_id', organizationId)
-    .eq('topic_id', topicId)
-    .maybeSingle();
+  const query = postgrestClient.from('topics').select('id').eq('organization_id', organizationId);
+  const { data, error } = await (isValidUUID(topicId)
+    ? query.eq('id', topicId)
+    : query.eq('topic_id', topicId)
+  ).maybeSingle();
   return !error && data?.id ? data.id : null;
 }
 

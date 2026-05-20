@@ -120,12 +120,18 @@ describe('prompts-storage', () => {
       expect(result).to.equal('cat-uuid');
     });
 
-    it('returns uuid directly without a DB lookup when categoryId is already a valid UUID', async () => {
+    it('resolves by primary key scoped to org when categoryId is a valid UUID', async () => {
       const uuid = 'a1111111-1111-4111-b111-111111111111';
-      const client = { from: sandbox.stub().throws(new Error('should not query DB')) };
+      const client = { from: () => makeChain({ data: { id: uuid }, error: null }) };
       const result = await resolveCategoryUuid(ORG_ID, uuid, client);
       expect(result).to.equal(uuid);
-      expect(client.from.called).to.be.false;
+    });
+
+    it('returns null when UUID does not belong to the organization', async () => {
+      const uuid = 'a1111111-1111-4111-b111-111111111111';
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await resolveCategoryUuid(ORG_ID, uuid, client);
+      expect(result).to.be.null;
     });
   });
 
@@ -147,12 +153,18 @@ describe('prompts-storage', () => {
       expect(result).to.be.null;
     });
 
-    it('returns uuid directly without a DB lookup when topicId is already a valid UUID', async () => {
+    it('resolves by primary key scoped to org when topicId is a valid UUID', async () => {
       const uuid = 'b2222222-2222-4222-b222-222222222222';
-      const client = { from: sandbox.stub().throws(new Error('should not query DB')) };
+      const client = { from: () => makeChain({ data: { id: uuid }, error: null }) };
       const result = await resolveTopicUuid(ORG_ID, uuid, client);
       expect(result).to.equal(uuid);
-      expect(client.from.called).to.be.false;
+    });
+
+    it('returns null when UUID does not belong to the organization', async () => {
+      const uuid = 'b2222222-2222-4222-b222-222222222222';
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await resolveTopicUuid(ORG_ID, uuid, client);
+      expect(result).to.be.null;
     });
   });
 
