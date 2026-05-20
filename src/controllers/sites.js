@@ -71,9 +71,11 @@ async function buildResolveData(org, site, context) {
  * @param {object} context - Request context.
  * @param {object} ctx - Controller context (provides dataAccess.Site and log).
  * @param {object} accessControlUtil - Access control utility for admin access checks.
+ * @param {boolean} callerIsInternal - Whether the caller belongs to an internal/demo org.
  * @returns {Promise<object|null>} Resolved data or null.
  */
-export async function resolveOrgDefaultSite(org, productCode, context, ctx, accessControlUtil) {
+// eslint-disable-next-line max-params, max-len
+export async function resolveOrgDefaultSite(org, productCode, context, ctx, accessControlUtil, callerIsInternal) {
   const { dataAccess: { Site }, log } = ctx;
   try {
     const defaultSiteId = org.getConfig()?.getDefaults()?.[productCode]?.siteId;
@@ -103,7 +105,7 @@ export async function resolveOrgDefaultSite(org, productCode, context, ctx, acce
     }
 
     const isVisibleTier = CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
-    if (!isVisibleTier && !accessControlUtil.hasAdminAccess()) {
+    if (!isVisibleTier && !callerIsInternal && !accessControlUtil.hasAdminAccess()) {
       return null;
     }
 
@@ -1248,8 +1250,8 @@ function SitesController(ctx, log, env) {
    *   - 'no_entitlement_for_product' — org has no entitlement for the requested x-product.
    *   - 'aso_pre_onboard' — entitlement tier is not in CUSTOMER_VISIBLE_TIERS (e.g. PRE_ONBOARD).
    *   - 'site_not_enrolled' — entitlement is visible but no SiteEnrollment links this site.
-   * `details` shape is `{ productCode, siteId, organizationId }` for all three statuses
-   * (these branches are reached only via the siteId path, so siteId is always present).
+   * `details` shape varies by path: siteId path includes `{ productCode, siteId, organizationId }`,
+   * organizationId/imsOrg paths include `{ productCode, organizationId }` (no siteId).
    * Unspecified 404s fall through without resolveStatus (unknown/generic not-found).
    *
    * @param {object} context - Context of the request.
@@ -1300,7 +1302,7 @@ function SitesController(ctx, log, env) {
     //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
     //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
     const resolveByOrg = async (org, failureDetails) => {
-      const args = [org, productCode, context, ctx, accessControlUtil];
+      const args = [org, productCode, context, ctx, accessControlUtil, callerIsInternal];
       const defaultData = await resolveOrgDefaultSite(...args);
       if (defaultData) {
         return ok({ data: defaultData });

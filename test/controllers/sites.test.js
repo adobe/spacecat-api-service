@@ -5457,7 +5457,7 @@ describe('Sites Controller', () => {
           entitlement: { getTier: () => 'FREE_TRIAL' },
           enrollments: [{ getId: () => 'enrollment-1' }],
         });
-        const args = [org, productCode, context, mockCtx, mockAccessControlUtil];
+        const args = [org, productCode, context, mockCtx, mockAccessControlUtil, false];
         resolveDefault = () => resolveOrgDefaultSite(...args);
       });
 
@@ -5518,6 +5518,17 @@ describe('Sites Controller', () => {
         });
 
         const result = await resolveDefault();
+
+        expect(result).to.not.be.null;
+      });
+
+      it('returns data when the configured site is on a non-customer-visible tier for internal caller', async () => {
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+        const args = [org, productCode, context, mockCtx, mockAccessControlUtil, true];
+        const result = await resolveOrgDefaultSite(...args);
 
         expect(result).to.not.be.null;
       });
