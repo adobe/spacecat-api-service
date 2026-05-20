@@ -1,3 +1,10 @@
+## [1.503.1](https://github.com/adobe/spacecat-api-service/compare/v1.503.0...v1.503.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* **slack:** use projection_audit for agentic traffic DB status check ([#2448](https://github.com/adobe/spacecat-api-service/issues/2448)) ([38ee1e2](https://github.com/adobe/spacecat-api-service/commit/38ee1e29c2516cb0b458e2e304af72d3968e156d))
+
 # [1.503.0](https://github.com/adobe/spacecat-api-service/compare/v1.502.1...v1.503.0) (2026-05-20)
 
 
