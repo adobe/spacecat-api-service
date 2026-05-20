@@ -55,16 +55,23 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
 }
 
 /**
- * Resolves category business key to categories.id (uuid).
+ * Resolves category business key (or UUID) to categories.id (uuid).
+ * If categoryId is already a valid UUID it is returned directly — the UI
+ * derives category identifiers from category.id (UUID PK) in prompt responses,
+ * so bypassing the business-key lookup avoids a spurious miss and ensures the
+ * filter is never silently skipped.
  *
  * @param {string} organizationId - SpaceCat organization UUID
- * @param {string} categoryId - Business key (e.g. "photoshop-photo-editing")
+ * @param {string} categoryId - Business key or UUID
  * @param {object} postgrestClient - PostgREST client
  * @returns {Promise<string|null>} categories.id (uuid) or null
  */
 export async function resolveCategoryUuid(organizationId, categoryId, postgrestClient) {
   if (!hasText(categoryId) || !postgrestClient?.from) {
     return null;
+  }
+  if (isValidUUID(categoryId)) {
+    return categoryId;
   }
   const { data, error } = await postgrestClient
     .from('categories')
@@ -76,16 +83,23 @@ export async function resolveCategoryUuid(organizationId, categoryId, postgrestC
 }
 
 /**
- * Resolves topic business key to topics.id (uuid).
+ * Resolves topic business key (or UUID) to topics.id (uuid).
+ * If topicId is already a valid UUID it is returned directly — the UI
+ * derives topic identifiers from topic.id (UUID PK) in prompt responses,
+ * so bypassing the business-key lookup avoids a spurious miss and ensures the
+ * filter is never silently skipped.
  *
  * @param {string} organizationId - SpaceCat organization UUID
- * @param {string} topicId - Business key
+ * @param {string} topicId - Business key or UUID
  * @param {object} postgrestClient - PostgREST client
  * @returns {Promise<string|null>} topics.id (uuid) or null
  */
 export async function resolveTopicUuid(organizationId, topicId, postgrestClient) {
   if (!hasText(topicId) || !postgrestClient?.from) {
     return null;
+  }
+  if (isValidUUID(topicId)) {
+    return topicId;
   }
   const { data, error } = await postgrestClient
     .from('topics')
