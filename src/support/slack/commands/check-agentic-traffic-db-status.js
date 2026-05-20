@@ -40,6 +40,12 @@ const HANDLERS = {
 // date. 2 days is a safe upper bound.
 const PROJECTION_WINDOW_DAYS = 2;
 
+// Max site IDs per PostgREST call. The full URL must fit under the smallest
+// proxy in the path (API Gateway / ALB / nginx default ~8 KB). Each UUID is
+// 36 chars + URL-encoded separator ≈ 40 bytes, so 150 site IDs ≈ 6 KB for
+// the IN() list - leaves real headroom for handler/date filters and headers.
+const SITE_ID_CHUNK_SIZE = 150;
+
 function isCompletedIsoWeek(date, now = new Date()) {
   return startOfUtcIsoWeek(date) < startOfUtcIsoWeek(now);
 }
@@ -147,28 +153,33 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         return;
       }
 
-      // Single PostgREST query: which (site, handler) pairs ran for this date?
+      // Which (site, handler) pairs ran for this date? Chunked across N
+      // PostgREST calls to stay under proxy URL-length limits when sweeping
+      // hundreds of sites. Sequential to avoid concurrent DNS pressure.
       const expectedHandlers = weeklyExpected
         ? [HANDLERS.raw, HANDLERS.daily, HANDLERS.weekly]
         : [HANDLERS.raw, HANDLERS.daily];
+      const siteIds = enabledSites.map((s) => s.getId());
 
-      const { data, error } = await postgrestClient
-        .from('projection_audit')
-        .select('scope_prefix,handler_name,projected_at,output_count')
-        .in('scope_prefix', enabledSites.map((s) => s.getId()))
-        .in('handler_name', expectedHandlers)
-        .gte('projected_at', `${dateStr}T00:00:00Z`)
-        .lt('projected_at', `${windowEnd}T00:00:00Z`)
-        .eq('skipped', false);
-
-      if (error) {
-        throw new Error(`projection_audit: ${error.message}`);
-      }
-
-      // Build (siteId, handler) -> latest run lookup.
       const ran = new Set();
-      for (const row of data ?? []) {
-        ran.add(`${row.scope_prefix}:${row.handler_name}`);
+      for (let i = 0; i < siteIds.length; i += SITE_ID_CHUNK_SIZE) {
+        const chunk = siteIds.slice(i, i + SITE_ID_CHUNK_SIZE);
+        // eslint-disable-next-line no-await-in-loop
+        const { data, error } = await postgrestClient
+          .from('projection_audit')
+          .select('scope_prefix,handler_name,projected_at,output_count')
+          .in('scope_prefix', chunk)
+          .in('handler_name', expectedHandlers)
+          .gte('projected_at', `${dateStr}T00:00:00Z`)
+          .lt('projected_at', `${windowEnd}T00:00:00Z`)
+          .eq('skipped', false);
+
+        if (error) {
+          throw new Error(`projection_audit: ${error.message}`);
+        }
+        for (const row of data ?? []) {
+          ran.add(`${row.scope_prefix}:${row.handler_name}`);
+        }
       }
 
       const siteStatuses = enabledSites.map((site) => {

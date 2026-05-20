@@ -33,25 +33,39 @@ const makeSite = (id, baseURL) => ({
   getLatestAuditByAuditType: sinon.stub().resolves(null),
 });
 
-// Builds a PostgREST mock whose query chain resolves to the supplied audit rows
-// (filtered by handler/site for realism). The Slack command only cares about
-// which (scope_prefix, handler_name) pairs come back, so the mock returns rows
-// verbatim and the test arranges the right rows.
-const makePostgrest = (rows) => {
-  const chain = {
-    select: sinon.stub(),
-    in: sinon.stub(),
-    gte: sinon.stub(),
-    lt: sinon.stub(),
-    eq: sinon.stub(),
-  };
-  const result = { data: rows, error: null };
-  chain.select.returns(chain);
-  chain.in.returns(chain);
-  chain.gte.returns(chain);
-  chain.lt.returns(chain);
-  chain.eq.resolves(result);
-  return { from: sinon.stub().returns(chain) };
+// Builds a PostgREST mock whose query chain resolves to audit rows filtered by
+// the scope_prefix IN(...) values used in each call. This matches PostgREST's
+// real behavior and lets a single test exercise the chunking path: each chunk
+// produces its own filtered response, and rows are correctly merged.
+const makePostgrest = (allRows, error = null) => {
+  const from = sinon.stub().callsFake(() => {
+    let chunkSiteIds = [];
+    const chain = {
+      select: sinon.stub(),
+      in: sinon.stub().callsFake((column, values) => {
+        if (column === 'scope_prefix') {
+          chunkSiteIds = values;
+        }
+        return chain;
+      }),
+      gte: sinon.stub(),
+      lt: sinon.stub(),
+      eq: sinon.stub(),
+    };
+    chain.select.returns(chain);
+    chain.gte.returns(chain);
+    chain.lt.returns(chain);
+    // Defer the filter until eq() is called so the closure captures the
+    // chunkSiteIds chosen by the in() call, not the empty initial value.
+    chain.eq.callsFake(() => Promise.resolve(error
+      ? { data: null, error }
+      : {
+        data: allRows.filter((r) => chunkSiteIds.includes(r.scope_prefix)),
+        error: null,
+      }));
+    return chain;
+  });
+  return { from };
 };
 
 describe('CheckAgenticTrafficDbStatusCommand', () => {
@@ -181,9 +195,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   it('surfaces PostgREST query errors through the generic Slack error handler', async () => {
     const site = makeSite(TARGET_SITE_ID, 'https://err.site');
     context.dataAccess.Site.all.resolves([site]);
-    const failing = makePostgrest(null);
-    failing.from().eq.resolves({ data: null, error: { message: 'relation missing' } });
-    context.dataAccess.services.postgrestClient = failing;
+    context.dataAccess.services.postgrestClient = makePostgrest([], { message: 'relation missing' });
 
     await CheckAgenticTrafficDbStatusCommand(context)
       .handleExecution(['2026-05-19'], slackContext);
@@ -194,5 +206,32 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     );
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('relation missing');
+  });
+
+  it('chunks site IDs across multiple PostgREST calls and merges results', async () => {
+    // 250 sites > 150 chunk size -> 2 PostgREST calls. Every site has all 3
+    // handlers in projection_audit, so the result must still be DASHBOARD_READY.
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    const sites = Array.from({ length: 250 }, (_, i) => {
+      const id = `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+      return makeSite(id, `https://site-${i}.example.com`);
+    });
+    context.dataAccess.Site.all.resolves(sites);
+    const audits = sites.flatMap((s) => [
+      { scope_prefix: s.getId(), handler_name: HANDLERS.raw },
+      { scope_prefix: s.getId(), handler_name: HANDLERS.daily },
+      { scope_prefix: s.getId(), handler_name: HANDLERS.weekly },
+    ]);
+    const postgrest = makePostgrest(audits);
+    context.dataAccess.services.postgrestClient = postgrest;
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    expect(postgrest.from.callCount).to.equal(2);
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    expect(output).to.include('Dashboard-ready: *250/250*');
   });
 });
