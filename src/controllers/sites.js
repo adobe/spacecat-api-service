@@ -70,9 +70,10 @@ async function buildResolveData(org, site, context) {
  * @param {string} productCode - Product code from x-product header.
  * @param {object} context - Request context.
  * @param {object} ctx - Controller context (provides dataAccess.Site and log).
+ * @param {object} accessControlUtil - Access control utility for admin access checks.
  * @returns {Promise<object|null>} Resolved data or null.
  */
-export async function resolveOrgDefaultSite(org, productCode, context, ctx) {
+export async function resolveOrgDefaultSite(org, productCode, context, ctx, accessControlUtil) {
   const { dataAccess: { Site }, log } = ctx;
   try {
     const defaultSiteId = org.getConfig()?.getDefaults()?.[productCode]?.siteId;
@@ -97,8 +98,12 @@ export async function resolveOrgDefaultSite(org, productCode, context, ctx) {
     const siteTierClient = await TierClient.createForSite(context, defaultSite, productCode);
     const { entitlement, enrollments } = await siteTierClient.getAllEnrollment();
 
-    const tierVisible = entitlement && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
-    if (!tierVisible || !enrollments?.length) {
+    if (!entitlement || !enrollments?.length) {
+      return null;
+    }
+
+    const isVisibleTier = CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+    if (!isVisibleTier && !accessControlUtil.hasAdminAccess()) {
       return null;
     }
 
@@ -1295,7 +1300,8 @@ function SitesController(ctx, log, env) {
     //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
     //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
     const resolveByOrg = async (org, failureDetails) => {
-      const defaultData = await resolveOrgDefaultSite(org, productCode, context, ctx);
+      const args = [org, productCode, context, ctx, accessControlUtil];
+      const defaultData = await resolveOrgDefaultSite(...args);
       if (defaultData) {
         return ok({ data: defaultData });
       }

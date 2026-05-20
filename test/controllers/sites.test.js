@@ -5442,22 +5442,28 @@ describe('Sites Controller', () => {
       const productCode = 'abcd';
       let mockCtx;
       let org;
+      let mockAccessControlUtil;
+
+      let resolveDefault;
 
       beforeEach(() => {
         [org] = testOrganizations;
         mockCtx = { dataAccess: mockDataAccess, log: { warn: sandbox.stub() } };
+        mockAccessControlUtil = { hasAdminAccess: sandbox.stub().returns(false) };
         sandbox.stub(org, 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
         mockDataAccess.Site.findById.resolves(testSites[0]);
         mockTierClientStub.getAllEnrollment.resolves({
           entitlement: { getTier: () => 'FREE_TRIAL' },
           enrollments: [{ getId: () => 'enrollment-1' }],
         });
+        const args = [org, productCode, context, mockCtx, mockAccessControlUtil];
+        resolveDefault = () => resolveOrgDefaultSite(...args);
       });
 
       it('returns null when org has no default configured for the product', async () => {
         org.getConfig.returns({ getDefaults: () => ({}) });
 
-        const result = await resolveOrgDefaultSite(org, productCode, context, mockCtx);
+        const result = await resolveDefault();
 
         expect(result).to.be.null;
         expect(mockDataAccess.Site.findById).to.not.have.been.called;
@@ -5466,7 +5472,7 @@ describe('Sites Controller', () => {
       it('returns null and warns when the configured site no longer exists', async () => {
         mockDataAccess.Site.findById.resolves(null);
 
-        const result = await resolveOrgDefaultSite(org, productCode, context, mockCtx);
+        const result = await resolveDefault();
 
         expect(result).to.be.null;
         expect(mockCtx.log.warn).to.have.been.called;
@@ -5475,7 +5481,7 @@ describe('Sites Controller', () => {
       it('returns null and warns when the configured site belongs to a different org', async () => {
         mockDataAccess.Site.findById.resolves(testSites[1]);
 
-        const result = await resolveOrgDefaultSite(org, productCode, context, mockCtx);
+        const result = await resolveDefault();
 
         expect(result).to.be.null;
         expect(mockCtx.log.warn).to.have.been.called;
@@ -5487,26 +5493,38 @@ describe('Sites Controller', () => {
           enrollments: [],
         });
 
-        const result = await resolveOrgDefaultSite(org, productCode, context, mockCtx);
+        const result = await resolveDefault();
 
         expect(result).to.be.null;
       });
 
-      it('returns null when the configured site is on a non-customer-visible tier', async () => {
+      it('returns null when the configured site is on a non-customer-visible tier for non-admin', async () => {
         mockTierClientStub.getAllEnrollment.resolves({
           entitlement: { getTier: () => 'PRE_ONBOARD' },
           enrollments: [{ getId: () => 'enrollment-1' }],
         });
 
-        const result = await resolveOrgDefaultSite(org, productCode, context, mockCtx);
+        const result = await resolveDefault();
 
         expect(result).to.be.null;
+      });
+
+      it('returns data when the configured site is on a non-customer-visible tier for admin', async () => {
+        mockAccessControlUtil.hasAdminAccess.returns(true);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const result = await resolveDefault();
+
+        expect(result).to.not.be.null;
       });
 
       it('returns null gracefully when TierClient throws', async () => {
         TierClient.createForSite.throws(new Error('tier service unavailable'));
 
-        const result = await resolveOrgDefaultSite(org, productCode, context, mockCtx);
+        const result = await resolveDefault();
 
         expect(result).to.be.null;
         expect(mockCtx.log.warn).to.have.been.called;
