@@ -35,16 +35,65 @@ const HANDLERS = {
   weekly: 'wrpc_refresh_agentic_traffic_weekly',
 };
 
-// Window for "did the projection run for this traffic date?". Projections run
-// shortly after analytics events arrive, typically within 24h of the traffic
-// date. 2 days is a safe upper bound.
-const PROJECTION_WINDOW_DAYS = 2;
+// projected_at window for the audit lookup. Wider than the typical "ran the
+// day after the traffic date" pattern to tolerate late-arriving traffic and
+// in-week backfills (a re-run of an old date within ~a week is still surfaced
+// as present). Daily/weekly handlers are then narrowed to the exact traffic
+// date via metadata; raw stays a presence-within-window check because the raw
+// handler does not record traffic dates in its audit metadata.
+const PROJECTION_LOOKBACK_DAYS = 1; // days before traffic date - early runs
+const PROJECTION_LOOKAHEAD_DAYS = 7; // days after - normal + backfill window
 
 // Max site IDs per PostgREST call. The full URL must fit under the smallest
 // proxy in the path (API Gateway / ALB / nginx default ~8 KB). Each UUID is
 // 36 chars + URL-encoded separator ≈ 40 bytes, so 150 site IDs ≈ 6 KB for
 // the IN() list - leaves real headroom for handler/date filters and headers.
 const SITE_ID_CHUNK_SIZE = 150;
+
+// Transient PostgREST/network errors worth retrying. EBUSY in particular is
+// the cascading-DNS-failure mode documented in the data-svc resilience plan;
+// each chunked call carries higher blast radius than the old per-site fan-out,
+// so a small jittered retry is worth keeping.
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 200;
+const TRANSIENT_CODES = new Set(['ECONNRESET', 'ENOTFOUND', 'EBUSY', 'ETIMEDOUT', 'PGRST002']);
+const TRANSIENT_HTTP_STATUS_RE = /^5\d\d$/;
+const TRANSIENT_MESSAGE_RE = /\b(?:timeout|gateway|ECONNRESET|ENOTFOUND|EBUSY|ETIMEDOUT|PGRST002)\b/i;
+
+function isTransientError(error) {
+  if (!error) {
+    return false;
+  }
+  if (error.code && TRANSIENT_CODES.has(String(error.code))) {
+    return true;
+  }
+  if (TRANSIENT_HTTP_STATUS_RE.test(String(error.status ?? ''))) {
+    return true;
+  }
+  return TRANSIENT_MESSAGE_RE.test(String(error.message || ''));
+}
+
+async function withRetry(fn) {
+  let lastError;
+  for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientError(error) || attempt === RETRY_ATTEMPTS - 1) {
+        throw error;
+      }
+      // Full jitter (AWS Architecture Blog) - avoids retry-storm synchronization.
+      const delay = RETRY_BASE_DELAY_MS * (2 ** attempt) * Math.random();
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => {
+        setTimeout(resolve, delay);
+      });
+    }
+  }
+  throw lastError;
+}
 
 function isCompletedIsoWeek(date, now = new Date()) {
   return startOfUtcIsoWeek(date) < startOfUtcIsoWeek(now);
@@ -123,7 +172,8 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const dateStr = formatUtcDate(targetDate);
       const weeklyExpected = isCompletedIsoWeek(targetDate);
       const weekStartStr = formatUtcDate(startOfUtcIsoWeek(targetDate));
-      const windowEnd = formatUtcDate(addUtcDays(targetDate, PROJECTION_WINDOW_DAYS));
+      const windowStart = formatUtcDate(addUtcDays(targetDate, -PROJECTION_LOOKBACK_DAYS));
+      const windowEnd = formatUtcDate(addUtcDays(targetDate, PROJECTION_LOOKAHEAD_DAYS));
 
       /* c8 ignore next 6 -- cosmetic per-scope prefix; logic tested via resolveSiteScope */
       let siteScopeText = '';
@@ -156,6 +206,11 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       // Which (site, handler) pairs ran for this date? Chunked across N
       // PostgREST calls to stay under proxy URL-length limits when sweeping
       // hundreds of sites. Sequential to avoid concurrent DNS pressure.
+      // Raw is presence-in-window (handler does not record traffic dates).
+      // Daily / weekly are narrowed to the exact target date via
+      // `metadata.dailyRefreshDates` / `metadata.weeklyRefreshWeeks`, which
+      // the projector populates in mysticat-projector-service/src/config/
+      // analytics/index.ts (mapDailyRefreshResponse / mapWeeklyRefreshResponse).
       const expectedHandlers = weeklyExpected
         ? [HANDLERS.raw, HANDLERS.daily, HANDLERS.weekly]
         : [HANDLERS.raw, HANDLERS.daily];
@@ -165,20 +220,34 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       for (let i = 0; i < siteIds.length; i += SITE_ID_CHUNK_SIZE) {
         const chunk = siteIds.slice(i, i + SITE_ID_CHUNK_SIZE);
         // eslint-disable-next-line no-await-in-loop
-        const { data, error } = await postgrestClient
+        const { data, error } = await withRetry(() => postgrestClient
           .from('projection_audit')
-          .select('scope_prefix,handler_name,projected_at,output_count')
+          .select('scope_prefix,handler_name,projected_at,metadata')
           .in('scope_prefix', chunk)
           .in('handler_name', expectedHandlers)
-          .gte('projected_at', `${dateStr}T00:00:00Z`)
+          .gte('projected_at', `${windowStart}T00:00:00Z`)
           .lt('projected_at', `${windowEnd}T00:00:00Z`)
-          .eq('skipped', false);
+          .eq('skipped', false));
 
         if (error) {
           throw new Error(`projection_audit: ${error.message}`);
         }
         for (const row of data ?? []) {
-          ran.add(`${row.scope_prefix}:${row.handler_name}`);
+          if (row.handler_name === HANDLERS.raw) {
+            // Raw handler has no traffic-date metadata; presence-in-window is
+            // the best signal available without a projector-side schema change.
+            ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
+          } else if (row.handler_name === HANDLERS.daily) {
+            const dates = row.metadata?.dailyRefreshDates ?? [];
+            if (dates.includes(dateStr)) {
+              ran.add(`${row.scope_prefix}:${HANDLERS.daily}`);
+            }
+          } else if (row.handler_name === HANDLERS.weekly) {
+            const weeks = row.metadata?.weeklyRefreshWeeks ?? [];
+            if (weeks.includes(weekStartStr)) {
+              ran.add(`${row.scope_prefix}:${HANDLERS.weekly}`);
+            }
+          }
         }
       }
 
@@ -202,9 +271,16 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const dailyMissing = siteStatuses.filter((s) => s.missing.includes('daily'));
       const weeklyMissing = siteStatuses.filter((s) => s.missing.includes('weekly'));
 
-      const outcome = dashboardReady.length === enabledSites.length
-        ? 'DASHBOARD_READY'
-        : 'ACTION_REQUIRED';
+      // Distinct "nothing arrived" outcome helps on-call separate "projector is
+      // broken org-wide" from "a few sites need follow-up".
+      let outcome;
+      if (dashboardReady.length === enabledSites.length) {
+        outcome = 'DASHBOARD_READY';
+      } else if (ran.size === 0) {
+        outcome = 'NO_DB_ROWS_FOR_DATE';
+      } else {
+        outcome = 'ACTION_REQUIRED';
+      }
 
       const lines = [
         `*Agentic Traffic Projection Status — ${dateStr}*`,
