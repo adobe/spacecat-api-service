@@ -219,7 +219,6 @@ describe('utils', () => {
 
     it('returns resolved author URL when RUM bundle has an AEM CS publish host', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
-      // wwwUrlResolver probes HTTPS reachability for the toggled hostname
       nock('https://example.com').head('/').reply(200);
 
       nock('https://bundles.aem.page')
