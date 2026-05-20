@@ -46,7 +46,6 @@ export const BASIC_AUDITS = [
   'scrape-top-pages',
   'headings',
   'llm-blocked',
-  'canonical',
   'hreflang',
   'summarization',
   'prerender',
