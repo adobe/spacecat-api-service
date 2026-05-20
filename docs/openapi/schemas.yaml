@@ -9117,6 +9117,107 @@ AiVisibilityPaginatedResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilitySemrushCountry:
+  type: string
+  description: COUNTRY enum from ai-seo-ts common/types_pb
+  enum:
+    - UNKNOWN
+    - AE
+    - AU
+    - BR
+    - CA
+    - DE
+    - ES
+    - FR
+    - IN
+    - IT
+    - JP
+    - MX
+    - NL
+    - SE
+    - UK
+    - US
+    - AR
+    - AT
+    - BE
+    - CH
+    - CL
+    - CO
+    - DK
+    - FI
+    - IE
+    - IL
+    - NO
+    - PA
+    - PE
+    - PL
+    - UY
+    - ZA
+    - SA
+    - WORLDWIDE
+
+AiVisibilitySemrushTopicIntent:
+  type: string
+  description: TOPIC_INTENT from ai-seo-ts common/types_pb
+  enum:
+    - UNSPECIFIED
+    - TASK
+    - INFORMATIONAL
+    - NAVIGATIONAL
+    - COMMERCIAL
+    - TRANSACTIONAL
+
+AiVisibilitySemrushLlm:
+  type: string
+  description: LLM enum from ai-seo-ts common/types_pb (response fields; query engine uses UI slugs).
+  enum:
+    - UNSPECIFIED
+    - CHAT_GPT
+    - GOOGLE_AI_OVERVIEW
+    - GOOGLE_AI_MODE
+    - GEMINI
+    - ALL
+
+AiVisibilitySemrushPromptCategory:
+  type: string
+  description: PROMPT_CATEGORY from ai-seo-ts v2/prompt/enums_pb
+  enum:
+    - UNSPECIFIED
+    - MENTIONS_TARGET
+    - MISSES_TARGET
+    - CITES_TARGET
+
+AiVisibilitySemrushBrand:
+  type: object
+  description: Brand from ai-seo-ts common/types_pb
+  properties:
+    domain:
+      type: string
+    name:
+      type: string
+  additionalProperties: true
+
+AiVisibilitySemrushSource:
+  type: object
+  description: Source from ai-seo-ts common/types_pb
+  properties:
+    url:
+      type: string
+    title:
+      type: string
+  additionalProperties: true
+
+AiVisibilitySemrushTopicIntentEntry:
+  type: object
+  description: Intent distribution entry on a topic or prompt row
+  properties:
+    intent:
+      $ref: '#/AiVisibilitySemrushTopicIntent'
+    weight:
+      type: integer
+      description: Intent weight within the distribution (0–100 scale per Semrush)
+  additionalProperties: true
+
 AiVisibilityV1TopicBrandTopicRow:
   type: object
   description: |
@@ -9124,7 +9225,7 @@ AiVisibilityV1TopicBrandTopicRow:
     UInt64 fields may be serialized as JSON strings.
   properties:
     id:
-      description: Topic identifier
+      description: Topic identifier (`uint64`)
       oneOf:
         - type: string
         - type: integer
@@ -9132,28 +9233,33 @@ AiVisibilityV1TopicBrandTopicRow:
       type: string
     visibility:
       type: integer
+      description: AI Visibility score (0–100)
     difficulty:
       type: integer
+      description: Topic difficulty (0–100)
     mentions:
+      description: Prompt responses mentioning the target brand in this topic
       oneOf:
         - type: string
         - type: integer
     volume:
+      description: Topic search volume
       oneOf:
         - type: string
         - type: integer
     volumeTrend:
       type: array
+      description: Historical volume scores (0.0–1.0 scale as uint32 per Semrush)
       items:
         type: integer
     intents:
       type: array
       items:
-        type: object
-        additionalProperties: true
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
     country:
+      description: Market (COUNTRY enum name or integer)
       oneOf:
-        - type: string
+        - $ref: '#/AiVisibilitySemrushCountry'
         - type: integer
   additionalProperties: true
 
@@ -9179,8 +9285,91 @@ AiVisibilityV1TopicBrandTopicsResponse:
 AiVisibilityV1PromptBrandPromptRow:
   type: object
   description: |
-    One prompt from Semrush `PromptsResponse.prompts` as protobuf JSON (camelCase).
-    UInt64 and other wide numeric fields may be serialized as JSON strings.
+    One prompt from Semrush v2 `PromptsResponse.Prompt` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      description: Prompt hash (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    briefResponse:
+      type: string
+    category:
+      description: Deprecated; use `categories`
+      $ref: '#/AiVisibilitySemrushPromptCategory'
+    mentionedBrandsCount:
+      type: integer
+    sourcesCount:
+      type: integer
+    serpId:
+      type: string
+    topicId:
+      oneOf:
+        - type: string
+        - type: integer
+    topicName:
+      type: string
+    topicVolume:
+      oneOf:
+        - type: string
+        - type: integer
+    topicIntents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    country:
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+    categories:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushPromptCategory'
+  additionalProperties: true
+
+AiVisibilityV1PromptPromptResponseValue:
+  type: object
+  description: PromptResponse.Value from Semrush pr.v1 Relations
+  properties:
+    date:
+      type: object
+      additionalProperties: true
+      description: Snapshot date components from `common.v1.Date`
+    prompt:
+      type: string
+    response:
+      type: string
+      description: Full LLM response in Markdown
+    mentionedBrands:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushBrand'
+    sources:
+      type: array
+      items:
+        type: string
+    isoDate:
+      type: string
+      description: Normalized date (`YYYY-MM` or `YYYY-MM-DD`)
+  additionalProperties: true
+
+AiVisibilityV1PromptPromptResponse:
+  type: object
+  description: |
+    Full prompt response from `GET /llmo/ai-visibility/v1/prompt/prompt-response`.
+    Native `PromptResponse` protobuf JSON (camelCase) from Semrush `Relations/Prompt`.
+  properties:
+    value:
+      $ref: '#/AiVisibilityV1PromptPromptResponseValue'
+    sourcesWithTitles:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushSource'
   additionalProperties: true
 
 AiVisibilityV1PromptBrandPromptsResponse:
