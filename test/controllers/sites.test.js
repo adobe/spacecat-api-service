@@ -5171,6 +5171,7 @@ describe('Sites Controller', () => {
     });
 
     it('should return 404 with aso_pre_onboard resolveStatus for PRE_ONBOARD-tier site via siteId path', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
       const validSiteId = SITE_IDS[1];
 
       context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
@@ -5741,6 +5742,7 @@ describe('Sites Controller', () => {
       // ────────────────────────────────────────────────────────────────────────────
 
       it('customer caller, PRE_ONBOARD → 404 aso_pre_onboard (unchanged, NOT remapped)', async () => {
+        sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
         context.data = {
           siteId: SITE_IDS[1],
           imsOrg: CUSTOMER_ORG_IMS_ID,
@@ -5782,6 +5784,7 @@ describe('Sites Controller', () => {
       // ────────────────────────────────────────────────────────────────────────────
 
       it('no callerImsOrg, PRE_ONBOARD → 404 aso_pre_onboard (no remap, original behavior)', async () => {
+        sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
         context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
         mockDataAccess.Site.findById.resolves(testSites[0]);
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -5798,6 +5801,7 @@ describe('Sites Controller', () => {
       });
 
       it('callerImsOrg points to org not found in DB → no remap (treated as not internal)', async () => {
+        sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
         const unknownIms = 'unknown-ims@AdobeOrg';
         context.data = {
           siteId: SITE_IDS[0],
@@ -5850,6 +5854,41 @@ describe('Sites Controller', () => {
         expect(response.status).to.equal(404);
         const body = await response.json();
         expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, organizationId path: PRE_ONBOARD + enrolled → 200', async () => {
+        context.data = {
+          organizationId: INTERNAL_ORG_SPACECAT_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          site: testSites[0],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data).to.have.property('site');
+      });
+
+      it('internal caller, imsOrg path: PRE_ONBOARD + enrolled → 200', async () => {
+        context.data = {
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          site: testSites[0],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data).to.have.property('site');
       });
     });
   });

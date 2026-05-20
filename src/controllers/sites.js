@@ -1324,6 +1324,7 @@ function SitesController(ctx, log, env) {
       }
 
       if (enrolledSite && (accessControlUtil.hasAdminAccess()
+        || callerIsInternal
         || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
         return ok({ data: await buildResolveData(org, enrolledSite, context) });
       }
@@ -1368,10 +1369,10 @@ function SitesController(ctx, log, env) {
               }
 
               if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
-                if (!callerIsInternal) {
+                if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
                   return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
                 }
-                log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
+                log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
               }
 
               if (!enrollments?.length) {
