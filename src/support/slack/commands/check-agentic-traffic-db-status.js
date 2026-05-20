@@ -27,33 +27,16 @@ import { postErrorMessage } from '../../../utils/slack/base.js';
 const PHRASES = ['check agentic traffic db status'];
 const CDN_LOGS_REPORT_AUDIT = 'cdn-logs-report';
 
-// Projection handlers that write to the agentic_traffic_* tables. Names are
-// declared in mysticat-projector-service/src/config/analytics/index.ts.
+// Handler names: mysticat-projector-service/src/config/analytics/index.ts
 const HANDLERS = {
   raw: 'wrpc_import_agentic_traffic',
   daily: 'wrpc_refresh_agentic_traffic_daily',
   weekly: 'wrpc_refresh_agentic_traffic_weekly',
 };
 
-// projected_at window for the audit lookup. Wider than the typical "ran the
-// day after the traffic date" pattern to tolerate late-arriving traffic and
-// in-week backfills (a re-run of an old date within ~a week is still surfaced
-// as present). Daily/weekly handlers are then narrowed to the exact traffic
-// date via metadata; raw stays a presence-within-window check because the raw
-// handler does not record traffic dates in its audit metadata.
-const PROJECTION_LOOKBACK_DAYS = 1; // days before traffic date - early runs
-const PROJECTION_LOOKAHEAD_DAYS = 7; // days after - normal + backfill window
-
-// Max site IDs per PostgREST call. The full URL must fit under the smallest
-// proxy in the path (API Gateway / ALB / nginx default ~8 KB). Each UUID is
-// 36 chars + URL-encoded separator ≈ 40 bytes, so 150 site IDs ≈ 6 KB for
-// the IN() list - leaves real headroom for handler/date filters and headers.
+const PROJECTION_LOOKBACK_DAYS = 1;
+const PROJECTION_LOOKAHEAD_DAYS = 7;
 const SITE_ID_CHUNK_SIZE = 150;
-
-// Transient PostgREST/network errors worth retrying. EBUSY in particular is
-// the cascading-DNS-failure mode documented in the data-svc resilience plan;
-// each chunked call carries higher blast radius than the old per-site fan-out,
-// so a small jittered retry is worth keeping.
 const RETRY_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 200;
 const TRANSIENT_CODES = new Set(['ECONNRESET', 'ENOTFOUND', 'EBUSY', 'ETIMEDOUT', 'PGRST002']);
@@ -84,7 +67,6 @@ async function withRetry(fn) {
       if (!isTransientError(error) || attempt === RETRY_ATTEMPTS - 1) {
         throw error;
       }
-      // Full jitter (AWS Architecture Blog) - avoids retry-storm synchronization.
       const delay = RETRY_BASE_DELAY_MS * (2 ** attempt) * Math.random();
       // eslint-disable-next-line no-await-in-loop
       await new Promise((resolve) => {
@@ -112,16 +94,6 @@ function renderSite(siteStatus) {
   ].join('\n');
 }
 
-/**
- * Factory function to create the CheckAgenticTrafficDbStatusCommand object.
- *
- * Reports whether the projection service has written agentic_traffic data for
- * each cdn-logs-report-enabled site on a given traffic date, by reading the
- * `projection_audit` table (the projector's own write log).
- *
- * @param {Object} context - The context object.
- * @returns {CheckAgenticTrafficDbStatusCommand} The command object.
- */
 function CheckAgenticTrafficDbStatusCommand(context) {
   const baseCommand = BaseCommand({
     id: 'check-agentic-traffic-db-status',
@@ -203,14 +175,6 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         return;
       }
 
-      // Which (site, handler) pairs ran for this date? Chunked across N
-      // PostgREST calls to stay under proxy URL-length limits when sweeping
-      // hundreds of sites. Sequential to avoid concurrent DNS pressure.
-      // Raw is presence-in-window (handler does not record traffic dates).
-      // Daily / weekly are narrowed to the exact target date via
-      // `metadata.dailyRefreshDates` / `metadata.weeklyRefreshWeeks`, which
-      // the projector populates in mysticat-projector-service/src/config/
-      // analytics/index.ts (mapDailyRefreshResponse / mapWeeklyRefreshResponse).
       const expectedHandlers = weeklyExpected
         ? [HANDLERS.raw, HANDLERS.daily, HANDLERS.weekly]
         : [HANDLERS.raw, HANDLERS.daily];
@@ -234,8 +198,6 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         }
         for (const row of data ?? []) {
           if (row.handler_name === HANDLERS.raw) {
-            // Raw handler has no traffic-date metadata; presence-in-window is
-            // the best signal available without a projector-side schema change.
             ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
           } else if (row.handler_name === HANDLERS.daily) {
             const dates = row.metadata?.dailyRefreshDates ?? [];
@@ -271,8 +233,6 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const dailyMissing = siteStatuses.filter((s) => s.missing.includes('daily'));
       const weeklyMissing = siteStatuses.filter((s) => s.missing.includes('weekly'));
 
-      // Distinct "nothing arrived" outcome helps on-call separate "projector is
-      // broken org-wide" from "a few sites need follow-up".
       let outcome;
       if (dashboardReady.length === enabledSites.length) {
         outcome = 'DASHBOARD_READY';
