@@ -1,3 +1,10 @@
+## [1.503.2](https://github.com/adobe/spacecat-api-service/compare/v1.503.1...v1.503.2) (2026-05-20)
+
+
+### Bug Fixes
+
+* resolveTopicUuid and resolveCategoryUuid accept UUID input directly ([#2449](https://github.com/adobe/spacecat-api-service/issues/2449)) ([b951ed4](https://github.com/adobe/spacecat-api-service/commit/b951ed4dcac2210fb1ca5f851649451bc3ed40ed))
+
 ## [1.503.1](https://github.com/adobe/spacecat-api-service/compare/v1.503.0...v1.503.1) (2026-05-20)
 
 
