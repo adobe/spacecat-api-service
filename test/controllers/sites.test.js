@@ -5449,7 +5449,8 @@ describe('Sites Controller', () => {
 
       beforeEach(() => {
         [org] = testOrganizations;
-        mockCtx = { dataAccess: mockDataAccess, log: { warn: sandbox.stub() } };
+        const log = { warn: sandbox.stub(), info: sandbox.stub() };
+        mockCtx = { dataAccess: mockDataAccess, log };
         mockAccessControlUtil = { hasAdminAccess: sandbox.stub().returns(false) };
         sandbox.stub(org, 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
         mockDataAccess.Site.findById.resolves(testSites[0]);

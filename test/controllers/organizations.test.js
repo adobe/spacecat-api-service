@@ -520,6 +520,22 @@ describe('Organizations Controller', () => {
     expect(response.status).to.equal(200);
   });
 
+  it('returns forbidden when non-admin tries to update config.defaults', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error.message).to.include('Only admins can update config.defaults');
+  });
+
   it('returns bad request for an unknown product code in config.defaults', async () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);

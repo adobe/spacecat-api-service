@@ -108,6 +108,9 @@ export async function resolveOrgDefaultSite(org, productCode, context, ctx, acce
     if (!isVisibleTier && !callerIsInternal && !accessControlUtil.hasAdminAccess()) {
       return null;
     }
+    if (!isVisibleTier) {
+      log.info(`[resolveSite] resolveOrgDefaultSite: skipping tier check (tier=${entitlement.getTier()}) for org ${org.getId()} product ${productCode}`);
+    }
 
     return buildResolveData(org, defaultSite, context);
   } catch (e) {

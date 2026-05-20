@@ -359,6 +359,9 @@ function OrganizationsController(ctx, env) {
 
     if (isObject(requestBody.config)) {
       if (isObject(requestBody.config.defaults)) {
+        if (!accessControlUtil.hasAdminAccess()) {
+          return forbidden('Only admins can update config.defaults');
+        }
         const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
         for (const [productCode, entry] of Object.entries(requestBody.config.defaults)) {
           if (!VALID_PRODUCT_CODES.has(productCode)) {
