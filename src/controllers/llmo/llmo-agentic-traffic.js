@@ -213,10 +213,10 @@ function buildExportId(payload) {
   return crypto.createHash('sha256').update(jcsStringify(payload)).digest('hex');
 }
 
-// Schema/canonical version live in the hash payload (kind/v/c/format).
-// Path stays `v1` for now; `v1c1` migration is a coordinated worker + producer change.
+// `v{N}c{M}` path matches the s3-export-framework ADR. Worker accepts both
+// `v1` (legacy) and `v1c1` during the rollout (PR adobe/spacecat-reporting-worker#619).
 function buildExportKeys(siteId, exportId) {
-  const prefix = `agentic-traffic/url-exports/${siteId}/${EXPORT_VERSION}/${exportId}`;
+  const prefix = `agentic-traffic/url-exports/${siteId}/${EXPORT_VERSION}c${EXPORT_CANONICAL_VERSION}/${exportId}`;
   return {
     csvKey: `${prefix}/urls.csv`,
     metadataKey: `${prefix}/metadata.json`,
@@ -832,7 +832,6 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
               filters: payload,
               s3Bucket,
               s3Key: csvKey,
-              metadataKey,
               s3Region,
               /* c8 ignore next -- 'unknown' fallback when authInfo is absent */
               requestedBy: ctx.attributes?.authInfo?.profile?.email || 'unknown',
