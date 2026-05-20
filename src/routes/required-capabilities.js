@@ -564,6 +564,7 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/topics/stats': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/brand-topics': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',

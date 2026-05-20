@@ -32,16 +32,17 @@ describe('src/index.js authHandlers order contract', () => {
     source = fs.readFileSync(path.join(testDir, '..', 'src', 'index.js'), 'utf8');
   });
 
-  it('places GitHubWebhookHmacHandler before path-agnostic handlers', () => {
-    // Extract the AUTH_HANDLERS array literal
+  function parseAuthHandlersOrder() {
     const match = source.match(/const AUTH_HANDLERS\s*=\s*\[([^\]]+)\]/);
     expect(match, 'AUTH_HANDLERS array not found in src/index.js').to.not.be.null;
-
-    const order = match[1]
+    return match[1]
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
+  }
 
+  it('places GitHubWebhookHmacHandler before path-agnostic handlers', () => {
+    const order = parseAuthHandlersOrder();
     const ghIdx = order.indexOf('GitHubWebhookHmacHandler');
     expect(ghIdx).to.be.greaterThan(-1, 'GitHubWebhookHmacHandler must be in AUTH_HANDLERS');
 
@@ -52,5 +53,24 @@ describe('src/index.js authHandlers order contract', () => {
       expect(idx).to.be.greaterThan(-1, `${name} must be in AUTH_HANDLERS`);
       expect(ghIdx).to.be.lessThan(idx, `GitHubWebhookHmacHandler must come before ${name}`);
     });
+  });
+
+  it('places ApiKeyImsHandler before AdobeImsHandler so /tools/api-keys is matched first', () => {
+    // Per the IMS-to-JWT migration design (mysticat-architecture), the route-
+    // scoped ApiKeyImsHandler must run BEFORE the global AdobeImsHandler.
+    // - For /tools/api-keys the scoped handler validates and the global handler
+    //   never runs.
+    // - For other routes the scoped handler returns null and the global handler
+    //   takes over (preserves Auto-Fix until ASO-607 migrates).
+    const order = parseAuthHandlersOrder();
+    const apiKeyIdx = order.indexOf('ApiKeyImsHandler');
+    const adobeImsIdx = order.indexOf('AdobeImsHandler');
+
+    expect(apiKeyIdx).to.be.greaterThan(-1, 'ApiKeyImsHandler must be in AUTH_HANDLERS');
+    expect(adobeImsIdx).to.be.greaterThan(-1, 'AdobeImsHandler must be in AUTH_HANDLERS');
+    expect(apiKeyIdx).to.be.lessThan(
+      adobeImsIdx,
+      'ApiKeyImsHandler must come before AdobeImsHandler',
+    );
   });
 });
