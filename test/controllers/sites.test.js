@@ -5449,8 +5449,7 @@ describe('Sites Controller', () => {
 
       beforeEach(() => {
         [org] = testOrganizations;
-        const log = { warn: sandbox.stub(), info: sandbox.stub() };
-        mockCtx = { dataAccess: mockDataAccess, log };
+        mockCtx = { dataAccess: mockDataAccess, log: { warn: sandbox.stub() } };
         mockAccessControlUtil = { hasAdminAccess: sandbox.stub().returns(false) };
         sandbox.stub(org, 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
         mockDataAccess.Site.findById.resolves(testSites[0]);
@@ -5458,7 +5457,7 @@ describe('Sites Controller', () => {
           entitlement: { getTier: () => 'FREE_TRIAL' },
           enrollments: [{ getId: () => 'enrollment-1' }],
         });
-        const args = [org, productCode, context, mockCtx, mockAccessControlUtil, false];
+        const args = [org, productCode, context, mockCtx, mockAccessControlUtil];
         resolveDefault = () => resolveOrgDefaultSite(...args);
       });
 
@@ -5519,17 +5518,6 @@ describe('Sites Controller', () => {
         });
 
         const result = await resolveDefault();
-
-        expect(result).to.not.be.null;
-      });
-
-      it('returns data when the configured site is on a non-customer-visible tier for internal caller', async () => {
-        mockTierClientStub.getAllEnrollment.resolves({
-          entitlement: { getTier: () => 'PRE_ONBOARD' },
-          enrollments: [{ getId: () => 'enrollment-1' }],
-        });
-        const args = [org, productCode, context, mockCtx, mockAccessControlUtil, true];
-        const result = await resolveOrgDefaultSite(...args);
 
         expect(result).to.not.be.null;
       });

@@ -71,11 +71,10 @@ async function buildResolveData(org, site, context) {
  * @param {object} context - Request context.
  * @param {object} ctx - Controller context (provides dataAccess.Site and log).
  * @param {object} accessControlUtil - Access control utility for admin access checks.
- * @param {boolean} callerIsInternal - Whether the caller belongs to an internal/demo org.
  * @returns {Promise<object|null>} Resolved data or null.
  */
-// eslint-disable-next-line max-params, max-len
-export async function resolveOrgDefaultSite(org, productCode, context, ctx, accessControlUtil, callerIsInternal) {
+// eslint-disable-next-line max-params
+export async function resolveOrgDefaultSite(org, productCode, context, ctx, accessControlUtil) {
   const { dataAccess: { Site }, log } = ctx;
   try {
     const defaultSiteId = org.getConfig()?.getDefaults()?.[productCode]?.siteId;
@@ -105,11 +104,8 @@ export async function resolveOrgDefaultSite(org, productCode, context, ctx, acce
     }
 
     const isVisibleTier = CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
-    if (!isVisibleTier && !callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+    if (!isVisibleTier && !accessControlUtil.hasAdminAccess()) {
       return null;
-    }
-    if (!isVisibleTier) {
-      log.info(`[resolveSite] resolveOrgDefaultSite: skipping tier check (tier=${entitlement.getTier()}) for org ${org.getId()} product ${productCode}`);
     }
 
     return buildResolveData(org, defaultSite, context);
@@ -1305,7 +1301,7 @@ function SitesController(ctx, log, env) {
     //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
     //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
     const resolveByOrg = async (org, failureDetails) => {
-      const args = [org, productCode, context, ctx, accessControlUtil, callerIsInternal];
+      const args = [org, productCode, context, ctx, accessControlUtil];
       const defaultData = await resolveOrgDefaultSite(...args);
       if (defaultData) {
         return ok({ data: defaultData });
