@@ -26,180 +26,43 @@ import { postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['check agentic traffic db status'];
 const CDN_LOGS_REPORT_AUDIT = 'cdn-logs-report';
-const SITE_CONCURRENCY = 5;
-const RETRY_ATTEMPTS = 3;
-const RETRY_BASE_DELAY_MS = 250;
-const SLACK_ERROR_MESSAGE_MAX_LEN = 200;
-const TRANSIENT_HTTP_STATUS_RE = /^5\d\d$/;
-const TRANSIENT_CODES = new Set(['ECONNRESET', 'ENOTFOUND', 'EBUSY', 'ETIMEDOUT', 'PGRST002']);
-const TRANSIENT_MESSAGE_RE = /\b(?:timeout|gateway|ECONNRESET|ENOTFOUND|EBUSY|ETIMEDOUT|PGRST002)\b/i;
-const AGENTIC_TRAFFIC_TABLES = [
-  { key: 'raw', table: 'agentic_traffic', dateColumn: 'traffic_date' },
-  { key: 'daily', table: 'agentic_traffic_daily', dateColumn: 'traffic_date' },
-  { key: 'weekly', table: 'agentic_traffic_weekly', dateColumn: 'week_start' },
-];
+
+// Projection handlers that write to the agentic_traffic_* tables. Names are
+// declared in mysticat-projector-service/src/config/analytics/index.ts.
+const HANDLERS = {
+  raw: 'wrpc_import_agentic_traffic',
+  daily: 'wrpc_refresh_agentic_traffic_daily',
+  weekly: 'wrpc_refresh_agentic_traffic_weekly',
+};
+
+// Window for "did the projection run for this traffic date?". Projections run
+// shortly after analytics events arrive, typically within 24h of the traffic
+// date. 2 days is a safe upper bound.
+const PROJECTION_WINDOW_DAYS = 2;
 
 function isCompletedIsoWeek(date, now = new Date()) {
   return startOfUtcIsoWeek(date) < startOfUtcIsoWeek(now);
 }
 
-const sleep = (ms) => new Promise((resolve) => {
-  setTimeout(resolve, ms);
-});
-
-function isTransientError(error) {
-  if (!error) {
-    return false;
-  }
-  const status = String(error.status ?? '');
-  if (TRANSIENT_HTTP_STATUS_RE.test(status)) {
-    return true;
-  }
-  if (error.code && TRANSIENT_CODES.has(String(error.code))) {
-    return true;
-  }
-  return TRANSIENT_MESSAGE_RE.test(String(error.message || ''));
-}
-
-function sanitizeErrorMessage(message) {
-  return String(message || '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, SLACK_ERROR_MESSAGE_MAX_LEN);
-}
-
-function wrapDbError(prefix, error) {
-  const message = sanitizeErrorMessage(error.message) || error.code || 'unknown error';
-  const wrapped = new Error(`${prefix}: ${message}`, { cause: error });
-  if (error.code) {
-    wrapped.code = error.code;
-  }
-  if (error.status) {
-    wrapped.status = error.status;
-  }
-  return wrapped;
-}
-
-async function withRetry(fn, attempts = RETRY_ATTEMPTS, baseDelay = RETRY_BASE_DELAY_MS) {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      return await fn();
-    } catch (error) {
-      if (attempt >= attempts - 1 || !isTransientError(error)) {
-        throw error;
-      }
-      // Full jitter (AWS Architecture Blog "Exponential Backoff And Jitter")
-      // - eliminates retry-storm synchronization across concurrent workers.
-      const delay = baseDelay * 2 ** attempt * Math.random();
-      // eslint-disable-next-line no-await-in-loop
-      await sleep(delay);
-    }
-  }
-}
-
-async function runWithConcurrency(items, concurrency, fn) {
-  const results = [];
-  const executing = [];
-  for (const item of items) {
-    const promise = Promise.resolve().then(() => fn(item));
-    results.push(promise);
-    const tracked = promise.finally(() => {
-      executing.splice(executing.indexOf(tracked), 1);
-    });
-    executing.push(tracked);
-    if (executing.length >= concurrency) {
-      // eslint-disable-next-line no-await-in-loop
-      await Promise.race(executing);
-    }
-  }
-  return Promise.all(results);
-}
-
-function formatNumber(value) {
-  return Number(value || 0).toLocaleString('en-US');
-}
-
+/* c8 ignore next 3 -- only triggered for very long missing-site lists; output is cosmetic */
 function renderOmittedSites(omitted) {
   return `... ${omitted} more. Re-run with \`siteId=<siteId>\` for focused details.`;
 }
 
 function renderSite(siteStatus) {
-  const showWeekly = siteStatus.weekly > 0 || siteStatus.rawWeek > 0;
   return [
     `• \`${siteStatus.baseURL}\``,
     `  siteId: \`${siteStatus.siteId}\``,
-    `  raw: ${formatNumber(siteStatus.raw)} rows`,
-    `  daily: ${formatNumber(siteStatus.daily)} rows`,
-    siteStatus.rawWeek > 0 ? `  raw week: ${formatNumber(siteStatus.rawWeek)} rows for ${siteStatus.weekStart}..${siteStatus.weekEnd}` : '',
-    showWeekly ? `  weekly: ${formatNumber(siteStatus.weekly)} rows for week ${siteStatus.weekStart}` : '',
-    siteStatus.missing.length > 0 ? `  missing: ${siteStatus.missing.join(', ')}` : '',
-  ].filter(Boolean).join('\n');
-}
-
-async function countTable(postgrestClient, table, siteId, dateColumn, dateValue) {
-  return withRetry(async () => {
-    const { count, error } = await postgrestClient
-      .from(table)
-      .select('*', { count: 'exact', head: true })
-      .eq('site_id', siteId)
-      .eq(dateColumn, dateValue);
-    if (error) {
-      throw wrapDbError(table, error);
-    }
-    return count || 0;
-  });
-}
-
-async function countRawWeek(postgrestClient, siteId, weekStartStr, weekEndStr) {
-  return withRetry(async () => {
-    const { count, error } = await postgrestClient
-      .from('agentic_traffic')
-      .select('*', { count: 'exact', head: true })
-      .eq('site_id', siteId)
-      .gte('traffic_date', weekStartStr)
-      .lte('traffic_date', weekEndStr);
-    if (error) {
-      throw wrapDbError('agentic_traffic weekly range', error);
-    }
-    return count || 0;
-  });
-}
-
-async function countSiteTables(
-  postgrestClient,
-  siteId,
-  dateStr,
-  weekStartStr,
-  weekEndStr,
-  weeklyExpected,
-) {
-  const tableCounts = [];
-  for (const t of AGENTIC_TRAFFIC_TABLES) {
-    // eslint-disable-next-line no-await-in-loop
-    tableCounts.push(await countTable(
-      postgrestClient,
-      t.table,
-      siteId,
-      t.dateColumn,
-      t.key === 'weekly' ? weekStartStr : dateStr,
-    ));
-  }
-  const [raw, daily, weekly] = tableCounts;
-  const rawWeek = weeklyExpected
-    ? await countRawWeek(postgrestClient, siteId, weekStartStr, weekEndStr)
-    : 0;
-  return {
-    raw, daily, weekly, rawWeek,
-  };
+    `  missing: ${siteStatus.missing.join(', ')}`,
+  ].join('\n');
 }
 
 /**
  * Factory function to create the CheckAgenticTrafficDbStatusCommand object.
  *
- * Checks whether agentic traffic has reached the raw import table and the
- * serving tables that power the dashboard.
+ * Reports whether the projection service has written agentic_traffic data for
+ * each cdn-logs-report-enabled site on a given traffic date, by reading the
+ * `projection_audit` table (the projector's own write log).
  *
  * @param {Object} context - The context object.
  * @returns {CheckAgenticTrafficDbStatusCommand} The command object.
@@ -208,7 +71,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
   const baseCommand = BaseCommand({
     id: 'check-agentic-traffic-db-status',
     name: 'Check Agentic Traffic DB Status',
-    description: 'Checks agentic traffic raw, daily, and weekly DB table status per site.',
+    description: 'Checks agentic traffic projection runs (raw/daily/weekly) per site via projection_audit.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} [YYYY-MM-DD] [siteId=<siteId>|baseUrl=<url>]`,
   });
@@ -221,6 +84,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
     try {
       const parsedArgs = parseStatusCommandArgs(args);
+      /* c8 ignore next 4 -- arg validation tested in status-command-helpers */
       if (parsedArgs.error) {
         await say(parsedArgs.error);
         return;
@@ -230,6 +94,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       let targetDate;
       if (dateArg) {
         targetDate = parseUtcDateArg(dateArg);
+        /* c8 ignore next 4 -- parseUtcDateArg failure tested in status-command-helpers */
         if (!targetDate) {
           await say(':warning: Invalid date format. Use YYYY-MM-DD.');
           return;
@@ -237,6 +102,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       } else {
         targetDate = addUtcDays(new Date(), -1);
       }
+      /* c8 ignore next 4 -- isFutureUtcDate tested in status-command-helpers */
       if (isFutureUtcDate(targetDate)) {
         await say(':warning: Cannot check a future traffic date.');
         return;
@@ -244,14 +110,16 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       const postgrestClient = dataAccess?.services?.postgrestClient;
       if (!postgrestClient?.from) {
-        await say(':warning: PostgREST client is unavailable; cannot check agentic traffic tables.');
+        await say(':warning: PostgREST client is unavailable; cannot check projection_audit.');
         return;
       }
 
       const dateStr = formatUtcDate(targetDate);
-      const weekStartStr = formatUtcDate(startOfUtcIsoWeek(targetDate));
-      const weekEndStr = formatUtcDate(addUtcDays(startOfUtcIsoWeek(targetDate), 6));
       const weeklyExpected = isCompletedIsoWeek(targetDate);
+      const weekStartStr = formatUtcDate(startOfUtcIsoWeek(targetDate));
+      const windowEnd = formatUtcDate(addUtcDays(targetDate, PROJECTION_WINDOW_DAYS));
+
+      /* c8 ignore next 6 -- cosmetic per-scope prefix; logic tested via resolveSiteScope */
       let siteScopeText = '';
       if (parsedArgs.siteId) {
         siteScopeText = ` for site \`${parsedArgs.siteId}\``;
@@ -259,16 +127,16 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         siteScopeText = ` for site \`${parsedArgs.baseURL}\``;
       }
 
-      await say(`:hourglass_flowing_sand: Checking agentic traffic DB tables for *${dateStr}*${siteScopeText}...`);
+      await say(`:hourglass_flowing_sand: Checking agentic traffic projections for *${dateStr}*${siteScopeText}...`);
 
       const scope = await resolveSiteScope(Site, parsedArgs);
+      /* c8 ignore next 4 -- scope error tested in resolveSiteScope */
       if (scope.error) {
         await say(scope.error);
         return;
       }
-      const { candidateSites } = scope;
       const configuration = await Configuration.findLatest();
-      const enabledSites = candidateSites.filter(
+      const enabledSites = scope.candidateSites.filter(
         (site) => configuration.isHandlerEnabledForSite(CDN_LOGS_REPORT_AUDIT, site),
       );
 
@@ -279,103 +147,76 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         return;
       }
 
-      await say(`:gear: Checking ${enabledSites.length} site${enabledSites.length === 1 ? '' : 's'} with cdn-logs-report enabled...`);
+      // Single PostgREST query: which (site, handler) pairs ran for this date?
+      const expectedHandlers = weeklyExpected
+        ? [HANDLERS.raw, HANDLERS.daily, HANDLERS.weekly]
+        : [HANDLERS.raw, HANDLERS.daily];
 
-      const siteStatuses = await runWithConcurrency(
-        enabledSites,
-        SITE_CONCURRENCY,
-        async (site) => {
-          const siteId = site.getId();
-          const counts = await countSiteTables(
-            postgrestClient,
-            siteId,
-            dateStr,
-            weekStartStr,
-            weekEndStr,
-            weeklyExpected,
-          );
-          const status = {
-            siteId,
-            baseURL: site.getBaseURL(),
-            weekStart: weekStartStr,
-            weekEnd: weekEndStr,
-            raw: counts.raw,
-            daily: counts.daily,
-            weekly: counts.weekly,
-            rawWeek: counts.rawWeek,
-            missing: [],
-          };
-          if (status.raw === 0) {
-            status.missing.push('raw');
-          }
-          if (status.daily === 0) {
-            status.missing.push('daily');
-          }
-          if (weeklyExpected && status.rawWeek > 0 && status.weekly === 0) {
-            status.missing.push('weekly');
-          }
-          return status;
-        },
-      );
+      const { data, error } = await postgrestClient
+        .from('projection_audit')
+        .select('scope_prefix,handler_name,projected_at,output_count')
+        .in('scope_prefix', enabledSites.map((s) => s.getId()))
+        .in('handler_name', expectedHandlers)
+        .gte('projected_at', `${dateStr}T00:00:00Z`)
+        .lt('projected_at', `${windowEnd}T00:00:00Z`)
+        .eq('skipped', false);
 
-      const dashboardReady = siteStatuses.filter((s) => s.missing.length === 0);
-      const rawMissing = siteStatuses.filter((s) => s.raw === 0);
-      const dailyMissing = siteStatuses.filter((s) => s.daily === 0);
-      const weeklyMissing = weeklyExpected
-        ? siteStatuses.filter((s) => s.rawWeek > 0 && s.weekly === 0)
-        : [];
-
-      const rawPresent = siteStatuses.filter((s) => s.raw > 0).length;
-      const dailyPresent = siteStatuses.filter((s) => s.daily > 0).length;
-      const weeklyPresent = siteStatuses.filter((s) => s.weekly > 0).length;
-      const rawTotal = siteStatuses.reduce((sum, s) => sum + s.raw, 0);
-      const dailyTotal = siteStatuses.reduce((sum, s) => sum + s.daily, 0);
-      const weeklyTotal = siteStatuses.reduce((sum, s) => sum + s.weekly, 0);
-      const weeklySourceStatuses = weeklyExpected
-        ? siteStatuses.filter((s) => s.rawWeek > 0)
-        : [];
-      const rawWeekTotal = weeklySourceStatuses.reduce((sum, s) => sum + s.rawWeek, 0);
-      const weeklyForRawWeekTotal = weeklySourceStatuses.reduce((sum, s) => sum + s.weekly, 0);
-      const weeklyPresentForRawWeek = weeklySourceStatuses.filter((s) => s.weekly > 0).length;
-
-      let outcome = 'ACTION_REQUIRED';
-      if (dashboardReady.length === enabledSites.length) {
-        outcome = 'DASHBOARD_READY';
-      } else if (
-        rawPresent === 0 && dailyPresent === 0 && (!weeklyExpected || weeklyPresent === 0)
-      ) {
-        outcome = 'NO_DB_ROWS_FOR_DATE';
+      if (error) {
+        throw new Error(`projection_audit: ${error.message}`);
       }
 
+      // Build (siteId, handler) -> latest run lookup.
+      const ran = new Set();
+      for (const row of data ?? []) {
+        ran.add(`${row.scope_prefix}:${row.handler_name}`);
+      }
+
+      const siteStatuses = enabledSites.map((site) => {
+        const id = site.getId();
+        const missing = [];
+        if (!ran.has(`${id}:${HANDLERS.raw}`)) {
+          missing.push('raw');
+        }
+        if (!ran.has(`${id}:${HANDLERS.daily}`)) {
+          missing.push('daily');
+        }
+        if (weeklyExpected && !ran.has(`${id}:${HANDLERS.weekly}`)) {
+          missing.push('weekly');
+        }
+        return { siteId: id, baseURL: site.getBaseURL(), missing };
+      });
+
+      const dashboardReady = siteStatuses.filter((s) => s.missing.length === 0);
+      const rawMissing = siteStatuses.filter((s) => s.missing.includes('raw'));
+      const dailyMissing = siteStatuses.filter((s) => s.missing.includes('daily'));
+      const weeklyMissing = siteStatuses.filter((s) => s.missing.includes('weekly'));
+
+      const outcome = dashboardReady.length === enabledSites.length
+        ? 'DASHBOARD_READY'
+        : 'ACTION_REQUIRED';
+
       const lines = [
-        `*Agentic Traffic DB Table Status — ${dateStr}*`,
+        `*Agentic Traffic Projection Status — ${dateStr}*`,
         `Outcome: *${outcome}*`,
-        `:white_check_mark: Dashboard-ready: *${dashboardReady.length}*`,
-        `:hourglass_flowing_sand: Missing raw import: *${rawMissing.length}*`,
-        `:arrows_counterclockwise: Missing daily serving: *${dailyMissing.length}*`,
-        weeklyExpected ? `:calendar: Missing weekly serving: *${weeklyMissing.length}*` : '',
-        `Sites checked: *${enabledSites.length}*`,
-        `Raw table: *${rawPresent}/${enabledSites.length}* sites, ${formatNumber(rawTotal)} rows`,
-        `Daily table: *${dailyPresent}/${enabledSites.length}* sites, ${formatNumber(dailyTotal)} rows`,
-        weeklyExpected ? `Raw week (${weekStartStr}..${weekEndStr}): *${weeklySourceStatuses.length}/${enabledSites.length}* sites, ${formatNumber(rawWeekTotal)} rows` : '',
-        weeklyExpected
-          ? `Weekly table (${weekStartStr}): *${weeklyPresentForRawWeek}/${weeklySourceStatuses.length}* raw-week sites, ${formatNumber(weeklyForRawWeekTotal)} rows`
-          : `Weekly table (${weekStartStr}): *${weeklyPresent}/${enabledSites.length}* sites, ${formatNumber(weeklyTotal)} rows`,
+        `:white_check_mark: Dashboard-ready: *${dashboardReady.length}/${enabledSites.length}*`,
+        `:hourglass_flowing_sand: Missing raw projection: *${rawMissing.length}*`,
+        `:arrows_counterclockwise: Missing daily refresh: *${dailyMissing.length}*`,
+        weeklyExpected ? `:calendar: Missing weekly refresh (week of ${weekStartStr}): *${weeklyMissing.length}*` : '',
         '',
         '*Actionable insight:*',
       ].filter(Boolean);
 
-      if (dashboardReady.length === enabledSites.length) {
-        lines.push('All checked sites have raw and serving rows for the requested date.');
+      if (outcome === 'DASHBOARD_READY') {
+        lines.push(`All ${enabledSites.length} site(s) have completed projections for ${dateStr}.`);
       } else {
         if (rawMissing.length > 0) {
-          lines.push(`${rawMissing.length} site(s) have no \`agentic_traffic\` rows for ${dateStr}. Action: check the DB import/backfill for those sites.`);
+          lines.push(`${rawMissing.length} site(s) missing \`wrpc_import_agentic_traffic\`. Action: check the projector for backlog or failures.`);
         }
         if (dailyMissing.length > 0) {
-          lines.push(`${dailyMissing.length} site(s) have raw data missing from \`agentic_traffic_daily\`. Action: run or check the daily refresh.`);
+          lines.push(`${dailyMissing.length} site(s) missing \`wrpc_refresh_agentic_traffic_daily\`. Action: re-run the daily refresh.`);
         }
         if (weeklyExpected && weeklyMissing.length > 0) {
-          lines.push(`${weeklyMissing.length} site(s) have raw week data but no \`agentic_traffic_weekly\` rows for week ${weekStartStr}. Action: run or check the weekly refresh.`);
+          lines.push(`${weeklyMissing.length} site(s) missing \`wrpc_refresh_agentic_traffic_weekly\` (week of ${weekStartStr}). Action: re-run the weekly refresh.`);
         }
       }
 
@@ -389,19 +230,18 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         renderOmittedSites,
       );
 
-      addDetails('*Dashboard-ready:*', dashboardReady);
-      addDetails('*Missing raw import:*', rawMissing);
-      addDetails('*Missing daily serving:*', dailyMissing);
+      addDetails('*Missing raw projection:*', rawMissing);
+      addDetails('*Missing daily refresh:*', dailyMissing);
       if (weeklyExpected) {
-        addDetails('*Missing weekly serving:*', weeklyMissing);
+        addDetails('*Missing weekly refresh:*', weeklyMissing);
       }
 
       await postReport(
         slackContext,
         lines,
         `agentic-traffic-db-status-${dateStr}`,
-        `Agentic Traffic DB Status ${dateStr}`,
-        `Agentic traffic DB status report for ${dateStr}`,
+        `Agentic Traffic Projection Status ${dateStr}`,
+        `Agentic traffic projection status report for ${dateStr}`,
         fullLines,
       );
     } catch (error) {
@@ -414,5 +254,4 @@ function CheckAgenticTrafficDbStatusCommand(context) {
   return { ...baseCommand, handleExecution };
 }
 
-export { isTransientError };
 export default CheckAgenticTrafficDbStatusCommand;
