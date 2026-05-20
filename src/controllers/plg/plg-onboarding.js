@@ -1764,17 +1764,17 @@ function PlgOnboardingController(ctx) {
     const updatedReviews = [...existingReviews, reviewEntry];
     onboarding.setReviews(updatedReviews);
 
-    const checkKey = deriveCheckKey(onboarding);
-    if (!checkKey) {
-      return badRequest('Unable to determine the review reason from the onboarding record');
-    }
-
     onboarding.setUpdatedBy(reviewedBy);
 
     // PENDING: record ESE action without changing status (e.g. emailed customer)
     if (decision === REVIEW_DECISIONS.PENDING) {
       await onboarding.save();
       return ok(PlgOnboardingDto.toAdminJSON(onboarding));
+    }
+
+    const checkKey = deriveCheckKey(onboarding);
+    if (!checkKey) {
+      return badRequest('Unable to determine the review reason from the onboarding record');
     }
 
     // UPHOLD: reject the domain — transition to REJECTED (terminal)

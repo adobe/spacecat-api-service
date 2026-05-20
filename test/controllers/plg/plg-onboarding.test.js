@@ -6109,6 +6109,28 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setStatus).to.not.have.been.called;
       });
 
+      it('PENDING: succeeds even when waitlistReason is absent (no checkKey needed)', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: null,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Emailed customer, awaiting response' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews[0].decision).to.equal('PENDING');
+        expect(record.setStatus).to.not.have.been.called;
+        expect(record.save).to.have.been.calledOnce;
+      });
+
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: replaces old domain and re-runs flow', async () => {
         const waitlistedRecord = createMockOnboarding({
           status: 'WAITLISTED',
