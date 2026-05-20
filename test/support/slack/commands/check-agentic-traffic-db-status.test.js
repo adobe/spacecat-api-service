@@ -109,8 +109,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
       { scope_prefix: TARGET_SITE_ID, handler_name: HANDLERS.raw },
       { scope_prefix: TARGET_SITE_ID, handler_name: HANDLERS.daily },
       { scope_prefix: TARGET_SITE_ID, handler_name: HANDLERS.weekly },
-      { scope_prefix: OTHER_SITE_ID, handler_name: HANDLERS.raw },
-      // partial site is missing daily and weekly
+      // partial site has no rows at all - missing raw, daily, AND weekly
     ]);
 
     await CheckAgenticTrafficDbStatusCommand(context)
@@ -119,10 +118,22 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Outcome: *ACTION_REQUIRED*');
+    expect(output).to.include('Missing raw projection: *1*');
     expect(output).to.include('Missing daily refresh: *1*');
     expect(output).to.include('Missing weekly refresh');
     expect(output).to.include('https://partial.site');
-    expect(output).to.include('missing: daily, weekly');
+    expect(output).to.include('missing: raw, daily, weekly');
+  });
+
+  it('defaults to yesterday when no date argument is given', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://wknd.site')]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution([], slackContext);
+    clock.restore();
+
+    expect(slackContext.say.firstCall.args[0]).to.include('*2026-05-25*');
   });
 
   it('skips weekly check for traffic dates in the current (incomplete) ISO week', async () => {
