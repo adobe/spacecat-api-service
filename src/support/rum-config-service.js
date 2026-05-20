@@ -38,7 +38,12 @@ const RUM_CHECK_TIMEOUT_MS = 3000;
  */
 export async function updateRumConfig(site, context, { save = true } = {}) {
   const { log } = context;
-  const domain = new URL(site.getBaseURL()).hostname;
+
+  const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+  const domain = new URL(overrideBaseURL || site.getBaseURL()).hostname;
+
+  /* c8 ignore next */
+  log.warn(`[rum-config-service] resolving RUM domain key for siteId=${site.getId?.()} domain=${domain} source=${overrideBaseURL ? 'overrideBaseURL' : 'baseURL'}`);
 
   let hasDomainKey = false;
   let timeoutId;
@@ -52,11 +57,16 @@ export async function updateRumConfig(site, context, { save = true } = {}) {
       }),
     ]);
     hasDomainKey = true;
+    /* c8 ignore next */
+    log.warn(`[rum-config-service] RUM domain key found for ${domain}`);
   } catch (e) {
     log.warn(`[rum-config-service] RUM check failed for ${domain}: ${e.message}`);
   } finally {
     clearTimeout(timeoutId);
   }
+
+  /* c8 ignore next */
+  log.warn(`[rum-config-service] updateRumConfig complete for siteId=${site.getId?.()} hasDomainKey=${hasDomainKey} save=${save}`);
 
   if (save) {
     const siteConfig = site.getConfig();
