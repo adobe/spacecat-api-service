@@ -1,3 +1,10 @@
+# [1.501.0](https://github.com/adobe/spacecat-api-service/compare/v1.500.6...v1.501.0) (2026-05-20)
+
+
+### Features
+
+* **api-key:** route-scoped IMS handler and middleware-driven controller auth ([#2344](https://github.com/adobe/spacecat-api-service/issues/2344)) ([b528369](https://github.com/adobe/spacecat-api-service/commit/b528369b2b1307be79093e5988d4ad87a86a2ae9))
+
 ## [1.500.6](https://github.com/adobe/spacecat-api-service/compare/v1.500.5...v1.500.6) (2026-05-19)
 
 
