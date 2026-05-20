@@ -399,8 +399,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -453,8 +453,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -510,8 +510,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -572,8 +572,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -819,8 +819,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -886,8 +886,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -941,8 +941,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -1030,8 +1030,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -1083,8 +1083,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -1131,8 +1131,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -1184,8 +1184,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -1229,8 +1229,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -1285,8 +1285,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -1330,8 +1330,8 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can perform this operation');
       }
 
       if (!hasText(siteId) || !isValidUUID(siteId)) {
