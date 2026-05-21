@@ -19,6 +19,7 @@ describe('observability-client', () => {
   let log;
   let postMessageStub;
   let webClientArgs;
+  let webClientThrows;
   let createObservabilitySlackClient;
 
   async function load() {
@@ -26,6 +27,9 @@ describe('observability-client', () => {
       '@slack/web-api': {
         WebClient: class {
           constructor(token, options) {
+            if (webClientThrows) {
+              throw new Error('invalid token');
+            }
             webClientArgs = { token, options };
             this.chat = { postMessage: postMessageStub };
           }
@@ -39,6 +43,7 @@ describe('observability-client', () => {
     log = { info: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub() };
     postMessageStub = sandbox.stub().resolves({ ok: true, ts: '1716200000.000300' });
     webClientArgs = undefined;
+    webClientThrows = false;
     ({ createObservabilitySlackClient } = await load());
   });
 
@@ -110,5 +115,12 @@ describe('observability-client', () => {
     createObservabilitySlackClient({ token: 'xoxb-test', channel: 'C123', log });
     expect(webClientArgs.options).to.include({ timeout: 2000 });
     expect(webClientArgs.options.retryConfig).to.deep.equal({ retries: 0 });
+  });
+
+  it('is disabled (no throw) when the WebClient constructor fails', () => {
+    webClientThrows = true;
+    const client = createObservabilitySlackClient({ token: 'xoxb-test', channel: 'C123', log });
+    expect(client.enabled).to.be.false;
+    expect(log.warn.calledOnce).to.be.true;
   });
 });
