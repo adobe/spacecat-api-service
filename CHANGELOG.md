@@ -1,3 +1,10 @@
+# [1.505.0](https://github.com/adobe/spacecat-api-service/compare/v1.504.1...v1.505.0) (2026-05-21)
+
+
+### Features
+
+* **slack:** add 'run cdn reports bulk publish' command ([#2458](https://github.com/adobe/spacecat-api-service/issues/2458)) ([776a2a5](https://github.com/adobe/spacecat-api-service/commit/776a2a5f47ce3a7da274dc2fea99316ff380fc64))
+
 ## [1.504.1](https://github.com/adobe/spacecat-api-service/compare/v1.504.0...v1.504.1) (2026-05-21)
 
 
