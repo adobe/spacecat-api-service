@@ -1,3 +1,10 @@
+# [1.508.0](https://github.com/adobe/spacecat-api-service/compare/v1.507.0...v1.508.0) (2026-05-21)
+
+
+### Features
+
+* **semrush:** IMS-bearer-only AIO proxy + onboarding + DB-backed projects ([#2456](https://github.com/adobe/spacecat-api-service/issues/2456)) ([882dbab](https://github.com/adobe/spacecat-api-service/commit/882dbab5d2776a3096a322d3a397a0331f19d30b))
+
 # [1.507.0](https://github.com/adobe/spacecat-api-service/compare/v1.506.0...v1.507.0) (2026-05-21)
 
 
