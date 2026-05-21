@@ -1,3 +1,10 @@
+# [1.507.0](https://github.com/adobe/spacecat-api-service/compare/v1.506.0...v1.507.0) (2026-05-21)
+
+
+### Features
+
+* added Pending review decision ([#2436](https://github.com/adobe/spacecat-api-service/issues/2436)) ([fab83c4](https://github.com/adobe/spacecat-api-service/commit/fab83c4256e92fafc81cad704318b7e3b4b03b95))
+
 # [1.506.0](https://github.com/adobe/spacecat-api-service/compare/v1.505.1...v1.506.0) (2026-05-21)
 
 
