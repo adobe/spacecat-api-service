@@ -45,6 +45,10 @@ function GetObjectCommand(input) {
   this.input = input;
 }
 
+function DeleteObjectCommand(input) {
+  this.input = input;
+}
+
 function PutObjectCommand(input) {
   this.input = input;
 }
@@ -113,6 +117,9 @@ function stubS3({ keys = [], echoPrefix = false, metadata } = {}) {
     if (command instanceof PutObjectCommand) {
       return Promise.resolve({});
     }
+    if (command instanceof DeleteObjectCommand) {
+      return Promise.resolve({});
+    }
     if (metadata === undefined) {
       const error = new Error('not found');
       error.name = 'NoSuchKey';
@@ -132,6 +139,9 @@ function makeExportContext(overrides = {}) {
     if (command instanceof PutObjectCommand) {
       return Promise.resolve({});
     }
+    if (command instanceof DeleteObjectCommand) {
+      return Promise.resolve({});
+    }
     const error = new Error('not found');
     error.name = 'NoSuchKey';
     return Promise.reject(error);
@@ -142,6 +152,7 @@ function makeExportContext(overrides = {}) {
     ListObjectsV2Command,
     GetObjectCommand,
     PutObjectCommand,
+    DeleteObjectCommand,
     getSignedUrl: sinon.stub().resolves('https://signed.example.com/export.csv'),
     ...overrides.s3,
   };
@@ -1305,6 +1316,61 @@ describe('llmo-agentic-traffic', () => {
       expect(ctx.log.warn).to.have.been.calledWithMatch(/out-of-prefix/);
     });
 
+    it('falls back to ListObjectsV2 when metadata.files contains in-prefix non-CSV keys', async () => {
+      // Worker bug: an in-prefix path that isn't a CSV (e.g. metadata.json
+      // itself) would otherwise get signed. Reject any entry whose filename
+      // doesn't match urls.csv or urls.csv_partN.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [{ Key: command.input.Prefix }] });
+        }
+        const prefix = command.input.Key.replace(/\/metadata\.json$/, '');
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 1,
+              // In-prefix but not a CSV — must be rejected.
+              files: [`${prefix}/metadata.json`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const listCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof ListObjectsV2Command);
+      expect(listCalls).to.have.length(1);
+      expect(ctx.log.warn).to.have.been.calledWithMatch(/out-of-prefix/);
+    });
+
+    it('signs with the regular S3 client (not accelerated) when AWS_ENDPOINT_URL_S3 is set (IT/MinIO)', async () => {
+      const ctx = makeExportContext({
+        context: { env: { AWS_ENDPOINT_URL_S3: 'http://localhost:4566' } },
+      });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        const prefix = command.input.Key.replace(/\/metadata\.json$/, '');
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 1,
+              files: [`${prefix}/urls.csv`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      // Regular client used, not accelerated.
+      expect(ctx.s3.getSignedUrl.firstCall.args[0]).to.equal(ctx.s3.s3Client);
+    });
+
     it('produces the same exportId for the same filter set across calls', async () => {
       // The cache contract rests on stableStringify being key-order invariant.
       const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
@@ -1419,6 +1485,20 @@ describe('llmo-agentic-traffic', () => {
       // PUT must happen before SQS sendMessage — locks the claim-before-enqueue order.
       const putOrder = ctx.s3.s3Client.send.firstCall.calledBefore(ctx.sqs.sendMessage.firstCall);
       expect(putOrder).to.equal(true);
+    });
+
+    it('rolls back processing metadata when SQS sendMessage fails', async () => {
+      // Without rollback a transient SQS failure would block the cache key
+      // for the full stale-processing window — 30 min outage on a blip.
+      const ctx = makeExportContext({
+        sqs: { sendMessage: sinon.stub().rejects(new Error('sqs unavailable')) },
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(500);
+      const deleteCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof DeleteObjectCommand);
+      expect(deleteCalls).to.have.length(1);
     });
 
     it('uses CAS (IfNoneMatch:*) when retrying against success metadata so success records are not clobbered', async () => {

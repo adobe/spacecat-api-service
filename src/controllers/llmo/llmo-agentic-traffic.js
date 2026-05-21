@@ -231,10 +231,17 @@ function buildExportKeys(siteId, exportId) {
 // Defense in depth: the worker writes `metadata.files[]` and the producer signs
 // presigned URLs for each entry. A worker bug or compromise could put arbitrary
 // keys in `files[]`; this filter rejects anything outside the deterministic
-// export prefix, falling back to ListObjectsV2 which already constrains shape.
+// export prefix AND anything that isn't a CSV file (the ListObjectsV2 fallback
+// already enforces `urls.csv | urls.csv_partN` — match it on the fast path).
 function validateFilesAgainstPrefix(files, siteId, exportId) {
-  const expectedPrefix = `${buildExportPrefix(siteId, exportId)}/`;
-  return files.filter((k) => typeof k === 'string' && k.startsWith(expectedPrefix));
+  const prefix = `${buildExportPrefix(siteId, exportId)}/`;
+  const allowedFile = /^urls\.csv(?:_part\d+)?$/;
+  return files.filter((k) => {
+    if (typeof k !== 'string' || !k.startsWith(prefix)) {
+      return false;
+    }
+    return allowedFile.test(k.slice(prefix.length));
+  });
 }
 
 // Caps defend status-polling against a pathological prefix (malicious
@@ -321,6 +328,15 @@ async function claimProcessingMetadata(ctx, bucket, metadataKey, exportId, siteI
   }
 }
 
+// Rolls back a claimProcessingMetadata write when downstream enqueue fails.
+// Without this a transient SQS failure would leave `processing` metadata
+// behind and block every subsequent POST until the stale window elapses.
+async function deleteProcessingMetadata(ctx, bucket, metadataKey) {
+  const { s3 } = ctx;
+  const command = new s3.DeleteObjectCommand({ Bucket: bucket, Key: metadataKey });
+  await s3.s3Client.send(command);
+}
+
 async function getExportMetadata(ctx, bucket, metadataKey) {
   const { s3 } = ctx;
   let body;
@@ -350,10 +366,17 @@ const MAX_EXPORT_DOWNLOAD_URLS = 50;
 
 // Customer-facing presigned URLs sign against the s3-accelerate endpoint so
 // the AWS region is hidden from the URL. Bucket-side acceleration is enabled
-// in spacecat-infrastructure. Cached per-region so a multi-region runtime
-// can't accidentally sign with the wrong client.
+// in spacecat-infrastructure.
+//
+// When AWS_ENDPOINT_URL_S3 is set (local IT against MinIO/LocalStack) the
+// accelerate endpoint doesn't exist — fall back to the shared regional
+// client. Cached per-region so a multi-region runtime can't accidentally
+// sign with the wrong client.
 const acceleratedS3Clients = new Map();
-function getAcceleratedS3Client(region) {
+function getSigningClient(ctx, region) {
+  if (ctx.env?.AWS_ENDPOINT_URL_S3) {
+    return ctx.s3.s3Client;
+  }
   if (!acceleratedS3Clients.has(region)) {
     acceleratedS3Clients.set(region, new S3Client({ region, useAccelerateEndpoint: true }));
   }
@@ -364,7 +387,7 @@ async function buildExportReadyResponse(ctx, bucket, exportId, csvKeys, metadata
   const expiresIn = PRESIGNED_URL_TTL_SECONDS;
   const keysToSign = csvKeys.slice(0, MAX_EXPORT_DOWNLOAD_URLS);
   const { s3Region } = getExportConfig(ctx);
-  const signingClient = getAcceleratedS3Client(s3Region);
+  const signingClient = getSigningClient(ctx, s3Region);
   const downloadUrls = await Promise.all(keysToSign.map(async (key) => {
     const command = new ctx.s3.GetObjectCommand({ Bucket: bucket, Key: key });
     return ctx.s3.getSignedUrl(signingClient, command, { expiresIn });
@@ -862,19 +885,26 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
             return accepted({ exportId, status: 'processing' });
           }
 
-          await sqs.sendMessage(queueUrl, {
-            type: EXPORT_TYPE,
-            data: {
-              siteId,
-              exportId,
-              filters: payload,
-              s3Bucket,
-              s3Key: csvKey,
-              s3Region,
-              /* c8 ignore next -- 'unknown' fallback when authInfo is absent */
-              requestedBy: ctx.attributes?.authInfo?.profile?.email || 'unknown',
-            },
-          });
+          try {
+            await sqs.sendMessage(queueUrl, {
+              type: EXPORT_TYPE,
+              data: {
+                siteId,
+                exportId,
+                filters: payload,
+                s3Bucket,
+                s3Key: csvKey,
+                s3Region,
+                /* c8 ignore next -- 'unknown' fallback when authInfo is absent */
+                requestedBy: ctx.attributes?.authInfo?.profile?.email || 'unknown',
+              },
+            });
+          } catch (enqueueError) {
+            // Rollback the processing claim so the next POST can retry
+            // instead of being blocked for the full stale-processing window.
+            await deleteProcessingMetadata(ctx, s3Bucket, metadataKey).catch(() => {});
+            throw enqueueError;
+          }
 
           return accepted({
             exportId,
