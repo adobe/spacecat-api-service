@@ -17,6 +17,7 @@ import { CDN_TYPES } from '../controllers/llmo/llmo-utils.js';
 import {
   AEM_CS_FASTLY_CNAME_PATTERNS,
   AEM_CS_FASTLY_IPS,
+  detectAemCsFastlyBehindWaf,
 } from './cdn-detection.js';
 
 // Per-CDN strategies for edge optimize routing.
@@ -210,16 +211,14 @@ async function checkHost(host, log) {
 }
 
 /**
- * Detects whether a domain is using AEM Cloud Service Managed CDN (Fastly)
- * by checking DNS CNAME and A records.
+ * Detects whether a domain is using AEM Cloud Service Managed CDN (Fastly),
+ * including sites where a WAF or reverse proxy hides the Fastly CNAME (Case 0).
  *
- * Returns 'aem-cs-fastly' if the domain resolves to the known CS Fastly
- * CNAME or IP addresses, otherwise returns null. Unlike the broader
- * detectCdnForDomain in cdn-detection.js, this function is AEM-CS-Fastly-only
- * and is meant to be called from edge-routing code paths that branch
- * exclusively on AEM-CS tenancy.
+ * Tries a cheap DNS check first (CNAME + A records). If DNS does not confirm
+ * AEM CS Fastly — e.g. because a WAF CNAME is visible instead — falls back to
+ * the full CDN detector which runs Phase 1.5 HTTP probes for the WAF proxy case.
  *
- * Never throws — DNS failures are treated as undetected.
+ * Returns 'aem-cs-fastly' or null. Never throws.
  *
  * @param {string} domain - Hostname to check (e.g. 'example.com')
  * @returns {Promise<string|null>} 'aem-cs-fastly' or null
@@ -227,9 +226,14 @@ async function checkHost(host, log) {
 export async function detectAemCsFastlyForDomain(domain, log) {
   try {
     log?.info(`[edge-routing-utils] Detecting AEM-CS Fastly for domain ${domain}`);
-    return await checkHost(domain, log);
+    const dnsResult = await checkHost(domain, log);
+    if (dnsResult) {
+      return dnsResult;
+    }
+    // DNS missed — a WAF or reverse proxy may be hiding AEM CS Fastly.
+    // Run Phase 1.5 HTTP probes directly (no Phase 2 — we only care about AEM CS).
+    return await detectAemCsFastlyBehindWaf(domain, log);
   } catch (err) {
-    // DNS errors are treated as undetected — never break callers
     log?.error('detectAemCsFastlyForDomain error', err);
   }
   return null;
