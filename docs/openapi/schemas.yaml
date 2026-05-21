@@ -9565,3 +9565,287 @@ AiVisibilitySourceDomainsResponse:
     srFilters:
       $ref: '#/AiVisibilitySrFilters'
   required: [data, total, offset, limit]
+
+# ── Semrush AIO proxy ─────────────────────────────────────────────────────────
+# Schemas for /v2/orgs/{spaceCatId}/brands/{brandId}/semrush/*. See
+# docs/openapi/semrush-api.yaml for the operations.
+
+SemrushPrompt:
+  type: object
+  description: A single Semrush AIO prompt as exposed by the proxy.
+  required: [id, semrushId, semrushProjectId, semrushLocationId, language, text]
+  properties:
+    id:
+      type: string
+      description: |
+        Logical id stable across Semrush re-creates:
+        `base64url(JSON({b: brandId, l: semrushLocationId, lang: language, t: text}))`.
+    semrushId:
+      type: string
+      description: Semrush-side prompt id (changes if the prompt is re-created).
+    semrushProjectId:
+      type: string
+      description: Semrush AIO project this prompt lives in.
+    semrushLocationId:
+      type: integer
+      minimum: 1
+      description: Google Ads Geo Target ID of the owning project.
+    language:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    text:
+      type: string
+    tags:
+      type: array
+      items: { type: string }
+
+SemrushPromptListResponse:
+  type: object
+  required: [items, total, page, limit]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SemrushPrompt' }
+    total: { type: integer }
+    page: { type: integer }
+    limit: { type: integer }
+
+SemrushPromptInput:
+  type: object
+  description: One row in a bulk-create prompts request.
+  required: [text, semrushLocationId, language]
+  properties:
+    text: { type: string }
+    tags:
+      type: array
+      items: { type: string }
+      default: []
+    semrushLocationId:
+      type: integer
+      minimum: 1
+    language:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+
+SemrushCreatePromptsRequest:
+  type: object
+  required: [prompts]
+  properties:
+    prompts:
+      type: array
+      minItems: 1
+      maxItems: 500
+      items: { $ref: '#/SemrushPromptInput' }
+
+SemrushCreatePromptsResponse:
+  type: object
+  required: [created, skipped, failed]
+  properties:
+    created:
+      type: array
+      items: { $ref: '#/SemrushPrompt' }
+    skipped:
+      type: array
+      description: Prompts skipped (e.g. duplicate within the request).
+      items:
+        type: object
+        properties:
+          text: { type: string }
+          reason: { type: string }
+    failed:
+      type: array
+      description: Prompts that hit a Semrush upstream error.
+      items:
+        type: object
+        properties:
+          text: { type: string }
+          semrushProjectId: { type: string }
+          status: { type: integer }
+          message: { type: string }
+
+SemrushUpdatePromptRequest:
+  type: object
+  description: Partial update to a prompt; at least one field required.
+  minProperties: 1
+  properties:
+    text: { type: string }
+    tags:
+      type: array
+      items: { type: string }
+
+SemrushBulkDeletePromptsRequest:
+  type: object
+  required: [semrushIds]
+  properties:
+    semrushIds:
+      type: array
+      minItems: 1
+      maxItems: 500
+      items:
+        type: object
+        required: [semrushProjectId, semrushPromptId]
+        properties:
+          semrushProjectId: { type: string }
+          semrushPromptId: { type: string }
+
+SemrushBulkDeletePromptsResponse:
+  type: object
+  required: [deleted, failed]
+  properties:
+    deleted: { type: integer }
+    failed:
+      type: array
+      items:
+        type: object
+        properties:
+          semrushProjectId: { type: string }
+          semrushPromptId: { type: string }
+          status: { type: integer }
+          message: { type: string }
+
+SemrushProjectRow:
+  type: object
+  description: One row from brand_to_semrush_projects enriched with live Semrush metadata.
+  required: [brandId, semrushProjectId, semrushLocationId, language]
+  properties:
+    brandId:
+      type: string
+      format: uuid
+    semrushProjectId: { type: string }
+    semrushLocationId:
+      type: integer
+      minimum: 1
+    language:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    name:
+      type: string
+      description: Semrush project display name (from live lookup).
+    domain:
+      type: string
+      description: Semrush project domain (from live lookup).
+    workspaceId:
+      type: string
+      format: uuid
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+
+SemrushProjectListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SemrushProjectRow' }
+
+SemrushCreateProjectRequest:
+  type: object
+  required: [name, market, language, brandDomain, brandNames]
+  properties:
+    name:
+      type: string
+      description: Display name of the new Semrush AIO project.
+    market:
+      type: string
+      description: ISO 2-letter country code; api-service resolves to semrush_location_id via locations.json.
+      pattern: '^[A-Za-z]{2}$'
+    language:
+      type: string
+      description: Lowercase BCP 47-shaped language tag (e.g. en, de, de-ch).
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    brandDomain:
+      type: string
+      description: Brand domain Semrush should track (e.g. adobe.com).
+    brandNames:
+      type: array
+      minItems: 1
+      items: { type: string }
+      description: Brand-name variants Semrush should match in model answers.
+    projectType:
+      type: string
+      enum: [aio]
+      default: aio
+
+SemrushCreateProjectResponse:
+  type: object
+  required: [semrushProjectId, semrushLocationId, language, name, workspaceId]
+  properties:
+    semrushProjectId: { type: string }
+    semrushLocationId:
+      type: integer
+      minimum: 1
+    language:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    name: { type: string }
+    workspaceId:
+      type: string
+      format: uuid
+
+SemrushTag:
+  type: object
+  required: [id, name]
+  properties:
+    id: { type: string }
+    name: { type: string }
+
+SemrushTagListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SemrushTag' }
+
+SemrushModel:
+  type: object
+  required: [id, key, name]
+  properties:
+    id: { type: string }
+    key:
+      type: string
+      description: CBF_model value the Semrush Reporting API expects.
+    name: { type: string }
+    icon: { type: string }
+
+SemrushModelListResponse:
+  type: object
+  required: [models]
+  properties:
+    models:
+      type: array
+      items: { $ref: '#/SemrushModel' }
+
+SemrushWorkspaceProject:
+  type: object
+  required: [id, name]
+  properties:
+    id: { type: string }
+    name: { type: string }
+    domain: { type: string }
+
+SemrushWorkspaceProjectListResponse:
+  type: object
+  required: [projects]
+  properties:
+    projects:
+      type: array
+      items: { $ref: '#/SemrushWorkspaceProject' }
+
+SemrushUpstreamError:
+  type: object
+  description: Envelope returned when Semrush returns a non-2xx response.
+  required: [error, status]
+  properties:
+    error:
+      type: string
+      enum: [semrushUpstreamError]
+    status:
+      type: integer
+      description: HTTP status code returned by Semrush.
+    message:
+      type: string
+    body:
+      description: Raw upstream body (parsed JSON when valid, otherwise the response text).
