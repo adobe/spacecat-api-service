@@ -61,14 +61,42 @@ function ScrapeJobController(context) {
 
   const MAX_JOBS_BY_BASEURL = 100;
 
-  // Duplicated from preflight controller (decision: refactor to support/scrape-auth.js
-  // as follow-up once the second consumer ships and the abstraction is justified).
+  // Duplicated from preflight controller. Extraction tracked in SITES-45204
+  // (move checkEnableAuthentication / resolvePromiseToken / PROMISE_BASED_TYPES
+  // to src/support/auth.js, alongside getIMSPromiseToken).
+  //
+  // Hardened HEAD probe — 3 s timeout (under API Gateway's 29 s budget for an
+  // outbound to arbitrary customer infrastructure) and redirect: 'manual' so
+  // a customer baseURL cannot 30x-launder the probe toward an internal host.
+  // Returns one of:
+  //   'auth-required'  — 401 / 403, mint and inject the Authorization header
+  //   'no-auth'        — 2xx,        delegate without injecting a header
+  //   'ambiguous'      — 3xx / 5xx / network / timeout, caller asked for auth
+  //                     but we cannot prove the page wants it; fail closed at
+  //                     the caller instead of silently scraping a login page.
+  const HEAD_PROBE_TIMEOUT_MS = 3000;
   async function checkEnableAuthentication(previewBaseURL) {
-    const headResponse = await fetch(previewBaseURL, {
-      method: 'HEAD',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    return headResponse.status === 401 || headResponse.status === 403;
+    let headResponse;
+    try {
+      headResponse = await fetch(previewBaseURL, {
+        method: 'HEAD',
+        headers: { 'Content-Type': 'application/json' },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(HEAD_PROBE_TIMEOUT_MS),
+      });
+    } catch (e) {
+      log.warn(`HEAD probe failed for ${previewBaseURL}: ${e.name}: ${e.message}`);
+      return 'ambiguous';
+    }
+    const { status } = headResponse;
+    if (status === 401 || status === 403) {
+      return 'auth-required';
+    }
+    if (status >= 200 && status < 300) {
+      return 'no-auth';
+    }
+    log.warn(`HEAD probe for ${previewBaseURL} returned ambiguous status ${status}`);
+    return 'ambiguous';
   }
 
   async function resolvePromiseToken(site, requestContext) {
@@ -90,6 +118,19 @@ function ScrapeJobController(context) {
     return createResponse({}, error.status || 500, {
       [HEADER_ERROR]: safeMessage,
     });
+  }
+
+  // Strip the server-minted Authorization header from the response — content-
+  // scraper still receives it via the SQS message body, but the credential
+  // must not be echoed back in the 202 body. At-rest exposure in DynamoDB /
+  // LIST endpoints is tracked in SITES-45205 (spacecat-shared ScrapeJobDto
+  // redaction).
+  function sanitizeJobResponse(job) {
+    if (!isNonEmptyObject(job) || !isNonEmptyObject(job.customHeaders)) {
+      return job;
+    }
+    const { Authorization: _, ...safeHeaders } = job.customHeaders;
+    return { ...job, customHeaders: safeHeaders };
   }
 
   /**
@@ -158,25 +199,57 @@ function ScrapeJobController(context) {
     }
 
     const baseURL = site.getBaseURL();
+    let siteHostname;
     let previewBaseURL;
     try {
       const parsed = new URL(baseURL);
+      siteHostname = parsed.hostname;
       previewBaseURL = `${parsed.protocol}//${parsed.hostname}`;
     } catch {
       log.error(`Site ${siteId} has invalid baseURL: ${baseURL}`);
       return internalServerError('Site has invalid baseURL');
     }
 
-    let needsAuth = false;
-    try {
-      needsAuth = await checkEnableAuthentication(previewBaseURL);
-    } catch (e) {
-      // HEAD probe is best-effort; on failure delegate without header injection.
-      log.info(`HEAD probe failed for ${previewBaseURL}: ${e.message}`);
+    // Bind every caller URL to the site origin before we mint a credential —
+    // otherwise a caller can submit a valid siteId with urls pointing at an
+    // attacker host and harvest the resolved Authorization header (cross-
+    // origin credential exfiltration). Mirrors the preflight controller's
+    // "all urls must belong to the same website" guard, but tightened to
+    // the *site's* origin rather than just same-hostname-as-first-url.
+    if (!Array.isArray(data.urls) || data.urls.length === 0) {
+      return badRequest('Invalid request: urls must be a non-empty array');
+    }
+    for (const u of data.urls) {
+      let urlHostname;
+      try {
+        urlHostname = new URL(u).hostname;
+      } catch {
+        return badRequest(`Invalid request: malformed URL: ${u}`);
+      }
+      if (urlHostname !== siteHostname) {
+        log.warn(`Cross-origin URL rejected for site ${siteId}: ${u}`);
+        return badRequest(
+          `Invalid request: every URL must belong to the site origin (${siteHostname})`,
+        );
+      }
+    }
+
+    // checkEnableAuthentication never throws — it returns 'auth-required',
+    // 'no-auth', or 'ambiguous'. We fail closed on 'ambiguous' because the
+    // caller explicitly asked for authenticated scraping; silently demoting
+    // would store a login page as "real content" — the exact SITES-40597
+    // failure class.
+    const probeResult = await checkEnableAuthentication(previewBaseURL);
+    if (probeResult === 'ambiguous') {
+      return createResponse({}, 502, {
+        [HEADER_ERROR]: cleanupHeaderValue(
+          `Could not verify authentication requirement for ${previewBaseURL}`,
+        ).slice(0, 500),
+      });
     }
 
     let authorizationHeader;
-    if (needsAuth) {
+    if (probeResult === 'auth-required') {
       let promiseTokenObj;
       try {
         promiseTokenObj = await resolvePromiseToken(site, requestContext);
@@ -217,7 +290,7 @@ function ScrapeJobController(context) {
 
     try {
       const job = await scrapeClient.createScrapeJob(delegatedData);
-      return accepted(job);
+      return accepted(sanitizeJobResponse(job));
     } catch (error) {
       log.error(error.message);
       if (error?.message?.includes('Invalid request')) {

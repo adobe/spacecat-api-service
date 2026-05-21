@@ -164,13 +164,16 @@ describe('ScrapeJobController tests', () => {
       maxUrlsPerJob: 3,
     };
 
-    const { info, debug, error } = console;
+    const {
+      info, debug, error, warn,
+    } = console;
 
     // Set up the base context
     baseContext = {
       log: {
         info,
         debug,
+        warn,
         error: sandbox.stub().callsFake(error),
       },
       env: {
@@ -1013,13 +1016,82 @@ describe('ScrapeJobController tests', () => {
       expect(sentBody.customHeaders).to.be.undefined;
     });
 
-    it('delegates without auth when HEAD probe throws', async () => {
+    it('fails closed (502) when HEAD probe throws — auth was explicitly requested', async () => {
       fetchStub.rejects(new Error('network'));
       const ctrl = await buildController();
       const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(502);
+      expect(mockSqsClient.sendMessage).to.not.have.been.called;
+    });
+
+    it('fails closed (502) when HEAD returns a 3xx (cannot follow under redirect: manual)', async () => {
+      fetchStub.resolves({ ok: false, status: 302 });
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(502);
+      expect(mockSqsClient.sendMessage).to.not.have.been.called;
+    });
+
+    it('fails closed (502) when HEAD returns 5xx', async () => {
+      fetchStub.resolves({ ok: false, status: 503 });
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(502);
+    });
+
+    it('fails closed (502) when HEAD probe aborts on timeout', async () => {
+      const abortErr = new Error('The operation was aborted');
+      abortErr.name = 'TimeoutError';
+      fetchStub.rejects(abortErr);
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(502);
+    });
+
+    it('passes signal: AbortSignal.timeout + redirect: manual to fetch', async () => {
+      fetchStub.resolves({ ok: false, status: 401 });
+      const ctrl = await buildController();
+      await ctrl.createScrapeJob(baseContext);
+      const fetchOpts = fetchStub.getCall(0).args[1];
+      expect(fetchOpts.redirect).to.equal('manual');
+      expect(fetchOpts.signal).to.be.an.instanceOf(AbortSignal);
+    });
+
+    it('400s on cross-origin URL when caller submits siteId for a different site', async () => {
+      baseContext.data.urls = ['https://attacker.example.com/exfil'];
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(400);
+      expect(fetchStub).to.not.have.been.called;
+    });
+
+    it('400s on malformed URL in auth flow', async () => {
+      baseContext.data.urls = ['not://a valid url'];
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(400);
+    });
+
+    it('400s when urls array is empty in auth flow', async () => {
+      baseContext.data.urls = [];
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(400);
+    });
+
+    it('strips customHeaders.Authorization from the 202 response body', async () => {
+      const ctrl = await buildController({
+        retrievePageAuthentication: async () => 'resolved-token',
+      });
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(202);
+      const body = await response.json();
+      // server-minted credential must not leak in the response, even though it
+      // was forwarded to content-scraper via SQS.
+      expect(body.customHeaders || {}).to.not.have.property('Authorization');
+      // SQS message should still contain the Authorization header
       const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
-      expect(sentBody.customHeaders).to.be.undefined;
+      expect(sentBody.customHeaders.Authorization).to.equal('token resolved-token');
     });
 
     it('merges caller-supplied customHeaders, overriding Authorization', async () => {
