@@ -82,6 +82,8 @@ function SuggestionsController(ctx, sqs, env) {
     'high-page-views-low-form-views',
   ];
 
+  const RELATIONSHIP_AWARE_OPPTY_TYPES = Object.freeze(['meta-tags', 'alt-text']);
+
   const DEFAULT_PAGE_SIZE = 100;
 
   /**
@@ -1018,18 +1020,24 @@ function SuggestionsController(ctx, sqs, env) {
           appliedOnPagePath,
           cancelInheritance,
         } = relationshipContext;
-        if (!hasText(fixTargetPageId)) {
-          return badRequest('Each fixTargetGroup relationshipContext.fixTargetPageId must be a non-empty string');
+
+        if (fixTargetMode === undefined || fixTargetMode === null) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetMode is required');
         }
+        if (fixTargetMode !== 'source' && fixTargetMode !== 'local') {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetMode must be "source" or "local"');
+        }
+
+        if (fixTargetMode === 'local' && !hasText(fixTargetPageId)) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetPageId is required when fixTargetMode is "local"');
+        }
+
+        if (fixTargetPageId !== undefined && !hasText(fixTargetPageId)) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetPageId must be a non-empty string when provided');
+        }
+
         if (cancelInheritance !== undefined && typeof cancelInheritance !== 'boolean') {
           return badRequest('Each fixTargetGroup relationshipContext.cancelInheritance must be a boolean');
-        }
-        if (
-          fixTargetMode !== undefined
-          && fixTargetMode !== 'source'
-          && fixTargetMode !== 'local'
-        ) {
-          return badRequest('Each fixTargetGroup relationshipContext.fixTargetMode must be "source" or "local"');
         }
         if (appliedOnPagePath !== undefined && !hasText(appliedOnPagePath)) {
           return badRequest('Each fixTargetGroup relationshipContext.appliedOnPagePath must be a non-empty string');
@@ -1048,6 +1056,15 @@ function SuggestionsController(ctx, sqs, env) {
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
+    }
+
+    // Relationship-aware autofix is only supported for specific opportunity types.
+    // Reject fixTargetGroups for unsupported types to prevent silent pass-through.
+    if (
+      isNonEmptyArray(fixTargetGroups)
+      && !RELATIONSHIP_AWARE_OPPTY_TYPES.includes(opportunity.getType())
+    ) {
+      return badRequest(`fixTargetGroups is not supported for opportunity type "${opportunity.getType()}"`);
     }
 
     // assess-urls action: validate pages and send worker message, return 202
@@ -1273,6 +1290,21 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
+    // profile.email is the IMS user ID (e.g. 82521D...@AdobeOrg), not an actual email address.
+    const { profile } = context.attributes.authInfo;
+    const auditFields = {
+      siteId,
+      opportunityId,
+      opportunityType: opportunity.getType(),
+      action: action || 'apply',
+      succeededSuggestionCount: succeededSuggestions.length,
+      triggeredBy: profile?.email || profile?.name || 'unknown',
+    };
+
+    if (!precheckOnly && succeededSuggestions.length > 0) {
+      context.log.info('[autofix-attempt]', auditFields);
+    }
+
     const autofixOptions = (urlParam) => ({
       url: urlParam,
       ...(precheckOnly === true && { precheckOnly: true }),
@@ -1312,6 +1344,10 @@ function SuggestionsController(ctx, sqs, env) {
         customData,
         autofixOptions(requestUrl),
       );
+    }
+
+    if (!precheckOnly && succeededSuggestions.length > 0) {
+      context.log.info('[autofix-triggered]', auditFields);
     }
 
     return createResponse(response, 207);

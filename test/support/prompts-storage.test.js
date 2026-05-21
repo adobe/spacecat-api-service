@@ -114,10 +114,24 @@ describe('prompts-storage', () => {
       expect(result).to.be.null;
     });
 
-    it('returns category id when found', async () => {
+    it('returns category id when found by business key', async () => {
       const client = { from: () => makeChain({ data: { id: 'cat-uuid' }, error: null }) };
       const result = await resolveCategoryUuid(ORG_ID, 'cat-1', client);
       expect(result).to.equal('cat-uuid');
+    });
+
+    it('resolves by primary key scoped to org when categoryId is a valid UUID', async () => {
+      const uuid = 'a1111111-1111-4111-b111-111111111111';
+      const client = { from: () => makeChain({ data: { id: uuid }, error: null }) };
+      const result = await resolveCategoryUuid(ORG_ID, uuid, client);
+      expect(result).to.equal(uuid);
+    });
+
+    it('returns null when UUID does not belong to the organization', async () => {
+      const uuid = 'a1111111-1111-4111-b111-111111111111';
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await resolveCategoryUuid(ORG_ID, uuid, client);
+      expect(result).to.be.null;
     });
   });
 
@@ -127,7 +141,7 @@ describe('prompts-storage', () => {
       expect(result).to.be.null;
     });
 
-    it('returns topic id when found', async () => {
+    it('returns topic id when found by business key', async () => {
       const client = { from: () => makeChain({ data: { id: 'topic-uuid' }, error: null }) };
       const result = await resolveTopicUuid(ORG_ID, 'topic-1', client);
       expect(result).to.equal('topic-uuid');
@@ -136,6 +150,20 @@ describe('prompts-storage', () => {
     it('returns null when topic is not found', async () => {
       const client = { from: () => makeChain({ data: null, error: null }) };
       const result = await resolveTopicUuid(ORG_ID, 'nonexistent', client);
+      expect(result).to.be.null;
+    });
+
+    it('resolves by primary key scoped to org when topicId is a valid UUID', async () => {
+      const uuid = 'b2222222-2222-4222-b222-222222222222';
+      const client = { from: () => makeChain({ data: { id: uuid }, error: null }) };
+      const result = await resolveTopicUuid(ORG_ID, uuid, client);
+      expect(result).to.equal(uuid);
+    });
+
+    it('returns null when UUID does not belong to the organization', async () => {
+      const uuid = 'b2222222-2222-4222-b222-222222222222';
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await resolveTopicUuid(ORG_ID, uuid, client);
       expect(result).to.be.null;
     });
   });
@@ -516,11 +544,16 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.items).to.have.lengthOf(1);
-      expect(result.items[0].category).to.deep.include({
-        id: 'cat-uuid', name: 'Photoshop', origin: 'human',
+      // deep.equal (not deep.include) — symmetric with getPromptById test below
+      // and locks the exact embed shape so a regression dropping `uuid` (or
+      // adding an unintended field) fails fast. DRS reads category.uuid /
+      // topic.uuid to populate brand_presence_executions.category_id /
+      // .topic_id FKs.
+      expect(result.items[0].category).to.deep.equal({
+        id: 'cat-uuid', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
       });
-      expect(result.items[0].topic).to.deep.include({
-        id: 'topic-uuid', name: 'Editing',
+      expect(result.items[0].topic).to.deep.equal({
+        id: 'topic-uuid', uuid: 'topic-uuid', name: 'Editing',
       });
     });
 
@@ -624,11 +657,13 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result).to.not.be.null;
+      // `uuid` is the UUID PK consumers (DRS) use for FK linkage; `id` is
+      // preserved with its historical UUID value for backward compat.
       expect(result.category).to.deep.equal({
-        id: 'cat-uuid', name: 'Photoshop', origin: 'human',
+        id: 'cat-uuid', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
       });
       expect(result.topic).to.deep.equal({
-        id: 'topic-uuid', name: 'Editing',
+        id: 'topic-uuid', uuid: 'topic-uuid', name: 'Editing',
       });
     });
 
@@ -704,7 +739,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -726,7 +765,7 @@ describe('prompts-storage', () => {
     it('updates existing prompts by id', async () => {
       const existingData = {
         data: [{
-          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [],
+          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [], status: 'active',
         }],
         error: null,
       };
@@ -759,12 +798,89 @@ describe('prompts-storage', () => {
       expect(result.updated).to.equal(1);
     });
 
+    it('skips a deleted prompt matched by prompt_id without updating or inserting', async () => {
+      const deletedRow = {
+        id: 'row-uuid', prompt_id: 'del-1', text: 'Deleted text', regions: [], status: 'deleted',
+      };
+      const existingData = { data: [deletedRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'del-1', prompt: 'Deleted text', regions: [] }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(0);
+      expect(result.created).to.equal(0);
+      expect(result.skipped).to.equal(1);
+      expect(updateStub.callCount).to.equal(0);
+    });
+
+    it('skips a deleted prompt matched by text+regions without inserting', async () => {
+      const deletedRow = {
+        id: 'row-uuid', prompt_id: 'del-2', text: 'Same text', regions: ['us'], status: 'deleted',
+      };
+      const existingData = { data: [deletedRow], error: null };
+      const insertSpy = sinon.stub().returns({
+        select: () => thenable({ data: [], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable(existingData),
+                }),
+              }),
+              insert: insertSpy,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      // Incoming prompt has no id but matches the deleted row by text+regions
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Same text', regions: ['us'] }],
+        postgrestClient: client,
+      });
+      expect(result.skipped).to.equal(1);
+      expect(result.created).to.equal(0);
+      expect(insertSpy.callCount).to.equal(0);
+    });
+
     it('throws on insert error', async () => {
       const client = {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: null, error: { message: 'Insert failed' } }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -785,7 +901,7 @@ describe('prompts-storage', () => {
     it('throws on update error', async () => {
       const existingData = {
         data: [{
-          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [],
+          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [], status: 'active',
         }],
         error: null,
       };
@@ -823,7 +939,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: null, error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -845,7 +965,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -876,7 +1000,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -884,7 +1012,13 @@ describe('prompts-storage', () => {
           // buildLookupMaps returns empty arrays → maps will be empty
           // ensureLookupEntries will upsert the missing entries by name
           return {
-            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  neq: () => thenable({ data: [], error: null }),
+                }),
+              }),
+            }),
             upsert: (rows) => {
               if (rows[0]?.category_id !== undefined) {
                 upsertedRows.categories = rows;
@@ -928,7 +1062,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -982,7 +1120,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1034,7 +1176,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1083,7 +1229,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1118,7 +1268,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1153,7 +1307,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1188,7 +1346,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1220,7 +1382,7 @@ describe('prompts-storage', () => {
     it('handles existing prompts with null regions', async () => {
       const existingData = {
         data: [{
-          id: 'row-id', prompt_id: 'p1', text: 'existing', regions: null,
+          id: 'row-id', prompt_id: 'p1', text: 'existing', regions: null, status: 'active',
         }],
         error: null,
       };
@@ -1712,7 +1874,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -1736,7 +1902,11 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
               insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };

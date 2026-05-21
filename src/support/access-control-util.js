@@ -14,6 +14,7 @@ import { isNonEmptyObject, hasText } from '@adobe/spacecat-shared-utils';
 import {
   TrialUser as TrialUserModel,
   Entitlement as EntitlementModel,
+  Consumer as ConsumerModel,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
@@ -93,8 +94,64 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
+  hasAdminReadAccess() {
+    return this.hasAdminAccess() || this.authInfo.isReadOnlyAdmin?.() === true;
+  }
+
   hasS2SAdminAccess() {
     return this.authInfo.isS2SAdmin();
+  }
+
+  /**
+   * Verifies the requesting S2S consumer holds the given capability by issuing
+   * a fresh DB fetch. Uses `context.s2sConsumer` (set by s2sAuthWrapper) only as
+   * an identity source - extracts `clientId` and `imsOrgId` and re-queries the
+   * Consumer table. Capabilities are NOT read from the in-context object: a stale
+   * or tampered context cannot grant access.
+   *
+   * Returns a result object so controllers can audit-log without re-reading
+   * context. The `reason` discriminates denial paths for SOC investigation:
+   * `not-s2s`, `not-found`, `revoked`, `not-active`, `missing-capability`,
+   * `granted`.
+   *
+   * See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the trust-boundary analysis.
+   *
+   * @param {string} capability - Full capability string, e.g. 'site:readAll'.
+   * @returns {Promise<{ allowed: boolean, reason: string,
+   *   consumerId: (string|undefined), clientId: (string|undefined) }>}
+   */
+  async hasS2SCapability(capability) {
+    const { s2sConsumer } = this.context;
+    if (!s2sConsumer) {
+      return { allowed: false, reason: 'not-s2s' };
+    }
+
+    const clientId = s2sConsumer.getClientId();
+    const fresh = await this.context.dataAccess.Consumer.findByClientIdAndImsOrgId(
+      clientId,
+      s2sConsumer.getImsOrgId(),
+    );
+    if (!fresh) {
+      return { allowed: false, reason: 'not-found', clientId };
+    }
+    if (fresh.isRevoked()) {
+      return {
+        allowed: false, reason: 'revoked', clientId, consumerId: fresh.getId(),
+      };
+    }
+    if (fresh.getStatus() !== ConsumerModel.STATUS.ACTIVE) {
+      return {
+        allowed: false, reason: 'not-active', clientId, consumerId: fresh.getId(),
+      };
+    }
+    if (!fresh.getCapabilities()?.includes(capability)) {
+      return {
+        allowed: false, reason: 'missing-capability', clientId, consumerId: fresh.getId(),
+      };
+    }
+    return {
+      allowed: true, reason: 'granted', clientId, consumerId: fresh.getId(),
+    };
   }
 
   /**
@@ -173,8 +230,11 @@ export default class AccessControlUtil {
     }
 
     const { authInfo } = this;
-    // Check admin access first - admins bypass product code validation
-    if (this.hasAdminAccess()) {
+    // Full admins and read-only admins both bypass org/product validation for data reads.
+    // Write operations are protected separately: the readOnlyAdminWrapper middleware blocks
+    // all non-GET requests for read-only admin tokens before they reach any controller,
+    // so a read-only admin can never mutate data even though hasAccess() returns true here.
+    if (this.hasAdminReadAccess()) {
       return true;
     }
 

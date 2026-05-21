@@ -78,8 +78,12 @@ function WebhooksController(context) {
   }
 
   const processGitHubWebhook = wrap(async (ctx) => {
-    const event = ctx.headers?.['x-github-event'];
-    const deliveryId = ctx.headers?.['x-github-delivery'];
+    // Headers are populated onto context.pathInfo.headers by the enrichPathInfo
+    // middleware (request.headers.plain() — lowercase plain object). Reading
+    // ctx.headers directly silently returns undefined and short-circuits every
+    // delivery to a 204 noContent at the EVENT_JOB_MAP check below.
+    const event = ctx.pathInfo?.headers?.['x-github-event'];
+    const deliveryId = ctx.pathInfo?.headers?.['x-github-delivery'];
     const { data } = ctx;
 
     // Validate required config up front. GITHUB_APP_SLUG is a security-relevant
@@ -92,19 +96,24 @@ function WebhooksController(context) {
       return internalServerError('GITHUB_APP_SLUG not configured');
     }
 
-    // Validate required payload fields
+    // Filter on event type BEFORE validating payload fields. Unmapped events
+    // (ping, push, issues, ...) do not necessarily carry `action` or
+    // `installation.id`. GitHub's app-install ping has neither — validating
+    // first would 400 the install handshake and surface as red Xs in the
+    // app's "Recent Deliveries" UI. Mapped events still get full validation
+    // below.
+    const jobType = EVENT_JOB_MAP[event];
+    if (!jobType) {
+      log.info('Skipping unmapped event', { event, deliveryId });
+      return noContent();
+    }
+
+    // Validate required payload fields (mapped events only)
     if (!data?.action) {
       return badRequest('Missing required field: action');
     }
     if (!data?.installation?.id) {
       return badRequest('Missing required field: installation.id');
-    }
-
-    // Check event-to-job-type mapping
-    const jobType = EVENT_JOB_MAP[event];
-    if (!jobType) {
-      log.info('Skipping unmapped event', { event, deliveryId });
-      return noContent();
     }
 
     const { action, pull_request: pr } = data;

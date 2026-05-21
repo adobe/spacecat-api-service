@@ -54,6 +54,8 @@ import {
   createAgenticTrafficMoversHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
   createAgenticTrafficHasDataHandler,
+  createAgenticTrafficUrlsExportHandler,
+  createAgenticTrafficUrlsExportStatusHandler,
 } from './llmo-agentic-traffic.js';
 import {
   createReferralTrafficFilterDimensionsHandler,
@@ -63,9 +65,11 @@ import {
   createReferralTrafficByRegionHandler,
   createReferralTrafficByPageIntentHandler,
   createReferralTrafficByUrlHandler,
+  createReferralTrafficUrlTrendHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
   createReferralTrafficByDeviceHandler,
+  createReferralTrafficHasDataHandler,
 } from './llmo-referral-traffic.js';
 
 /**
@@ -202,6 +206,10 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
+  const exportAgenticTrafficUrls = createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficUrlsExportStatus = createAgenticTrafficUrlsExportStatusHandler(
+    getSiteAndValidateAccess,
+  );
 
   const getReferralTrafficFilterDimensions = createReferralTrafficFilterDimensionsHandler(
     getSiteAndValidateAccess,
@@ -218,11 +226,13 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getReferralTrafficByUrl = createReferralTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getReferralTrafficUrlTrend = createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess);
   const getReferralTrafficBusinessImpact = createReferralTrafficBusinessImpactHandler(
     getSiteAndValidateAccess,
   );
   const getReferralTrafficWeeks = createReferralTrafficWeeksHandler(getSiteAndValidateAccess);
   const getReferralTrafficByDevice = createReferralTrafficByDeviceHandler(getSiteAndValidateAccess);
+  const getReferralTrafficHasData = createReferralTrafficHasDataHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
@@ -264,6 +274,8 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficMovers,
     getAgenticTrafficUrlBrandPresence,
     getAgenticTrafficHasData,
+    exportAgenticTrafficUrls,
+    getAgenticTrafficUrlsExportStatus,
     getReferralTrafficFilterDimensions,
     getReferralTrafficKpis,
     getReferralTrafficTrend,
@@ -271,9 +283,11 @@ function LlmoMysticatController(ctx) {
     getReferralTrafficByRegion,
     getReferralTrafficByPageIntent,
     getReferralTrafficByUrl,
+    getReferralTrafficUrlTrend,
     getReferralTrafficBusinessImpact,
     getReferralTrafficWeeks,
     getReferralTrafficByDevice,
+    getReferralTrafficHasData,
   };
 }
 

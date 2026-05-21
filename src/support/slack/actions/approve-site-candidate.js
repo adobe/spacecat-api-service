@@ -21,6 +21,7 @@ import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
 import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
 import OrgDetectorAgent from '../../../agents/org-detector/agent.js';
+import { updateRumConfig } from '../../rum-config-service.js';
 
 async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
   const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = context.env;
@@ -69,6 +70,11 @@ export default function approveSiteCandidate(lambdaContext) {
             ? { organizationId: friendsFamilyOrgId }
             : { organizationId: defaultOrgId }),
         });
+        try {
+          await updateRumConfig(site, lambdaContext);
+        } catch (e) {
+          log.warn(`[approve-site-candidate] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
+        }
       } else {
         // site might've been added before manually. In that case, make sure it is promoted to live
         // and set delivery type to aem_edge then update
@@ -79,6 +85,11 @@ export default function approveSiteCandidate(lambdaContext) {
         site.setHlxConfig(siteCandidate.getHlxConfig());
         site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_EDGE);
         site = await site.save();
+        try {
+          await updateRumConfig(site, lambdaContext);
+        } catch (e) {
+          log.warn(`[approve-site-candidate] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
+        }
       }
 
       siteCandidate.setSiteId(site.getId());

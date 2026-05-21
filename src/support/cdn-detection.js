@@ -178,9 +178,8 @@ async function detectAdobeManagedCdn(domain, log) {
  * of truth. Until that lands, this is an intentional duplicate of
  * spacecat-audit-worker/src/detect-cdn/cdn-detector.js.
  *
- * Probes HTTP headers first; on miss, walks the CNAME chain (system resolver
- * then DoH), then maps a single A-record IP to its ASN via ipinfo.io, then
- * runs PTR keyword matching as a final tiebreaker.
+ * Probes HTTP headers first; on miss, walks the CNAME chain (system resolver),
+ * then runs PTR keyword matching as a final tiebreaker.
  *
  * The detector returns descriptive labels (e.g. "Cloudflare", "Vercel"). The
  * LABEL_TO_LLMO_TOKEN adapter collapses every detected non-Adobe CDN to one
@@ -199,19 +198,6 @@ const CDN_DOMAIN_SIGNATURES = [
   { domains: ['azureedge.net', 'msecnd.net'], cdn: 'Azure Front Door / Azure CDN' },
   { domains: ['googleusercontent.com'], cdn: 'Google Cloud CDN' },
   { domains: ['alicdn.com', 'yundunwaf3.com'], cdn: 'Alibaba Cloud CDN' },
-];
-
-/**
- * CDN identification by ASN when CNAME chain doesn't match a known provider.
- */
-const CDN_ASN_SIGNATURES = [
-  { asns: [13335], cdn: 'Cloudflare' },
-  { asns: [54113], cdn: 'Fastly' },
-  { asns: [16509], cdn: 'CloudFront' },
-  { asns: [20940, 16625, 21342], cdn: 'Akamai' },
-  { asns: [8075], cdn: 'Azure Front Door / Azure CDN' },
-  { asns: [15169], cdn: 'Google Cloud CDN' },
-  { asns: [24429, 37963], cdn: 'Alibaba Cloud CDN' },
 ];
 
 /**
@@ -392,90 +378,6 @@ function headersFromResponse(response) {
   return { cdn };
 }
 
-/** DoH JSON endpoints. Google primary; Cloudflare fallback so a single-provider
- * outage doesn't take down Phase 2 fallback for every customer. */
-const DOH_GOOGLE_RESOLVE = 'https://dns.google/resolve';
-const DOH_CLOUDFLARE_RESOLVE = 'https://cloudflare-dns.com/dns-query';
-
-async function dohQuerySingle(endpoint, name, typeNum, timeout) {
-  const url = `${endpoint}?name=${encodeURIComponent(name)}&type=${typeNum}`;
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: 'application/dns-json' },
-      redirect: 'follow',
-      follow: 5,
-    });
-    clearTimeout(id);
-    if (!response.ok) {
-      return null;
-    }
-    const data = await response.json();
-    return data && Array.isArray(data.Answer) ? data : { Answer: [] };
-  } catch {
-    clearTimeout(id);
-    return null;
-  }
-}
-
-async function dohQuery(name, typeNum, opts = {}) {
-  const { timeout = 3000, log } = opts;
-  let data = await dohQuerySingle(DOH_GOOGLE_RESOLVE, name, typeNum, timeout);
-  if (data) {
-    return data;
-  }
-  data = await dohQuerySingle(DOH_CLOUDFLARE_RESOLVE, name, typeNum, timeout);
-  if (data) {
-    return data;
-  }
-  log?.warn?.('[cdn-detection] DoH query failed (both providers)', { name, type: typeNum });
-  return { Answer: [] };
-}
-
-function normalizeDohName(data) {
-  /* c8 ignore next 3 -- defensive; callers only pass string values from DoH Answer.data */
-  if (typeof data !== 'string') {
-    return '';
-  }
-  return data.replace(/\.$/, '').trim();
-}
-
-async function getCnameChainDoh(hostname, log) {
-  const chain = [];
-  let current = hostname.replace(/\.$/, '');
-  const maxHops = 10;
-
-  /* eslint-disable no-await-in-loop -- Each CNAME hop depends on the previous answer. */
-  for (let hop = 0; hop < maxHops; hop += 1) {
-    chain.push(current);
-    const { Answer = [] } = await dohQuery(current, 5, { timeout: 3000, log });
-    const cname = Answer.find((a) => a.type === 5);
-    if (!cname?.data) {
-      break;
-    }
-    current = normalizeDohName(cname.data);
-    if (!current) {
-      break;
-    }
-  }
-  /* eslint-enable no-await-in-loop */
-
-  return chain;
-}
-
-async function getOneIpDoh(hostname, log) {
-  const { Answer = [] } = await dohQuery(hostname, 1, { timeout: 3000, log });
-  const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/;
-  for (const a of Answer) {
-    if (a.type === 1 && typeof a.data === 'string' && ipv4.test(a.data)) {
-      return a.data;
-    }
-  }
-  return null;
-}
-
 async function getCnameChain(hostname, log) {
   const chain = [];
   let current = hostname.replace(/\.$/, '');
@@ -527,35 +429,6 @@ async function getPtrHostnames(ip, log) {
   }
 }
 
-async function getAsnForIp(ip, options = {}) {
-  const { timeout = 3000, log } = options;
-  const url = `https://ipinfo.io/${ip}/json`;
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: 'follow',
-      follow: 5,
-    });
-    clearTimeout(id);
-    if (!response.ok) {
-      return null;
-    }
-    const data = await response.json();
-    const org = data?.org;
-    if (typeof org !== 'string') {
-      return null;
-    }
-    const m = org.match(/^AS(\d+)/);
-    return m ? parseInt(m[1], 10) : null;
-  } catch (err) {
-    clearTimeout(id);
-    log?.warn?.('[cdn-detection] ASN lookup failed', { ip, message: err?.message });
-    return null;
-  }
-}
-
 // Suffix-anchored CNAME match: a hostname matches a signature domain `d`
 // only when it equals `d` or ends with `.d`. Substring `includes()` would
 // classify `evil.fastly.net.attacker.com` as Fastly, which is the bug the
@@ -567,24 +440,11 @@ function matchCdnByCname(cnameChain) {
   }
   for (const { domains, cdn } of CDN_DOMAIN_SIGNATURES) {
     for (const hostname of cnameChain) {
-      /* c8 ignore next -- defensive; getCnameChain/getCnameChainDoh always push strings */
+      /* c8 ignore next -- defensive; getCnameChain always pushes strings */
       const lower = (hostname || '').toLowerCase().replace(/\.$/, '');
       if (domains.some((d) => lower === d || lower.endsWith(`.${d}`))) {
         return cdn;
       }
-    }
-  }
-  return null;
-}
-
-function matchCdnByAsn(asn) {
-  /* c8 ignore next 3 -- defensive; caller passes parseInt output filtered for null */
-  if (typeof asn !== 'number' || Number.isNaN(asn)) {
-    return null;
-  }
-  for (const { asns, cdn } of CDN_ASN_SIGNATURES) {
-    if (asns.includes(asn)) {
-      return cdn;
     }
   }
   return null;
@@ -601,7 +461,7 @@ async function detectCdnFromDnsFallback(url, options = {}) {
   }
   /* c8 ignore stop */
 
-  // Track whether any DNS / DoH / ASN / PTR stage produced usable data.
+  // Track whether any DNS / PTR stage produced usable data.
   // Distinguishes a clean "no match" from a fully inconclusive run, which
   // detectCdnForDomain uses to choose between 'byocdn-other' and null.
   let probeSucceeded = false;
@@ -610,7 +470,7 @@ async function detectCdnFromDnsFallback(url, options = {}) {
   if (cnameChainSystem.length > 1) {
     probeSucceeded = true;
   }
-  let cdnFromCname = matchCdnByCname(cnameChainSystem);
+  const cdnFromCname = matchCdnByCname(cnameChainSystem);
   if (cdnFromCname) {
     log?.info?.('[cdn-detection] Phase 2: detected by CNAME', { cdn: cdnFromCname, hostname });
     return { cdn: cdnFromCname, probeSucceeded: true };
@@ -621,30 +481,9 @@ async function detectCdnFromDnsFallback(url, options = {}) {
     return { cdn: cdnFromChainKw, probeSucceeded: true };
   }
 
-  const cnameChainDoh = await getCnameChainDoh(hostname, log);
-  if (cnameChainDoh.length > 1) {
-    probeSucceeded = true;
-  }
-  cdnFromCname = matchCdnByCname(cnameChainDoh);
-  if (cdnFromCname) {
-    log?.info?.('[cdn-detection] Phase 2: detected by CNAME (DoH)', { cdn: cdnFromCname, hostname });
-    return { cdn: cdnFromCname, probeSucceeded: true };
-  }
-  const cdnFromDohKw = matchCdnByKeywords(cnameChainDoh.join(' '));
-  if (cdnFromDohKw) {
-    log?.info?.('[cdn-detection] Phase 2: detected by DNS name keywords (DoH)', { cdn: cdnFromDohKw, hostname });
-    return { cdn: cdnFromDohKw, probeSucceeded: true };
-  }
-
-  const ip = (await getOneIp(hostname, log)) || (await getOneIpDoh(hostname, log));
+  const ip = await getOneIp(hostname, log);
   if (ip) {
     probeSucceeded = true;
-    const asn = await getAsnForIp(ip, { timeout: 3000, log });
-    const cdnFromAsn = asn !== null ? matchCdnByAsn(asn) : null;
-    if (cdnFromAsn) {
-      log?.info?.('[cdn-detection] Phase 2: detected by ASN', { cdn: cdnFromAsn, asn });
-      return { cdn: cdnFromAsn, probeSucceeded: true };
-    }
     const ptrHostnames = await getPtrHostnames(ip, log);
     for (const ptr of ptrHostnames) {
       const fromPtrKw = matchCdnByKeywords(ptr);
@@ -747,7 +586,7 @@ async function detectCdnFromUrl(url, options = {}) {
 /**
  * Phase 2 entry: returns { token, probeSucceeded } where token is the LLMO
  * byocdn-X token (or null when no signal matched). probeSucceeded reflects
- * whether at least one underlying probe (HTTP HEAD/GET, DNS, DoH, ASN, PTR)
+ * whether at least one underlying probe (HTTP HEAD/GET, DNS, PTR)
  * produced data, so callers can distinguish a clean miss from an inconclusive
  * run.
  */
@@ -776,9 +615,9 @@ async function detectGenericCdnToken(url, log) {
  *   Phase 1 — DNS-only check for Adobe-managed CDNs (AEM CS Fastly,
  *             Adobe Commerce Cloud Fastly). Cheap and authoritative when matched.
  *   Phase 2 — When Phase 1 doesn't match, runs a multi-signal probe ported from
- *             spacecat-audit-worker (HTTP headers → CNAME chain → DoH → ASN →
- *             PTR keywords). Result is mapped from a descriptive label to the
- *             LLMO byocdn-X token via LABEL_TO_LLMO_TOKEN.
+ *             spacecat-audit-worker (HTTP headers → CNAME chain → PTR keywords).
+ *             Result is mapped from a descriptive label to the LLMO byocdn-X
+ *             token via LABEL_TO_LLMO_TOKEN.
  *
  * Returns:
  *   - 'aem-cs-fastly' | 'commerce-fastly'  — Phase 1 hit
@@ -851,8 +690,8 @@ export async function detectCdnForDomain(input, log) {
       return 'byocdn-other';
     }
     // Phase 1 succeeded with no match, Phase 2 produced no data anywhere
-    // (HTTP probes, DNS, DoH, ASN/PTR all failed). Treat as inconclusive
-    // rather than mislead callers with a stale 'byocdn-other'.
+    // (HTTP probes, DNS, PTR all failed). Treat as inconclusive rather than
+    // mislead callers with a stale 'byocdn-other'.
     return null;
     /* c8 ignore next 4 */
   } catch (err) {

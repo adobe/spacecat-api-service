@@ -57,7 +57,7 @@ function ConfigurationController(ctx) {
    * @return {Promise<Response>} Configuration response.
    */
   const getByVersion = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view configurations');
     }
     const configurationVersion = context.params?.version;
@@ -79,7 +79,7 @@ function ConfigurationController(ctx) {
    * @return {Promise<Response>} Configuration response.
    */
   const getLatest = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view configurations');
     }
     const configuration = await Configuration.findLatest();

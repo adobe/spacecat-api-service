@@ -4319,6 +4319,104 @@ describe('Suggestions Controller', () => {
       expect(sqsCallArgs[1].customData).to.deep.equal({});
     });
 
+    it('logs [autofix-attempt] before and [autofix-triggered] after successful dispatch', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
+
+      await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      const expectedFields = sinon.match({
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        opportunityType: 'meta-tags',
+        action: 'apply',
+        succeededSuggestionCount: 1,
+        triggeredBy: 'test@test.com',
+      });
+      expect(context.log.info).to.have.been.calledWith('[autofix-attempt]', expectedFields);
+      expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', expectedFields);
+    });
+
+    it('logs triggeredBy as unknown when profile email is absent', async () => {
+      const savedProfile = context.attributes.authInfo.profile;
+      context.attributes.authInfo.profile = null;
+      try {
+        opportunity.getType = sandbox.stub().returns('meta-tags');
+        mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+        mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
+
+        await suggestionsControllerWithMock.autofixSuggestions({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          ...context,
+        });
+
+        expect(context.log.info).to.have.been.calledWith('[autofix-attempt]', sinon.match({
+          triggeredBy: 'unknown',
+        }));
+        expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', sinon.match({
+          triggeredBy: 'unknown',
+        }));
+      } finally {
+        context.attributes.authInfo.profile = savedProfile;
+      }
+    });
+
+    it('logs [autofix-attempt] and [autofix-triggered] for grouped dispatch', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(altTextSuggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...altTextSuggs[0], status: 'IN_PROGRESS' })]);
+
+      await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(context.log.info).to.have.been.calledWith('[autofix-attempt]', sinon.match({
+        opportunityType: 'alt-text',
+        succeededSuggestionCount: 1,
+        triggeredBy: 'test@test.com',
+      }));
+      expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', sinon.match({
+        opportunityType: 'alt-text',
+      }));
+    });
+
+    it('does not log audit events when precheckOnly is true', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(altTextSuggs[0])]);
+
+      await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], action: 'assess', precheckOnly: true },
+        ...context,
+      });
+
+      expect(context.log.info).to.not.have.been.calledWith('[autofix-attempt]', sinon.match.any);
+      expect(context.log.info).to.not.have.been.calledWith('[autofix-triggered]', sinon.match.any);
+    });
+
+    it('does not log audit events when no suggestions succeed', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves([]);
+
+      await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(context.log.info).to.not.have.been.calledWith('[autofix-attempt]', sinon.match.any);
+      expect(context.log.info).to.not.have.been.calledWith('[autofix-triggered]', sinon.match.any);
+    });
+
     it('auto-fix suggestions status returns bad request if no site ID is passed', async () => {
       const response = await suggestionsController.autofixSuggestions({
         params: {
@@ -4535,6 +4633,7 @@ describe('Suggestions Controller', () => {
               suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
               relationshipContext: {
                 fixTargetPageId: '/content/my-site/en/target-page',
+                fixTargetMode: 'local',
               },
             },
           ],
@@ -4551,6 +4650,7 @@ describe('Suggestions Controller', () => {
       const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
       expect(sqsPayload).to.have.property('relationshipContext');
       expect(sqsPayload.relationshipContext).to.have.property('fixTargetPageId', '/content/my-site/en/target-page');
+      expect(sqsPayload.relationshipContext).to.have.property('fixTargetMode', 'local');
       expect(sqsPayload.suggestionIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[2]]);
     });
 
@@ -4636,7 +4736,7 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'fixTargetGroups must be an array');
     });
 
-    it('returns 400 when fixTargetGroup relationshipContext.fixTargetPageId is empty', async () => {
+    it('returns 400 when fixTargetGroup relationshipContext.fixTargetPageId is empty for local mode', async () => {
       const response = await suggestionsController.autofixSuggestions({
         params: {
           siteId: SITE_ID,
@@ -4647,7 +4747,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              relationshipContext: { fixTargetPageId: '' },
+              relationshipContext: { fixTargetPageId: '', fixTargetMode: 'local' },
             },
           ],
         },
@@ -4657,7 +4757,32 @@ describe('Suggestions Controller', () => {
       const error = await response.json();
       expect(error).to.have.property(
         'message',
-        'Each fixTargetGroup relationshipContext.fixTargetPageId must be a non-empty string',
+        'Each fixTargetGroup relationshipContext.fixTargetPageId is required when fixTargetMode is "local"',
+      );
+    });
+
+    it('returns 400 when fixTargetGroup relationshipContext.fixTargetPageId is empty string when provided', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: '', fixTargetMode: 'source' },
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup relationshipContext.fixTargetPageId must be a non-empty string when provided',
       );
     });
 
@@ -4698,6 +4823,7 @@ describe('Suggestions Controller', () => {
               suggestionIds: [SUGGESTION_IDS[0]],
               relationshipContext: {
                 fixTargetPageId: '/content/page',
+                fixTargetMode: 'local',
                 cancelInheritance: 'true',
               },
             },
@@ -4726,6 +4852,7 @@ describe('Suggestions Controller', () => {
               suggestionIds: [SUGGESTION_IDS[0]],
               relationshipContext: {
                 fixTargetPageId: '/content/page',
+                fixTargetMode: 'source',
                 appliedOnPagePath: '',
               },
             },
@@ -4769,8 +4896,62 @@ describe('Suggestions Controller', () => {
       );
     });
 
-    it('ignores fixTargetGroups for non-groupable opportunity type', async () => {
-      opportunity.getType = sandbox.stub().returns('broken-backlinks');
+    it('returns 400 when fixTargetGroup relationshipContext.fixTargetMode is missing', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/page',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup relationshipContext.fixTargetMode is required',
+      );
+    });
+
+    it('returns 400 when fixTargetMode is local without fixTargetPageId', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetMode: 'local',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup relationshipContext.fixTargetPageId is required when fixTargetMode is "local"',
+      );
+    });
+
+    it('passes validation when fixTargetMode is source without fixTargetPageId', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0])],
       );
@@ -4788,7 +4969,10 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              relationshipContext: { fixTargetPageId: 'source-page-id' },
+              relationshipContext: {
+                fixTargetMode: 'source',
+                appliedOnPagePath: '/content/wknd/language-masters/en/page',
+              },
             },
           ],
         },
@@ -4798,7 +4982,113 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
       const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
-      expect(sqsPayload).to.not.have.property('relationshipContext');
+      expect(sqsPayload).to.have.property('relationshipContext');
+      expect(sqsPayload.relationshipContext).to.have.property('fixTargetMode', 'source');
+      expect(sqsPayload.relationshipContext).to.not.have.property('fixTargetPageId');
+    });
+
+    it('passes validation when fixTargetMode is source with fixTargetPageId (backward compat)', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/my-site/en/source-page',
+                fixTargetMode: 'source',
+                appliedOnPagePath: '/content/wknd/language-masters/en/page',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload.relationshipContext).to.deep.include({
+        fixTargetPageId: '/content/my-site/en/source-page',
+        fixTargetMode: 'source',
+      });
+    });
+
+    it('returns 400 when fixTargetGroups is sent for unsupported opportunity type', async () => {
+      opportunity.getType = sandbox.stub().returns('broken-backlinks');
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: 'source-page-id', fixTargetMode: 'local' },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'fixTargetGroups is not supported for opportunity type "broken-backlinks"',
+      );
+    });
+
+    it('accepts fixTargetGroups for alt-text opportunity type', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/my-site/en/target-page',
+                fixTargetMode: 'local',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload).to.have.property('relationshipContext');
+      expect(sqsPayload.relationshipContext).to.have.property('fixTargetPageId', '/content/my-site/en/target-page');
+      expect(sqsPayload.relationshipContext).to.have.property('fixTargetMode', 'local');
     });
 
     it('sends multiple SQS messages for multiple fixTargetGroups', async () => {
@@ -4821,11 +5111,11 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              relationshipContext: { fixTargetPageId: 'source-page-A' },
+              relationshipContext: { fixTargetPageId: 'source-page-A', fixTargetMode: 'local' },
             },
             {
               suggestionIds: [SUGGESTION_IDS[2]],
-              relationshipContext: { fixTargetPageId: 'source-page-B' },
+              relationshipContext: { fixTargetPageId: 'source-page-B', fixTargetMode: 'local' },
             },
           ],
         },
@@ -4881,7 +5171,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              relationshipContext: { fixTargetPageId: 'source-page-1' },
+              relationshipContext: { fixTargetPageId: 'source-page-1', fixTargetMode: 'local' },
             },
           ],
         },
@@ -4942,7 +5232,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              relationshipContext: { fixTargetPageId: 'source-page-1' },
+              relationshipContext: { fixTargetMode: 'source', fixTargetPageId: 'source-page-1' },
             },
           ],
         },
@@ -4985,7 +5275,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              relationshipContext: { fixTargetPageId: 'source-page-1' },
+              relationshipContext: { fixTargetMode: 'source', fixTargetPageId: 'source-page-1' },
             },
           ],
         },
@@ -5029,7 +5319,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              relationshipContext: { fixTargetPageId: 'source-page-1' },
+              relationshipContext: { fixTargetMode: 'source', fixTargetPageId: 'source-page-1' },
             },
           ],
         },
@@ -5073,7 +5363,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              relationshipContext: { fixTargetPageId: 'source-page-1' },
+              relationshipContext: { fixTargetMode: 'source', fixTargetPageId: 'source-page-1' },
             },
           ],
         },
@@ -5323,6 +5613,8 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -5365,6 +5657,8 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -5473,6 +5767,8 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -5500,6 +5796,8 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -5527,6 +5825,8 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -5821,6 +6121,7 @@ describe('Suggestions Controller', () => {
         data: {
           suggestionIds: [SUGGESTION_IDS[0]],
         },
+        ...context,
       });
 
       // Should proceed to next checks (not forbidden)
@@ -10421,6 +10722,7 @@ describe('Suggestions Controller', () => {
         data: {
           suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
         },
+        ...context,
       });
 
       expect(response.status).to.equal(207);

@@ -54,6 +54,8 @@ import setLlmoCountryCodeIgnoreList from './commands/set-llmo-country-code-ignor
 import addDelegate from './commands/add-delegate.js';
 import listDelegates from './commands/list-delegates.js';
 import removeDelegate from './commands/remove-delegate.js';
+import checkAgenticTrafficDbStatus from './commands/check-agentic-traffic-db-status.js';
+import checkCdnLogsStatus from './commands/check-cdn-logs-status.js';
 
 /**
  * Returns all commands.
@@ -106,4 +108,6 @@ export default (context) => [
   addDelegate(context),
   listDelegates(context),
   removeDelegate(context),
+  checkAgenticTrafficDbStatus(context),
+  checkCdnLogsStatus(context),
 ];

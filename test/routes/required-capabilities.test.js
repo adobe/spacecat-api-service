@@ -19,7 +19,7 @@ import routeRequiredCapabilities, { INTERNAL_ROUTES } from '../../src/routes/req
 const testDir = dirname(fileURLToPath(import.meta.url));
 
 const ALLOWED_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-const ALLOWED_ACTIONS = ['read', 'write'];
+const ALLOWED_ACTIONS = ['read', 'write', 'readAll'];
 const PATH_REGEX = /^\/[a-zA-Z0-9\-_/.:]+(\/[a-zA-Z0-9\-_/.:])*$/;
 
 describe('routeRequiredCapabilities', () => {
@@ -98,6 +98,41 @@ describe('routeRequiredCapabilities', () => {
         'DRS Brand Presence PG audit must not be mapped to an S2S capability until a dedicated '
         + 'resource-scoped capability (e.g. drsBrandPresenceAudit:read) is registered.',
       ).to.not.have.property(route);
+    });
+
+    describe('API key routes', () => {
+      const API_KEY_ROUTES = [
+        'POST /tools/api-keys',
+        'DELETE /tools/api-keys/:id',
+        'GET /tools/api-keys',
+      ];
+
+      it('are in INTERNAL_ROUTES (not exposed to S2S consumers)', () => {
+        const internalSet = new Set(INTERNAL_ROUTES);
+        API_KEY_ROUTES.forEach((route) => {
+          expect(internalSet.has(route), `${route} must be in INTERNAL_ROUTES`).to.be.true;
+        });
+      });
+
+      it('are not in routeRequiredCapabilities', () => {
+        API_KEY_ROUTES.forEach((route) => {
+          expect(routeRequiredCapabilities).to.not.have.property(route);
+        });
+      });
+    });
+
+    describe('sheet-data POST routes', () => {
+      const SHEET_DATA_POST_ROUTES = [
+        'POST /sites/:siteId/llmo/sheet-data/:dataSource',
+        'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
+        'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
+      ];
+
+      it('are mapped to site:read (not site:write)', () => {
+        SHEET_DATA_POST_ROUTES.forEach((route) => {
+          expect(routeRequiredCapabilities[route], `${route} must map to site:read`).to.equal('site:read');
+        });
+      });
     });
   });
 

@@ -64,7 +64,7 @@ function UserDetailsController(ctx) {
    */
   const fetchFromImsIfAdmin = async (externalUserId, organizationId) => {
     // Check if requestor has admin access
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       log.debug(`User is not admin, returning system defaults for ${externalUserId}`);
       return {
         firstName: 'system',

@@ -48,7 +48,12 @@ import {
   updateBrand,
   deleteBrand,
   getBrandById,
+  getBrandBySite,
 } from '../support/brands-storage.js';
+import {
+  resolveLlmoOnboardingMode,
+  LLMO_ONBOARDING_MODE_V2,
+} from '../support/llmo-onboarding-mode.js';
 import {
   listCategories,
   createCategory,
@@ -643,6 +648,80 @@ function BrandsController(ctx, log, env) {
       return ok(brand);
     } catch (error) {
       log.error(`Error getting brand ${brandId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  /**
+   * Resolves the active brand for a (organization, site) pair.
+   *
+   * Gated by `resolveLlmoOnboardingMode` — returns 404 when the org is in v1
+   * mode (neither brandalf nor brandalf_migration set, or kill-switch
+   * downgrade). When v2 and an active brand row exists with
+   * `brands.site_id === siteId` (the authoritative site mapping per
+   * LLMO-4592), returns the full V2 brand object so callers can pick `id`
+   * (or any other field).
+   *
+   * @returns {Promise<Response>} The active brand, or 404.
+   */
+  const getBrandForOrgSite = async (context) => {
+    const { spaceCatId, siteId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId) || !isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID (valid UUID) is required');
+      }
+      if (!hasText(siteId) || !isValidUUID(siteId)) {
+        return badRequest('Site ID (valid UUID) is required');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound(`Site not found: ${siteId}`);
+      }
+      if (site.getOrganizationId() !== spaceCatId) {
+        // Same tenant-isolation check as triggerConfigSync — return forbidden
+        // so the controller is internally consistent (different status codes
+        // for the identical check would be incoherent for clients).
+        return forbidden('Site does not belong to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      // readOnly: true keeps this GET endpoint idempotent — the resolver's
+      // kill-switch remediation (which writes to feature_flags) only fires
+      // from explicit onboarding/admin write paths, never from a high-traffic
+      // resolver hit by BP refresh and the DRS scheduler.
+      const mode = await resolveLlmoOnboardingMode(spaceCatId, context, {
+        readOnly: true,
+      });
+      if (mode !== LLMO_ONBOARDING_MODE_V2) {
+        return notFound('No v2 brand configured for this organization');
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+      const brand = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+      if (!brand) {
+        return notFound(`No active brand for site ${siteId}`);
+      }
+
+      return ok(brand);
+    } catch (error) {
+      log.error(
+        `Error resolving brand for org ${spaceCatId} site ${siteId}:`,
+        error,
+      );
       return createErrorResponse(error);
     }
   };
@@ -1294,6 +1373,7 @@ function BrandsController(ctx, log, env) {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
     getBrandForOrg,
+    getBrandForOrgSite,
     listBrandsForOrg,
     listCategoriesForOrg,
     createCategoryForOrg,

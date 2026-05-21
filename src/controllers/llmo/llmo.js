@@ -55,6 +55,7 @@ import {
   applyExclusions,
   applyGroups,
   applyMappings,
+  CDN_TYPES,
   LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
@@ -90,6 +91,7 @@ const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
   '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3', // adobe.com Prod
   'c2473d89-e997-458d-a86d-b4096649c12b', // adobe.com Stage
+  '59bdf35f-c0d4-4c51-9013-8a5b63d71eeb', // ekremney.com configured to use the adobe data folder for some reason
 ]);
 
 const HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE = 'Access to HLX sheet data has been blocked for this site due to PG migration';
@@ -973,7 +975,7 @@ function LlmoController(ctx) {
       }
 
       const {
-        domain, brandName, imsOrgId: payloadImsOrgId, cadence,
+        domain, brandName, imsOrgId: payloadImsOrgId, cadence, region,
       } = data;
       const tempOnboarding = data['temp-onboarding'] === true;
 
@@ -983,6 +985,13 @@ function LlmoController(ctx) {
 
       if (cadence && !VALID_CADENCES.includes(cadence)) {
         return badRequest(`Invalid cadence. Must be one of: ${VALID_CADENCES.join(', ')}`);
+      }
+
+      // LLMO-4683: optional ISO 3166-1 alpha-2 region for V1 prompt generation.
+      // Forwarded to DRS so the GPT prompt-gen job conditions on the brand's market.
+      // Omitted → DRS client default ('US') applies, preserving prior behavior.
+      if (region !== undefined && !/^[A-Z]{2}$/.test(region)) {
+        return badRequest('Invalid region. Must be an ISO 3166-1 alpha-2 country code (e.g. US, IN, BR)');
       }
 
       let imsOrgId;
@@ -1035,6 +1044,7 @@ function LlmoController(ctx) {
           imsOrgId,
           cadence,
           tempOnboarding,
+          ...(region ? { region } : {}),
         },
         context,
       );
@@ -1068,6 +1078,7 @@ function LlmoController(ctx) {
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
+        ...(region ? { region } : {}),
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
@@ -1302,6 +1313,23 @@ function LlmoController(ctx) {
       const currentConfig = site.getConfig();
       const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
       const isNewlyOpted = !existingEdgeConfig.opted;
+
+      // Kick off IMS + S3 in parallel with saveSiteConfig — all three are independent
+      let notificationPrep = null;
+      if (isNewlyOpted) {
+        const imsUserId = profile?.email;
+
+        const imsPromise = imsUserId && context.imsClient
+          ? Promise.resolve(context.imsClient.getImsAdminProfile(imsUserId))
+          : Promise.resolve(null);
+
+        const s3Promise = s3?.s3Client
+          ? Promise.resolve(readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket }))
+          : Promise.resolve(null);
+
+        notificationPrep = Promise.allSettled([imsPromise, s3Promise]);
+      }
+
       currentConfig.updateEdgeOptimizeConfig({
         ...existingEdgeConfig,
         opted: existingEdgeConfig.opted ?? Date.now(),
@@ -1330,53 +1358,39 @@ function LlmoController(ctx) {
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
         }
 
-        // Detached from the response path so the UI's enable click is not blocked
-        // by the IMS lookup, bot-blocker probe (5s timeout), S3 read, and email
-        // send. Lambda's default callbackWaitsForEmptyEventLoop=true keeps the
-        // invocation alive until this promise settles, so the email still goes out.
-        ((async () => {
-          // profile.email holds the IMS userId (sub claim) for IMS-authenticated
-          // callers, so we resolve the real email via IMS. Best-effort: non-IMS
-          // auth modes leave optedBy unset, which the email helper handles.
-          let optedBy;
-          const imsUserId = profile?.email;
-          if (imsUserId && context.imsClient) {
-            try {
-              const adminProfile = await context.imsClient.getImsAdminProfile(imsUserId);
-              optedBy = adminProfile?.email;
-            } catch (imsErr) {
-              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${imsErr.message}`);
-            }
-          }
-
-          /* CDN provider is managed by log-infra and stored in the S3 LLMO config
-          during provisioning. Site DynamoDB cdnBucketConfig does not store it,
-          so S3 is the primary source.
-          Fallback to request cdnType (e.g. AEM CS Fastly self-service)
-          when S3 config is not yet available. */
+        try {
+          const [adminProfile, llmoCfgResult] = await notificationPrep;
           let notificationCdnType;
-          try {
-            if (s3?.s3Client) {
-              const { config: llmoCfg } = await readConfig(siteId, s3.s3Client, {
-                s3Bucket: s3.s3Bucket,
-              });
-              notificationCdnType = llmoCfg?.cdnBucketConfig?.cdnProvider;
-            }
-          } catch (s3Err) {
-            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${s3Err.message}`);
+          if (llmoCfgResult.status === 'fulfilled') {
+            notificationCdnType = llmoCfgResult.value?.config?.cdnBucketConfig?.cdnProvider;
+          } else {
+            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${llmoCfgResult.reason?.message}`);
           }
           if (!hasText(notificationCdnType) && hasText(cdnType)) {
             notificationCdnType = cdnType;
           }
 
-          await notifyOptInIfNeeded(context, {
-            siteId,
-            siteBaseURL: baseURL,
-            cdnType: notificationCdnType,
-            orgId: site.getOrganizationId?.(),
-            optedBy,
-          });
-        })()).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
+          if (notificationCdnType === CDN_TYPES.AEM_CS_FASTLY) {
+            log.info(`[cdn-opt-in-notification] Email skipped for site=${siteId} reason=aem-cs-fastly`);
+          } else {
+            let optedBy;
+            if (adminProfile.status === 'fulfilled') {
+              optedBy = adminProfile.value?.email;
+            } else {
+              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${adminProfile.reason?.message}`);
+            }
+
+            await notifyOptInIfNeeded(context, {
+              siteId,
+              siteBaseURL: baseURL,
+              cdnType: notificationCdnType,
+              orgId: site.getOrganizationId?.(),
+              optedBy,
+            });
+          }
+        } catch (err) {
+          log.error('[cdn-opt-in-notification] Unhandled error:', err);
+        }
       }
 
       let cdnTypeNormalized = null;

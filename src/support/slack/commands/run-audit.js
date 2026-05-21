@@ -50,6 +50,7 @@ const ALL_AUDITS = [
   'faqs',
   'related-urls',
   'money-pages',
+  'semantic-value-visibility',
 ];
 
 /**

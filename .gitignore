@@ -23,5 +23,6 @@ admin-idp-p*.json
 
 # V1 to V2 migration scripts and test data (local only)
 scripts/
+!scripts/backfill-rum-config.mjs
 docs/index.html
 mcp-server.log

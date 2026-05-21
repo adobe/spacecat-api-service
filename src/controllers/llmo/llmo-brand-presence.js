@@ -645,14 +645,15 @@ const CONFIG_FILTER_ORIGINS = Object.freeze([
 ]);
 
 /**
- * Optional query param only: siteId / site_id.
+ * Optional query params: siteId / site_id, categoryId / category_id.
  * @param {Object} context
- * @returns {{ siteId: string|undefined }}
+ * @returns {{ siteId: string|undefined, categoryId: string|undefined }}
  */
 function parseFilterDimensionsSiteQuery(context) {
   const q = context.data || {};
   return {
     siteId: q.siteId || q.site_id,
+    categoryId: q.categoryId || q.category_id,
   };
 }
 
@@ -875,17 +876,60 @@ export async function fetchCategoriesForConfig(client, organizationId) {
  * Topics for org, optionally scoped to brand_ids from config brands (includes brand_id NULL).
  * @internal Exported for tests
  */
-export async function fetchTopicsForConfig(client, organizationId, brandOptions) {
+export async function fetchTopicsForConfig(
+  client,
+  organizationId,
+  brandOptions,
+  categoryId = null,
+) {
   const brandIdSet = new Set(
     brandOptions.map((b) => b.id).filter((id) => hasText(id)),
   );
-  const { data, error } = await client
-    .from('topics')
-    .select('id, name, brand_id')
-    .eq('organization_id', organizationId)
-    .in('status', ['pending', 'active'])
-    .limit(QUERY_LIMIT);
-  if (error || !data?.length) {
+
+  let topicIdFilter = null;
+  if (categoryId) {
+    const { data: tcRows, error: tcError } = await client
+      .from('topic_categories')
+      .select('topic_id')
+      .eq('category_id', categoryId)
+      .limit(QUERY_LIMIT);
+    if (tcError || !tcRows?.length) {
+      return [];
+    }
+    topicIdFilter = tcRows.map((r) => r.topic_id).filter(Boolean);
+    if (!topicIdFilter.length) {
+      return [];
+    }
+  }
+
+  let data;
+  if (topicIdFilter) {
+    const chunks = [];
+    for (let i = 0; i < topicIdFilter.length; i += IN_FILTER_CHUNK_SIZE) {
+      chunks.push(topicIdFilter.slice(i, i + IN_FILTER_CHUNK_SIZE));
+    }
+    const chunkResults = await Promise.all(chunks.map((chunk) => client
+      .from('topics')
+      .select('id, name, brand_id')
+      .eq('organization_id', organizationId)
+      .in('status', ['pending', 'active'])
+      .in('id', chunk)
+      .limit(QUERY_LIMIT)));
+    data = chunkResults.flatMap(({ data: d, error }) => (error || !d ? [] : d));
+  } else {
+    const { data: rows, error } = await client
+      .from('topics')
+      .select('id, name, brand_id')
+      .eq('organization_id', organizationId)
+      .in('status', ['pending', 'active'])
+      .limit(QUERY_LIMIT);
+    if (error || !rows?.length) {
+      return [];
+    }
+    data = rows;
+  }
+
+  if (!data.length) {
     return [];
   }
   const filtered = data.filter((t) => !t.brand_id || brandIdSet.has(String(t.brand_id)));
@@ -898,6 +942,7 @@ const PROMPT_STATUS_FOR_CONFIG_STATS = ['pending', 'active'];
 
 /**
  * Counts `prompts` rows for the same brand scope as filter-dimensions dimensions.
+ * When `categoryId` is provided, restricts the count to prompts in that category.
  * @internal Exported for tests
  */
 export async function fetchDistinctPromptCountForConfig(
@@ -905,14 +950,19 @@ export async function fetchDistinctPromptCountForConfig(
   organizationId,
   filterByBrandId,
   brandOptions,
+  categoryId = null,
 ) {
   if (filterByBrandId) {
-    const { count, error } = await client
+    let query = client
       .from('prompts')
       .select('id', { count: 'exact', head: true })
       .eq('organization_id', organizationId)
       .eq('brand_id', filterByBrandId)
       .in('status', PROMPT_STATUS_FOR_CONFIG_STATS);
+    if (categoryId) {
+      query = query.eq('category_id', categoryId);
+    }
+    const { count, error } = await query;
     if (error) {
       return 0;
     }
@@ -926,12 +976,18 @@ export async function fetchDistinctPromptCountForConfig(
   for (let i = 0; i < brandIds.length; i += IN_FILTER_CHUNK_SIZE) {
     chunks.push(brandIds.slice(i, i + IN_FILTER_CHUNK_SIZE));
   }
-  const rows = await Promise.all(chunks.map((chunk) => client
-    .from('prompts')
-    .select('id', { count: 'exact', head: true })
-    .eq('organization_id', organizationId)
-    .in('brand_id', chunk)
-    .in('status', PROMPT_STATUS_FOR_CONFIG_STATS)));
+  const rows = await Promise.all(chunks.map((chunk) => {
+    let query = client
+      .from('prompts')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', organizationId)
+      .in('brand_id', chunk)
+      .in('status', PROMPT_STATUS_FOR_CONFIG_STATS);
+    if (categoryId) {
+      query = query.eq('category_id', categoryId);
+    }
+    return query;
+  }));
   let total = 0;
   for (const { count, error } of rows) {
     if (error) {
@@ -952,12 +1008,14 @@ export async function fetchFilterDimensionsStats(
   organizationId,
   filterByBrandId,
   brandOptions,
+  categoryId = null,
 ) {
   const distinctPromptCount = await fetchDistinctPromptCountForConfig(
     client,
     organizationId,
     filterByBrandId,
     brandOptions,
+    categoryId,
   );
   return {
     distinct_prompt_count: distinctPromptCount,
@@ -980,12 +1038,16 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
     'filter-dimensions',
     async (ctx, client) => {
       const { spaceCatId, brandId } = ctx.params;
-      const { siteId: siteFilter } = parseFilterDimensionsSiteQuery(ctx);
+      const { siteId: siteFilter, categoryId } = parseFilterDimensionsSiteQuery(ctx);
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
       if (filterByBrandId && !isValidUUID(filterByBrandId)) {
         return badRequest('Brand id must be a valid UUID');
+      }
+
+      if (categoryId && !isValidUUID(categoryId)) {
+        return badRequest('Category id must be a valid UUID');
       }
 
       if (shouldApplyFilter(siteFilter)) {
@@ -1006,12 +1068,13 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
       }
 
       const [topics, stats] = await Promise.all([
-        fetchTopicsForConfig(client, organizationId, brandOptions),
+        fetchTopicsForConfig(client, organizationId, brandOptions, categoryId),
         fetchFilterDimensionsStats(
           client,
           organizationId,
           filterByBrandId,
           brandOptions,
+          categoryId,
         ),
       ]);
       const origins = [...CONFIG_FILTER_ORIGINS];
@@ -1608,39 +1671,13 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
+
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
       const model = resolveModelFromRequest(params.model);
-
-      let q = client
-        .from('brand_presence_executions_active')
-        .select('execution_date, sentiment, prompt, region_code, topics')
-        .eq('organization_id', organizationId)
-        .gte('execution_date', startDate)
-        .lte('execution_date', endDate)
-        .eq('model', model);
-
-      if (shouldApplyFilter(params.siteId)) {
-        q = q.eq('site_id', params.siteId);
-      }
-      if (filterByBrandId) {
-        q = q.eq('brand_id', filterByBrandId);
-      }
-      q = applyExecutionCategoryFilter(q, params);
-      if (params.topicIds?.length > 0) {
-        q = q.in('topic_id', params.topicIds);
-      }
-      q = applyExecutionRegionFilter(q, params);
-      if (shouldApplyFilter(params.origin)) {
-        q = q.ilike('origin', params.origin);
-      }
-
-      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
-
-      if (error) {
-        ctx.log.error(`Brand presence sentiment-overview PostgREST error: ${error.message}`);
-        return badRequest(error.message);
-      }
 
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
@@ -1653,7 +1690,41 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const weeklyTrends = aggregateSentimentByWeek(data || []);
+      const { data, error } = await client.rpc('rpc_brand_presence_sentiment_overview', {
+        p_organization_id: organizationId,
+        p_start_date: startDate,
+        p_end_date: endDate,
+        p_model: model,
+        p_brand_id: filterByBrandId || null,
+        p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
+        p_category_id: params.categoryUuidIds?.[0] ?? null,
+        p_category_name: params.categoryNames?.[0] ?? null,
+        p_region_code: params.regionCodesList?.[0] ?? null,
+        p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
+        p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
+      });
+
+      if (error) {
+        ctx.log.error(`Brand presence sentiment-overview RPC error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const weeklyTrends = (data || []).map((row) => ({
+        week: row.week_str,
+        weekNumber: row.week_number,
+        year: row.year,
+        sentiment: [
+          { name: 'Positive', value: row.positive_pct, color: SENTIMENT_COLORS.positive },
+          { name: 'Neutral', value: row.neutral_pct, color: SENTIMENT_COLORS.neutral },
+          { name: 'Negative', value: row.negative_pct, color: SENTIMENT_COLORS.negative },
+        ],
+        totalPrompts: row.total_prompts,
+        promptsWithSentiment: row.prompts_with_sentiment,
+        mentions: 0,
+        citations: 0,
+        visibilityScore: 0,
+        competitors: [],
+      }));
       return cachedOk({ weeklyTrends });
     },
   );

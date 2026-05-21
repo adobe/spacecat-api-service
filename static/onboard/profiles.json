@@ -129,7 +129,8 @@
 			"accessibility": {},
 			"hreflang": {},
 			"security-vulnerabilities": {},
-			"security-vulnerabilities-auto-suggest": {}
+			"security-vulnerabilities-auto-suggest": {},
+			"wikipedia-analysis": {}
 		},
 		"imports": {
 			"organic-traffic" : {},

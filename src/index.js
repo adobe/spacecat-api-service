@@ -27,6 +27,7 @@ import {
   AdobeImsHandler,
   JwtHandler,
   s2sAuthWrapper,
+  readOnlyAdminWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
@@ -69,6 +70,7 @@ import TrafficController from './controllers/paid/traffic.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
+import SiteDetectionController from './controllers/site-detection.js';
 import DemoController from './controllers/demo.js';
 import ConsentBannerController from './controllers/consentBanner.js';
 import ScrapeController from './controllers/scrape.js';
@@ -77,6 +79,7 @@ import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
+import FanoutReportController from './controllers/llmo/fanout-report.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
@@ -95,12 +98,14 @@ import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
-import routeRequiredCapabilities from './routes/required-capabilities.js';
+import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
+import AiVisibilityController from './controllers/ai-visibility.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
+import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -222,6 +227,7 @@ async function run(request, context) {
     const topPaidOpportunitiesController = TopPaidOpportunitiesController(context, context.env);
     const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
+    const siteDetectionController = SiteDetectionController(context, log, context.env);
     const demoController = DemoController(context);
     const consentBannerController = ConsentBannerController(context);
     const scrapeController = ScrapeController(context);
@@ -230,6 +236,7 @@ async function run(request, context) {
     const llmoController = LlmoController(context);
     const llmoMysticatController = LlmoMysticatController(context);
     const llmoOpportunitiesController = LlmoOpportunitiesController(context);
+    const fanoutReportController = FanoutReportController(context);
     const fixesController = new FixesController(context);
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
@@ -253,6 +260,7 @@ async function run(request, context) {
     const plgOnboardingController = PlgOnboardingController(context);
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
+    const aiVisibilityController = AiVisibilityController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -303,9 +311,12 @@ async function run(request, context) {
       pageRelationshipsController,
       ephemeralRunController,
       autofixChecksController,
+      siteDetectionController,
       plgOnboardingController,
       drsBpPgAuditController,
       webhooksController,
+      aiVisibilityController,
+      fanoutReportController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -335,6 +346,9 @@ async function run(request, context) {
       if (params.executionId && !isValidUUID(params.executionId)) {
         return badRequest('Execution Id is invalid. Please provide a valid UUID.');
       }
+      if (params.jobId && !isValidUUIDV4(params.jobId)) {
+        return badRequest('Job Id is invalid. Please provide a valid UUID.');
+      }
       context.params = params;
       context.request = request;
 
@@ -355,14 +369,26 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // Wrapper execution order (helix-shared-wrap: last .with() = outermost = runs first):
 // 1. s2sAuthWrapper — intercepts S2S JWT bearer tokens, passes through non-S2S to authWrapper
 // 2. authWrapper — handles JWT, IMS, scoped API key, legacy API key
+// 3. readOnlyAdminWrapper — enforces read-only access for read-only admin tokens (see
+//    adobe/spacecat-shared#1469); routes not present in routeCapabilities default to deny
+//    (fail-closed), so unmapped routes are blocked for read-only admins
+//
 // authHandlers order contract:
 //  - SkipAuthHandler first: local-dev escape hatch (no-op in Lambda).
 //  - GitHubWebhookHmacHandler next: path-scoped to /webhooks/* and returns null
 //    for any other path, so non-webhook requests fall through cheaply. Must run
 //    BEFORE path-agnostic handlers so a webhook request does not reach JwtHandler
 //    / AdobeImsHandler and fail with a misleading 401 on a missing JWT.
-//  - JwtHandler / AdobeImsHandler / ScopedApiKeyHandler / LegacyApiKeyHandler:
-//    standard auth paths for the rest of the API surface.
+//  - JwtHandler: tried first for token-bearing requests (JWT path is the target
+//    end-state for all consumers).
+//  - ApiKeyImsHandler: route-scoped IMS handler (/tools/api-keys/*) for IaaS-only
+//    orgs that cannot acquire a JWT session token. Returns null for other paths,
+//    falling through to AdobeImsHandler. Once Auto-Fix (ASO-607) migrates and
+//    AdobeImsHandler is removed, this scoped handler keeps IaaS key management
+//    working without re-introducing a global IMS auth backdoor.
+//  - AdobeImsHandler: legacy global IMS path; kept for routes still on IMS auth
+//    (e.g. Auto-Fix). To be removed once all consumers are JWT-migrated.
+//  - ScopedApiKeyHandler / LegacyApiKeyHandler: standard API-key auth paths.
 // When adding a new path-scoped handler, place it in the same position (after
 // SkipAuthHandler, before the path-agnostic handlers) to preserve early-bail.
 // AUTH_HANDLERS order is enforced by test/auth-handlers.test.js.
@@ -370,12 +396,17 @@ const AUTH_HANDLERS = [
   SkipAuthHandler,
   GitHubWebhookHmacHandler,
   JwtHandler,
+  ApiKeyImsHandler,
   AdobeImsHandler,
   ScopedApiKeyHandler,
   LegacyApiKeyHandler,
 ];
 
 const wrappedMain = wrap(run)
+  .with(readOnlyAdminWrapper, {
+    routeCapabilities: routeRequiredCapabilities,
+    internalRoutes: INTERNAL_ROUTES,
+  })
   .with(authWrapper, { authHandlers: AUTH_HANDLERS })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 

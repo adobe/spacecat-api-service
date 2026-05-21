@@ -94,9 +94,12 @@ function isStaticRoute(routePattern) {
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
+ * @param {Object} siteDetectionController - The site detection controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
  * @param {Object} webhooksController - GitHub webhook handler controller.
+ * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
+ * @param {Object} fanoutReportController - Query Fan-Out report controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -148,9 +151,12 @@ export default function getRouteHandlers(
   pageRelationshipsController,
   ephemeralRunController,
   autofixChecksController,
+  siteDetectionController,
   plgOnboardingController,
   drsBpPgAuditController,
   webhooksController,
+  aiVisibilityController,
+  fanoutReportController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -202,6 +208,7 @@ export default function getRouteHandlers(
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.deletePromptByBrandAndId,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': brandsController.bulkDeletePromptsByBrand,
     'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': brandsController.triggerConfigSync,
+    'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': brandsController.getBrandForOrgSite,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
@@ -217,6 +224,8 @@ export default function getRouteHandlers(
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
     'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
+    'POST /sites/detect/jobs': siteDetectionController.createSiteDetectionJob,
+    'GET /sites/detect/jobs/:jobId': siteDetectionController.getSiteDetectionJobStatus,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
@@ -450,8 +459,11 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,
     'GET /sites/:siteId/agentic-traffic/url-brand-presence': llmoMysticatController.getAgenticTrafficUrlBrandPresence,
     'GET /sites/:siteId/agentic-traffic/has-data': llmoMysticatController.getAgenticTrafficHasData,
+    'POST /sites/:siteId/agentic-traffic/urls/export': llmoMysticatController.exportAgenticTrafficUrls,
+    'GET /sites/:siteId/agentic-traffic/urls/export/:exportId': llmoMysticatController.getAgenticTrafficUrlsExportStatus,
 
     // Referral Traffic PG — site-scoped endpoints (mysticat PostgREST)
+    'GET /sites/:siteId/referral-traffic/has-data': llmoMysticatController.getReferralTrafficHasData,
     'GET /sites/:siteId/referral-traffic/filter-dimensions': llmoMysticatController.getReferralTrafficFilterDimensions,
     'GET /sites/:siteId/referral-traffic/kpis': llmoMysticatController.getReferralTrafficKpis,
     'GET /sites/:siteId/referral-traffic/trend': llmoMysticatController.getReferralTrafficTrend,
@@ -459,12 +471,14 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/referral-traffic/by-region': llmoMysticatController.getReferralTrafficByRegion,
     'GET /sites/:siteId/referral-traffic/by-page-intent': llmoMysticatController.getReferralTrafficByPageIntent,
     'GET /sites/:siteId/referral-traffic/by-url': llmoMysticatController.getReferralTrafficByUrl,
+    'GET /sites/:siteId/referral-traffic/by-url-trend': llmoMysticatController.getReferralTrafficUrlTrend,
     'GET /sites/:siteId/referral-traffic/by-device': llmoMysticatController.getReferralTrafficByDevice,
     'GET /sites/:siteId/referral-traffic/business-impact': llmoMysticatController.getReferralTrafficBusinessImpact,
     'GET /sites/:siteId/referral-traffic/weeks': llmoMysticatController.getReferralTrafficWeeks,
 
     // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
+    'GET /org/:spaceCatId/brands/:brandId/fanout-report': fanoutReportController.getFanoutReport,
     'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
     'GET /org/:spaceCatId/brands/all/brand-presence/weeks': llmoMysticatController.getBrandPresenceWeeks,
@@ -525,7 +539,8 @@ export default function getRouteHandlers(
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
     'PATCH /plg/onboard/:onboardingId': plgOnboardingController.update,
     'POST /plg/records': plgOnboardingController.createOnboarding,
-    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
+    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboarding,
+    'PATCH /plg/onboard/:onboardingId/status': plgOnboardingController.transitionStatus,
     'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
 
     // Tier Specific Routes
@@ -593,6 +608,7 @@ export default function getRouteHandlers(
     'POST /consumers/:consumerId/revoke': consumersController.revoke,
 
     // Tokens
+    'GET /sites/:siteId/tokens': tokensController.getAll,
     'GET /sites/:siteId/tokens/by-type/:tokenType': tokensController.getByTokenType,
     'GET /sites/:siteId/tokens/:tokenId/grants': tokensController.getGrants,
 
@@ -613,6 +629,33 @@ export default function getRouteHandlers(
 
     // Autofix checks (permission/capability validation before autofix deploy)
     'POST /sites/:siteId/autofix-checks': autofixChecksController.runChecks,
+
+    // AI Visibility (Semrush gRPC)
+    'GET /llmo/ai-visibility/brands/stats': aiVisibilityController.getBrandsStats,
+    'GET /llmo/ai-visibility/brands/topics': aiVisibilityController.getBrandsTopics,
+    'GET /llmo/ai-visibility/brands/prompts': aiVisibilityController.getBrandsPrompts,
+    'GET /llmo/ai-visibility/brands/cited-pages': aiVisibilityController.getBrandsCitedPages,
+    'GET /llmo/ai-visibility/brands/topic-opportunities': aiVisibilityController.getBrandsTopicOpportunities,
+    'GET /llmo/ai-visibility/brands/top-brands': aiVisibilityController.getBrandsTopBrands,
+    'GET /llmo/ai-visibility/brands/cited-sources': aiVisibilityController.getBrandsCitedSources,
+    'GET /llmo/ai-visibility/brands/source-opportunities': aiVisibilityController.getBrandsSourceOpportunities,
+    'GET /llmo/ai-visibility/brands/competitors': aiVisibilityController.getBrandsCompetitors,
+    'GET /llmo/ai-visibility/competitors/metrics': aiVisibilityController.getCompetitorsMetrics,
+    'GET /llmo/ai-visibility/competitors/gap-topics': aiVisibilityController.getCompetitorsGapTopics,
+    'GET /llmo/ai-visibility/competitors/gap-source-domains': aiVisibilityController.getCompetitorsGapSourceDomains,
+    'GET /llmo/ai-visibility/competitors/gap-prompts': aiVisibilityController.getCompetitorsGapPrompts,
+    'GET /llmo/ai-visibility/meta': aiVisibilityController.getMeta,
+    'GET /llmo/ai-visibility/prompts/responses/latest': aiVisibilityController.getPromptsResponsesLatest,
+    'GET /llmo/ai-visibility/prompts/responses': aiVisibilityController.getPromptsResponses,
+    'GET /llmo/ai-visibility/topics/research/stats': aiVisibilityController.getTopicsResearchStats,
+    'GET /llmo/ai-visibility/topics/research/prompts': aiVisibilityController.getTopicsResearchPrompts,
+    'GET /llmo/ai-visibility/topics/research/brands': aiVisibilityController.getTopicsResearchBrands,
+    'GET /llmo/ai-visibility/topics/research/source-domains': aiVisibilityController.getTopicsResearchSourceDomains,
+    'GET /llmo/ai-visibility/topics/research': aiVisibilityController.getTopicsResearch,
+    'GET /llmo/ai-visibility/topics/stats': aiVisibilityController.getTopicsStats,
+    'GET /llmo/ai-visibility/v1/topic/brand-topics': aiVisibilityController.getV1TopicBrandTopics,
+    'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
+    'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
   };
 
   // Initialization of static and dynamic routes

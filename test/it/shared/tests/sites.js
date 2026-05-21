@@ -109,6 +109,39 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.user.get('/sites');
         expect(res.status).to.equal(403);
       });
+
+      // ── S2S readAll capability path ──
+      // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
+
+      it('s2sConsumerReadAll: returns all sites (site:readAll)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get('/sites');
+        expect(res.status).to.equal(200);
+        // Same exclusions as the admin path apply (DEFAULT_ORGANIZATION_ID excluded).
+        // Admin baseline returns 4: SITE_3, SITE_4, SITE_LEGACY_LLMO, SITE_NEW_LLMO.
+        expect(res.body).to.be.an('array').with.lengthOf(4);
+        const ids = res.body.map((s) => s.id);
+        expect(ids).to.include(SITE_3_ID);
+        expect(ids).to.include(SITE_4_ID);
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no site:readAll)', async () => {
+        // Layer 1 (s2sAuthWrapper) denies - GET /sites now maps to site:readAll which
+        // CONSUMER_1 does NOT hold.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get('/sites');
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerUnknown: returns 403 (no Consumer row for the (clientId, imsOrgId) pair)', async () => {
+        // Trust-boundary assertion: a token signed correctly by the auth-service for
+        // a (clientId, imsOrgId) pair that has no Consumer row is rejected at Layer 1
+        // by the s2sAuthWrapper - the Consumer-record lookup is the load-bearing
+        // isolation invariant per the design.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerUnknown.get('/sites');
+        expect(res.status).to.equal(403);
+      });
     });
 
     describe('GET /sites/:siteId', () => {
@@ -184,6 +217,26 @@ export default function siteTests(getHttpClient, resetData) {
       it('delegatedUser: returns 403 for SITE_3 (owned by ORG_2, not in any tenant)', async () => {
         const http = getHttpClient();
         const res = await http.delegatedUser.get(`/sites/${SITE_3_ID}`);
+        expect(res.status).to.equal(403);
+      });
+
+      // ── Read-only admin smoke tests ──
+      // readOnlyAdminWrapper is fail-closed: without a LaunchDarkly SDK key in the
+      // IT environment the feature-flag evaluation returns false, so ALL routes return
+      // 403 regardless of HTTP method. These tests verify:
+      //   1. The token is correctly parsed as a read-only admin identity.
+      //   2. The readOnlyAdminWrapper is wired and rejects the request (fail-closed).
+      // In an environment with the LD flag enabled, GET routes would return 200 and
+      // POST/mutating routes would return 403.
+      it('readOnlyAdmin: returns 403 for GET /sites/:siteId (fail-closed without LD flag)', async () => {
+        const http = getHttpClient();
+        const res = await http.readOnlyAdmin.get(`/sites/${SITE_1_ID}`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('readOnlyAdmin: returns 403 for POST /sites (fail-closed without LD flag)', async () => {
+        const http = getHttpClient();
+        const res = await http.readOnlyAdmin.post('/sites', { baseURL: 'https://ro-admin-test.example.com' });
         expect(res.status).to.equal(403);
       });
     });

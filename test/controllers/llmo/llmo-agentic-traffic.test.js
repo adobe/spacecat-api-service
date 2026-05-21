@@ -27,11 +27,22 @@ import {
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
   createAgenticTrafficHasDataHandler,
+  createAgenticTrafficUrlsExportHandler,
+  createAgenticTrafficUrlsExportStatusHandler,
 } from '../../../src/controllers/llmo/llmo-agentic-traffic.js';
 
 use(sinonChai);
 
 const SITE_ID = '11111111-1111-1111-1111-111111111111';
+const EXPORT_ID = 'a'.repeat(64);
+
+function ListObjectsV2Command(input) {
+  this.input = input;
+}
+
+function GetObjectCommand(input) {
+  this.input = input;
+}
 
 /**
  * Minimal chainable PostgREST client mock.
@@ -80,6 +91,70 @@ function makeContext(overrides = {}) {
     log: { error: sinon.stub(), info: sinon.stub() },
     ...overrides.context,
   };
+}
+
+// Stubs s3Client.send so ListObjectsV2 returns the supplied keys (or echoes
+// the request Prefix when `echoPrefix` is set, simulating a single cached
+// object at the deterministic key the controller computed) and GetObject
+// returns the supplied metadata (or 404 NoSuchKey when metadata is omitted).
+function stubS3({ keys = [], echoPrefix = false, metadata } = {}) {
+  return sinon.stub().callsFake((command) => {
+    if (command instanceof ListObjectsV2Command) {
+      const Contents = echoPrefix
+        ? [{ Key: command.input.Prefix }]
+        : keys.map((Key) => ({ Key }));
+      return Promise.resolve({ Contents });
+    }
+    if (metadata === undefined) {
+      const error = new Error('not found');
+      error.name = 'NoSuchKey';
+      return Promise.reject(error);
+    }
+    return Promise.resolve({
+      Body: { transformToString: () => Promise.resolve(JSON.stringify(metadata)) },
+    });
+  });
+}
+
+function makeExportContext(overrides = {}) {
+  const send = sinon.stub().callsFake((command) => {
+    if (command instanceof ListObjectsV2Command) {
+      return Promise.resolve({ Contents: [], NextContinuationToken: undefined });
+    }
+    const error = new Error('not found');
+    error.name = 'NoSuchKey';
+    return Promise.reject(error);
+  });
+  const s3 = {
+    s3Client: { send },
+    s3Bucket: 'default-bucket',
+    ListObjectsV2Command,
+    GetObjectCommand,
+    getSignedUrl: sinon.stub().resolves('https://signed.example.com/export.csv'),
+    ...overrides.s3,
+  };
+  const sqs = {
+    sendMessage: sinon.stub().resolves(),
+    ...overrides.sqs,
+  };
+  return makeContext({
+    ...overrides,
+    context: {
+      ...overrides.context,
+      s3,
+      sqs,
+      env: {
+        REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/report-jobs',
+        S3_REPORT_BUCKET: 'report-bucket',
+        ...overrides.context?.env,
+      },
+      runtime: { region: 'us-east-1', ...overrides.context?.runtime },
+      attributes: {
+        authInfo: { profile: { email: 'user@example.com' } },
+        ...overrides.context?.attributes,
+      },
+    },
+  });
 }
 
 // Resolves with the same shape as the real getSiteAndValidateAccess so that
@@ -386,6 +461,188 @@ describe('llmo-agentic-traffic', () => {
     });
   });
 
+  // ── agentTypes additive inclusion list ────────────────────────────────────
+
+  describe('agentTypes inclusion list', () => {
+    it('forwards a comma-separated list to kpis-trend as canonical TEXT[]', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'Chatbots,Research' },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('forwards an array passed directly without re-splitting', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: ['Chatbots', 'Research'] },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('drops unknown agent types silently and dedupes case-insensitively', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agentTypes: 'chatbots, RESEARCH , unknown ,Chatbots',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('ignores non-string entries when an array is passed directly', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        // Defensive coercion: if a caller hands us an array with a
+        // non-string element (e.g. a serialiser bug or a rogue middleware),
+        // we drop it silently instead of throwing.
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: ['Chatbots', 42, 'Research'] },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('skips empty tokens (e.g. trailing or repeated commas) without dropping the rest', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          // Repeated comma + whitespace-only token must not collapse the
+          // inclusion list to null; this exercises the empty-key branch
+          // in parseAgentTypes alongside two valid values.
+          agentTypes: 'Chatbots,, ,Research,',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('omits p_agent_types entirely when the parameter is missing', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      // The key must be absent (not null) so PostgREST falls back to the RPC's
+      // own DEFAULT NULL — same back-compat contract every other consumer relies on.
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('accepts the snake_case alias agent_types and trims whitespace', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agent_types: ' Chatbots , Training bots ',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Training bots'],
+      });
+    });
+
+    it('collapses an all-unknown list to omitted (null behaviour)', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'foo,bar' },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('forwards p_agent_types to by-url alongside paging/sort params', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_by_url: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agentTypes: 'Chatbots,Research',
+          pageSize: 25,
+          sortBy: 'success_rate',
+          sortOrder: 'asc',
+        },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_agent_types: ['Chatbots', 'Research'],
+        p_page_limit: 25,
+        p_sort_by: 'success_rate',
+        p_sort_order: 'asc',
+      });
+    });
+
+    it('does not leak p_agent_types into RPCs that do not accept it', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'Chatbots,Research' },
+      });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      // kpis (non-trend) hasn't been extended yet so the key must still be absent.
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+  });
+
   // ── By Region ──────────────────────────────────────────────────────────────
 
   describe('createAgenticTrafficByRegionHandler', () => {
@@ -682,6 +939,39 @@ describe('llmo-agentic-traffic', () => {
       expect(body.rows[0].deployedAtEdge).to.equal(true);
     });
 
+    it('maps hits_trend points to camelCase and coerces missing values to 0', async () => {
+      // Covers the truthy branch of `Array.isArray(row.hits_trend)`: the
+      // RPC returns a [{week_start, value}] series and the controller
+      // forwards it to the UI as [{weekStart, value}] so the URL Inspector
+      // PG dashboard can derive its sparkline + WoW + dialog chart from
+      // the same per-URL series.
+      const client = createMockClient({
+        rpc_agentic_traffic_by_url: {
+          data: [{
+            host: 'example.com',
+            url_path: '/page',
+            total_count: 1,
+            total_hits: 42,
+            hits_trend: [
+              { week_start: '2026-01-05', value: 30 },
+              { week_start: '2026-01-12', value: null },
+              { week_start: '2026-01-19', value: 12 },
+            ],
+          }],
+          error: null,
+        },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(body.rows[0].hitsTrend).to.deep.equal([
+        { weekStart: '2026-01-05', value: 30 },
+        { weekStart: '2026-01-12', value: 0 },
+        { weekStart: '2026-01-19', value: 12 },
+      ]);
+    });
+
     it('caps limit at 500 via legacy "limit" param', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', limit: 99999 } });
@@ -872,6 +1162,194 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── URL Export ─────────────────────────────────────────────────────────────
+
+  describe('createAgenticTrafficUrlsExportHandler', () => {
+    it('returns a cached download URL when the CSV already exists', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = stubS3({
+        echoPrefix: true,
+        metadata: { status: 'success', rowCount: 2 },
+      });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      // Lock the S3 key shape; a refactor flipping the prefix surfaces here.
+      const listCmd = ctx.s3.s3Client.send.firstCall.args[0];
+      expect(listCmd.input.Prefix).to.match(
+        new RegExp(`^agentic-traffic/url-exports/${SITE_ID}/v1/[a-f0-9]{64}/urls\\.csv$`),
+      );
+      expect(body.downloadUrls).to.deep.equal(['https://signed.example.com/export.csv']);
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('produces the same exportId for the same filter set across calls', async () => {
+      // The cache contract rests on stableStringify being key-order invariant.
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const ctxA = makeExportContext({ data: { platform: 'chatgpt', urlPathSearch: 'pricing' } });
+      const ctxB = makeExportContext({ data: { urlPathSearch: 'pricing', platform: 'chatgpt' } });
+      const idA = (await (await handler(ctxA)).json()).exportId;
+      const idB = (await (await handler(ctxB)).json()).exportId;
+      expect(idA).to.equal(idB);
+    });
+
+    it('re-enqueues when prior `processing` metadata is stale (worker abandoned)', async () => {
+      const ctx = makeExportContext();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'processing', createdAt: oldDate },
+      });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('drops non-string filter values instead of forwarding them', async () => {
+      const ctx = makeExportContext({
+        data: { urlPathSearch: { $ne: null }, userAgent: ['a', 'b'] },
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const { filters } = ctx.sqs.sendMessage.firstCall.args[1].data;
+      expect(filters.urlPathSearch).to.equal(null);
+      expect(filters.userAgent).to.equal(null);
+    });
+
+    it('queues an export job with mapped filters when no cached CSV exists', async () => {
+      // Also covers UI→DB platform code mapping (chatgpt → ChatGPT) in the payload.
+      const ctx = makeExportContext({ data: { platform: 'chatgpt' } });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(202);
+      expect(body.status).to.equal('processing');
+      expect(body.exportId).to.match(/^[a-f0-9]{64}$/);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, message] = ctx.sqs.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('https://sqs.example.com/report-jobs');
+      expect(message.type).to.equal('agentic-traffic-urls-export');
+      expect(message.data.filters.platform).to.equal('ChatGPT');
+      expect(message.data.s3Key).to.include(`/v1/${body.exportId}/urls.csv`);
+      expect(message.data.requestedBy).to.equal('user@example.com');
+    });
+
+    it('does not queue another job while an export is already processing', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = stubS3({ metadata: { status: 'processing' } });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(202);
+      expect(body.status).to.equal('processing');
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('re-enqueues when a prior attempt failed (failed metadata is retriable)', async () => {
+      // POST is the user's "I want this export" signal — a previously
+      // failed attempt with the same filters shouldn't permanently lock
+      // the cache key. Status reporting on 'failed' is the GET endpoint's
+      // job, not POST's.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'failed', failureReason: 'db error' },
+      });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(202);
+      expect(body.status).to.equal('processing');
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+  });
+
+  describe('createAgenticTrafficUrlsExportStatusHandler', () => {
+    it('returns processing when no CSV or metadata exists', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body).to.deep.equal({ exportId: EXPORT_ID, status: 'processing' });
+    });
+
+    it('returns ready with presigned URLs for split CSV parts', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = stubS3({
+        keys: [
+          `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv_part2`,
+          `agentic-traffic/url-exports/${SITE_ID}/v1/${EXPORT_ID}/urls.csv`,
+        ],
+        metadata: {
+          status: 'success', rowCount: 10, filesUploaded: 2, bytesUploaded: 1000,
+        },
+      });
+      ctx.s3.getSignedUrl = sinon.stub()
+        .onFirstCall()
+        .resolves('https://signed.example.com/part1')
+        .onSecondCall()
+        .resolves('https://signed.example.com/part2');
+
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      expect(body.downloadUrls).to.deep.equal([
+        'https://signed.example.com/part1',
+        'https://signed.example.com/part2',
+      ]);
+      expect(body.rowCount).to.equal(10);
+      expect(body.filesUploaded).to.equal(2);
+      expect(body.bytesUploaded).to.equal(1000);
+    });
+
+    it('returns failed when metadata reports a failed export', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'failed', failureReason: 'db error' },
+      });
+
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body).to.deep.equal({
+        exportId: EXPORT_ID,
+        status: 'failed',
+        failureReason: 'db error',
+      });
+    });
+
+    it('surfaces stale `processing` metadata as failed (timeout) so the UI can retry', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'processing', createdAt: oldDate },
+      });
+
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('failed');
+      expect(body.failureReason).to.match(/timed out/i);
+    });
+
+    it('rejects invalid export ids', async () => {
+      const ctx = makeExportContext({ params: { exportId: 'not-a-hash' } });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
     });
   });
 

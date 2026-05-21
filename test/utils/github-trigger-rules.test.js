@@ -58,24 +58,77 @@ describe('github-trigger-rules', () => {
       });
     });
 
-    describe('labeled trigger', () => {
-      it('returns null when label matches', () => {
+    describe('GITHUB_REVIEWER_LOGIN override', () => {
+      it('returns null when reviewer matches GITHUB_REVIEWER_LOGIN (plain user)', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev', GITHUB_REVIEWER_LOGIN: 'aighagent' };
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: 'aighagent' },
+        };
+        expect(getSkipReason(data, 'review_requested', env)).to.be.null;
+      });
+
+      it('returns skip reason when reviewer does not match GITHUB_REVIEWER_LOGIN', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev', GITHUB_REVIEWER_LOGIN: 'aighagent' };
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: 'mysticat-bot-dev[bot]' },
+        };
+        const reason = getSkipReason(data, 'review_requested', env);
+        expect(reason).to.include('mysticat-bot-dev[bot]');
+        expect(reason).to.include('aighagent');
+      });
+
+      it('falls back to [bot] suffix when GITHUB_REVIEWER_LOGIN is absent', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev' };
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: 'mysticat-bot-dev[bot]' },
+        };
+        expect(getSkipReason(data, 'review_requested', env)).to.be.null;
+      });
+
+      it('falls back to [bot] suffix when GITHUB_REVIEWER_LOGIN is empty string', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev', GITHUB_REVIEWER_LOGIN: '' };
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: 'mysticat-bot-dev[bot]' },
+        };
+        expect(getSkipReason(data, 'review_requested', env)).to.be.null;
+      });
+    });
+
+    describe('labeled trigger (disabled)', () => {
+      // Labeled triggers were disabled because GitHub does not count
+      // label-triggered reviews toward branch protection / merge
+      // requirements. All labeled events now fall through to the
+      // unsupported-action skip path.
+      it('returns unsupported-action skip reason regardless of label name', () => {
         const data = {
           ...baseData,
           action: 'labeled',
           label: { name: 'mysticat:review-requested' },
         };
-        expect(getSkipReason(data, 'labeled', defaultEnv)).to.be.null;
+        expect(getSkipReason(data, 'labeled', defaultEnv)).to.include('unsupported action');
       });
 
-      it('returns skip reason when label does not match', () => {
+      it('ignores MYSTICAT_REVIEW_LABEL env override', () => {
+        // The env hook is left in place for future re-enable but is
+        // currently a no-op.
+        const devEnv = {
+          ...defaultEnv,
+          MYSTICAT_REVIEW_LABEL: 'mysticat-dev:review-requested',
+        };
         const data = {
           ...baseData,
           action: 'labeled',
-          label: { name: 'bug' },
+          label: { name: 'mysticat-dev:review-requested' },
         };
-        const reason = getSkipReason(data, 'labeled', defaultEnv);
-        expect(reason).to.include('bug');
+        expect(getSkipReason(data, 'labeled', devEnv)).to.include('unsupported action');
       });
     });
 
@@ -96,17 +149,12 @@ describe('github-trigger-rules', () => {
       });
     });
 
-    describe('skip rules (parametrized across review_requested and labeled)', () => {
+    describe('skip rules (review_requested only — labeled is disabled)', () => {
       const scenarios = [
         {
           name: 'review_requested',
           action: 'review_requested',
           matchFields: { requested_reviewer: { login: 'mysticat[bot]' } },
-        },
-        {
-          name: 'labeled',
-          action: 'labeled',
-          matchFields: { label: { name: 'mysticat:review-requested' } },
         },
       ];
 

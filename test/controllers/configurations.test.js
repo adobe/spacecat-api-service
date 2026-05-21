@@ -272,6 +272,14 @@ describe('Configurations Controller', () => {
     expect(error.message).to.include('Configuration data validation failed');
   });
 
+  it('gets latest configuration for read-only admin', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+
+    const result = await configurationsController.getLatest();
+
+    expect(result.status).to.equal(200);
+  });
+
   it('gets latest configuration for non admin users', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     const result = await configurationsController.getLatest();

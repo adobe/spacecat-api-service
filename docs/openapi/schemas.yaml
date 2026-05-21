@@ -176,6 +176,13 @@ ScopeName:
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
+SemrushWorkspaceId:
+  type: string
+  description: |
+    Semrush workspace identifier mapped to this Adobe organization.
+    UNIQUE across organizations (DB-enforced). Setting this field via
+    PATCH is restricted to admin users.
+  example: 'ws_12345'
 ImsUserAccessToken:
   type: string
   example: 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEyMzQ1IiwidHlwZSI6ImFjY2Vzc190b2tlbiIsImNsaWVudF9pZCI6ImV4YW1wbGVfYXBwIiwidXNlcl9pZCI6Ijk4NzY1NDc4OTBBQkNERUYxMjM0NTY3OEBhYmNkZWYxMjM0NTY3ODkuZSIsImFzIjoiaW1zLW5hMSIsImFhX2lkIjoiMTIzNDU2Nzg5MEFCQ0RFRjEyMzQ1Njc4QGFkb2JlLmNvbSIsImNyZWF0ZWRfYXQiOiIxNzEwMjQ3MDAwMDAwIn0.MRDpxgxSHDj4DmA182hPnjMAnKkly-VUJ_bXpQ-J8EQ'
@@ -194,6 +201,12 @@ HandlerConfig:
       $ref: '#/SlackMentionConfig'
     excludedURLs:
       description: URLs to be excluded from the handler's processing
+      type: array
+      items:
+        type: string
+        format: uri
+    includedURLs:
+      description: URLs to be included in the handler's processing
       type: array
       items:
         type: string
@@ -221,6 +234,8 @@ HandlerConfig:
     excludedURLs:
       - 'https://www.adobe.com/excluded-page'
       - 'https://www.adobe.com/another-excluded-page'
+    includedURLs:
+      - 'https://www.adobe.com/included-page'
     groupedURLs:
       - name: 'catalog'
         pattern: '/products/'
@@ -391,6 +406,9 @@ Organization:
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
+    semrushWorkspaceId:
+      description: Optional. The Semrush workspace ID mapped to this organization.
+      $ref: '#/SemrushWorkspaceId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -404,6 +422,7 @@ Organization:
     id: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     name: 'Example Organization'
     imsOrgId: '1234567890ABCDEF12345678@AdobeOrg'
+    semrushWorkspaceId: 'ws_12345'
     config:
       slack:
         channel: '#example-channel'
@@ -441,6 +460,12 @@ OrganizationCreate:
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
+    semrushWorkspaceId:
+      description: |
+        Optional. The Semrush workspace ID to bind to this organization at
+        creation time. Admin-only endpoint - non-admins cannot reach this
+        path. UNIQUE across organizations.
+      $ref: '#/SemrushWorkspaceId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -474,6 +499,11 @@ OrganizationUpdate:
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
+    semrushWorkspaceId:
+      description: |
+        Optional. The Semrush workspace ID to bind to this organization.
+        Admin-only - non-admin users PATCHing this field receive a 403.
+      $ref: '#/SemrushWorkspaceId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -811,10 +841,25 @@ UpdateHandlerTypeConfig:
   type: object
   properties:
     excludedURLs:
-      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed
+      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed. Combined with replaceExcludedURLs to control merge vs replace behavior
       type: array
       items:
         type: string
+        format: uri
+    replaceExcludedURLs:
+      description: When true, excludedURLs fully replaces the existing list. When false (default), values are appended and deduplicated
+      type: boolean
+      default: false
+    includedURLs:
+      description: Set of URLs to include. If empty, previously included URLs will be removed. Combined with replaceIncludedURLs to control merge vs replace behavior
+      type: array
+      items:
+        type: string
+        format: uri
+    replaceIncludedURLs:
+      description: When true, includedURLs fully replaces the existing list. When false (default), values are appended and deduplicated
+      type: boolean
+      default: false
     groupedURLs:
       description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
       type: array
@@ -831,6 +876,10 @@ UpdateHandlerTypeConfig:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
+    replaceExcludedURLs: true
+    includedURLs:
+      - 'https://www.adobe.com/included-page'
+    replaceIncludedURLs: true
     groupedURLs:
       - name: 'catalog'
         pattern: '/products/'
@@ -5996,7 +6045,10 @@ V2Prompt:
       properties:
         id:
           type: string
-          description: Business key (category_id)
+          description: |
+            Currently the UUID PK (categories.id) for backward compat —
+            aligning this to the category_id business key is a deferred
+            breaking change. Use `uuid` for FK linkage today.
         uuid:
           type: string
           format: uuid
@@ -6010,14 +6062,15 @@ V2Prompt:
       properties:
         id:
           type: string
-          description: Business key (topic_id)
+          description: |
+            Currently the UUID PK (topics.id) for backward compat —
+            aligning this to the topic_id business key is a deferred
+            breaking change. Use `uuid` for FK linkage today.
         uuid:
           type: string
           format: uuid
           description: UUID primary key (topics.id)
         name:
-          type: string
-        categoryId:
           type: string
 
 V2PromptInput:
@@ -7523,6 +7576,72 @@ PageRelationshipsSearchResponse:
     errors:
       $ref: '#/PageRelationshipsErrorMapping'
 
+CreateSiteDetectionJobResponse:
+  type: object
+  required: [jobId, status, createdAt, pollUrl]
+  properties:
+    createdAt:
+      type: string
+      format: date-time
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the newly created site detection job.
+    pollUrl:
+      type: string
+      format: uri
+      description: The URL to poll for the status of the site detection job.
+    status:
+      type: string
+      enum: [IN_PROGRESS]
+      description: Always IN_PROGRESS immediately after creation.
+
+SiteDetectionJobResponse:
+  type: object
+  required: [jobId, status, createdAt, updatedAt]
+  properties:
+    createdAt:
+      type: string
+      format: date-time
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the site detection job.
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+    updatedAt:
+      type: string
+      format: date-time
+    result:
+      type: object
+      description: The result of the site detection job once completed or failed. Absent when the job is still IN_PROGRESS.
+      properties:
+        action:
+          type: string
+          enum: [created, rejected, duplicate]
+          description: The action taken by the site detection job.
+        domain:
+          type: string
+          description: The domain that was processed.
+        baseURL:
+          type: string
+          format: uri
+          description: The normalized base URL (present for action=created).
+        reason:
+          type: string
+          description: Human-readable reason for the action (present for rejected/duplicate).
+    error:
+      type: object
+      description: The error of the site detection job if it failed with an exception. Absent when no exception occurred.
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+        message:
+          type: string
+          description: Human-readable error message.
+
 BrandPresenceLlmModel:
   type: string
   description: |
@@ -7937,6 +8056,27 @@ AgenticTrafficByUrlRow:
     deployedAtEdge:
       type: boolean
       example: true
+    hitsTrend:
+      type: array
+      description: |
+        Multi-week sparkline for this URL — array of `{weekStart, value}` points
+        scoped by the same filters (including `agentTypes`). Used by the URL
+        Inspector PG dialog to render per-URL agentic charts without a second
+        request. Empty array when the URL has no agentic activity in the
+        requested window. The `value` field name (rather than `hits`) is
+        preserved from the underlying `rpc_agentic_traffic_by_url` week_series
+        payload to stay aligned with `UrlInspectorOwnedUrlRow.agenticHitsTrend`.
+      items:
+        type: object
+        properties:
+          weekStart:
+            type: string
+            format: date
+            example: '2026-02-09'
+          value:
+            type: integer
+            example: 12
+        required: [weekStart, value]
   required:
     - host
     - urlPath
@@ -7963,6 +8103,90 @@ AgenticTrafficByUrl:
   required:
     - totalCount
     - rows
+
+AgenticTrafficUrlsExportRequest:
+  type: object
+  description: Filter set for an asynchronous URL-level agentic traffic CSV export
+  properties:
+    startDate:
+      type: string
+      format: date
+    endDate:
+      type: string
+      format: date
+    platform:
+      type: string
+      description: AI platform UI code, mapped to the DB platform value before export
+      example: 'chatgpt'
+    categoryName:
+      type: string
+      example: 'Poster Maker'
+    agentType:
+      type: string
+      example: 'Chatbots'
+    userAgent:
+      type: string
+      example: 'ChatGPT-User'
+    contentType:
+      type: string
+      example: 'owned'
+    successRate:
+      type: string
+      description: Success-rate bucket accepted by the agentic traffic RPC helpers
+      example: 'high'
+    urlPathSearch:
+      type: string
+      description: Substring filter applied to url_path server-side
+      example: '/express/create'
+
+AgenticTrafficUrlsExportResponse:
+  type: object
+  description: Status and download metadata for an asynchronous URL-level CSV export
+  properties:
+    exportId:
+      type: string
+      pattern: '^[a-f0-9]{64}$'
+      example: 'b8d70f4ce07b44a1c46ef6d1a9f83a0678d8c0c14f82121161db725e9d4c7b9a'
+    status:
+      type: string
+      enum: [processing, ready, failed]
+      example: 'ready'
+    downloadUrls:
+      type: array
+      description: One or more presigned CSV URLs. Large DB exports may be split into multiple objects.
+      items:
+        type: string
+        format: uri
+    expiresAt:
+      type: string
+      format: date-time
+      description: Expiry timestamp shared by all presigned URLs
+      example: '2026-05-12T10:15:30.000Z'
+    rowCount:
+      oneOf:
+        - type: integer
+        - type: 'null'
+      description: Number of CSV rows reported by Aurora S3 export
+      example: 9900000
+    filesUploaded:
+      oneOf:
+        - type: integer
+        - type: 'null'
+      description: Number of CSV objects reported by Aurora S3 export
+      example: 3
+    bytesUploaded:
+      oneOf:
+        - type: integer
+        - type: 'null'
+      description: Number of bytes reported by Aurora S3 export
+      example: 1428000000
+    failureReason:
+      type: string
+      description: Present only when status is failed
+      example: 'aws_s3/aws_commons extensions are required to export agentic traffic URLs to S3'
+  required:
+    - exportId
+    - status
 
 AgenticTrafficFilterDimensions:
   type: object
@@ -8160,6 +8384,35 @@ UrlInspectorOwnedUrlRow:
       items:
         type: object
       description: Weekly prompts-cited breakdown (JSONB from RPC)
+    agenticHits:
+      type: integer
+      description: |
+        Total agentic Citation Attempts for this URL across the requested
+        window, scoped by `agentTypes` if supplied (the URL Inspector PG
+        page passes `Chatbots,Research`). Defaults to 0 when the URL has
+        no agentic activity. Server-side join from `agentic_traffic_weekly`
+        added in LLMO-4526 — replaces the previous client-side merge that
+        silently truncated owned URLs ranked beyond 500.
+      example: 1248
+    agenticHitsTrend:
+      type: array
+      description: |
+        Per-week agentic Citation Attempts for this URL — array of
+        `{weekStart, value}` points scoped by the same filters. Empty
+        array when there is no agentic activity. Added in LLMO-4526.
+      items:
+        type: object
+        properties:
+          weekStart:
+            oneOf:
+              - type: string
+                format: date
+              - type: 'null'
+            example: '2026-02-09'
+          value:
+            type: integer
+            example: 21
+        required: [value]
 
 UrlInspectorOwnedUrls:
   type: object
@@ -8383,6 +8636,304 @@ UrlInspectorFilterDimensions:
           label: { type: string }
         required: [id, label]
   required: [categories, regions, content_types]
+
+BrandPresenceFilterOption:
+  type: object
+  description: A single id/label option for a filter dropdown
+  properties:
+    id: { type: string }
+    label: { type: string }
+  required: [id, label]
+
+BrandPresenceFilterDimensions:
+  type: object
+  description: |
+    Filter dimensions for the Brand Presence configuration view.
+    Each dimension is an array of id/label pairs except `stats`.
+  properties:
+    brands:
+      type: array
+      description: Brands accessible for the organization (and optionally a specific site).
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    categories:
+      type: array
+      description: Prompt categories configured for the organization.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    topics:
+      type: array
+      description: Topics for the organization, optionally scoped to a category.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    regions:
+      type: array
+      description: Available region codes.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    origins:
+      type: array
+      description: Prompt origin values (e.g. `human`, `ai`).
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    page_intents:
+      type: array
+      description: Page intent values derived from the brand's prompt data.
+      items:
+        $ref: '#/BrandPresenceFilterOption'
+    stats:
+      type: object
+      description: Aggregate statistics for the current filter scope.
+      properties:
+        distinct_prompt_count:
+          type: integer
+          description: Number of distinct prompts matching the current filter scope.
+      required: [distinct_prompt_count]
+  required: [brands, categories, topics, regions, origins, page_intents, stats]
+
+FanoutReport:
+  type: object
+  description: |
+    Schema of the JSON document stored at
+    `fanout/llmo/{spaceCatId}/{brandId}/data.json.gz` and served via the 302
+    redirect from `GET /org/{spaceCatId}/brands/{brandId}/fanout-report`.
+
+    Generated by `POST /org/{spaceCatId}/brands/{brandId}/fanout-report`. The
+    document is overwritten on each regeneration (last writer wins).
+  properties:
+    schemaVersion:
+      type: integer
+      description: Bumped when this schema changes in a breaking way.
+      example: 1
+    generatedAt:
+      type: string
+      format: date-time
+      description: ISO 8601 timestamp at which the curation finished.
+      example: '2026-05-12T14:00:00Z'
+    isoDate:
+      type: string
+      format: date
+      description: Semrush snapshot date echoed from the upstream response. Drives the UI's "data as of …" stamp.
+      example: '2026-05-08'
+    orgId:
+      type: string
+      format: uuid
+      description: Organization (SpaceCat) ID the report was generated for.
+    brandId:
+      type: string
+      format: uuid
+      description: Brand UUID the report was generated for.
+    brandName:
+      type: string
+      description: Brand display name at the time of generation.
+      example: 'Acme'
+    brandDomains:
+      type: array
+      description: |
+        `www.`-stripped hostnames that the curation considered as "the brand"
+        when computing `brandPosition` against Semrush rankings. Derived
+        server-side using the same logic the UI applies (see
+        `collectBrandUrlDomains`). Empty array means the brand has no
+        recognizable URLs configured — every sub-query will have
+        `brandPosition: null`.
+      items:
+        type: string
+      example: ['acme.com', 'blog.acme.com']
+    country:
+      type: string
+      description: Market scope for SERP + keyword data. Hard-coded to `US` in MVP.
+      example: 'US'
+    llm:
+      type: string
+      description: LLM the citation/mention rates are scoped to. Hard-coded to `chatgpt` in MVP.
+      example: 'chatgpt'
+    windowDays:
+      type: integer
+      description: Trailing window (in days) used to compute `mentionRate` and `citationRate` per topic. Hard-coded to 7 in MVP.
+      example: 7
+    topics:
+      type: array
+      description: |
+        Up to **5 topics**, ordered by `priorityScore` descending. May be empty
+        when the brand has no tracked topics or none survives the
+        `similarityScore >= 0.70` filter.
+      maxItems: 5
+      items:
+        $ref: '#/FanoutReportTopic'
+  required:
+    - schemaVersion
+    - generatedAt
+    - isoDate
+    - orgId
+    - brandId
+    - brandName
+    - brandDomains
+    - country
+    - llm
+    - windowDays
+    - topics
+
+FanoutReportTopic:
+  type: object
+  description: |
+    One topic in a `FanoutReport`. Trimmed to the minimal set the UI consumes —
+    debug-only and pre-filtered fields (Semrush internal IDs, similarity score,
+    per-rate breakdown counts) are intentionally omitted.
+  properties:
+    topicUuid:
+      type: string
+      format: uuid
+      description: Internal UUID from `public.topics.id`. Use this to deep-link to topic-scoped endpoints.
+    name:
+      type: string
+      description: Human-readable topic name from `public.topics.name`.
+      example: 'Best CRM for SMB'
+    matchedTopicName:
+      type: string
+      description: |
+        Semrush's canonical name for the matched topic. May differ from `name`
+        when Semrush rewrote the input string (e.g. `"best crm for smb"` →
+        `"Best CRM for small business"`). UI can surface this as a
+        "matched to: X" hint.
+      example: 'Best CRM for small business'
+    volume:
+      type: integer
+      description: Monthly search volume for the matched topic in the requested country.
+      example: 2400
+    promptsTotal:
+      type: integer
+      description: |
+        Number of distinct prompts under the topic that have at least one
+        execution in the trailing window. Drives the "8 tracked prompts"
+        header text in the UI (PDF Fig 2).
+      example: 8
+    mentionRate:
+      type: [number, 'null']
+      format: float
+      minimum: 0
+      maximum: 1
+      description: |
+        Fraction of `promptsTotal` where at least one execution had
+        `mentions = true`. `null` when `promptsTotal = 0` (no execution data
+        in the window).
+      example: 0.47
+    citationRate:
+      type: [number, 'null']
+      format: float
+      minimum: 0
+      maximum: 1
+      description: |
+        Fraction of `promptsTotal` where at least one execution had
+        `citations = true`. `null` when `promptsTotal = 0`. Topics with
+        `null` are treated as zero by the priority formula.
+      example: 0.03
+    priorityScore:
+      type: number
+      format: float
+      description: |
+        `volume × (1 − COALESCE(citationRate, 0))`. Pre-computed so the UI
+        can sort/rank without recomputing. Higher score = larger opportunity.
+      example: 2328.0
+    subQueries:
+      type: array
+      description: Deduplicated fan-out sub-queries for this topic, in the order Semrush returned them.
+      items:
+        $ref: '#/FanoutReportSubQuery'
+  required:
+    - topicUuid
+    - name
+    - matchedTopicName
+    - volume
+    - promptsTotal
+    - mentionRate
+    - citationRate
+    - priorityScore
+    - subQueries
+
+FanoutReportSubQuery:
+  type: object
+  description: One fan-out sub-query, with its SERP top-10 and the brand's position derived from it.
+  properties:
+    keyword:
+      type: string
+      description: The sub-query text as Semrush returned it. Displayed verbatim in the UI.
+      example: 'HubSpot vs Salesforce for small teams'
+    intent:
+      type: string
+      description: |
+        Search-intent label assigned by Semrush. One of the values from
+        `KEYWORD_INTENT_ENUM` in `third-party/ai-seo-ts/v2/fanout/enums_pb.d.ts`.
+
+        Semrush returns a multi-label `intents` array per fan-out keyword;
+        the curation step picks `intents[0]` and surfaces it here as a
+        single value. Absent when Semrush returns an empty list.
+
+        The PDF prototype shows labels like `Comparison` / `Commercial` /
+        `Informational` — those were illustrative. The actual enum values
+        are listed below.
+      enum:
+        - COMMERCIAL
+        - INFORMATIONAL
+        - NAVIGATIONAL
+        - TRANSACTIONAL
+        - UNSPECIFIED
+      example: 'COMMERCIAL'
+    volume:
+      type: integer
+      description: Monthly search volume for this sub-query in the requested country.
+      example: 1900
+    brandPosition:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 10
+      description: |
+        Lowest (best) SERP position of any of the brand's configured domains
+        in `rankings[]`. `null` when none of the brand's domains appears in
+        the top 10. Matching is exact-hostname against `brandDomains`.
+      example: null
+    topDomain:
+      type: string
+      description: |
+        Domain at position 1 in `rankings[]`. Equivalent to `rankings[0].domain`,
+        denormalized for quick UI rendering.
+      example: 'hubspot.com'
+    rankings:
+      type: array
+      maxItems: 10
+      description: |
+        Top-10 SERP rankings for the sub-query. Hostname format (with `www.`
+        stripped); subdomains are kept (e.g. `blog.adobe.com` and `adobe.com`
+        are distinct entries).
+      items:
+        $ref: '#/FanoutReportRanking'
+  required:
+    - keyword
+    - intent
+    - volume
+    - brandPosition
+    - topDomain
+    - rankings
+
+FanoutReportRanking:
+  type: object
+  description: A single SERP entry — `(domain, position)` pair.
+  properties:
+    domain:
+      type: string
+      description: |
+        `www.`-stripped hostname. Subdomains other than `www.` are kept
+        (e.g. `blog.adobe.com` is distinct from `adobe.com`).
+      example: 'hubspot.com'
+    position:
+      type: integer
+      minimum: 1
+      maximum: 10
+      description: Google SERP position (1–10).
+      example: 1
+  required:
+    - domain
+    - position
+
 WebhookAccepted:
   type: object
   properties:
@@ -8431,3 +8982,586 @@ PromptExecutionStatusResponse:
       items:
         $ref: '#/PromptExecutionStatusItem'
   required: [items]
+
+# ── AI Visibility schemas ──────────────────────────────────────────────
+
+AiVisibilityServiceUnavailable:
+  type: object
+  description: Returned when the AI Visibility gRPC backend is not configured
+  properties:
+    error:
+      type: string
+      example: aiVisibilityNotConfigured
+    message:
+      type: string
+      example: Missing SEO_CLIENT_ID
+  required: [error, message]
+
+AiVisibilityEngineBreakdown:
+  type: object
+  description: Per-LLM-engine numeric breakdown
+  properties:
+    all:
+      type: number
+    chatgpt:
+      type: number
+    gemini:
+      type: number
+    googleAiMode:
+      type: number
+    googleAiOverview:
+      type: number
+
+AiVisibilityByDateEntry:
+  type: object
+  description: A single date-bucket in brand statistics
+  properties:
+    year:
+      type: integer
+    month:
+      type: integer
+    day:
+      type: integer
+    aiVisibility:
+      type: number
+    mentions:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    citedPages:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    visibilityByEngine:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    ownedSources:
+      type: integer
+    audience:
+      type: integer
+
+AiVisibilityByCountryEntry:
+  type: object
+  description: Per-country breakdown row in brand statistics
+  properties:
+    country:
+      type: string
+    mentions:
+      type: integer
+    audience:
+      type: integer
+    citedPages:
+      type: integer
+
+AiVisibilitySrFilters:
+  type: object
+  description: Available filter dimensions extracted from the response
+  properties:
+    markets:
+      type: array
+      items:
+        type: object
+        properties:
+          code:
+            type: string
+          name:
+            type: string
+    models:
+      type: array
+      items:
+        type: object
+        properties:
+          code:
+            type: string
+          name:
+            type: string
+
+AiVisibilityBrandStats:
+  type: object
+  description: Brand visibility statistics response
+  properties:
+    visibility:
+      type: number
+    visibilityByEngine:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    audience:
+      type: integer
+    mentions:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    citedPages:
+      $ref: '#/AiVisibilityEngineBreakdown'
+    byDate:
+      type: array
+      items:
+        $ref: '#/AiVisibilityByDateEntry'
+    byCountry:
+      type: array
+      items:
+        $ref: '#/AiVisibilityByCountryEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityPaginatedResponse:
+  type: object
+  description: Generic paginated response for AI Visibility list endpoints
+  properties:
+    data:
+      type: array
+      items:
+        type: object
+        additionalProperties: true
+    total:
+      type: integer
+      description: Total number of results matching the query
+    offset:
+      type: integer
+    limit:
+      type: integer
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilitySemrushCountry:
+  type: string
+  description: COUNTRY enum from ai-seo-ts common/types_pb
+  enum:
+    - UNKNOWN
+    - AE
+    - AU
+    - BR
+    - CA
+    - DE
+    - ES
+    - FR
+    - IN
+    - IT
+    - JP
+    - MX
+    - NL
+    - SE
+    - UK
+    - US
+    - AR
+    - AT
+    - BE
+    - CH
+    - CL
+    - CO
+    - DK
+    - FI
+    - IE
+    - IL
+    - NO
+    - PA
+    - PE
+    - PL
+    - UY
+    - ZA
+    - SA
+    - WORLDWIDE
+
+AiVisibilitySemrushTopicIntent:
+  type: string
+  description: TOPIC_INTENT from ai-seo-ts common/types_pb
+  enum:
+    - UNSPECIFIED
+    - TASK
+    - INFORMATIONAL
+    - NAVIGATIONAL
+    - COMMERCIAL
+    - TRANSACTIONAL
+
+AiVisibilitySemrushLlm:
+  type: string
+  description: LLM enum from ai-seo-ts common/types_pb (response fields; query engine uses UI slugs).
+  enum:
+    - UNSPECIFIED
+    - CHAT_GPT
+    - GOOGLE_AI_OVERVIEW
+    - GOOGLE_AI_MODE
+    - GEMINI
+    - ALL
+
+AiVisibilitySemrushPromptCategory:
+  type: string
+  description: PROMPT_CATEGORY from ai-seo-ts v2/prompt/enums_pb
+  enum:
+    - UNSPECIFIED
+    - MENTIONS_TARGET
+    - MISSES_TARGET
+    - CITES_TARGET
+
+AiVisibilitySemrushBrand:
+  type: object
+  description: Brand from ai-seo-ts common/types_pb
+  properties:
+    domain:
+      type: string
+    name:
+      type: string
+  additionalProperties: true
+
+AiVisibilitySemrushSource:
+  type: object
+  description: Source from ai-seo-ts common/types_pb
+  properties:
+    url:
+      type: string
+    title:
+      type: string
+  additionalProperties: true
+
+AiVisibilitySemrushTopicIntentEntry:
+  type: object
+  description: Intent distribution entry on a topic or prompt row
+  properties:
+    intent:
+      $ref: '#/AiVisibilitySemrushTopicIntent'
+    weight:
+      type: integer
+      description: Intent weight within the distribution (0–100 scale per Semrush)
+  additionalProperties: true
+
+AiVisibilityV1TopicBrandTopicRow:
+  type: object
+  description: |
+    One topic from Semrush `BrandTopicsResponse.Topic` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    id:
+      description: Topic identifier (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    name:
+      type: string
+    visibility:
+      type: integer
+      description: AI Visibility score (0–100)
+    difficulty:
+      type: integer
+      description: Topic difficulty (0–100)
+    mentions:
+      description: Prompt responses mentioning the target brand in this topic
+      oneOf:
+        - type: string
+        - type: integer
+    volume:
+      description: Topic search volume
+      oneOf:
+        - type: string
+        - type: integer
+    volumeTrend:
+      type: array
+      description: Historical volume scores (0.0–1.0 scale as uint32 per Semrush)
+      items:
+        type: integer
+    intents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1TopicBrandTopicsResponse:
+  type: object
+  description: |
+    Brand topics list from `GET /llmo/ai-visibility/v1/topic/brand-topics`.
+    Wraps Semrush v2 topic `BrandTopics` / `BrandTopicsTotals` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1TopicBrandTopicRow'
+    total:
+      description: Total topics matching the request (from `BrandTopicsTotals`)
+      oneOf:
+        - type: integer
+        - type: string
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1PromptBrandPromptRow:
+  type: object
+  description: |
+    One prompt from Semrush v2 `PromptsResponse.Prompt` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      description: Prompt hash (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    briefResponse:
+      type: string
+    category:
+      description: Deprecated; use `categories`
+      $ref: '#/AiVisibilitySemrushPromptCategory'
+    mentionedBrandsCount:
+      type: integer
+    sourcesCount:
+      type: integer
+    serpId:
+      type: string
+    topicId:
+      oneOf:
+        - type: string
+        - type: integer
+    topicName:
+      type: string
+    topicVolume:
+      oneOf:
+        - type: string
+        - type: integer
+    topicIntents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    country:
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+    categories:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushPromptCategory'
+  additionalProperties: true
+
+AiVisibilityV1PromptPromptResponseValue:
+  type: object
+  description: PromptResponse.Value from Semrush pr.v1 Relations
+  properties:
+    date:
+      type: object
+      additionalProperties: true
+      description: Snapshot date components from `common.v1.Date`
+    prompt:
+      type: string
+    response:
+      type: string
+      description: Full LLM response in Markdown
+    mentionedBrands:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushBrand'
+    sources:
+      type: array
+      items:
+        type: string
+    isoDate:
+      type: string
+      description: Normalized date (`YYYY-MM` or `YYYY-MM-DD`)
+  additionalProperties: true
+
+AiVisibilityV1PromptPromptResponse:
+  type: object
+  description: |
+    Full prompt response from `GET /llmo/ai-visibility/v1/prompt/prompt-response`.
+    Native `PromptResponse` protobuf JSON (camelCase) from Semrush `Relations/Prompt`.
+  properties:
+    value:
+      $ref: '#/AiVisibilityV1PromptPromptResponseValue'
+    sourcesWithTitles:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushSource'
+  additionalProperties: true
+
+AiVisibilityV1PromptBrandPromptsResponse:
+  type: object
+  description: |
+    Brand prompts list from `GET /llmo/ai-visibility/v1/prompt/brand-prompts`.
+    Wraps Semrush v2 `Prompts` / `PromptsTotals` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptBrandPromptRow'
+    total:
+      description: Total prompts matching the request (from `PromptsTotals`)
+      oneOf:
+        - type: integer
+        - type: string
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityCompetitorsMetrics:
+  type: object
+  description: Competitor comparison time-series response
+  properties:
+    byBrand:
+      type: array
+      items:
+        type: object
+        properties:
+          brand:
+            type: object
+            properties:
+              domain:
+                type: string
+              name:
+                type: string
+          byDate:
+            type: array
+            items:
+              type: object
+              properties:
+                date:
+                  type: object
+                  properties:
+                    year:
+                      type: integer
+                    month:
+                      type: integer
+                    day:
+                      type: integer
+                visibility:
+                  type: number
+                mentions:
+                  type: number
+                audience:
+                  type: number
+                ownedSources:
+                  type: number
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityGapPromptRow:
+  type: object
+  description: A single gap prompt row
+  properties:
+    id:
+      type: string
+    prompt:
+      type: string
+    engine:
+      type: string
+    topic:
+      type: string
+    topicId:
+      type: string
+    topicVolume:
+      type: integer
+    mentioned:
+      type: boolean
+    brands:
+      type: integer
+    sources:
+      type: integer
+    promptHash:
+      type: string
+    serpId:
+      type: string
+
+AiVisibilityGapPromptsResponse:
+  type: object
+  description: Normalized gap prompts response
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityGapPromptRow'
+    total:
+      type: integer
+    offset:
+      type: integer
+    limit:
+      type: integer
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data, total, offset, limit]
+
+AiVisibilityMeta:
+  type: object
+  description: AI Visibility metadata including supported countries
+  properties:
+    countries:
+      type: array
+      items:
+        type: object
+        properties:
+          countryCode:
+            type: string
+            description: ISO country code
+          daily:
+            type: array
+            items:
+              type: object
+          monthly:
+            type: array
+            items:
+              type: object
+          isComingSoon:
+            type: boolean
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityTopicsResearchStats:
+  type: object
+  description: Aggregate statistics for topic research
+  properties:
+    topicsTotal:
+      type: integer
+      description: Total number of distinct topics matching the query
+    brandsTotal:
+      type: integer
+      description: Total number of brands across matching topics
+    sourceDomainsTotal:
+      type: integer
+      description: Total number of source domains across matching topics
+    intentBreakdown:
+      type: array
+      items:
+        type: object
+        properties:
+          intent:
+            type: string
+          count:
+            type: integer
+    relatedTopicsAiVolume:
+      type: integer
+      description: Aggregated AI volume for related topics
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilitySourceDomainRow:
+  type: object
+  description: A source domain row in topic research
+  properties:
+    sourceDomain:
+      type: string
+    sourcesCount:
+      type: integer
+    mentions:
+      type: integer
+    organicTraffic:
+      type: integer
+    promptExample:
+      type: string
+
+AiVisibilitySourceDomainsResponse:
+  type: object
+  description: Normalized source domains response
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySourceDomainRow'
+    total:
+      type: integer
+    offset:
+      type: integer
+    limit:
+      type: integer
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data, total, offset, limit]

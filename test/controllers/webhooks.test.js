@@ -22,9 +22,11 @@ describe('WebhooksController', () => {
   const queueUrl = 'https://sqs.us-east-1.amazonaws.com/123/mysticat-github-service-jobs';
 
   const validContext = {
-    headers: {
-      'x-github-event': 'pull_request',
-      'x-github-delivery': 'delivery-uuid-123',
+    pathInfo: {
+      headers: {
+        'x-github-event': 'pull_request',
+        'x-github-delivery': 'delivery-uuid-123',
+      },
     },
     data: {
       action: 'review_requested',
@@ -99,7 +101,34 @@ describe('WebhooksController', () => {
   it('returns 204 for non-pull_request event', async () => {
     const context = {
       ...validContext,
-      headers: { ...validContext.headers, 'x-github-event': 'issue_comment' },
+      pathInfo: {
+        headers: { ...validContext.pathInfo.headers, 'x-github-event': 'issue_comment' },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(204);
+    expect(mockSqs.sendMessage.called).to.be.false;
+  });
+
+  it('returns 204 for GitHub install ping (no action, no installation)', async () => {
+    // Real GitHub `ping` payloads carry neither `action` nor `installation.id`.
+    // Verifies the controller short-circuits on event type before payload
+    // validation, so install pings do not appear as failed deliveries in the
+    // App's "Recent Deliveries" UI.
+    const context = {
+      pathInfo: {
+        headers: {
+          'x-github-event': 'ping',
+          'x-github-delivery': 'delivery-uuid-ping',
+        },
+      },
+      data: {
+        zen: 'Anything added dilutes everything else.',
+        hook_id: 12345,
+        hook: { type: 'App', id: 12345, events: ['pull_request'] },
+      },
     };
 
     const response = await controller.processGitHubWebhook(context);
@@ -293,7 +322,9 @@ describe('WebhooksController', () => {
   it('logs structured skip reason (not interpolated) for untrusted event header', async () => {
     const context = {
       ...validContext,
-      headers: { ...validContext.headers, 'x-github-event': 'evil\ninjected' },
+      pathInfo: {
+        headers: { ...validContext.pathInfo.headers, 'x-github-event': 'evil\ninjected' },
+      },
     };
 
     await controller.processGitHubWebhook(context);
