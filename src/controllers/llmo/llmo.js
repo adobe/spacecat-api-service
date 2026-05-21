@@ -16,8 +16,6 @@ import {
   unauthorized,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  SPACECAT_USER_AGENT,
-  tracingFetch as fetch,
   hasText,
   isObject,
   isValidUUID,
@@ -70,6 +68,8 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import {
+  fetchLlmoSource,
+  llmoSourceErrorResponse,
   logNotProvisioned,
   EMPTY_SHEET_PAYLOAD,
   NOT_PROVISIONED_HEADER,
@@ -196,7 +196,6 @@ function LlmoController(ctx) {
     const {
       siteId, dataSource, sheetType, week,
     } = context.params;
-    const { env } = context;
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
       if (siteValidation.status) {
@@ -232,28 +231,18 @@ function LlmoController(ctx) {
       }
 
       // Fetch data from the external endpoint using the dataFolder from config
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
-          'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'br',
-        },
-      });
-
-      if (!response.ok) {
-        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
-        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      const result = await fetchLlmoSource(context, url.toString());
+      if (result.noData) {
+        logNotProvisioned(log, siteId, llmoConfig.dataFolder);
+        return cachedOk(EMPTY_SHEET_PAYLOAD, { [NOT_PROVISIONED_HEADER]: NOT_PROVISIONED_VALUE });
       }
-
-      // Get the response data
-      const data = await response.json();
-
-      // Return the data, pass through any compression headers from upstream
-      return cachedOk(data, {
-        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
-      });
+      return cachedOk(result.data, { ...result.headers });
     } catch (error) {
       log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      const mapped = llmoSourceErrorResponse(error);
+      if (mapped) {
+        return mapped;
+      }
       return badRequest(cleanupHeaderValue(error.message));
     }
   };
@@ -265,7 +254,6 @@ function LlmoController(ctx) {
     const {
       siteId, dataSource, sheetType, week,
     } = context.params;
-    const { env } = context;
 
     // Start timing for the entire method
     const methodStartTime = Date.now();
@@ -335,21 +323,13 @@ function LlmoController(ctx) {
 
       // Fetch data from the external endpoint using the dataFolder from config
       const fetchStartTime = Date.now();
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
-          'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'br',
-        },
-      });
-
-      if (!response.ok) {
-        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
-        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      const fetchResult = await fetchLlmoSource(context, url.toString());
+      if (fetchResult.noData) {
+        logNotProvisioned(log, siteId, llmoConfig.dataFolder);
+        return ok(EMPTY_SHEET_PAYLOAD, { [NOT_PROVISIONED_HEADER]: NOT_PROVISIONED_VALUE });
       }
-
-      // Get the response data
-      let data = await response.json();
+      let { data } = fetchResult;
+      const responseHeaders = fetchResult.headers;
       const fetchEndTime = Date.now();
       const fetchDuration = fetchEndTime - fetchStartTime;
       log.info(`External API fetch completed - elapsed: ${fetchEndTime - methodStartTime}ms, duration: ${fetchDuration}ms`);
@@ -422,12 +402,14 @@ function LlmoController(ctx) {
       log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms, mapping: ${mappingDuration}ms)`);
 
       // Return the data, pass through any compression headers from upstream
-      return ok(data, {
-        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
-      });
+      return ok(data, { ...responseHeaders });
     } catch (error) {
       const errorTime = Date.now();
       log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
+      const mapped = llmoSourceErrorResponse(error);
+      if (mapped) {
+        return mapped;
+      }
       return badRequest(cleanupHeaderValue(error.message));
     }
   };
@@ -436,7 +418,6 @@ function LlmoController(ctx) {
   const getLlmoGlobalSheetData = async (context) => {
     const { log } = context;
     const { siteId, configName } = context.params;
-    const { env } = context;
     try {
       log.info(`validating LLMO global sheet data for siteId: ${siteId}, configName: ${configName}`);
       // Validate LLMO access but don't use the site-specific dataFolder
@@ -463,29 +444,19 @@ function LlmoController(ctx) {
       }
 
       // Fetch data from the external endpoint using the global llmo-global folder
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
-          'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'br',
-        },
-      });
-
-      if (!response.ok) {
-        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
-        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      const result = await fetchLlmoSource(context, url.toString());
+      if (result.noData) {
+        logNotProvisioned(log, siteId, 'llmo-global');
+        return cachedOk(EMPTY_SHEET_PAYLOAD, { [NOT_PROVISIONED_HEADER]: NOT_PROVISIONED_VALUE });
       }
-
-      // Get the response data
-      const data = await response.json();
-
       log.info(`Successfully proxied global data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
-      // Return the data and let the framework handle the compression
-      return cachedOk(data, {
-        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
-      });
+      return cachedOk(result.data, { ...result.headers });
     } catch (error) {
       log.error(`Error proxying global data for siteId: ${siteId}, error: ${error.message}`);
+      const mapped = llmoSourceErrorResponse(error);
+      if (mapped) {
+        return mapped;
+      }
       return badRequest(cleanupHeaderValue(error.message));
     }
   };
