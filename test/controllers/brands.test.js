@@ -565,17 +565,44 @@ describe('Brands Controller', () => {
         expect(brandClientStub.getBrandGuidelines).to.have.been.calledOnce;
       });
 
-      it('returns error response when Brand Governance client throws', async () => {
+      it('falls back to Brand Publish when Brand Governance client throws', async () => {
+        const mockGuidelines = { theme: 'dark' };
         const brandGovClientStub = {
           getBrandGuidelinesForUrl: sinon.stub().rejects(new Error('Brand Governance API unavailable')),
         };
-        const govContext = { ...context, brandGovernanceClient: brandGovClientStub };
+        const brandClientStub = { getBrandGuidelines: sinon.stub().resolves(mockGuidelines) };
+        const govContext = {
+          ...context, brandGovernanceClient: brandGovClientStub, brandClient: brandClientStub,
+        };
         const govEnv = { ...mockEnv, ...BRAND_GOV_ENV };
         const govController = BrandsController(govContext, loggerStub, govEnv);
 
         const response = await govController.getBrandGuidelinesForSite({
           ...govContext,
           params: { siteId: SITE_ID },
+          env: { BRAND_API_BASE_URL: 'https://brand-api.com', BRAND_API_KEY: 'brand-api-key' },
+        });
+
+        expect(response.status).to.equal(200);
+        expect(brandGovClientStub.getBrandGuidelinesForUrl).to.have.been.calledOnce;
+        expect(brandClientStub.getBrandGuidelines).to.have.been.calledOnce;
+      });
+
+      it('returns 500 when Brand Governance throws and Brand Publish also fails', async () => {
+        const brandGovClientStub = {
+          getBrandGuidelinesForUrl: sinon.stub().rejects(new Error('Brand Governance API unavailable')),
+        };
+        const brandClientStub = { getBrandGuidelines: sinon.stub().rejects(new Error('Brand Publish also down')) };
+        const govContext = {
+          ...context, brandGovernanceClient: brandGovClientStub, brandClient: brandClientStub,
+        };
+        const govEnv = { ...mockEnv, ...BRAND_GOV_ENV };
+        const govController = BrandsController(govContext, loggerStub, govEnv);
+
+        const response = await govController.getBrandGuidelinesForSite({
+          ...govContext,
+          params: { siteId: SITE_ID },
+          env: { BRAND_API_BASE_URL: 'https://brand-api.com', BRAND_API_KEY: 'brand-api-key' },
         });
 
         expect(response.status).to.equal(500);
