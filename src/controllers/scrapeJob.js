@@ -216,6 +216,13 @@ function ScrapeJobController(context) {
     // origin credential exfiltration). Mirrors the preflight controller's
     // "all urls must belong to the same website" guard, but tightened to
     // the *site's* origin rather than just same-hostname-as-first-url.
+    //
+    // `www.` is stripped on both sides so that a site registered as
+    // `okta.com` accepts URLs under `www.okta.com` (and vice versa) — the
+    // canonical apex/www pair has identical TLS + content guarantees. Other
+    // subdomains are rejected; promote them to their own site if needed.
+    const stripWww = (h) => h.toLowerCase().replace(/^www\./, '');
+    const normalizedSiteHost = stripWww(siteHostname);
     if (!Array.isArray(data.urls) || data.urls.length === 0) {
       return badRequest('Invalid request: urls must be a non-empty array');
     }
@@ -226,7 +233,7 @@ function ScrapeJobController(context) {
       } catch {
         return badRequest(`Invalid request: malformed URL: ${u}`);
       }
-      if (urlHostname !== siteHostname) {
+      if (stripWww(urlHostname) !== normalizedSiteHost) {
         log.warn(`Cross-origin URL rejected for site ${siteId}: ${u}`);
         return badRequest(
           `Invalid request: every URL must belong to the site origin (${siteHostname})`,
