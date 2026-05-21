@@ -317,16 +317,16 @@ relationship, the two records expire together: when the `AsyncJob` TTLs, the ass
 `profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`). It is
 never supplied by the client.
 
-The legacy endpoints (`/preflight/jobs`, `/preflight/beta/jobs`) continue to write to
-`AsyncJob` unchanged until they are retired. The new `/sites/:siteId/preflights` endpoints
-write exclusively to the `Preflight` entity. The two backing stores operate in parallel
-without interference.
+`/preflight/beta/jobs` is removed outright as part of this work — it is replaced by the new
+endpoints, not deprecated. `/preflight/jobs` is the only legacy endpoint; it continues writing
+to `AsyncJob` unchanged until external consumers have migrated. The new
+`/sites/:siteId/preflights` endpoints write exclusively to the `Preflight` entity.
 
 Alignment with @ekdogan is complete (SITES-44675). Agreed decisions: 1-to-1 FK relationship
 via `asyncJobId`; TTL column at 7 days matching `async_jobs`; `url` index deferred —
 in-memory filter is sufficient given 7-day TTL bounds per-site volume; `allBySiteId` uses
-the standard `BaseCollection.all()` pattern; legacy endpoints continue writing to `AsyncJob`
-unchanged in parallel.
+the standard `BaseCollection.all()` pattern; `/preflight/beta/jobs` removed (replaced by new
+endpoints), `/preflight/jobs` deprecated in parallel until external consumers migrate.
 
 **This change is scoped to `spacecat-shared-data-access` and is a prerequisite that must land
 before the controller work in this repo.** See SITES-44675 for the tracking ticket.
