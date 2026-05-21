@@ -12,8 +12,16 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+import { ErrorWithStatusCode } from '../../utils.js';
+
 const FETCH_PAGE_SIZE = 200;
 const MAX_PROMPTS_PER_PROJECT = 10000;
+// Caps the inflight upstream calls when fanning out a bulk create across the
+// inputs. Semrush's gateway has a shared rate limit; firing 500 concurrent
+// requests from a single API call exhausted it during the prior serenity
+// testing. 8 keeps the per-call wall time reasonable without overwhelming
+// the upstream.
+const BULK_CREATE_CONCURRENCY = 8;
 
 /**
  * Logical id: opaque, stable across Semrush re-creates. Encodes
@@ -121,12 +129,16 @@ function filterProjects(projects, query) {
 /**
  * GET /semrush/prompts — fan out across every BrandSemrushProject mapped to
  * the brand, merge results, paginate.
+ *
+ * Per-project upstream failures are reported via `errors[]` rather than
+ * tanking the whole request — when some projects responded the partial set
+ * is useful, and the client can surface the missing slices.
  */
 export async function handleListPrompts(transport, dataAccess, brandId, workspaceId, query) {
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
   if (!projects || projects.length === 0) {
     return {
-      items: [], total: 0, page: 1, limit: 50, errors: undefined,
+      items: [], total: 0, page: 1, limit: 50,
     };
   }
 
@@ -160,13 +172,16 @@ export async function handleListPrompts(transport, dataAccess, brandId, workspac
   const limit = Math.max(1, Math.min(parseInt(query?.limit ?? '50', 10) || 50, 1000));
   const start = (page - 1) * limit;
 
-  return {
+  const out = {
     items: dtos.slice(start, start + limit),
     total: dtos.length,
     page,
     limit,
-    errors: errors.length > 0 ? errors : undefined,
   };
+  if (errors.length > 0) {
+    out.errors = errors;
+  }
+  return out;
 }
 
 async function publishAffected(transport, workspaceId, projectIds, log) {
@@ -199,10 +214,36 @@ function normalizePromptInput(input) {
 }
 
 /**
+ * Runs an async mapper over `items` with a concurrency cap. Preserves input
+ * order in the output array. Simpler than pulling in a dep just for this.
+ */
+async function mapLimit(items, limit, mapper) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (true) {
+      const idx = i;
+      i += 1;
+      if (idx >= items.length) {
+        return;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      out[idx] = await mapper(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+/**
  * POST /semrush/prompts — bulk create.
  * Each input is grouped by (semrushLocationId, language); the matching
  * BrandSemrushProject row resolves the upstream project; publish runs once
  * per affected project at the end.
+ *
+ * Inputs are fanned out with a small concurrency cap (BULK_CREATE_CONCURRENCY)
+ * to bound the simultaneous upstream load — `prompts.maxItems` is 500 in
+ * the spec, and Semrush rate-limits aggressively.
  */
 export async function handleCreatePrompts(
   transport,
@@ -223,7 +264,7 @@ export async function handleCreatePrompts(
     projectsBySlice.set(`${p.getSemrushLocationId()}:${p.getLanguage()}`, p);
   }
 
-  const tasks = inputs.map(async (raw) => {
+  const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const input = normalizePromptInput(raw);
     if (!input) {
       return {
@@ -280,7 +321,6 @@ export async function handleCreatePrompts(
     }
   });
 
-  const results = await Promise.all(tasks);
   const created = [];
   const skipped = [];
   const failed = [];
@@ -309,26 +349,28 @@ export async function handleCreatePrompts(
   return { created, skipped, failed };
 }
 
-async function findSemrushPromptIdByText(transport, workspaceId, semrushProjectId, text) {
-  // PATCH carries only text/tags; we look up the current semrush prompt id by
+async function findSemrushPromptByText(transport, workspaceId, semrushProjectId, text) {
+  // PATCH carries only text/tags; we look up the current semrush prompt by
   // listing the project (paginated) and matching on prompt name. Cost is
   // bounded by MAX_PROMPTS_PER_PROJECT and only paid on PATCH (low volume).
+  // Returns the full item so the caller can preserve tags when PATCH omits
+  // them — see R30 (tags-omit shouldn't wipe tags).
   const collected = await fetchProjectPrompts(
     transport,
     workspaceId,
-    {
-      getSemrushProjectId: () => semrushProjectId,
-    },
+    { getSemrushProjectId: () => semrushProjectId },
     text,
   );
-  const match = collected.find((it) => (it?.name || '') === text);
-  return match ? String(match.id) : null;
+  return collected.find((it) => (it?.name || '') === text) || null;
 }
 
 /**
  * PATCH /semrush/prompts/:promptId — partial update. Decodes the logical id
- * to find the owning slice, looks up the current Semrush prompt id by text,
+ * to find the owning slice, looks up the current Semrush prompt by text,
  * then DELETE-old + POST-new + publish.
+ *
+ * When `body.tags` is omitted the old prompt's tags are preserved (the
+ * PATCH semantics — omitted field means "don't change", not "clear").
  */
 export async function handleUpdatePrompt(
   transport,
@@ -373,17 +415,25 @@ export async function handleUpdatePrompt(
     };
   }
   const semrushProjectId = project.getSemrushProjectId();
-  const oldSemrushId = await findSemrushPromptIdByText(
+  const oldPrompt = await findSemrushPromptByText(
     transport,
     workspaceId,
     semrushProjectId,
     decoded.text,
   );
+  const oldSemrushId = oldPrompt ? String(oldPrompt.id) : null;
+  const oldTags = oldPrompt ? tagNamesOf(oldPrompt) : [];
 
   const nextText = String(body.text ?? decoded.text);
-  const nextTags = Array.isArray(body.tags)
-    ? body.tags.map((t) => String(t || '').trim()).filter(Boolean)
-    : [];
+  // Omitted tags → preserve current tags. Explicit empty array → clear them.
+  let nextTags;
+  if (body.tags === undefined) {
+    nextTags = oldTags;
+  } else {
+    nextTags = Array.isArray(body.tags)
+      ? body.tags.map((t) => String(t || '').trim()).filter(Boolean)
+      : [];
+  }
 
   if (oldSemrushId) {
     try {
@@ -427,6 +477,10 @@ export async function handleUpdatePrompt(
  * `{ semrushIds: [{semrushProjectId, semrushPromptId}] }`.
  * Validates each projectId is in the brand's mapped projects, deletes per
  * project in one upstream call each, publishes affected projects.
+ *
+ * Empty payload throws 400 — distinguish from a successful no-op.
+ * Upstream 404s on individual ids are treated as idempotent success: the
+ * caller's intent (the id is gone) is satisfied either way.
  */
 export async function handleBulkDeletePrompts(
   transport,
@@ -438,7 +492,7 @@ export async function handleBulkDeletePrompts(
 ) {
   const targets = Array.isArray(body?.semrushIds) ? body.semrushIds : [];
   if (targets.length === 0) {
-    return { deleted: 0, failed: [{ message: 'No semrushIds supplied' }] };
+    throw new ErrorWithStatusCode('Body must include a non-empty semrushIds array', 400);
   }
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
@@ -469,12 +523,26 @@ export async function handleBulkDeletePrompts(
     }
   });
 
+  // Only publish projects that had at least one successful delete, so a
+  // failed batch doesn't trigger unnecessary upstream publish calls.
   let deleted = 0;
+  const projectsToPublish = new Set();
   await Promise.all(Array.from(byProject.entries()).map(async ([pid, ids]) => {
     try {
       await transport.deletePromptsByIds(workspaceId, pid, ids);
       deleted += ids.length;
+      projectsToPublish.add(pid);
     } catch (e) {
+      // Upstream 404 == idempotent success: the ids are already gone. Count
+      // them as deleted so retries with the same payload converge.
+      if (e?.status === 404) {
+        deleted += ids.length;
+        projectsToPublish.add(pid);
+        log?.info?.('bulk-delete: upstream already-deleted (404 treated as success)', {
+          semrushProjectId: pid, ids,
+        });
+        return;
+      }
       ids.forEach((sid) => {
         failed.push({
           semrushProjectId: pid,
@@ -489,7 +557,7 @@ export async function handleBulkDeletePrompts(
   const publishErrors = await publishAffected(
     transport,
     workspaceId,
-    Array.from(byProject.keys()),
+    Array.from(projectsToPublish),
     log,
   );
   publishErrors.forEach((e) => {

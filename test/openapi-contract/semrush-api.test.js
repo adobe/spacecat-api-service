@@ -41,7 +41,11 @@ function fakeContext({ params = {}, data = undefined } = {}) {
   return {
     env: {},
     pathInfo: { headers: { authorization: 'Bearer ims-token' } },
-    dataAccess: {},
+    attributes: { authInfo: { getType: () => 'ims' } },
+    dataAccess: {
+      Organization: { findById: sinon.stub().resolves({ getId: () => ORG }) },
+      services: { postgrestClient: { from: () => ({}) } },
+    },
     params: { spaceCatId: ORG, brandId: BRAND, ...params },
     data,
   };
@@ -174,7 +178,7 @@ const FIXTURES = {
     controllerMethod: 'listProjectModels',
     handlerName: 'handleListProjectModels',
     handlerResult: {
-      models: [{
+      items: [{
         id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: 'icon-url',
       }],
     },
@@ -184,7 +188,7 @@ const FIXTURES = {
     expectedStatus: 200,
     controllerMethod: 'listWorkspaceProjects',
     handlerName: 'handleListWorkspaceProjects',
-    handlerResult: { projects: [{ id: 'p1', name: 'Adobe', domain: 'adobe.com' }] },
+    handlerResult: { items: [{ id: 'p1', name: 'Adobe', domain: 'adobe.com' }] },
     params: { workspaceId: WORKSPACE },
   },
 };
@@ -251,6 +255,12 @@ describe('OpenAPI contract — /semrush/* endpoints', () => {
           },
           '../../src/support/semrush/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
+          },
+          '../../src/support/access-control-util.js': {
+            default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
+          },
+          '../../src/support/prompts-storage.js': {
+            resolveBrandUuid: () => Promise.resolve(BRAND),
           },
           '../../src/support/semrush/handlers/prompts.js': {
             handleListPrompts: handlerStubs.handleListPrompts,

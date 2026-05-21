@@ -9609,6 +9609,18 @@ SemrushPromptListResponse:
     total: { type: integer }
     page: { type: integer }
     limit: { type: integer }
+    errors:
+      type: array
+      description: |
+        Per-project upstream failures encountered while fanning out the list
+        across the brand's mapped Semrush projects. Present only when at
+        least one project failed; the `items` array contains the partial
+        successful results.
+      items:
+        type: object
+        required: [message]
+        properties:
+          message: { type: string }
 
 SemrushPromptInput:
   type: object
@@ -9719,18 +9731,22 @@ SemrushProjectRow:
       type: string
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
     name:
-      type: string
-      description: Semrush project display name (from live lookup).
+      type: [string, 'null']
+      description: Semrush project display name (from live lookup); null when enrichment fails.
     domain:
-      type: string
-      description: Semrush project domain (from live lookup).
+      type: [string, 'null']
+      description: Semrush project domain (from live lookup); null when enrichment fails.
     workspaceId:
-      type: string
+      type: [string, 'null']
       format: uuid
     createdAt:
-      $ref: '#/DateTime'
+      oneOf:
+        - $ref: '#/DateTime'
+        - type: 'null'
     updatedAt:
-      $ref: '#/DateTime'
+      oneOf:
+        - $ref: '#/DateTime'
+        - type: 'null'
 
 SemrushProjectListResponse:
   type: object
@@ -9739,6 +9755,13 @@ SemrushProjectListResponse:
     items:
       type: array
       items: { $ref: '#/SemrushProjectRow' }
+    enrichment:
+      type: string
+      enum: [failed]
+      description: |
+        Present and set to `failed` when the live-metadata lookup against
+        Semrush couldn't be completed. The `items` array still carries the
+        authoritative DB rows; only the `name`/`domain` enrichment is null.
 
 SemrushCreateProjectRequest:
   type: object
@@ -9801,51 +9824,56 @@ SemrushTagListResponse:
 
 SemrushModel:
   type: object
-  required: [id, key, name]
+  required: [id, key]
   properties:
     id: { type: string }
     key:
       type: string
       description: CBF_model value the Semrush Reporting API expects.
-    name: { type: string }
-    icon: { type: string }
+    name:
+      type: [string, 'null']
+    icon:
+      type: [string, 'null']
 
 SemrushModelListResponse:
   type: object
-  required: [models]
+  required: [items]
+  description: |
+    All list responses on this surface use `items` for consistency; that
+    includes models (formerly `models`) and workspace projects (formerly
+    `projects`). Clients reading either of the prior shapes should migrate.
   properties:
-    models:
+    items:
       type: array
       items: { $ref: '#/SemrushModel' }
 
 SemrushWorkspaceProject:
   type: object
-  required: [id, name]
+  required: [id]
   properties:
     id: { type: string }
-    name: { type: string }
-    domain: { type: string }
+    name:
+      type: [string, 'null']
+    domain:
+      type: [string, 'null']
 
 SemrushWorkspaceProjectListResponse:
   type: object
-  required: [projects]
+  required: [items]
   properties:
-    projects:
+    items:
       type: array
       items: { $ref: '#/SemrushWorkspaceProject' }
 
-SemrushUpstreamError:
+SemrushErrorResponse:
   type: object
-  description: Envelope returned when Semrush returns a non-2xx response.
-  required: [error, status]
+  description: |
+    Unified error envelope for the /semrush/* surface. `error` is a stable
+    machine-readable token (`invalidRequest`, `semrushUpstreamError`,
+    `sliceExists`, etc.); `message` is a sanitized human-readable summary.
+    Provider-specific detail (Semrush HTTP status, raw upstream body) is
+    deliberately NOT exposed — it is logged server-side instead.
+  required: [error, message]
   properties:
-    error:
-      type: string
-      enum: [semrushUpstreamError]
-    status:
-      type: integer
-      description: HTTP status code returned by Semrush.
-    message:
-      type: string
-    body:
-      description: Raw upstream body (parsed JSON when valid, otherwise the response text).
+    error: { type: string }
+    message: { type: string }

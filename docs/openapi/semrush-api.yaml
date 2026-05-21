@@ -74,7 +74,7 @@ v2-semrush-prompts:
         description: Semrush upstream returned a non-2xx response.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SemrushUpstreamError' }
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
   post:
     tags: [semrush]
@@ -105,7 +105,7 @@ v2-semrush-prompts:
         description: Semrush upstream returned a non-2xx response.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SemrushUpstreamError' }
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 v2-semrush-prompt-by-id:
@@ -157,7 +157,7 @@ v2-semrush-prompt-by-id:
         description: Semrush upstream returned a non-2xx response.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SemrushUpstreamError' }
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 v2-semrush-prompts-bulk-delete:
@@ -204,7 +204,7 @@ v2-semrush-prompts-bulk-delete:
         description: Semrush upstream returned a non-2xx response.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SemrushUpstreamError' }
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 # ─── Projects ─────────────────────────────────────────────────────────────────
@@ -255,7 +255,7 @@ v2-semrush-projects:
         description: Semrush upstream returned a non-2xx response.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SemrushUpstreamError' }
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
   post:
     tags: [semrush]
@@ -293,7 +293,7 @@ v2-semrush-projects:
         description: Semrush upstream returned a non-2xx response.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SemrushUpstreamError' }
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 v2-semrush-project-tags:
@@ -338,7 +338,7 @@ v2-semrush-project-tags:
         description: Semrush upstream returned a non-2xx response.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SemrushUpstreamError' }
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 v2-semrush-project-models:
@@ -384,7 +384,7 @@ v2-semrush-project-models:
         description: Semrush upstream returned a non-2xx response.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SemrushUpstreamError' }
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 v2-semrush-workspace-projects:
@@ -427,5 +427,5 @@ v2-semrush-workspace-projects:
         description: Semrush upstream returned a non-2xx response.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SemrushUpstreamError' }
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }

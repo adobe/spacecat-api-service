@@ -55,6 +55,15 @@ function makeDataAccess({ projects = [], existingSlice = null, createResult = nu
   };
 }
 
+function fakeLog() {
+  return {
+    info: sinon.stub(),
+    warn: sinon.stub(),
+    error: sinon.stub(),
+    debug: sinon.stub(),
+  };
+}
+
 describe('semrush projects handler', () => {
   beforeEach(() => {
     clearLanguageCache();
@@ -103,18 +112,41 @@ describe('semrush projects handler', () => {
       });
     });
 
-    it('returns rows without enrichment when upstream list fails', async () => {
+    it('returns rows without enrichment when upstream transport fails — marks enrichment:failed', async () => {
+      const projects = [
+        makeProject({
+          semrushProjectId: 'proj-1', semrushLocationId: 2840, language: 'en',
+        }),
+      ];
+      // Use a SemrushTransportError shape so the handler's narrow catch picks it up.
+      const upstreamErr = Object.assign(new Error('upstream-down'), { name: 'SemrushTransportError' });
+      const transport = {
+        listWorkspaceProjects: sinon.stub().rejects(upstreamErr),
+      };
+      const result = await handleListProjects(transport, makeDataAccess({ projects }), BRAND, WORKSPACE, {}, fakeLog());
+      expect(result.items[0].semrushProjectId).to.equal('proj-1');
+      expect(result.items[0].name).to.equal(null);
+      expect(result.enrichment).to.equal('failed');
+    });
+
+    it('lets non-transport errors propagate (real bugs are not silenced)', async () => {
       const projects = [
         makeProject({
           semrushProjectId: 'proj-1', semrushLocationId: 2840, language: 'en',
         }),
       ];
       const transport = {
-        listWorkspaceProjects: sinon.stub().rejects(new Error('upstream-down')),
+        // Plain Error (no name='SemrushTransportError') — represents a TypeError
+        // / programming bug, not an upstream outage.
+        listWorkspaceProjects: sinon.stub().rejects(new TypeError('boom')),
       };
-      const result = await handleListProjects(transport, makeDataAccess({ projects }), BRAND, WORKSPACE, {});
-      expect(result.items[0].semrushProjectId).to.equal('proj-1');
-      expect(result.items[0].name).to.equal(undefined);
+      let caught;
+      try {
+        await handleListProjects(transport, makeDataAccess({ projects }), BRAND, WORKSPACE, {}, fakeLog());
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).to.be.instanceOf(TypeError);
     });
 
     it('filters by semrushLocationId and language query params', async () => {
@@ -375,13 +407,13 @@ describe('semrush projects handler', () => {
         }),
       };
       const result = await handleListProjectModels(transport, WORKSPACE, 'proj-1');
-      expect(result.models).to.have.length(2);
-      expect(result.models[0].key).to.equal('gpt-4o');
+      expect(result.items).to.have.length(2);
+      expect(result.items[0].key).to.equal('gpt-4o');
     });
   });
 
   describe('handleListWorkspaceProjects', () => {
-    it('returns {id, name, domain} per project', async () => {
+    it('returns {id, name, domain} per project under the items envelope', async () => {
       const transport = {
         listWorkspaceProjects: sinon.stub().resolves({
           items: [
@@ -392,7 +424,7 @@ describe('semrush projects handler', () => {
         }),
       };
       const result = await handleListWorkspaceProjects(transport, WORKSPACE);
-      expect(result.projects).to.deep.equal([
+      expect(result.items).to.deep.equal([
         { id: 'p1', name: 'one', domain: 'one.com' },
         { id: 'p2', name: 'two', domain: 'two.com' },
       ]);

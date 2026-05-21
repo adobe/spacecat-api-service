@@ -19,6 +19,8 @@ import {
   resolveWorkspaceId,
   clearWorkspaceCache,
   CACHE_TTL_MS,
+  NEG_TTL_MS,
+  MAX_ENTRIES,
 } from '../../../src/support/semrush/workspace-resolver.js';
 
 use(chaiAsPromised);
@@ -97,13 +99,43 @@ describe('resolveWorkspaceId', () => {
     expect(findById).to.have.been.calledOnce;
   });
 
-  it('caches a null workspace too (does not re-hit on misses)', async () => {
+  it('caches a null workspace briefly (negative TTL) — does not re-hit immediately', async () => {
     const findById = sandbox.stub().resolves(null);
     const ctx = makeCtx(findById);
 
     await resolveWorkspaceId(ctx, SPACECAT_ORG);
     await resolveWorkspaceId(ctx, SPACECAT_ORG);
 
+    expect(findById).to.have.been.calledOnce;
+  });
+
+  it('expires negative entries after NEG_TTL_MS — newly-onboarded orgs unblock fast', async () => {
+    clock = sandbox.useFakeTimers({ now: 1_700_000_000_000, shouldAdvanceTime: false });
+    const findById = sandbox.stub();
+    findById.onFirstCall().resolves(null);
+    findById.onSecondCall().resolves(makeOrg(WORKSPACE));
+    const ctx = makeCtx(findById);
+
+    expect(await resolveWorkspaceId(ctx, SPACECAT_ORG)).to.equal(null);
+
+    clock.tick(NEG_TTL_MS + 1);
+    expect(await resolveWorkspaceId(ctx, SPACECAT_ORG)).to.equal(WORKSPACE);
+    expect(findById).to.have.been.calledTwice;
+  });
+
+  it('evicts the oldest entry once the cache exceeds MAX_ENTRIES', async () => {
+    const findById = sandbox.stub().callsFake((id) => Promise.resolve(makeOrg(`ws-${id}`)));
+    const ctx = makeCtx(findById);
+
+    // Fill the cache slightly over the cap.
+    for (let i = 0; i < MAX_ENTRIES + 5; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await resolveWorkspaceId(ctx, `org-${i}`);
+    }
+    // The earliest entries should have been evicted; re-querying them
+    // re-hits the data layer.
+    findById.resetHistory();
+    await resolveWorkspaceId(ctx, 'org-0');
     expect(findById).to.have.been.calledOnce;
   });
 

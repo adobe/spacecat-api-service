@@ -11,9 +11,10 @@
  */
 
 import {
-  badRequest, createResponse, internalServerError, notFound, ok,
+  createResponse, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSemrushTransport, SemrushTransportError } from '../support/semrush/rest-transport.js';
 import { resolveWorkspaceId } from '../support/semrush/workspace-resolver.js';
@@ -30,8 +31,27 @@ import {
   handleListProjectModels,
   handleListWorkspaceProjects,
 } from '../support/semrush/handlers/projects.js';
-import { ErrorWithStatusCode, getImsUserToken } from '../support/utils.js';
+import AccessControlUtil from '../support/access-control-util.js';
+import { resolveBrandUuid } from '../support/prompts-storage.js';
+import { ErrorWithStatusCode } from '../support/utils.js';
 
+const MAX_ERR_MSG_LEN = 500;
+const BEARER_PREFIX = 'Bearer ';
+
+/**
+ * Strips characters HTTP headers can't carry (CR/LF/non-ASCII) and caps length.
+ * Prevents response splitting and keeps error bodies bounded.
+ */
+function safeError(msg) {
+  return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
+}
+
+/**
+ * Extracts query params from the request URL. Unlike the prior implementation
+ * this does NOT fall back to `context.data` (the request body) on parse
+ * failure — body keys must never become query keys on a GET, which would be
+ * a silent attribute confusion vector.
+ */
 function extractQuery(context) {
   if (context?.request?.url) {
     try {
@@ -41,9 +61,9 @@ function extractQuery(context) {
         out[k] = v;
       }
       return out;
-    } catch { /* fall through */ }
+    } catch { /* fall through to empty */ }
   }
-  return context?.data || {};
+  return {};
 }
 
 function parsedQuery(context) {
@@ -56,21 +76,58 @@ function parsedQuery(context) {
   return out;
 }
 
+/**
+ * Unified error envelope. All client-facing messages run through
+ * `cleanupHeaderValue` and are length-capped. SemrushTransportError details
+ * are deliberately NOT echoed — the upstream body may contain provider
+ * internals; clients get a stable contract instead.
+ */
 function mapError(e, log) {
   if (e instanceof ErrorWithStatusCode) {
-    return badRequest(e.message);
+    const status = Number.isInteger(e.status) ? e.status : 400;
+    return createResponse(
+      { error: 'invalidRequest', message: safeError(e.message) },
+      status,
+    );
   }
   if (e instanceof SemrushTransportError) {
+    // Log full upstream detail server-side, but do NOT leak the upstream body
+    // to clients (it may contain provider internals).
     log.error('Semrush upstream error', e);
     return createResponse({
       error: 'semrushUpstreamError',
-      status: e.status,
-      message: e.message,
-      body: e.body,
-    }, e.status || 502);
+      message: 'Semrush upstream request failed',
+    }, 502);
   }
   log.error('Semrush controller error', e);
-  return internalServerError(e.message);
+  return createResponse(
+    { error: 'internalServerError', message: 'Internal server error' },
+    500,
+  );
+}
+
+/**
+ * Pulls the IMS bearer from the inbound Authorization header. Throws 401 if
+ * missing OR if the caller authenticated by some other mechanism (scoped API
+ * key, S2S JWT). The Semrush gateway only understands IMS user tokens; we
+ * refuse to forward anything else.
+ */
+function requireImsBearer(ctx) {
+  const authInfo = ctx?.attributes?.authInfo;
+  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+    throw new ErrorWithStatusCode(
+      'Semrush proxy requires IMS authentication',
+      401,
+    );
+  }
+  const header = ctx?.pathInfo?.headers?.authorization;
+  if (!hasText(header) || !header.startsWith(BEARER_PREFIX)) {
+    throw new ErrorWithStatusCode(
+      'Missing or invalid Authorization header',
+      401,
+    );
+  }
+  return header.substring(BEARER_PREFIX.length);
 }
 
 function SemrushController(context, log, env) {
@@ -82,35 +139,91 @@ function SemrushController(context, log, env) {
   }
 
   /**
-   * Builds the per-request transport. Throws ErrorWithStatusCode(400) when
-   * the IMS bearer is missing — controllers catch and map to badRequest.
+   * Verifies the caller has access to the addressed org AND the brand belongs
+   * to that org. For brand-scoped endpoints (all 9 today). When
+   * `requireWorkspace` is true (default), also resolves the org's Semrush
+   * workspace and 404s if missing.
+   *
+   * Returns either `{ error: Response }` or `{ brandUuid, workspaceId? }`.
    */
-  function buildTransport(ctx) {
-    const imsToken = getImsUserToken(ctx);
-    return createSemrushTransport({ env: ctx.env || env, imsToken });
-  }
-
-  async function resolveWorkspaceOrNotFound(ctx) {
+  async function authorize(ctx, { requireWorkspace = true } = {}) {
     const spaceCatId = ctx?.params?.spaceCatId;
+    const brandId = ctx?.params?.brandId;
+    const Organization = ctx?.dataAccess?.Organization;
+    if (!Organization || typeof Organization.findById !== 'function') {
+      return { error: internalServerError('Organization data-access not available') };
+    }
+    const organization = await Organization.findById(spaceCatId);
+    if (!organization) {
+      return { error: notFound(`Organization not found: ${spaceCatId}`) };
+    }
+    const accessControl = AccessControlUtil.fromContext(ctx);
+    if (!await accessControl.hasAccess(organization)) {
+      return { error: forbidden('User does not have access to this organization') };
+    }
+    // Brand <-> org binding. Mirrors brands.js — UUID lookup scoped to the
+    // org, so a cross-tenant brandId in the path returns 404 instead of
+    // proxying to Semrush. Required because there is no Brand entity in
+    // spacecat-shared yet; brand membership lives in mysticat-data-service.
+    const postgrestClient = ctx.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      return {
+        error: createResponse(
+          { error: 'configurationError', message: 'PostgREST client not available' },
+          503,
+        ),
+      };
+    }
+    const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+    if (!brandUuid) {
+      return { error: notFound(`Brand not found for organization: ${brandId}`) };
+    }
+    if (!requireWorkspace) {
+      return { brandUuid };
+    }
     const workspaceId = await resolveWorkspaceId(ctx, spaceCatId);
     if (!hasText(workspaceId)) {
       return { error: notFound('Organization has no semrush_workspace_id') };
     }
-    return { workspaceId };
+    return { brandUuid, workspaceId };
+  }
+
+  /**
+   * For the 3 workspace-scoped lookups (tags / models / workspaceProjects)
+   * we additionally verify the path `:workspaceId` matches the org's
+   * resolved workspace. Defense-in-depth on top of Semrush's ACL.
+   */
+  function verifyPathWorkspace(ctx, resolvedWorkspaceId) {
+    const pathWs = ctx?.params?.workspaceId;
+    if (!hasText(pathWs)) {
+      throw new ErrorWithStatusCode('Missing workspaceId', 400);
+    }
+    if (pathWs !== resolvedWorkspaceId) {
+      throw new ErrorWithStatusCode(
+        'Path workspaceId does not match the organization workspace',
+        403,
+      );
+    }
+    return pathWs;
+  }
+
+  function buildTransport(ctx, imsToken) {
+    return createSemrushTransport({ env: ctx.env || env, imsToken });
   }
 
   const listPrompts = async (ctx) => {
     try {
-      const transport = buildTransport(ctx);
-      const { workspaceId, error } = await resolveWorkspaceOrNotFound(ctx);
-      if (error) {
-        return error;
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
       }
+      const transport = buildTransport(ctx, imsToken);
       const result = await handleListPrompts(
         transport,
         ctx.dataAccess,
-        ctx.params.brandId,
-        workspaceId,
+        auth.brandUuid,
+        auth.workspaceId,
         parsedQuery(ctx),
       );
       return ok(result);
@@ -121,16 +234,17 @@ function SemrushController(context, log, env) {
 
   const createPrompts = async (ctx) => {
     try {
-      const transport = buildTransport(ctx);
-      const { workspaceId, error } = await resolveWorkspaceOrNotFound(ctx);
-      if (error) {
-        return error;
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
       }
+      const transport = buildTransport(ctx, imsToken);
       const result = await handleCreatePrompts(
         transport,
         ctx.dataAccess,
-        ctx.params.brandId,
-        workspaceId,
+        auth.brandUuid,
+        auth.workspaceId,
         ctx.data || {},
         log,
       );
@@ -142,20 +256,21 @@ function SemrushController(context, log, env) {
 
   const updatePrompt = async (ctx) => {
     try {
+      const imsToken = requireImsBearer(ctx);
       const { promptId } = ctx?.params || {};
       if (!hasText(promptId)) {
-        return badRequest('Missing promptId');
+        throw new ErrorWithStatusCode('Missing promptId', 400);
       }
-      const transport = buildTransport(ctx);
-      const { workspaceId, error } = await resolveWorkspaceOrNotFound(ctx);
-      if (error) {
-        return error;
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
       }
+      const transport = buildTransport(ctx, imsToken);
       const result = await handleUpdatePrompt(
         transport,
         ctx.dataAccess,
-        ctx.params.brandId,
-        workspaceId,
+        auth.brandUuid,
+        auth.workspaceId,
         promptId,
         ctx.data || {},
         log,
@@ -168,16 +283,17 @@ function SemrushController(context, log, env) {
 
   const bulkDeletePrompts = async (ctx) => {
     try {
-      const transport = buildTransport(ctx);
-      const { workspaceId, error } = await resolveWorkspaceOrNotFound(ctx);
-      if (error) {
-        return error;
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
       }
+      const transport = buildTransport(ctx, imsToken);
       const result = await handleBulkDeletePrompts(
         transport,
         ctx.dataAccess,
-        ctx.params.brandId,
-        workspaceId,
+        auth.brandUuid,
+        auth.workspaceId,
         ctx.data || {},
         log,
       );
@@ -189,17 +305,19 @@ function SemrushController(context, log, env) {
 
   const listProjects = async (ctx) => {
     try {
-      const transport = buildTransport(ctx);
-      const { workspaceId, error } = await resolveWorkspaceOrNotFound(ctx);
-      if (error) {
-        return error;
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
       }
+      const transport = buildTransport(ctx, imsToken);
       const result = await handleListProjects(
         transport,
         ctx.dataAccess,
-        ctx.params.brandId,
-        workspaceId,
+        auth.brandUuid,
+        auth.workspaceId,
         parsedQuery(ctx),
+        log,
       );
       return ok(result);
     } catch (e) {
@@ -209,17 +327,19 @@ function SemrushController(context, log, env) {
 
   const createProject = async (ctx) => {
     try {
-      const transport = buildTransport(ctx);
-      const { workspaceId, error } = await resolveWorkspaceOrNotFound(ctx);
-      if (error) {
-        return error;
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
       }
+      const transport = buildTransport(ctx, imsToken);
       const result = await handleCreateProject(
         transport,
         ctx.dataAccess,
-        ctx.params.brandId,
-        workspaceId,
+        auth.brandUuid,
+        auth.workspaceId,
         ctx.data || {},
+        log,
       );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -229,11 +349,17 @@ function SemrushController(context, log, env) {
 
   const listProjectTags = async (ctx) => {
     try {
-      const { workspaceId: pathWs, projectId } = ctx?.params || {};
-      if (!hasText(pathWs) || !hasText(projectId)) {
-        return badRequest('Missing workspaceId or projectId');
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
       }
-      const transport = buildTransport(ctx);
+      const pathWs = verifyPathWorkspace(ctx, auth.workspaceId);
+      const { projectId } = ctx?.params || {};
+      if (!hasText(projectId)) {
+        throw new ErrorWithStatusCode('Missing projectId', 400);
+      }
+      const transport = buildTransport(ctx, imsToken);
       const result = await handleListProjectTags(transport, pathWs, projectId);
       return ok(result);
     } catch (e) {
@@ -243,11 +369,17 @@ function SemrushController(context, log, env) {
 
   const listProjectModels = async (ctx) => {
     try {
-      const { workspaceId: pathWs, projectId } = ctx?.params || {};
-      if (!hasText(pathWs) || !hasText(projectId)) {
-        return badRequest('Missing workspaceId or projectId');
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
       }
-      const transport = buildTransport(ctx);
+      const pathWs = verifyPathWorkspace(ctx, auth.workspaceId);
+      const { projectId } = ctx?.params || {};
+      if (!hasText(projectId)) {
+        throw new ErrorWithStatusCode('Missing projectId', 400);
+      }
+      const transport = buildTransport(ctx, imsToken);
       const result = await handleListProjectModels(transport, pathWs, projectId);
       return ok(result);
     } catch (e) {
@@ -257,11 +389,13 @@ function SemrushController(context, log, env) {
 
   const listWorkspaceProjects = async (ctx) => {
     try {
-      const { workspaceId: pathWs } = ctx?.params || {};
-      if (!hasText(pathWs)) {
-        return badRequest('Missing workspaceId');
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
       }
-      const transport = buildTransport(ctx);
+      const pathWs = verifyPathWorkspace(ctx, auth.workspaceId);
+      const transport = buildTransport(ctx, imsToken);
       const result = await handleListWorkspaceProjects(transport, pathWs);
       return ok(result);
     } catch (e) {

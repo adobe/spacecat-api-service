@@ -276,18 +276,28 @@ Confirm outbound requests are going to the right host, the IMS sub matches the c
 
 ### Cleanup
 
-Remove the smoke-test prompts and project — the DB write is via the proxy, so cleanup is too:
+Smoke tests provision **two** resources that need teardown: the prompts/project on Semrush's side and the `brand_to_semrush_projects` row on our side. Delete both — otherwise the shared hackathon workspace accumulates test stubs.
 
 ```bash
-# Delete the prompts (collect the per-prompt {projectId, semrushPromptId} from test 6's response first)
+# 1. Delete the test prompts (collect {semrushProjectId, semrushPromptId} pairs
+#    from test 6's response)
 curl -s -H "Authorization: Bearer ${IMS}" \
   -H "Content-Type: application/json" \
   -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/prompts/bulk-delete" \
   -d '{"semrushIds": [<list of {semrushProjectId, semrushPromptId} from test 6>]}'
 
-# The brand_to_semrush_projects row is left in place — Semrush projects are
-# meant to persist. If you bound a temporary workspace to the org in step 1,
-# unbind it now:
+# 2. Delete the upstream Semrush project so it doesn't linger in the
+#    workspace. Use the project id returned by test 2's createProject call.
+#    Replace ${WS_ID} with the workspace id from test 2's response.
+curl -X DELETE "https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WS_ID}/projects/${SEMRUSH_PROJECT_ID}" \
+  -H "Authorization: Bearer ${IMS}"
+
+# 3. Delete the brand_to_semrush_projects row (PostgREST direct — no proxy
+#    endpoint deletes it today; coordinate with mysticat-data-service oncall).
+#    Use the same (brand_id, semrush_location_id, language) you onboarded.
+# (See follow-up: ticket TBD for a proxy DELETE /semrush/projects/:id.)
+
+# 4. If you bound a temporary workspace to the org in step 1, unbind it:
 curl -X PATCH "${API_BASE}/organizations/${ORG_ID}" \
   -H "x-api-key: ${SPACECAT_ADMIN_KEY}" \
   -H "Content-Type: application/json" \
@@ -298,7 +308,7 @@ curl -X PATCH "${API_BASE}/organizations/${ORG_ID}" \
 
 | Symptom | Likely cause | Verification |
 |---|---|---|
-| Every endpoint 500s with `Cannot read property 'allByBrandId' of undefined` | api-service was deployed before `@adobe/spacecat-shared-data-access` published the `BrandSemrushProject` entity | `npm ls @adobe/spacecat-shared-data-access` on the lambda container; needs ≥ the minor that contains `BrandSemrushProject` |
+| Every endpoint 500s with `Cannot read property 'allByBrandId' of undefined` | api-service was deployed before `@adobe/spacecat-shared-data-access` published the `BrandSemrushProject` entity | `npm ls @adobe/spacecat-shared-data-access` on the lambda container; needs `>= 3.67.0` |
 | All endpoints 404 with `Organization has no semrush_workspace_id` | The org never had `semrushWorkspaceId` set; or the LRU cache is stale from before it was set | Wait 5 min for the cache TTL, or restart the lambda container; verify via `GET /organizations/:id` |
 | `createSemrushProject` returns 400 `unknownLanguage` | The language tag isn't in Semrush's `/v1/languages` catalog response | The cache is module-scoped and lives for 1 h; if a new language landed in Semrush, restart the lambda or wait for the TTL |
 | `listSemrushPrompts` returns `total: 0` immediately after create | Semrush publishes asynchronously; the prompt isn't queryable yet | Retry after ~5 s; if still empty, check the upstream Coralogix logs for a publish failure |

@@ -12,13 +12,21 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+// FIXME(2026-05-22): move the base URL fully to env/vault; see follow-up
+// "Wire Semrush base URL via env/vault" — the hardcoded fallback remains
+// only so dev environments without the secret wired still resolve.
 const DEFAULT_BASE_URL = 'https://adobe-hackathon.semrush.com';
 const API_PREFIX = '/enterprise/projects/api';
+// Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
+// full wall budget. Semrush returns well under 5s in practice; 15s is a safe
+// ceiling that still gives the user a clean error rather than a Lambda timeout.
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
  * Error thrown when the Semrush upstream returns a non-2xx response or refuses
  * the auth header. `status` carries the upstream status; `body` is the parsed
- * JSON (or raw text when not valid JSON).
+ * JSON (or raw text when not valid JSON). The controller's `mapError` does
+ * NOT leak `.body` to clients — it is kept here only for server-side logging.
  */
 export class SemrushTransportError extends Error {
   constructor(status, message, body) {
@@ -29,8 +37,24 @@ export class SemrushTransportError extends Error {
   }
 }
 
+/**
+ * Resolves and validates the upstream base URL. The default is the Adobe-
+ * managed hackathon host; an env override is permitted but only if it parses
+ * as a same-protocol https URL — refuses arbitrary schemes so a compromised
+ * env can't redirect IMS bearers to an attacker host.
+ */
 function baseUrl(env) {
-  return (env?.SEMRUSH_PROJECTS_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
+  const candidate = (env?.SEMRUSH_PROJECTS_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error(`SEMRUSH_PROJECTS_BASE_URL is not a valid URL: ${candidate}`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`SEMRUSH_PROJECTS_BASE_URL must use https (got ${parsed.protocol})`);
+  }
+  return candidate;
 }
 
 /**
@@ -64,15 +88,31 @@ async function parseBody(response) {
   }
 }
 
-async function request(method, url, imsToken, body) {
+async function request(method, url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const init = {
     method,
     headers: buildHeaders(imsToken),
+    signal: controller.signal,
   };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
-  const response = await fetch(url, init);
+  let response;
+  try {
+    response = await fetch(url, init);
+  } catch (e) {
+    if (e?.name === 'AbortError') {
+      throw new SemrushTransportError(
+        504,
+        `Semrush ${method} ${url} timed out after ${timeoutMs}ms`,
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   const parsed = await parseBody(response);
   if (!response.ok) {
     throw new SemrushTransportError(
@@ -84,8 +124,16 @@ async function request(method, url, imsToken, body) {
   return parsed;
 }
 
+// All path-segment interpolations route through encodeURIComponent so a
+// caller-supplied id containing reserved URL chars can't break out of the
+// expected segment. UUIDs are safe by construction today but the policy
+// applies uniformly.
+function enc(segment) {
+  return encodeURIComponent(String(segment ?? ''));
+}
+
 function aioPromptsPath(workspaceId, projectId, suffix) {
-  return `${API_PREFIX}/v2/workspaces/${workspaceId}/projects/${projectId}/aio/prompts${suffix}`;
+  return `${API_PREFIX}/v2/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/aio/prompts${suffix}`;
 }
 
 /**
@@ -104,6 +152,10 @@ export function createSemrushTransport({ env, imsToken }) {
     /**
      * POST /v2/.../aio/prompts/by_tags — paginated list of prompts in a
      * project. Pass an empty `tag_ids` array to list all prompts.
+     *
+     * Note: Semrush rejects `sort_field` / `sort_dir` on this endpoint (see
+     * commit history on the prior `serenity` handler). Body is restricted to
+     * the fields the upstream documents as accepted.
      */
     async listPromptsByTags(workspaceId, projectId, body) {
       const url = `${root}${aioPromptsPath(workspaceId, projectId, '/by_tags')}`;
@@ -112,8 +164,6 @@ export function createSemrushTransport({ env, imsToken }) {
         page: body?.page ?? 1,
         limit: body?.limit ?? 200,
         search: body?.search,
-        sort_field: body?.sort_field,
-        sort_dir: body?.sort_dir,
         unassigned: body?.unassigned,
       });
     },
@@ -142,22 +192,23 @@ export function createSemrushTransport({ env, imsToken }) {
      * this is called.
      */
     async publishProject(workspaceId, projectId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${workspaceId}/projects/${projectId}/publish`;
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/publish`;
       return request('POST', url, imsToken, undefined);
     },
 
     /**
      * GET /v2/workspaces/{ws}/projects?type=AIO&publish_status=live,…
      * Lists published AIO projects in a workspace. Drafts and failed
-     * publishes are omitted.
+     * publishes are omitted. Paginated — yields the full set across pages.
      */
-    async listWorkspaceProjects(workspaceId) {
+    async listWorkspaceProjects(workspaceId, { page = 1, limit = 100 } = {}) {
       const params = new URLSearchParams({
         type: 'AIO',
         publish_status: 'live,live_with_unpublished_updates',
-        limit: '100',
+        page: String(page),
+        limit: String(limit),
       });
-      const url = `${root}${API_PREFIX}/v2/workspaces/${workspaceId}/projects?${params.toString()}`;
+      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(workspaceId)}/projects?${params.toString()}`;
       return request('GET', url, imsToken, undefined);
     },
 
@@ -166,21 +217,20 @@ export function createSemrushTransport({ env, imsToken }) {
      * configured for a project. `model.key` is the value the Reporting API
      * expects as `CBF_model`.
      */
-    async listAiModels(workspaceId, projectId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${workspaceId}/projects/${projectId}/ai_models?limit=100`;
+    async listAiModels(workspaceId, projectId, { page = 1, limit = 100 } = {}) {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(limit),
+      });
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models?${params.toString()}`;
       return request('GET', url, imsToken, undefined);
     },
 
     /**
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
-     * Body shape mirrors the model.ProjectRequest shape documented in
-     * Semrush's public_swagger.json (see scripts/serenity/semrush_create_projects.py
-     * for the field-by-field reference):
-     *   { name, type: 'aio', brand_name_display, brand_names, domain,
-     *     country_code, location_id, location_name, language_id }
      */
     async createProject(workspaceId, body) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${workspaceId}/projects`;
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects`;
       return request('POST', url, imsToken, body);
     },
 

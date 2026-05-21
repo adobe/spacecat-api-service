@@ -30,6 +30,13 @@ const locationsData = JSON.parse(readFileSync(LOCATIONS_JSON_PATH, 'utf8'));
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 const LANGUAGE_TAG_REGEX = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
 
+// Pagination caps for list endpoints. The upstream Semrush API returns
+// 100/page; a workspace with hundreds of projects is unusual but plausible.
+const WORKSPACE_PROJECTS_PAGE = 100;
+const MAX_WORKSPACE_PROJECTS_PAGES = 20; // 2000 projects ceiling
+const AI_MODELS_PAGE = 100;
+const MAX_AI_MODELS_PAGES = 5;
+
 /**
  * Map ISO-2 country code (uppercase) -> { locationId, locationName }. Lazy
  * normalised on first access so we don't pay the work on cold start.
@@ -76,17 +83,28 @@ export function clearLanguageCache() {
   languageCache.byTag.clear();
 }
 
-async function resolveLanguageId(transport, languageTag) {
+async function resolveLanguageId(transport, languageTag, log) {
   const now = Date.now();
   if (languageCache.expiresAt <= now) {
     const resp = await transport.listLanguages();
     const items = Array.isArray(resp?.items) ? resp.items : [];
     languageCache.byTag.clear();
     for (const item of items) {
+      // Semrush's documented field for the BCP-47 tag is `code`. We tolerate
+      // `iso`/`tag` as historical aliases but warn-log if the catalog comes
+      // back without any recognizable tag field — that means the upstream
+      // shape has drifted and POST /projects will start failing with
+      // unknownLanguage until we adapt.
       const code = item?.code || item?.iso || item?.tag;
       if (hasText(code) && hasText(item?.id)) {
         languageCache.byTag.set(String(code).toLowerCase(), String(item.id));
       }
+    }
+    if (languageCache.byTag.size === 0 && items.length > 0) {
+      log?.warn?.(
+        'resolveLanguageId: language catalog returned no usable tags — Semrush field shape may have changed',
+        { receivedKeys: Object.keys(items[0] || {}) },
+      );
     }
     languageCache.expiresAt = now + LANGUAGE_CACHE_TTL_MS;
   }
@@ -94,10 +112,62 @@ async function resolveLanguageId(transport, languageTag) {
 }
 
 /**
- * GET /semrush/projects — DB rows enriched with live Semrush metadata
- * (name, domain) via one `listWorkspaceProjects` call.
+ * Fetches every page of `listWorkspaceProjects` up to MAX_WORKSPACE_PROJECTS_PAGES.
+ * Workspaces typically have ~10–100 projects; the cap is a safety net.
  */
-export async function handleListProjects(transport, dataAccess, brandId, workspaceId, query) {
+async function fetchAllWorkspaceProjects(transport, workspaceId) {
+  const all = [];
+  let page = 1;
+  while (page <= MAX_WORKSPACE_PROJECTS_PAGES) {
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await transport.listWorkspaceProjects(workspaceId, {
+      page,
+      limit: WORKSPACE_PROJECTS_PAGE,
+    });
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    if (items.length === 0) {
+      break;
+    }
+    all.push(...items);
+    if (items.length < WORKSPACE_PROJECTS_PAGE) {
+      break;
+    }
+    page += 1;
+  }
+  return all;
+}
+
+async function fetchAllAiModels(transport, workspaceId, projectId) {
+  const all = [];
+  let page = 1;
+  while (page <= MAX_AI_MODELS_PAGES) {
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await transport.listAiModels(workspaceId, projectId, {
+      page,
+      limit: AI_MODELS_PAGE,
+    });
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    if (items.length === 0) {
+      break;
+    }
+    all.push(...items);
+    if (items.length < AI_MODELS_PAGE) {
+      break;
+    }
+    page += 1;
+  }
+  return all;
+}
+
+/**
+ * GET /semrush/projects — DB rows enriched with live Semrush metadata
+ * (name, domain) via `listWorkspaceProjects` (paginated).
+ *
+ * Enrichment failures are surfaced as `enrichment: 'failed'` in the response
+ * rather than silently dropped — clients can distinguish "no upstream data"
+ * from "upstream said nothing for this id".
+ */
+export async function handleListProjects(transport, dataAccess, brandId, workspaceId, query, log) {
   const rows = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
   if (!rows || rows.length === 0) {
     return { items: [] };
@@ -120,21 +190,27 @@ export async function handleListProjects(transport, dataAccess, brandId, workspa
   }
 
   let liveByProjectId = new Map();
+  let enrichmentFailed = false;
   try {
-    const resp = await transport.listWorkspaceProjects(workspaceId);
-    const items = Array.isArray(resp?.items) ? resp.items : [];
+    const items = await fetchAllWorkspaceProjects(transport, workspaceId);
     liveByProjectId = new Map(
       items
         .filter((p) => p && hasText(p.id))
         .map((p) => [String(p.id), { name: p.name, domain: p.domain }]),
     );
-  } catch {
-    // If the upstream list call fails, return the rows without enrichment
-    // rather than 502'ing the whole request. The DB rows are still
-    // authoritative for slice membership.
+  } catch (e) {
+    // Only swallow upstream transport failures — let TypeErrors etc. bubble
+    // so a real bug isn't hidden as "enrichment unavailable".
+    if (e?.name !== 'SemrushTransportError') {
+      throw e;
+    }
+    enrichmentFailed = true;
+    log?.warn?.('handleListProjects: enrichment lookup failed, returning rows without live metadata', {
+      error: e.message,
+    });
   }
 
-  return {
+  const out = {
     items: filtered.map((row) => {
       const projectId = row.getSemrushProjectId();
       const live = liveByProjectId.get(projectId) || {};
@@ -143,14 +219,18 @@ export async function handleListProjects(transport, dataAccess, brandId, workspa
         semrushProjectId: projectId,
         semrushLocationId: row.getSemrushLocationId(),
         language: row.getLanguage(),
-        name: live.name,
-        domain: live.domain,
+        name: live.name ?? null,
+        domain: live.domain ?? null,
         workspaceId,
-        createdAt: row.getCreatedAt ? row.getCreatedAt() : undefined,
-        updatedAt: row.getUpdatedAt ? row.getUpdatedAt() : undefined,
+        createdAt: row.getCreatedAt ? row.getCreatedAt() : null,
+        updatedAt: row.getUpdatedAt ? row.getUpdatedAt() : null,
       };
     }),
   };
+  if (enrichmentFailed) {
+    out.enrichment = 'failed';
+  }
+  return out;
 }
 
 function validateCreateBody(body) {
@@ -184,8 +264,25 @@ function validateCreateBody(body) {
  * A row is written **only** when both upstream calls succeed. Callers may
  * safely retry with the same body — the 409 gate on findBySlice catches
  * duplicates before the upstream call.
+ *
+ * On publish-failure: the upstream project is orphaned (no row written, so
+ * the 409 gate won't fire on retry). We log the orphan with the upstream id
+ * so operators can clean it up.
+ *
+ * On concurrent-create race: two requests pass the 409 gate, both call
+ * createProject (two upstream projects), the second `dataAccess.create` call
+ * fails on the unique constraint. We catch that, log the orphaned upstream
+ * id, and return 409. The race orphan and the publish orphan are the only
+ * remaining edge cases; both surface in logs.
  */
-export async function handleCreateProject(transport, dataAccess, brandId, workspaceId, body) {
+export async function handleCreateProject(
+  transport,
+  dataAccess,
+  brandId,
+  workspaceId,
+  body,
+  log,
+) {
   const errors = validateCreateBody(body);
   if (errors.length > 0) {
     return {
@@ -221,7 +318,7 @@ export async function handleCreateProject(transport, dataAccess, brandId, worksp
     };
   }
 
-  const languageId = await resolveLanguageId(transport, language);
+  const languageId = await resolveLanguageId(transport, language, log);
   if (!languageId) {
     return {
       status: 400,
@@ -258,15 +355,63 @@ export async function handleCreateProject(transport, dataAccess, brandId, worksp
     };
   }
 
-  // Upstream publish. Same rule — no row on failure.
-  await transport.publishProject(workspaceId, semrushProjectId);
+  // Upstream publish. Log + propagate on failure so the controller envelopes
+  // as 502 — but tag the orphaned upstream id loudly so operators can clean
+  // up the dangling Semrush project.
+  try {
+    await transport.publishProject(workspaceId, semrushProjectId);
+  } catch (e) {
+    log?.error?.(
+      'handleCreateProject: orphaned upstream Semrush project after publish failure',
+      {
+        brandId,
+        workspaceId,
+        semrushProjectId,
+        semrushLocationId: location.locationId,
+        language,
+        error: e.message,
+      },
+    );
+    throw e;
+  }
 
-  await dataAccess.BrandSemrushProject.create({
-    brandId,
-    semrushProjectId,
-    semrushLocationId: location.locationId,
-    language,
-  });
+  try {
+    await dataAccess.BrandSemrushProject.create({
+      brandId,
+      semrushProjectId,
+      semrushLocationId: location.locationId,
+      language,
+    });
+  } catch (e) {
+    // Concurrent-create race: another request won the slice between our
+    // findBySlice call and our INSERT. The DB raised the unique-constraint
+    // violation — we have two upstream projects now; ours is the orphan.
+    // PostgREST surfaces this as a 23505 sqlstate inside an error body; the
+    // entity layer typically wraps it. We treat any insert failure here as
+    // a possible race and respond 409 so the retry-after-race-loser path is
+    // idempotent at the API layer.
+    log?.error?.(
+      'handleCreateProject: orphaned upstream Semrush project after row-create race',
+      {
+        brandId,
+        workspaceId,
+        semrushProjectId,
+        semrushLocationId: location.locationId,
+        language,
+        error: e.message,
+      },
+    );
+    const winner = await dataAccess.BrandSemrushProject
+      .findBySlice(brandId, location.locationId, language);
+    return {
+      status: 409,
+      body: {
+        error: 'sliceExists',
+        message: 'Brand already has a Semrush project for this (locationId, language) slice',
+        semrushProjectId: winner ? winner.getSemrushProjectId() : '',
+      },
+    };
+  }
 
   return {
     status: 201,
@@ -328,37 +473,32 @@ export async function handleListProjectTags(transport, workspaceId, projectId) {
  * `CBF_model` filter clauses.
  */
 export async function handleListProjectModels(transport, workspaceId, projectId) {
-  const resp = await transport.listAiModels(workspaceId, projectId);
-  const items = Array.isArray(resp?.items) ? resp.items : [];
-  const models = items
+  const allItems = await fetchAllAiModels(transport, workspaceId, projectId);
+  const items = allItems
     .map((it) => it?.model)
     .filter((m) => m && typeof m === 'object' && hasText(m.id) && hasText(m.key))
     .map((m) => ({
       id: m.id,
       key: m.key,
-      name: m.name,
-      icon: m.icon,
+      name: m.name ?? null,
+      icon: m.icon ?? null,
     }));
-  return { models };
+  return { items };
 }
 
 /**
  * GET /semrush/workspaces/:workspaceId/projects — all projects in a workspace.
  * Used by the Brand Presence dashboard's Category filter.
- *
- * Response shape uses `projects` (not `items`) to match
- * SemrushWorkspaceProjectListResponse in docs/openapi/schemas.yaml.
  */
 export async function handleListWorkspaceProjects(transport, workspaceId) {
-  const resp = await transport.listWorkspaceProjects(workspaceId);
-  const items = Array.isArray(resp?.items) ? resp.items : [];
+  const all = await fetchAllWorkspaceProjects(transport, workspaceId);
   return {
-    projects: items
+    items: all
       .filter((p) => p && hasText(p.id))
       .map((p) => ({
         id: p.id,
-        name: p.name,
-        domain: p.domain,
+        name: p.name ?? null,
+        domain: p.domain ?? null,
       })),
   };
 }

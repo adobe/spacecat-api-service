@@ -106,6 +106,62 @@ describe('Semrush REST transport', () => {
       const [url] = fetchStub.firstCall.args;
       expect(url).to.match(/^https:\/\/override\.semrush\.com\/enterprise\//);
     });
+
+    it('rejects a non-https SEMRUSH_PROJECTS_BASE_URL', () => {
+      expect(() => createSemrushTransport({
+        env: { SEMRUSH_PROJECTS_BASE_URL: 'http://attacker.example/' },
+        imsToken: IMS,
+      })).to.throw(/must use https/);
+    });
+
+    it('rejects an unparseable SEMRUSH_PROJECTS_BASE_URL', () => {
+      expect(() => createSemrushTransport({
+        env: { SEMRUSH_PROJECTS_BASE_URL: 'not a url' },
+        imsToken: IMS,
+      })).to.throw(/not a valid URL/);
+    });
+
+    it('encodes path segments so reserved chars stay inside the segment', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+
+      await transport.listAiModels('ws/with/slashes', 'pid?with#hash');
+
+      const [url] = fetchStub.firstCall.args;
+      // Slashes/question marks/hashes must be percent-encoded — never break
+      // out of their segment.
+      expect(url).to.include('ws%2Fwith%2Fslashes');
+      expect(url).to.include('pid%3Fwith%23hash');
+    });
+
+    it('aborts with SemrushTransportError(504) on fetch timeout', async () => {
+      // fetch never resolves; the transport's AbortController should fire.
+      fetchStub.callsFake((_url, init) => new Promise((resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const e = new Error('aborted');
+          e.name = 'AbortError';
+          reject(e);
+        });
+      }));
+      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      // Patch in a tiny "timeout" by stubbing setTimeout to immediately fire.
+      const realSetTimeout = global.setTimeout;
+      // Use sinon's fake timers narrowly so we don't break other things.
+      const clock = sinon.useFakeTimers({
+        now: 1_700_000_000_000,
+        toFake: ['setTimeout', 'clearTimeout'],
+      });
+      try {
+        const promise = transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+        clock.tick(20_000); // safely past the 15s default timeout
+        const err = await promise.catch((e) => e);
+        expect(err).to.be.instanceOf(SemrushTransportError);
+        expect(err.status).to.equal(504);
+      } finally {
+        clock.restore();
+        global.setTimeout = realSetTimeout;
+      }
+    });
   });
 
   describe('non-2xx upstream', () => {
@@ -187,6 +243,22 @@ describe('Semrush REST transport', () => {
       expect(body.page).to.equal(1);
       expect(body.limit).to.equal(200);
     });
+
+    it('does not forward sort_field / sort_dir — Semrush rejects them on this endpoint', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, {
+        sort_field: 'created_at',
+        sort_dir: 'desc',
+        search: 'photoshop',
+      });
+
+      const body = JSON.parse(fetchStub.firstCall.args[1].body);
+      expect(body).to.not.have.property('sort_field');
+      expect(body).to.not.have.property('sort_dir');
+      expect(body.search).to.equal('photoshop');
+    });
   });
 
   describe('createTaggedPrompts', () => {
@@ -249,11 +321,23 @@ describe('Semrush REST transport', () => {
         'publish_status=live%2Clive_with_unpublished_updates',
       );
       expect(url).to.include('limit=100');
+      expect(url).to.include('page=1');
+    });
+
+    it('honours explicit page/limit for pagination', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+
+      await transport.listWorkspaceProjects(WORKSPACE_ID, { page: 4, limit: 50 });
+
+      const [url] = fetchStub.firstCall.args;
+      expect(url).to.include('page=4');
+      expect(url).to.include('limit=50');
     });
   });
 
   describe('listAiModels', () => {
-    it('GETs /v1/.../ai_models with limit=100', async () => {
+    it('GETs /v1/.../ai_models with page=1&limit=100 by default', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
       const transport = createSemrushTransport({ env: {}, imsToken: IMS });
 
@@ -261,11 +345,20 @@ describe('Semrush REST transport', () => {
 
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('GET');
-      expect(url).to.match(
-        new RegExp(
-          `/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models\\?limit=100$`,
-        ),
-      );
+      expect(url).to.include(`/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models?`);
+      expect(url).to.include('page=1');
+      expect(url).to.include('limit=100');
+    });
+
+    it('honours explicit page/limit for pagination', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+
+      await transport.listAiModels(WORKSPACE_ID, PROJECT_ID, { page: 3, limit: 25 });
+
+      const [url] = fetchStub.firstCall.args;
+      expect(url).to.include('page=3');
+      expect(url).to.include('limit=25');
     });
   });
 

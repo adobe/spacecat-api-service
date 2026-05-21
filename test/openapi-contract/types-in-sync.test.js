@@ -11,7 +11,9 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync, readFileSync, rmSync, statSync,
+} from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -20,19 +22,16 @@ import { expect } from 'chai';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolvePath(HERE, '..', '..');
-const COMMITTED_TYPES = resolvePath(REPO_ROOT, 'src', 'support', 'semrush', 'generated', 'api.d.ts');
 const OPENAPI_ENTRY = resolvePath(REPO_ROOT, 'docs', 'openapi', 'api.yaml');
 
 /**
- * Guards against drift between `docs/openapi/api.yaml` and the committed
- * `src/support/semrush/generated/api.d.ts`. CI re-runs `openapi-typescript`
- * into a tempdir and diffs against the committed file — if anyone forgets
- * to run `npm run gen:types:semrush` after changing the spec, this test
- * fails loudly.
+ * The OpenAPI -> TypeScript codegen lives in `npm run gen:types:semrush` and
+ * writes to `src/support/semrush/generated/api.d.ts`. That output is not
+ * committed (see .gitignore — no runtime code imports it; dev/CI regenerates
+ * on demand), so this test verifies the spec is valid input for the codegen
+ * rather than diffing against a frozen committed artifact.
  */
-describe('OpenAPI types — generated `.d.ts` is up-to-date', function whenInSync() {
-  // Generating the file shells out to openapi-typescript, parses + writes
-  // the bundle, so the budget is generous.
+describe('OpenAPI types — codegen runs cleanly against the spec', function whenInSync() {
   this.timeout(60_000);
 
   let tempDir;
@@ -64,27 +63,13 @@ describe('OpenAPI types — generated `.d.ts` is up-to-date', function whenInSyn
     }
   });
 
-  it('regenerated output matches the committed file byte-for-byte', () => {
-    const committed = readFileSync(COMMITTED_TYPES, 'utf8');
-    const regenerated = readFileSync(tempOutput, 'utf8');
-    if (committed !== regenerated) {
-      // Produce a useful first-divergence message rather than dumping 30k lines.
-      const committedLines = committed.split('\n');
-      const regenLines = regenerated.split('\n');
-      const max = Math.max(committedLines.length, regenLines.length);
-      for (let i = 0; i < max; i += 1) {
-        if (committedLines[i] !== regenLines[i]) {
-          const expected = committedLines[i] ?? '<EOF>';
-          const actual = regenLines[i] ?? '<EOF>';
-          throw new Error([
-            `Generated types drift from docs/openapi/api.yaml at line ${i + 1}.`,
-            '  Re-run: npm run gen:types:semrush',
-            `  Committed: ${expected}`,
-            `  Regenerated: ${actual}`,
-          ].join('\n'));
-        }
-      }
-    }
-    expect(committed).to.equal(regenerated);
+  it('produces a non-empty .d.ts that defines the operations object', () => {
+    const { size } = statSync(tempOutput);
+    expect(size).to.be.greaterThan(1000);
+
+    const content = readFileSync(tempOutput, 'utf8');
+    // Sanity: the codegen lays down a top-level `operations` interface — if
+    // that is missing the spec didn't surface any operationIds.
+    expect(content).to.match(/export interface operations/);
   });
 });

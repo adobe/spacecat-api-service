@@ -411,11 +411,42 @@ describe('semrush prompts handler', () => {
   });
 
   describe('handleBulkDeletePrompts', () => {
-    it('returns failed entry when targets list is empty', async () => {
+    it('throws ErrorWithStatusCode(400) when targets list is empty', async () => {
       const transport = { deletePromptsByIds: sinon.stub(), publishProject: sinon.stub() };
-      const result = await handleBulkDeletePrompts(transport, makeDataAccess([]), BRAND, WORKSPACE, {}, fakeLog());
-      expect(result.deleted).to.equal(0);
-      expect(result.failed[0].message).to.equal('No semrushIds supplied');
+      let caught;
+      try {
+        await handleBulkDeletePrompts(transport, makeDataAccess([]), BRAND, WORKSPACE, {}, fakeLog());
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).to.exist;
+      expect(caught.status).to.equal(400);
+      expect(caught.message).to.match(/non-empty semrushIds/);
+    });
+
+    it('treats upstream 404 on delete as idempotent success', async () => {
+      const projects = [
+        makeProject({ semrushProjectId: 'p1', semrushLocationId: 2840, language: 'en' }),
+      ];
+      const err = new Error('not found');
+      err.status = 404;
+      const transport = {
+        deletePromptsByIds: sinon.stub().rejects(err),
+        publishProject: sinon.stub().resolves({}),
+      };
+      const result = await handleBulkDeletePrompts(
+        transport,
+        makeDataAccess(projects),
+        BRAND,
+        WORKSPACE,
+        { semrushIds: [{ semrushProjectId: 'p1', semrushPromptId: 'sid-gone' }] },
+        fakeLog(),
+      );
+      // The id is already gone → caller's intent is satisfied → counts as deleted.
+      expect(result.deleted).to.equal(1);
+      expect(result.failed).to.deep.equal([]);
+      // Publish still runs so any draft updates persist.
+      expect(transport.publishProject).to.have.been.calledWith(WORKSPACE, 'p1');
     });
 
     it('rejects targets pointing to projects not mapped to the brand', async () => {
