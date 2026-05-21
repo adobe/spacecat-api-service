@@ -69,6 +69,12 @@ import {
   previewAndPublishQueryIndex,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
+import {
+  logNotProvisioned,
+  EMPTY_SHEET_PAYLOAD,
+  NOT_PROVISIONED_HEADER,
+  NOT_PROVISIONED_VALUE,
+} from './llmo-source.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
@@ -1139,8 +1145,12 @@ function LlmoController(ctx) {
         return forbidden(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
       }
       const { llmoConfig } = siteValidation;
-      const { data, headers } = await queryLlmoFiles(context, llmoConfig);
-      return cachedOk(data, headers);
+      const queryResult = await queryLlmoFiles(context, llmoConfig);
+      if (queryResult.noData) {
+        logNotProvisioned(log, siteId, llmoConfig.dataFolder);
+        return cachedOk(EMPTY_SHEET_PAYLOAD, { [NOT_PROVISIONED_HEADER]: NOT_PROVISIONED_VALUE });
+      }
+      return cachedOk(queryResult.data, queryResult.headers);
     } catch (error) {
       log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));

@@ -3746,6 +3746,27 @@ describe('LlmoController', () => {
       const result = await cacheController.queryFiles(mockContext);
       expect(result.status).to.equal(404);
     });
+
+    it('returns empty 200 with not-provisioned header when single-file query reports noData', async () => {
+      const queryLlmoFilesStub = sinon.stub().resolves({ noData: true });
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+      const cacheController = LlmoControllerWithCache(mockContext);
+
+      const result = await cacheController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(result.headers.get('x-llmo-data-status')).to.equal('not-provisioned');
+      const body = await result.json();
+      expect(body).to.deep.equal({
+        total: 0, offset: 0, limit: 0, data: [], ':type': 'sheet',
+      });
+    });
   });
 
   describe('getLlmoRationale', () => {
