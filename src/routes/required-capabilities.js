@@ -482,6 +482,7 @@ const routeRequiredCapabilities = {
 
   // Scrape Jobs
   'POST /tools/scrape/jobs': 'scrapeJob:write',
+  'POST /tools/scrape/authenticated-jobs': 'scrapeJob:write',
   'GET /tools/scrape/jobs/:jobId': 'scrapeJob:read',
   'GET /tools/scrape/jobs/:jobId/results': 'scrapeJob:read',
   'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs': 'scrapeJob:read',

@@ -15,11 +15,13 @@ import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon, { stub } from 'sinon';
+import esmock from 'esmock';
 
-import { ScrapeJob, ScrapeUrl } from '@adobe/spacecat-shared-data-access';
+import { ScrapeJob, ScrapeUrl, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import ScrapeJobSchema from '@adobe/spacecat-shared-data-access/src/models/scrape-job/scrape-job.schema.js';
 import ScrapeUrlSchema from '@adobe/spacecat-shared-data-access/src/models/scrape-url/scrape-url.schema.js';
 import ScrapeJobController from '../../src/controllers/scrapeJob.js';
+import * as utils from '../../src/support/utils.js';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
 use(sinonChai);
@@ -824,6 +826,244 @@ describe('ScrapeJobController tests', () => {
       const callArgs = allRecentByUrlAndProcessingTypeStub.getCall(0).args;
       expect(callArgs[0]).to.equal('https://www.example.com/page1');
       expect(callArgs[1]).to.equal('form');
+    });
+  });
+
+  describe('createScrapeAuthenticatedJob', () => {
+    const validSiteId = 'b520b4cf-dc73-49de-8573-0eb44b123e0d';
+    const previewBaseURL = 'https://www.okta.com';
+    let fetchStub;
+    let mockSite;
+    let mockAccessControl;
+
+    beforeEach(() => {
+      mockSite = {
+        getId: () => validSiteId,
+        getBaseURL: () => `${previewBaseURL}/`,
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.SO,
+        getDeliveryType: () => SiteModel.DELIVERY_TYPES.OTHER,
+      };
+
+      baseContext.dataAccess.Site = {
+        findById: sandbox.stub().resolves(mockSite),
+      };
+
+      mockAccessControl = {
+        hasAccess: sandbox.stub().resolves(true),
+      };
+
+      fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.resolves({ ok: false, status: 401 });
+
+      baseContext.data = {
+        urls: ['https://www.okta.com/login'],
+        metaData: { siteId: validSiteId },
+      };
+    });
+
+    afterEach(() => {
+      if (fetchStub && fetchStub.restore) {
+        fetchStub.restore();
+      }
+    });
+
+    async function buildController(overrides = {}) {
+      const ControllerWithMocks = await esmock('../../src/controllers/scrapeJob.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getIMSPromiseToken: overrides.getIMSPromiseToken || (async () => null),
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => mockAccessControl },
+        },
+        '@adobe/spacecat-shared-ims-client': {
+          retrievePageAuthentication: overrides.retrievePageAuthentication
+            || (async () => 'static-page-auth-token'),
+        },
+      });
+      return ControllerWithMocks(baseContext);
+    }
+
+    it('400s when data is missing', async () => {
+      delete baseContext.data;
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(400);
+    });
+
+    it('400s when metaData.siteId is missing', async () => {
+      baseContext.data = { urls: ['https://www.okta.com/login'] };
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(400);
+    });
+
+    it('400s when metaData.siteId is not a valid UUID', async () => {
+      baseContext.data.metaData.siteId = 'not-a-uuid';
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(400);
+    });
+
+    it('404s when site is not found', async () => {
+      baseContext.dataAccess.Site.findById.resolves(null);
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(404);
+    });
+
+    it('500s when Site.findById throws', async () => {
+      baseContext.dataAccess.Site.findById.rejects(new Error('db down'));
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(500);
+    });
+
+    it('403s when caller has no access to site', async () => {
+      mockAccessControl.hasAccess.resolves(false);
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(403);
+    });
+
+    it('500s when site has invalid baseURL', async () => {
+      mockSite.getBaseURL = () => 'not a url';
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(500);
+    });
+
+    it('injects token Authorization header for non-promise site (HEAD 401)', async () => {
+      const ctrl = await buildController({
+        retrievePageAuthentication: async () => 'okta-page-auth-token',
+      });
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(202);
+      expect(mockSqsClient.sendMessage).to.have.been.calledOnce;
+      const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
+      expect(sentBody.customHeaders).to.deep.equal({
+        Authorization: 'token okta-page-auth-token',
+      });
+    });
+
+    it('injects Bearer Authorization header for AEM_CS site with promise token cookie', async () => {
+      mockSite.getAuthoringType = () => SiteModel.AUTHORING_TYPES.CS;
+      mockSite.getDeliveryType = () => SiteModel.DELIVERY_TYPES.AEM_CS;
+      baseContext.pathInfo = { headers: { cookie: 'promiseToken=cookie-token-abc' } };
+
+      const ctrl = await buildController({
+        retrievePageAuthentication: async () => 'cs-access-token',
+      });
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(202);
+      const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
+      expect(sentBody.customHeaders.Authorization).to.equal('Bearer cs-access-token');
+    });
+
+    it('falls back to IMS when promiseToken cookie missing for CS_CW site', async () => {
+      mockSite.getAuthoringType = () => SiteModel.AUTHORING_TYPES.CS_CW;
+      mockSite.getDeliveryType = () => SiteModel.DELIVERY_TYPES.AEM_CS;
+
+      const ctrl = await buildController({
+        getIMSPromiseToken: async () => ({ promise_token: 'ims-token' }),
+        retrievePageAuthentication: async () => 'cw-access-token',
+      });
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(202);
+      const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
+      expect(sentBody.customHeaders.Authorization).to.equal('Bearer cw-access-token');
+    });
+
+    it('returns 400 when IMS promise token resolution throws ErrorWithStatusCode', async () => {
+      mockSite.getAuthoringType = () => SiteModel.AUTHORING_TYPES.AMS;
+      const ctrl = await buildController({
+        getIMSPromiseToken: async () => {
+          throw new ErrorWithStatusCode('Missing Authorization header', 400);
+        },
+      });
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 500 when IMS promise token resolution throws generic error', async () => {
+      mockSite.getAuthoringType = () => SiteModel.AUTHORING_TYPES.AMS;
+      const ctrl = await buildController({
+        getIMSPromiseToken: async () => {
+          throw new Error('IMS down');
+        },
+      });
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(500);
+    });
+
+    it('returns 500 when retrievePageAuthentication throws', async () => {
+      const ctrl = await buildController({
+        retrievePageAuthentication: async () => {
+          throw new Error('secret missing');
+        },
+      });
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(500);
+    });
+
+    it('delegates transparently with no header injection when HEAD returns 2xx', async () => {
+      fetchStub.resolves({ ok: true, status: 200 });
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(202);
+      const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
+      expect(sentBody.customHeaders).to.be.undefined;
+    });
+
+    it('delegates without auth when HEAD probe throws', async () => {
+      fetchStub.rejects(new Error('network'));
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(202);
+      const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
+      expect(sentBody.customHeaders).to.be.undefined;
+    });
+
+    it('merges caller-supplied customHeaders, overriding Authorization', async () => {
+      baseContext.data.customHeaders = {
+        'X-Trace-Id': 'abc-123',
+        Authorization: 'this-should-be-overridden',
+      };
+      const ctrl = await buildController({
+        retrievePageAuthentication: async () => 'resolved-token',
+      });
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(202);
+      const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
+      expect(sentBody.customHeaders).to.deep.equal({
+        'X-Trace-Id': 'abc-123',
+        Authorization: 'token resolved-token',
+      });
+    });
+
+    it('strips options.enableAuthentication from delegated payload', async () => {
+      baseContext.data.options = { enableAuthentication: true, enableJavascript: true };
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(202);
+      const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
+      expect(sentBody.options).to.not.have.property('enableAuthentication');
+      expect(sentBody.options.enableJavascript).to.equal(true);
+    });
+
+    it('returns badRequest when delegated scrapeClient rejects with Invalid request', async () => {
+      baseContext.data.urls = 'not-an-array';
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 500 when SQS fails inside delegated job creation', async () => {
+      baseContext.sqs.sendMessage = sandbox.stub().throws(new Error('queue down'));
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      expect(response.status).to.equal(500);
     });
   });
 });

@@ -2561,6 +2561,31 @@ ScrapeRequest:
         - 'https://example.com/en/page1'
         - 'https://example.com/fr/page2'
 
+AuthenticatedScrapeRequest:
+  description: |
+    Same shape as ScrapeRequest, but `metaData.siteId` is required. The server
+    resolves the per-site Authorization header before delegating to the standard
+    scrape pipeline. `options.enableAuthentication` is ignored (the server always
+    probes via HEAD and resolves on demand).
+  allOf:
+    - $ref: '#/ScrapeRequest'
+    - type: object
+      required:
+        - metaData
+      properties:
+        metaData:
+          type: object
+          required:
+            - siteId
+          properties:
+            siteId:
+              description: |
+                The site whose Authorization header should be resolved server-side
+                via AWS Secrets Manager (PAGE_AUTH_TOKEN) or IMS promise-token
+                exchange. Must be a valid UUID.
+              type: string
+              format: uuid
+
 ScrapeResponse:
   type: object
   properties:

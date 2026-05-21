@@ -113,6 +113,7 @@ describe('getRouteHandlers', () => {
 
   const mockScrapeJobController = {
     createScrapeJob: sinon.stub(),
+    createScrapeAuthenticatedJob: sinon.stub(),
     getScrapeJobStatus: sinon.stub(),
     getScrapeJobResult: sinon.stub(),
     getScrapeJobProgress: sinon.stub(),
@@ -588,6 +589,7 @@ describe('getRouteHandlers', () => {
       'GET /monitoring/drs-bp-pg-audit',
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
+      'POST /tools/scrape/authenticated-jobs',
       'POST /consent-banner',
       'POST /llmo/onboard',
       'POST /llmo/onboard/update-query-index',
@@ -647,6 +649,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /monitoring/drs-bp-pg-audit']).to.equal(mockDrsBpPgAuditController.getProjectionAudit);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
+    expect(staticRoutes['POST /tools/scrape/authenticated-jobs']).to.equal(mockScrapeJobController.createScrapeAuthenticatedJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
     expect(staticRoutes['POST /llmo/onboard/update-query-index']).to.equal(mockLlmoController.updateQueryIndex);
     expect(staticRoutes['GET /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.getAgenticTrafficGlobal);
