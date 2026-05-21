@@ -143,6 +143,20 @@ paths:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-and-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/semrush/prompts:
+    $ref: './semrush-api.yaml#/v2-semrush-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/semrush/prompts/{promptId}:
+    $ref: './semrush-api.yaml#/v2-semrush-prompt-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/semrush/prompts/bulk-delete:
+    $ref: './semrush-api.yaml#/v2-semrush-prompts-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/semrush/projects:
+    $ref: './semrush-api.yaml#/v2-semrush-projects'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/semrush/projects/{workspaceId}/{projectId}/tags:
+    $ref: './semrush-api.yaml#/v2-semrush-project-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/semrush/projects/{workspaceId}/{projectId}/models:
+    $ref: './semrush-api.yaml#/v2-semrush-project-models'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/semrush/workspaces/{workspaceId}/projects:
+    $ref: './semrush-api.yaml#/v2-semrush-workspace-projects'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
