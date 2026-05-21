@@ -112,8 +112,7 @@ Follow runbook Step 5 exactly. Key points the runbook details:
   symptom, root cause, chosen fix; link the revert commit and the original PR;
   `Critical` priority for a full outage, type `Bug`.
 - Recommend the durable regression guard: a CI bundle-smoke test that imports the
-  built artifact and asserts `typeof main === 'function'` — written in **Node**
-  (the repo's language) as a test / npm script, not bundled in this skill.
+  built artifact.
 
 ## Anti-patterns
 
