@@ -49,6 +49,7 @@ import {
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -1753,18 +1754,37 @@ function SuggestionsController(ctx, sqs, env) {
       && preferHeaderValue.toLowerCase() === 'respond-async';
 
     if (isAsyncExperimentRequested) {
-      context.log.info(`[edge-geo-exp] async experiment requested for site: ${apexBaseUrl}`);
-      let urls;
       const geoExperimentId = crypto.randomUUID();
+      const tRequestStart = Date.now();
+      const stepTimings = {};
 
-      context.log.info('[edge-geo-exp] Initiating experiment', {
-        geoExperimentId,
-        opportunityId,
-        opportunityType: opportunity.getType(),
-        siteId,
-      });
+      // All logs in the async edge-deploy flow share the [edge-deploy]
+      // root prefix + step=<name> + phase=<start|ok|failed|rollback|complete>
+      // so the whole request can be retrieved in Coralogix with:
+      //   $d.message ~ '\[edge-deploy\]' AND $d.message ~ '<geoExperimentId>'
+      const trackStep = async (name, fn) => {
+        const t0 = Date.now();
+        try {
+          const result = await fn();
+          const ms = Date.now() - t0;
+          stepTimings[name] = ms;
+          context.log.info(`[edge-deploy] step=${name} phase=ok durationMs=${ms} geoExperimentId=${geoExperimentId} siteId=${siteId}`);
+          return result;
+        } catch (err) {
+          const ms = Date.now() - t0;
+          stepTimings[name] = ms;
+          context.log.error(`[edge-deploy] step=${name} phase=failed durationMs=${ms} geoExperimentId=${geoExperimentId} siteId=${siteId} errorName=${err.name} errorCode=${err.code || err.Code} message=${err.message}`);
+          throw err;
+        }
+      };
 
+      context.log.info(`[edge-deploy] step=request phase=start geoExperimentId=${geoExperimentId} siteId=${siteId} site=${apexBaseUrl} opportunityId=${opportunityId} opportunityType=${opportunity.getType()} validSuggestions=${validSuggestionIds.length} domainWide=${domainWideSuggestions.length}`);
+
+      let urls;
       let geoExperiment = null;
+      // Tracks whether the Atomic strategy was successfully written, so the
+      // outer catch knows whether to compensate by deleting it.
+      let atomicStrategyCreated = false;
       try {
         const preScheduleParams = getScheduleParams(
           context,
@@ -1773,14 +1793,14 @@ function SuggestionsController(ctx, sqs, env) {
           'pre',
         );
         if (!preScheduleParams.cronExpression || !preScheduleParams.expiryMs) {
-          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
+          context.log.warn(`[edge-deploy] step=schedule-config phase=failed geoExperimentId=${geoExperimentId} siteId=${siteId} site=${apexBaseUrl} reason=missing-env-vars`);
           throw new Error('Missing required environment variables');
         }
         const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
         let promptSources;
         if (domainWideSuggestions.length > 0) {
           const newStatus = SuggestionModel.STATUSES.NEW;
-          const allNew = await Suggestion.allByOpportunityIdAndStatus(opportunityId, newStatus);
+          const allNew = await trackStep('prompt-selection', () => Suggestion.allByOpportunityIdAndStatus(opportunityId, newStatus));
           const top15ByContentGainRatio = [...allNew]
             .filter((s) => s.getData()?.isDomainWide !== true)
             .sort((a, b) => (b.getData()?.contentGainRatio || 0)
@@ -1801,19 +1821,19 @@ function SuggestionsController(ctx, sqs, env) {
           .filter(Boolean);
         const prompts = promptSources.flatMap((s) => s.getData()?.prompts || []);
         if (prompts.length === 0) {
-          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, no prompts found in selected suggestions`);
+          context.log.warn(`[edge-deploy] step=prompt-collection phase=failed geoExperimentId=${geoExperimentId} siteId=${siteId} site=${apexBaseUrl} reason=no-prompts-found`);
           throw new Error('No prompts found in selected suggestions');
         }
         const promptsS3Key = `geo-experiments/${siteId}/${geoExperimentId}-prompts.json`;
-        await s3Client.send(new PutObjectCommand({
+        await trackStep('prompts-s3-upload', () => s3Client.send(new PutObjectCommand({
           Bucket: s3Bucket,
           Key: promptsS3Key,
           Body: JSON.stringify(prompts),
           ContentType: 'application/json',
-        }));
-        context.log.info(`[edge-geo-exp] Uploaded ${prompts.length} prompts to S3: ${promptsS3Key}`);
+        })));
+        context.log.info(`[edge-deploy] step=prompts-s3-upload phase=meta geoExperimentId=${geoExperimentId} promptCount=${prompts.length} s3Key=${promptsS3Key}`);
 
-        geoExperiment = await GeoExperiment.create({
+        geoExperiment = await trackStep('geoexperiment-create', () => GeoExperiment.create({
           geoExperimentId,
           siteId,
           opportunityId,
@@ -1832,52 +1852,59 @@ function SuggestionsController(ctx, sqs, env) {
             opportunity.getType(),
           ),
           updatedBy: profile?.email || 'geo-experiment',
-        });
+        }));
 
         if (!geoExperiment?.getId?.()) {
           throw new Error('GeoExperiment was not created');
         }
 
-        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_STARTED`);
+        // Create the Atomic strategy before DRS / suggestion-marking so a
+        // failure rolls back cheaply via the outer catch. The helper emits
+        // its own [edge-deploy] step=atomic-strategy-create logs (start +
+        // per-attempt read/write timing + phase=ok|failed), so we don't
+        // wrap it in trackStep — that would double-count the duration.
+        await createAtomicStrategy({
+          siteId,
+          geoExperimentId,
+          opportunityId,
+          opportunityType: opportunity.getType(),
+          name: geoExperiment.getName?.() || `${opportunity.getType()}-${new Date().toISOString().slice(0, 10)}`,
+          profile,
+          s3: context.s3,
+          log: context.log,
+        });
+        atomicStrategyCreated = true;
 
-        let preScheduleId;
-        try {
-          const drsClient = DrsClient.createFrom(context);
-          const drsResult = await drsClient.createExperimentSchedule({
-            siteId,
-            experimentId: geoExperimentId,
-            experimentPhase: EXPERIMENT_PHASES.PRE,
-            cronExpression: preScheduleParams.cronExpression,
-            expiresAt: new Date(Date.now() + preScheduleParams.expiryMs).toISOString(),
-            platforms: preScheduleParams.platforms,
-            providerIds: preScheduleParams.providerIds,
-            triggerImmediately: true,
-            enableBrandPresence: true,
-            metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
-          });
-          preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;
-          if (!preScheduleId) {
-            throw new Error('DRS schedule created but returned no schedule ID');
-          }
-          context.log.info(`[edge-geo-exp] DRS pre-analysis schedule created: ${preScheduleId}`);
-        } catch (drsError) {
-          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, DRS schedule creation failed: ${drsError.message}`, drsError);
-          throw drsError;
+        const drsClient = DrsClient.createFrom(context);
+        const drsResult = await trackStep('drs-pre-schedule', () => drsClient.createExperimentSchedule({
+          siteId,
+          experimentId: geoExperimentId,
+          experimentPhase: EXPERIMENT_PHASES.PRE,
+          cronExpression: preScheduleParams.cronExpression,
+          expiresAt: new Date(Date.now() + preScheduleParams.expiryMs).toISOString(),
+          platforms: preScheduleParams.platforms,
+          providerIds: preScheduleParams.providerIds,
+          triggerImmediately: true,
+          enableBrandPresence: true,
+          metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
+        }));
+        const preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;
+        if (!preScheduleId) {
+          context.log.error(`[edge-deploy] step=drs-pre-schedule phase=failed geoExperimentId=${geoExperimentId} reason=missing-schedule-id`);
+          throw new Error('DRS schedule created but returned no schedule ID');
         }
-        try {
-          geoExperiment.setPreScheduleId(preScheduleId);
-          geoExperiment.setUpdatedBy(profile?.email || 'geo-experiment');
-          await geoExperiment.save();
-        } catch (updateError) {
-          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Failed to update GeoExperiment pre schedule ID: ${updateError.message}. DRS schedule ${preScheduleId} will expire naturally.`, updateError);
-          throw updateError;
-        }
+        context.log.info(`[edge-deploy] step=drs-pre-schedule phase=meta geoExperimentId=${geoExperimentId} preScheduleId=${preScheduleId}`);
+
+        geoExperiment.setPreScheduleId(preScheduleId);
+        geoExperiment.setUpdatedBy(profile?.email || 'geo-experiment');
+        await trackStep('geoexperiment-save-preid', () => geoExperiment.save());
+
         const validSuggestionEntities = [
           ...validSuggestions,
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
         ];
 
-        const markResults = await Promise.allSettled(
+        const markResults = await trackStep('mark-suggestions', () => Promise.allSettled(
           validSuggestionEntities.map(async (suggestion) => {
             const currentData = suggestion.getData();
             suggestion.setData({
@@ -1887,15 +1914,15 @@ function SuggestionsController(ctx, sqs, env) {
             suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
             return suggestion.save();
           }),
-        );
+        ));
 
         const markFailures = markResults.filter((r) => r.status === 'rejected');
         if (markFailures.length > 0) {
-          context.log.warn(`[edge-geo-exp-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
-            geoExperimentId,
-            errors: markFailures.map((r) => r.reason?.message),
-          });
+          context.log.warn(`[edge-deploy] step=mark-suggestions phase=partial-failure geoExperimentId=${geoExperimentId} failedCount=${markFailures.length} totalCount=${validSuggestionEntities.length} errors=${JSON.stringify(markFailures.map((r) => r.reason?.message))}`);
         }
+
+        const totalMs = Date.now() - tRequestStart;
+        context.log.info(`[edge-deploy] step=request phase=complete geoExperimentId=${geoExperimentId} siteId=${siteId} site=${apexBaseUrl} totalMs=${totalMs} timings=${JSON.stringify(stepTimings)}`);
 
         const experimentResponse = {
           suggestions: [
@@ -1920,33 +1947,68 @@ function SuggestionsController(ctx, sqs, env) {
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
         return createResponse(experimentResponse, 207);
       } catch (error) {
-        context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
-        if (geoExperiment?.getId?.()) {
-          /* c8 ignore start */
-          try {
-            await geoExperiment.remove();
-          } catch (removeError) {
-            context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
-          }
-        }
+        const tRollbackStart = Date.now();
         const allSuggestionEntities = [
           ...validSuggestions,
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
         ];
+        const suggestionsToUnblock = allSuggestionEntities
+          .filter((s) => s.getData()?.edgeOptimizeStatus === 'EXPERIMENT_IN_PROGRESS');
+        context.log.error(`[edge-deploy] step=request phase=failed geoExperimentId=${geoExperimentId} siteId=${siteId} site=${apexBaseUrl} errorName=${error.name} errorCode=${error.code || error.Code} message=${error.message} timings=${JSON.stringify(stepTimings)} stack=${error.stack}`);
+        context.log.warn(`[edge-deploy] step=rollback phase=start geoExperimentId=${geoExperimentId} siteId=${siteId} geoExperimentPersisted=${!!geoExperiment?.getId?.()} atomicStrategyCreated=${atomicStrategyCreated} suggestionsToUnblock=${suggestionsToUnblock.length} triggerErrorName=${error.name} triggerMessage=${error.message}`);
+
+        let geoExperimentRemoved = false;
+        let strategyDeleted = false;
+        let strategyDeleteSkipped = false;
+        let unblockedCount = 0;
+
+        if (geoExperiment?.getId?.()) {
+          /* c8 ignore start */
+          try {
+            const tRemove = Date.now();
+            await geoExperiment.remove();
+            geoExperimentRemoved = true;
+            context.log.info(`[edge-deploy] step=rollback-geoexperiment-remove phase=ok geoExperimentId=${geoExperimentId} durationMs=${Date.now() - tRemove}`);
+          } catch (removeError) {
+            context.log.error(`[edge-deploy] step=rollback-geoexperiment-remove phase=failed geoExperimentId=${geoExperimentId} errorName=${removeError.name} message=${removeError.message}`);
+          }
+        }
+        // Delete the strategy if it was created so we don't leave an orphan.
+        if (atomicStrategyCreated) {
+          try {
+            const result = await deleteAtomicStrategy({
+              siteId,
+              strategyId: geoExperimentId,
+              s3: context.s3,
+              log: context.log,
+              reason: 'rollback',
+            });
+            strategyDeleted = result?.removed === true;
+            // Helper's own phase=ok log already records removed=true/false +
+            // durationMs; no extra log needed here.
+          } catch (cleanupError) {
+            context.log.error(`[edge-deploy] step=atomic-strategy-cleanup-failed phase=failed geoExperimentId=${geoExperimentId} siteId=${siteId} site=${apexBaseUrl} errorName=${cleanupError.name} message=${cleanupError.message}`);
+          }
+        } else {
+          strategyDeleteSkipped = true;
+          context.log.info(`[edge-deploy] step=atomic-strategy-delete phase=skipped geoExperimentId=${geoExperimentId} reason=strategy-never-created`);
+        }
+
         await Promise.allSettled(
-          allSuggestionEntities
-            .filter((s) => s.getData()?.edgeOptimizeStatus === 'EXPERIMENT_IN_PROGRESS')
-            .map(async (s) => {
-              try {
-                const { edgeOptimizeStatus: _, ...rest } = s.getData();
-                s.setData(rest);
-                s.setUpdatedBy(profile?.email || 'geo-experiment');
-                await s.save();
-              } catch (unblockError) {
-                context.log.error(`[edge-geo-exp-failed] Failed to unblock suggestion ${s.getId()}: ${unblockError.message}`, unblockError);
-              }
-            }),
+          suggestionsToUnblock.map(async (s) => {
+            try {
+              const { edgeOptimizeStatus: _, ...rest } = s.getData();
+              s.setData(rest);
+              s.setUpdatedBy(profile?.email || 'geo-experiment');
+              await s.save();
+              unblockedCount += 1;
+            } catch (unblockError) {
+              context.log.error(`[edge-deploy] step=rollback-unblock-suggestion phase=failed geoExperimentId=${geoExperimentId} suggestionId=${s.getId()} errorName=${unblockError.name} message=${unblockError.message}`);
+            }
+          }),
         );
+
+        context.log.warn(`[edge-deploy] step=rollback phase=complete geoExperimentId=${geoExperimentId} siteId=${siteId} geoExperimentRemoved=${geoExperimentRemoved} strategyDeleted=${strategyDeleted} strategyDeleteSkipped=${strategyDeleteSkipped} unblockedSuggestions=${unblockedCount}/${suggestionsToUnblock.length} rollbackMs=${Date.now() - tRollbackStart}`);
         /* c8 ignore stop */
         const errorResponse = {
           suggestions: suggestionIds.map((id, index) => ({
