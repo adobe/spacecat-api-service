@@ -265,11 +265,20 @@ describe('WebhooksController', () => {
     ]);
   });
 
-  it('does not warn at construction (constructor is side-effect-free)', () => {
-    // beforeEach already built a controller without the env var set.
-    const constructWarn = mockLog.warn.getCalls()
-      .find((c) => c.args[0].includes('MYSTICAT_WORKSPACE_REPOS'));
-    expect(constructWarn).to.be.undefined;
+  it('does not warn or debug at construction (constructor is side-effect-free)', () => {
+    const freshLog = {
+      info: sandbox.stub(),
+      warn: sandbox.stub(),
+      error: sandbox.stub(),
+      debug: sandbox.stub(),
+    };
+    WebhooksController({
+      sqs: mockSqs,
+      log: freshLog,
+      env: { MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl, GITHUB_APP_SLUG: 'mysticat' },
+    });
+    expect(freshLog.warn.called).to.be.false;
+    expect(freshLog.debug.called).to.be.false;
   });
 
   it('uses defaults at debug (not warn) when MYSTICAT_WORKSPACE_REPOS is not set', async () => {
@@ -282,7 +291,7 @@ describe('WebhooksController', () => {
       'Adobe-AEM-Sites/aem-sites-architecture',
     ]);
     const notSetWarn = mockLog.warn.getCalls()
-      .find((c) => c.args[0].includes('not set'));
+      .find((c) => c.args[0].includes('MYSTICAT_WORKSPACE_REPOS not set'));
     expect(notSetWarn, 'unset path must not warn').to.be.undefined;
     const notSetDebug = mockLog.debug.getCalls()
       .find((c) => c.args[0].includes('MYSTICAT_WORKSPACE_REPOS not set'));
