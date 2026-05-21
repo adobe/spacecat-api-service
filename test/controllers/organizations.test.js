@@ -492,6 +492,12 @@ describe('Organizations Controller', () => {
     organizations[0].setConfig = sinon.stub();
     mockDataAccess.Organization.findById.resolves(organizations[0]);
     mockDataAccess.Site.findById.resolves({ getOrganizationId: () => orgId });
+    sandbox.stub(TierClient, 'createForSite').resolves({
+      checkValidEntitlement: sinon.stub().resolves({
+        entitlement: { getTier: () => 'PAID' },
+        siteEnrollment: { getId: () => 'enrollment-1' },
+      }),
+    });
 
     const response = await organizationsController.updateOrganization({
       params: { organizationId: orgId },
@@ -509,6 +515,9 @@ describe('Organizations Controller', () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     organizations[0].setConfig = sinon.stub();
     mockDataAccess.Organization.findById.resolves(organizations[0]);
+    sandbox.stub(TierClient, 'createForOrg').returns({
+      checkValidEntitlement: sinon.stub().resolves({ entitlement: { getTier: () => 'PAID' } }),
+    });
 
     const response = await organizationsController.updateOrganization({
       params: { organizationId: orgId },
@@ -550,6 +559,49 @@ describe('Organizations Controller', () => {
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Unknown product code in config.defaults: UNKNOWN_PRODUCT');
+  });
+
+  it('returns bad request when config.defaults product has no entitlement (with siteId)', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => orgId });
+    sandbox.stub(TierClient, 'createForSite').resolves({
+      checkValidEntitlement: sinon.stub().resolves({ entitlement: null, siteEnrollment: null }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'config.defaults.ASO: organization does not have an entitlement for this product');
+  });
+
+  it('returns bad request when config.defaults site is not enrolled for product', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => orgId });
+    sandbox.stub(TierClient, 'createForSite').resolves({
+      checkValidEntitlement: sinon.stub().resolves({
+        entitlement: { getTier: () => 'PAID' },
+        siteEnrollment: null,
+      }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'config.defaults.ASO: site is not enrolled for this product');
   });
 
   it('returns bad request when config.defaults siteId is not a valid UUID', async () => {

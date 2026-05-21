@@ -24,6 +24,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
@@ -375,6 +376,16 @@ function OrganizationsController(ctx, env) {
             const site = await Site.findById(entry.siteId);
             if (!site || site.getOrganizationId() !== organization.getId()) {
               return badRequest(`config.defaults.${productCode}: site not found or does not belong to this organization`);
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const siteTierClient = await TierClient.createForSite(context, site, productCode);
+            // eslint-disable-next-line no-await-in-loop
+            const { entitlement, siteEnrollment } = await siteTierClient.checkValidEntitlement();
+            if (!entitlement) {
+              return badRequest(`config.defaults.${productCode}: organization does not have an entitlement for this product`);
+            }
+            if (!siteEnrollment) {
+              return badRequest(`config.defaults.${productCode}: site is not enrolled for this product`);
             }
           }
         }
