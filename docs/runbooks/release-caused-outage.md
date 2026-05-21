@@ -1,5 +1,7 @@
 # Runbook: Release-Caused Outage (diagnose → verify → revert)
 
+**Last validated:** 2026-05-21 (v1.508.0 incident).
+
 How to respond when `spacecat-api-service` starts failing broadly shortly after a
 deploy. The goal is to **confirm the release is the cause before reverting**, then
 mitigate safely and hand off a real fix.
@@ -171,6 +173,10 @@ real fix and a regression test.
 
 ## Step 5 — Revert and push
 
+> **Communicate first.** Post in the incident channel _(TODO: name it, e.g.
+> `#spacecat-incidents`)_ that you're mitigating with a revert of `<sha>`, so
+> responders aren't duplicating work.
+
 Revert the **feature commit**, not the release commit:
 
 ```bash
@@ -240,23 +246,28 @@ deploy, not just the revert merge.
 
 ---
 
-## Step 7 — Follow-up
+## Step 7 — Follow-up & post-incident
 
-- File a ticket for the **real fix** (re-land the reverted change correctly). Include
-  the symptom, root cause, and chosen fix; link the revert commit and the original
-  PR. Priority `Critical` if it was a full outage; type `Bug`.
-- Add a **regression guard**. For bundle/module-load failures the cheap, durable one
-  is a CI smoke test that loads the built artifact and asserts the handler is
-  callable:
+Once recovery is confirmed (Step 6):
 
-  ```js
-  const mod = await import('../dist/spacecat-services/api-service@<version>-bundle.mjs');
-  assert(typeof mod.main === 'function');
-  ```
-
-  More generally: if `npm run build`'s `--test-bundle` step is currently advisory,
-  make it blocking in CI — it already loads the artifact and would catch this class
-  of failure pre-merge.
+- **Close the loop in the incident channel** _(TODO: name it)_ — post that the
+  revert deployed and the error rate is back to baseline, with the recovered-deploy
+  timestamp. Update the status page if one exists _(TODO: link)_.
+- **File the post-mortem** _(TODO: SLA, e.g. within 48h)_ using the team template
+  _(TODO: link to post-mortem template)_. Capture the timeline, the root cause, and
+  the **detection gap** — this class of failure is invisible until a cold-start
+  invocation, so note how the regression guard below would have caught it.
+- **File the real-fix ticket** to re-land the reverted change correctly: symptom,
+  root cause, chosen fix; link the revert commit and the original PR. Priority
+  `Critical` for a full outage; type `Bug`.
+- **Add a regression guard.** The repo already ships a bundle test —
+  `npm run test:bundle` resolves the artifact path from `npm pkg get version`
+  dynamically (no hard-coded version) and runs `test/index.test.js` against the
+  built bundle. Ensure that test asserts the handler is callable
+  (`typeof main === 'function'`) and that it runs as a **blocking** CI gate, not
+  advisory. `npm run build`'s `--test-bundle` step also loads the artifact at build
+  time and would catch this pre-merge — confirm it fails the build rather than
+  warning.
 
 ---
 
@@ -297,12 +308,18 @@ const locationsData = JSON.parse(readFileSync(LOCATIONS_JSON_PATH, 'utf8'));  //
 `locations.json` was not in `package.json`'s `hlx.static`, so the bundler never
 shipped it. Load-time ENOENT → `main` undefined → `main2 is not a function`.
 
-**The three fixes** (prefer the first — it removes the runtime FS read entirely):
+**Fix — recommended:** inline the data as a JS module (`export const LOCATIONS =
+[...]`) and `import` it. This removes the runtime `readFileSync` entirely, so the
+bundler includes the data via normal import resolution and **this failure mode
+cannot recur**. Prefer this for the re-land.
 
-1. Inline the data as a JS module (`export const LOCATIONS = [...]`) and `import` it.
-2. Add the file to `hlx.static` in `package.json`.
-3. Use a JSON import attribute: `import x from './data/x.json' with { type: 'json' }`
-   (requires relaxing the eslint parser config that currently rejects it).
+Alternatives (they work, but keep the fragile read):
+
+- Add the file to `hlx.static` in `package.json`. Matches the existing allow-list
+  pattern, but preserves the load-time `readFileSync` — the next data file that
+  forgets the allow-list hits the same trap.
+- Use a JSON import attribute: `import x from './data/x.json' with { type: 'json' }`
+  (requires relaxing the eslint parser config that currently rejects it).
 
 ---
 
@@ -312,12 +329,25 @@ shipped it. Load-time ENOENT → `main` undefined → `main2 is not a function`.
   `dist/spacecat-services/api-service@<version>-bundle.mjs` and a `.zip`. The
   `--test-bundle` step loads + invokes the artifact, so a load-time break fails the
   build.
+- **Bundle test:** `npm run test:bundle` runs `test/index.test.js` against an
+  already-built bundle, resolving the artifact path from `npm pkg get version` (so it
+  never hard-codes a version). Distinct role from `build`: `build` produces +
+  validates the bundle; `test:bundle` runs the test suite against an existing one.
+  Use it as the CI regression gate (Step 7).
 - **Deploy (prod):** `npm run deploy` → `hedy -v --deploy
   --aws-deploy-bucket=spacecat-prod-deploy --pkgVersion=latest`. Run by CI, not by
   hand, in normal operation.
-- **Static assets:** `package.json` → `hlx.static` is an allow-list of non-JS files
-  copied into the bundle. **Anything read from disk at runtime must be listed here**
-  (or, better, imported so the bundler includes it automatically).
+- **Static assets:** `hlx.static` is an allow-list of non-JS files copied into the
+  bundle. It lives in `package.json` under the `hlx` key (not a separate
+  `helix-deploy.yaml`). **Anything read from disk at runtime must be listed here**
+  (or, better, imported so the bundler includes it automatically). Concrete shape:
+
+  ```jsonc
+  // package.json
+  "hlx": {
+    "static": ["static/onboard/profiles.json"]
+  }
+  ```
 - **Lambda function name:** `spacecat-services--api-service` (CloudWatch) /
   `/spacecat-services/api-service/latest` (Coralogix `inv.functionName`).
 - **Node:** `engines` pins `>=24 <25`. Match it locally with `nvm use 24`.
