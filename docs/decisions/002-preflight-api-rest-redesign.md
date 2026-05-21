@@ -138,7 +138,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
     "status": "COMPLETED",
     "url": "https://main--site--org.hlx.page/some-path",
     "createdAt": "2026-05-11T10:00:00.000Z",
-    "updatedAt": "2026-05-11T10:00:05.000Z",
     "createdBy": { "email": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
   },
   {
@@ -146,7 +145,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
     "status": "COMPLETED",
     "url": "https://main--site--org.hlx.page/some-path",
     "createdAt": "2026-05-11T10:05:00.000Z",
-    "updatedAt": "2026-05-11T10:05:04.000Z",
     "createdBy": { "email": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
   },
   {
@@ -154,7 +152,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
     "status": "IN_PROGRESS",
     "url": "https://main--site--org.hlx.page/another-path",
     "createdAt": "2026-05-11T10:10:00.000Z",
-    "updatedAt": "2026-05-11T10:10:00.000Z",
     "createdBy": { "email": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
   }
 ]
@@ -166,7 +163,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
 | `url` | string | The page URL that was analyzed |
 | `createdAt` | ISO 8601 | When the preflight was created |
-| `updatedAt` | ISO 8601 | When the preflight was last updated |
 | `createdBy` | object | Caller identity — `{ email, displayName }` |
 | `createdBy.email` | string | IMS user email (`profile.email`) |
 | `createdBy.displayName` | string | Full name from IMS profile |
