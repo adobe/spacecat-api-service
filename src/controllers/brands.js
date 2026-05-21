@@ -253,14 +253,18 @@ function BrandsController(ctx, log, env) {
       // Try Brand Governance Agent first (URL-based lookup, no brandId required)
       const govConfig = getImsConfigForBrandGovernance();
       if (govConfig) {
-        const brandGovClient = BrandGovernanceClient.createFrom(context);
-        const brandGovGuidelines = await brandGovClient.getBrandGuidelinesForUrl(
-          site.getBaseURL(),
-          imsOrgId,
-          govConfig,
-        );
-        if (brandGovGuidelines) {
-          return ok(brandGovGuidelines);
+        try {
+          const brandGovClient = BrandGovernanceClient.createFrom(context);
+          const brandGovGuidelines = await brandGovClient.getBrandGuidelinesForUrl(
+            site.getBaseURL(),
+            imsOrgId,
+            govConfig,
+          );
+          if (brandGovGuidelines) {
+            return ok(brandGovGuidelines);
+          }
+        } catch (govError) {
+          log.warn(`Brand Governance Agent failed for site ${siteId}, falling back to Brand Publish: ${govError.message}`);
         }
       }
 
