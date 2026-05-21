@@ -275,9 +275,9 @@ creates several problems:
   small and the query clean with no cross-workflow contamination.
 
 The decision is to **introduce a dedicated `Preflight` entity in `spacecat-shared-data-access`**
-rather than extending `AsyncJob`. The `Preflight` entity owns the domain record; it may
-reference an `AsyncJob` internally for execution lifecycle tracking (status polling, result
-storage) without exposing that detail to API consumers.
+rather than extending `AsyncJob`. The `Preflight` entity owns the domain record and holds a
+1-to-1 FK reference to an `AsyncJob` via `asyncJobId` for execution lifecycle tracking (status
+polling, result storage). The `asyncJobId` is never exposed to API consumers.
 
 **`Preflight` entity — first-class fields:**
 
@@ -285,7 +285,8 @@ storage) without exposing that detail to API consumers.
 |-------|------|-------------|
 | `preflightId` | UUID | Primary key |
 | `siteId` | UUID (indexed) | The site this preflight belongs to |
-| `url` | string (indexed) | The page URL that was analyzed |
+| `url` | string | The page URL that was analyzed; `(site_id, url)` composite index deferred — `url` filter applied in-memory (see collection methods) |
+| `asyncJobId` | UUID (FK to `async_jobs`, 1-to-1) | Backing AsyncJob reference for execution lifecycle tracking; never exposed to API consumers |
 | `status` | enum | `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` |
 | `createdBy` | object | `{ email, displayName }` from IMS profile at creation time |
 | `createdAt` | ISO 8601 | Creation timestamp |
@@ -301,22 +302,28 @@ storage) without exposing that detail to API consumers.
   `url` filter applied in-memory when `?url=` query parameter is present
 - `findById(preflightId)` — loads a single preflight; caller verifies `siteId` matches path
 
+**Creation flow:** The controller creates the `AsyncJob` first, receives the `asyncJobId`, then
+immediately creates the `Preflight` entity with `asyncJobId` as the FK. This ordering ensures
+the execution primitive exists before the domain record that references it.
+
 **TTL** is configured on the `Preflight` table/collection at the same 7-day window as
-`AsyncJob`. No separate cleanup strategy is needed — the TTL attribute handles it identically.
+`AsyncJob`. The TTL column approach matches the `async_jobs` mechanism — verify the exact
+column name in `mysticat-data-service` before writing the migration. Given the 1-to-1
+relationship, the two records expire together: when the `AsyncJob` TTLs, the associated
+`Preflight` record is also obsolete.
 
 `createdBy` is derived from the caller's IMS profile at job creation time: `email` is
 `profile.email` (the IMS user identifier); `displayName` is composed from
 `profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`). It is
 never supplied by the client.
 
-The legacy endpoints (`/preflight/jobs`, `/preflight/beta/jobs`) continue to write to
-`AsyncJob` unchanged until they are retired. The new `/sites/:siteId/preflights` endpoints
-write exclusively to the `Preflight` entity. The two backing stores operate in parallel
-without interference.
+`/preflight/beta/jobs` is removed outright as part of this work — it is replaced by the new
+endpoints, not deprecated. `/preflight/jobs` is the only legacy endpoint; it continues writing
+to `AsyncJob` unchanged until external consumers have migrated. The new
+`/sites/:siteId/preflights` endpoints write exclusively to the `Preflight` entity.
 
 **This change is scoped to `spacecat-shared-data-access` and is a prerequisite that must land
-before the controller work in this repo.** The design of the `Preflight` entity and its
-relationship to `AsyncJob` should be aligned with @ekdogan before implementation begins.
+before the controller work in this repo.** Alignment with @ekdogan is complete (SITES-44675).
 See SITES-44675 for the tracking ticket.
 
 ## Consequences
