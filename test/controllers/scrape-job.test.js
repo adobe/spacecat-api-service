@@ -829,7 +829,7 @@ describe('ScrapeJobController tests', () => {
     });
   });
 
-  describe('createScrapeAuthenticatedJob', () => {
+  describe('createScrapeJob — auth resolution branch (enableAuthentication=true)', () => {
     const validSiteId = 'b520b4cf-dc73-49de-8573-0eb44b123e0d';
     const previewBaseURL = 'https://www.okta.com';
     let fetchStub;
@@ -858,6 +858,7 @@ describe('ScrapeJobController tests', () => {
       baseContext.data = {
         urls: ['https://www.okta.com/login'],
         metaData: { siteId: validSiteId },
+        options: { enableAuthentication: true },
       };
     });
 
@@ -885,52 +886,48 @@ describe('ScrapeJobController tests', () => {
       return ControllerWithMocks(baseContext);
     }
 
-    it('400s when data is missing', async () => {
-      delete baseContext.data;
-      const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
-      expect(response.status).to.equal(400);
-    });
-
     it('400s when metaData.siteId is missing', async () => {
-      baseContext.data = { urls: ['https://www.okta.com/login'] };
+      baseContext.data = {
+        urls: ['https://www.okta.com/login'],
+        options: { enableAuthentication: true },
+      };
       const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
     });
 
     it('400s when metaData.siteId is not a valid UUID', async () => {
       baseContext.data.metaData.siteId = 'not-a-uuid';
       const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
     });
 
     it('404s when site is not found', async () => {
       baseContext.dataAccess.Site.findById.resolves(null);
       const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(404);
     });
 
     it('500s when Site.findById throws', async () => {
       baseContext.dataAccess.Site.findById.rejects(new Error('db down'));
       const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(500);
     });
 
     it('403s when caller has no access to site', async () => {
       mockAccessControl.hasAccess.resolves(false);
       const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(403);
     });
 
     it('500s when site has invalid baseURL', async () => {
       mockSite.getBaseURL = () => 'not a url';
       const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(500);
     });
 
@@ -938,7 +935,7 @@ describe('ScrapeJobController tests', () => {
       const ctrl = await buildController({
         retrievePageAuthentication: async () => 'okta-page-auth-token',
       });
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(202);
       expect(mockSqsClient.sendMessage).to.have.been.calledOnce;
       const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
@@ -955,7 +952,7 @@ describe('ScrapeJobController tests', () => {
       const ctrl = await buildController({
         retrievePageAuthentication: async () => 'cs-access-token',
       });
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(202);
       const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
       expect(sentBody.customHeaders.Authorization).to.equal('Bearer cs-access-token');
@@ -969,7 +966,7 @@ describe('ScrapeJobController tests', () => {
         getIMSPromiseToken: async () => ({ promise_token: 'ims-token' }),
         retrievePageAuthentication: async () => 'cw-access-token',
       });
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(202);
       const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
       expect(sentBody.customHeaders.Authorization).to.equal('Bearer cw-access-token');
@@ -982,7 +979,7 @@ describe('ScrapeJobController tests', () => {
           throw new ErrorWithStatusCode('Missing Authorization header', 400);
         },
       });
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
     });
 
@@ -993,7 +990,7 @@ describe('ScrapeJobController tests', () => {
           throw new Error('IMS down');
         },
       });
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(500);
     });
 
@@ -1003,14 +1000,14 @@ describe('ScrapeJobController tests', () => {
           throw new Error('secret missing');
         },
       });
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(500);
     });
 
     it('delegates transparently with no header injection when HEAD returns 2xx', async () => {
       fetchStub.resolves({ ok: true, status: 200 });
       const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(202);
       const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
       expect(sentBody.customHeaders).to.be.undefined;
@@ -1019,7 +1016,7 @@ describe('ScrapeJobController tests', () => {
     it('delegates without auth when HEAD probe throws', async () => {
       fetchStub.rejects(new Error('network'));
       const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(202);
       const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
       expect(sentBody.customHeaders).to.be.undefined;
@@ -1033,7 +1030,7 @@ describe('ScrapeJobController tests', () => {
       const ctrl = await buildController({
         retrievePageAuthentication: async () => 'resolved-token',
       });
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(202);
       const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
       expect(sentBody.customHeaders).to.deep.equal({
@@ -1042,28 +1039,35 @@ describe('ScrapeJobController tests', () => {
       });
     });
 
-    it('strips options.enableAuthentication from delegated payload', async () => {
+    it('always strips options.enableAuthentication from delegated payload', async () => {
       baseContext.data.options = { enableAuthentication: true, enableJavascript: true };
       const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(202);
       const sentBody = mockSqsClient.sendMessage.getCall(0).args[1];
       expect(sentBody.options).to.not.have.property('enableAuthentication');
       expect(sentBody.options.enableJavascript).to.equal(true);
     });
 
-    it('returns badRequest when delegated scrapeClient rejects with Invalid request', async () => {
-      baseContext.data.urls = 'not-an-array';
-      const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
-      expect(response.status).to.equal(400);
-    });
-
     it('returns 500 when SQS fails inside delegated job creation', async () => {
       baseContext.sqs.sendMessage = sandbox.stub().throws(new Error('queue down'));
       const ctrl = await buildController();
-      const response = await ctrl.createScrapeAuthenticatedJob(baseContext);
+      const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(500);
+    });
+
+    it('returns 400 when delegated scrapeClient rejects with Invalid request', async () => {
+      // Drop the per-job URL cap so the underlying validator triggers the
+      // 'Invalid request' branch from the auth-flow error handler.
+      baseContext.data.urls = [
+        'https://www.okta.com/page1',
+        'https://www.okta.com/page2',
+        'https://www.okta.com/page3',
+        'https://www.okta.com/page4',
+      ];
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(400);
     });
   });
 });
