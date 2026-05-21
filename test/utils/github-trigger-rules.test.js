@@ -200,6 +200,14 @@ describe('github-trigger-rules', () => {
   });
 
   describe('isMysticatTargetedSkip', () => {
+    it('returns false for null', () => {
+      expect(isMysticatTargetedSkip(null)).to.be.false;
+    });
+
+    it('returns false for undefined', () => {
+      expect(isMysticatTargetedSkip(undefined)).to.be.false;
+    });
+
     it('returns true for draft PR', () => {
       expect(isMysticatTargetedSkip('draft PR')).to.be.true;
     });
@@ -256,6 +264,20 @@ describe('github-trigger-rules', () => {
       it('classifies the foreign-reviewer reason as silent', () => {
         const data = { ...base, requested_reviewer: { login: 'some-human' } };
         const reason = getSkipReason(data, 'review_requested', env);
+        expect(isMysticatTargetedSkip(reason)).to.be.false;
+      });
+
+      it('classifies the unsupported-action reason as silent', () => {
+        const data = { ...base, action: 'closed' };
+        const reason = getSkipReason(data, 'closed', env);
+        expect(reason).to.include('unsupported action');
+        expect(isMysticatTargetedSkip(reason)).to.be.false;
+      });
+
+      it('classifies the auto-trigger reason as silent', () => {
+        const data = { ...base, action: 'opened' };
+        const reason = getSkipReason(data, 'opened', env);
+        expect(reason).to.include('auto-trigger');
         expect(isMysticatTargetedSkip(reason)).to.be.false;
       });
     });

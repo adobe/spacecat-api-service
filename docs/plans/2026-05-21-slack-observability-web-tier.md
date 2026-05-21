@@ -6,7 +6,7 @@
 
 **Architecture:** A dedicated, `chat:write`-only observability bot (separate from the existing broad `elevatedSlackClient`) posts via `@slack/web-api`. A thin best-effort client wrapper never throws - a Slack failure logs a warning and the job still enqueues. The web tier owns the thread root because it is the only component that sees every inbound webhook. Errors/rejections (400/401/500, unmapped events, "not-for-us" skips) are NOT posted to Slack - they stay in CloudWatch/Coralogix.
 
-**Tech Stack:** Node.js 22.x, Mocha, Chai, Sinon, esmock, `@slack/web-api@7.15.2` (already a direct dependency), `@adobe/helix-shared-wrap`, `@adobe/spacecat-shared-http-utils`.
+**Tech Stack:** Node.js >=24, Mocha, Chai, Sinon, esmock, `@slack/web-api@7.15.2` (already a direct dependency), `@adobe/helix-shared-wrap`, `@adobe/spacecat-shared-http-utils`.
 
 **This is repo 2 of 3.** It MUST NOT deploy to an environment until the `spacecat-infrastructure` dispatcher allow-list change (repo 1) is live there - otherwise every dispatched job carries an `observability` key the dispatcher rejects, and reviews DLQ. See `mysticat-architecture/platform/ops/review-orchestrator-slack-observability.md` ("Rollout").
 

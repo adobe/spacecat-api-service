@@ -17,6 +17,19 @@
  */
 
 /**
+ * Escapes the three characters Slack treats specially in mrkdwn so user-influenced
+ * content (e.g. a branch ref like `<!here>` carried in a skip reason) cannot inject
+ * a mention or markup. Per Slack guidance, only &, <, > need escaping. Apply only
+ * to text OUTSIDE backtick code spans (inside code spans Slack renders literally).
+ */
+function escapeSlack(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
  * Thread-root message for an enqueued review.
  * @param {object} p
  * @param {string} p.owner
@@ -29,7 +42,7 @@
 export function enqueuedParentText({
   owner, repo, prNumber, action, jobType,
 }) {
-  return `:inbox_tray: *Review enqueued*  \`${owner}/${repo}\` #${prNumber}\n${action} → ${jobType}`;
+  return `:inbox_tray: *Review enqueued* \`${owner}/${repo}\` #${prNumber}\n${escapeSlack(action)} → ${escapeSlack(jobType)}`;
 }
 
 /**
@@ -44,5 +57,5 @@ export function enqueuedParentText({
 export function skippedStandaloneText({
   owner, repo, prNumber, reason,
 }) {
-  return `:fast_forward: *Skipped*  \`${owner}/${repo}\` #${prNumber} - ${reason}`;
+  return `:fast_forward: *Skipped* \`${owner}/${repo}\` #${prNumber} - ${escapeSlack(reason)}`;
 }

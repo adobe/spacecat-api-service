@@ -22,6 +22,7 @@ import wrap from '@adobe/helix-shared-wrap';
 import { getSkipReason, EVENT_JOB_MAP, isMysticatTargetedSkip } from '../utils/github-trigger-rules.js';
 import { createObservabilitySlackClient } from '../support/slack/observability-client.js';
 import { enqueuedParentText, skippedStandaloneText } from '../support/slack/observability-messages.js';
+import { shouldRateLimitSlackPost } from '../support/slack/observability-rate-limit.js';
 
 const DEFAULT_WORKSPACE_REPOS = [
   'adobe/mysticat-architecture',
@@ -70,6 +71,7 @@ function WebhooksController(context) {
   const slackChannel = env.MYSTICAT_OBSERVABILITY_SLACK_CHANNEL;
   const slack = createObservabilitySlackClient({
     token: env.MYSTICAT_OBSERVABILITY_SLACK_TOKEN,
+    channel: slackChannel,
     log,
   });
 
@@ -152,11 +154,14 @@ function WebhooksController(context) {
       });
       // Post a standalone Slack note only when Mysticat WAS the requested
       // reviewer (draft / bot / non-default branch). Foreign-reviewer and
-      // unsupported-action skips stay silent to avoid channel flooding.
-      // Best-effort: postMessage never throws.
-      if (slack.enabled && slackChannel && isMysticatTargetedSkip(skipReason)) {
+      // unsupported-action skips stay silent. Best-effort + rate-limited per PR;
+      // postMessage never throws.
+      if (
+        slack.enabled
+        && isMysticatTargetedSkip(skipReason)
+        && !shouldRateLimitSlackPost(`${data.repository.owner.login}/${data.repository.name}#${pr.number}`)
+      ) {
         await slack.postMessage({
-          channel: slackChannel,
           text: skippedStandaloneText({
             owner: data.repository.owner.login,
             repo: data.repository.name,
@@ -170,13 +175,15 @@ function WebhooksController(context) {
 
     // Post the Slack thread root BEFORE enqueue (ordering invariant: parent
     // before enqueue, never after). Best-effort - a Slack failure must never
-    // block the review, so we still enqueue. When the post fails we send
-    // slack_channel only (no thread_ts); the worker then degrades to a
-    // standalone message. When Slack is unconfigured we omit observability.
+    // block the review, so we still enqueue. On parent-post failure we send
+    // slack_channel only (no thread_ts); the worker degrades to a standalone.
+    // When Slack is disabled or rate-limited we omit observability entirely.
     let observability;
-    if (slack.enabled && slackChannel) {
+    if (
+      slack.enabled
+      && !shouldRateLimitSlackPost(`${data.repository.owner.login}/${data.repository.name}#${pr.number}`)
+    ) {
       const threadTs = await slack.postMessage({
-        channel: slackChannel,
         text: enqueuedParentText({
           owner: data.repository.owner.login,
           repo: data.repository.name,

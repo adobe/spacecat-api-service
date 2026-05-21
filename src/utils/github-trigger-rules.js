@@ -99,6 +99,9 @@ export function getSkipReason(data, action, env) {
  * @returns {boolean} true if a standalone Slack note should be posted
  */
 export function isMysticatTargetedSkip(reason) {
+  if (!reason) {
+    return false;
+  }
   return reason === 'draft PR'
     || reason === 'bot sender'
     || reason.startsWith('non-default branch:');

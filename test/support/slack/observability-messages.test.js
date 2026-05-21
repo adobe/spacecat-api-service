@@ -27,7 +27,7 @@ describe('observability-messages', () => {
         jobType: 'pr-review',
       });
       expect(text).to.equal(
-        ':inbox_tray: *Review enqueued*  `adobe/spacecat-api-service` #456\nreview_requested → pr-review',
+        ':inbox_tray: *Review enqueued* `adobe/spacecat-api-service` #456\nreview_requested → pr-review',
       );
     });
   });
@@ -40,7 +40,18 @@ describe('observability-messages', () => {
         prNumber: 12,
         reason: 'draft PR',
       });
-      expect(text).to.equal(':fast_forward: *Skipped*  `adobe/foo` #12 - draft PR');
+      expect(text).to.equal(':fast_forward: *Skipped* `adobe/foo` #12 - draft PR');
+    });
+
+    it('escapes Slack-special characters in the skip reason', () => {
+      const text = skippedStandaloneText({
+        owner: 'adobe',
+        repo: 'foo',
+        prNumber: 12,
+        reason: 'non-default branch: <!here>',
+      });
+      expect(text).to.include('&lt;!here&gt;');
+      expect(text).to.not.include('<!here>');
     });
   });
 });

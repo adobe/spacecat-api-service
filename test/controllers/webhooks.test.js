@@ -342,15 +342,20 @@ describe('WebhooksController', () => {
     // Module-scoped: the mocked client factory's postMessage delegates to this,
     // and each test reassigns it (default success in beforeEach) before posting.
     let postMessage;
+    // Module-scoped: the mocked rate limiter returns this; tests flip it.
+    let rateLimited;
     let MockedController;
 
     before(async () => {
       const mod = await esmock('../../src/controllers/webhooks.js', {
         '../../src/support/slack/observability-client.js': {
-          createObservabilitySlackClient: ({ token }) => ({
-            enabled: Boolean(token),
+          createObservabilitySlackClient: ({ token, channel: ch }) => ({
+            enabled: Boolean(token && ch),
             postMessage: (...args) => postMessage(...args),
           }),
+        },
+        '../../src/support/slack/observability-rate-limit.js': {
+          shouldRateLimitSlackPost: () => rateLimited,
         },
       });
       // esmock returns the module namespace; the controller is the default export.
@@ -360,6 +365,7 @@ describe('WebhooksController', () => {
     beforeEach(() => {
       // Default: a successful parent post returning a thread ts (string).
       postMessage = sandbox.stub().resolves('1716200000.000300');
+      rateLimited = false;
     });
 
     function buildObsController(envOverrides = {}) {
@@ -386,7 +392,6 @@ describe('WebhooksController', () => {
       expect(postMessage.calledOnce).to.be.true;
       expect(postMessage.calledBefore(mockSqs.sendMessage)).to.be.true;
       const postArg = postMessage.firstCall.args[0];
-      expect(postArg.channel).to.equal(channel);
       expect(postArg.text).to.include(':inbox_tray:');
       expect(postArg.text).to.include('adobe/spacecat-api-service');
 
@@ -447,6 +452,16 @@ describe('WebhooksController', () => {
       const obsController = buildObsController({ MYSTICAT_OBSERVABILITY_SLACK_CHANNEL: undefined });
       const response = await obsController.processGitHubWebhook(validContext);
 
+      expect(response.status).to.equal(202);
+      expect(postMessage.called).to.be.false;
+      const [, payload] = mockSqs.sendMessage.firstCall.args;
+      expect(payload.observability).to.be.undefined;
+    });
+
+    it('does not post or attach observability when rate-limited', async () => {
+      rateLimited = true;
+      const obsController = buildObsController();
+      const response = await obsController.processGitHubWebhook(validContext);
       expect(response.status).to.equal(202);
       expect(postMessage.called).to.be.false;
       const [, payload] = mockSqs.sendMessage.firstCall.args;

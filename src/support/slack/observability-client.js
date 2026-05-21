@@ -12,34 +12,60 @@
 
 import { WebClient } from '@slack/web-api';
 
+// Bound the Slack request so a slow/hung Slack API call can never delay webhook
+// handling: the controller awaits postMessage before enqueue, and GitHub times
+// out webhook delivery at ~10s (and redelivers). A sub-2s budget with no retries
+// keeps the worst case well under that window even on a slow Slack edge, so a
+// Slack incident cannot cause duplicate enqueues via GitHub redelivery.
+const SLACK_REQUEST_TIMEOUT_MS = 2000;
+
 /**
  * Creates a best-effort Slack client for review observability.
  *
- * Uses a dedicated chat:write-only bot token (NOT the broad elevatedSlackClient).
- * postMessage NEVER throws: a Slack failure must not block or fail a webhook.
- * It returns the posted message `ts` (string) on success, or null on any failure,
- * when unconfigured, or when no channel is given.
+ * Uses a dedicated chat:write-only bot token (NOT the broad elevatedSlackClient)
+ * so a compromised webhook environment cannot post as the broad bot in product
+ * channels; the blast radius on token compromise is limited to this one channel.
+ *
+ * postMessage NEVER throws: a Slack failure must not block or fail a webhook. It
+ * returns the posted message `ts` (string) on success, or null on any failure or
+ * when disabled (no token or no channel, or the client could not be built).
  *
  * @param {object} p
- * @param {string|undefined} p.token - bot token; absent => Slack disabled
+ * @param {string|undefined} p.token - bot token; absent => disabled
+ * @param {string|undefined} p.channel - target channel id; absent => disabled
  * @param {object} p.log - logger with .warn
  * @returns {{ postMessage: function, enabled: boolean }}
  */
-export function createObservabilitySlackClient({ token, log }) {
-  const client = token ? new WebClient(token) : null;
+export function createObservabilitySlackClient({ token, channel, log }) {
+  let client = null;
+  if (token) {
+    try {
+      client = new WebClient(token, {
+        timeout: SLACK_REQUEST_TIMEOUT_MS,
+        retryConfig: { retries: 0 },
+      });
+    } catch (e) {
+      // A constructor failure (e.g. a future token-format validation) must not
+      // crash webhook handling for every delivery — degrade to disabled.
+      log.warn('Observability Slack client init failed (non-fatal)', { error: e?.message ?? String(e) });
+      client = null;
+    }
+  }
 
-  async function postMessage({ channel, text, attachments }) {
-    if (!client || !channel) {
+  const enabled = Boolean(client && channel);
+
+  async function postMessage({ text, attachments }) {
+    if (!enabled) {
       return null;
     }
     try {
       const result = await client.chat.postMessage({ channel, text, attachments });
       return result?.ts ?? null;
     } catch (e) {
-      log.warn('Observability Slack post failed (non-fatal)', { error: e.message });
+      log.warn('Observability Slack post failed (non-fatal)', { error: e?.message ?? String(e) });
       return null;
     }
   }
 
-  return { postMessage, enabled: Boolean(client) };
+  return { postMessage, enabled };
 }
