@@ -11,10 +11,19 @@
  */
 
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+// Import real PlgOnboarding model statics for esmock stubs: normalizeDomain and
+// isValidDomain are pure utilities that the controller now delegates to. Stubbing
+// them out would silently disable validation — use the real implementations.
+import RealPlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+
+const PLG_MODEL_DOMAIN_HELPERS = {
+  normalizeDomain: RealPlgOnboardingModel.normalizeDomain,
+  isValidDomain: RealPlgOnboardingModel.isValidDomain,
+};
 
 use(sinonChai);
 
@@ -379,6 +388,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         },
         '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
           default: {
+            ...PLG_MODEL_DOMAIN_HELPERS,
             STATUSES: {
               IN_PROGRESS: 'IN_PROGRESS',
               ONBOARDED: 'ONBOARDED',
@@ -602,6 +612,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -828,7 +839,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
     });
 
-    // Non-http schemes and protocol-relative inputs are NOT stripped; DOMAIN_RE rejects them.
+    // Non-http schemes and protocol-relative inputs are NOT stripped; isValidDomain rejects them.
     const stripSchemeRejectCases = [
       { input: 'ftp://nba.com', desc: 'non-http scheme not stripped' },
       { input: '//nba.com', desc: 'protocol-relative not stripped' },
@@ -973,6 +984,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -1081,6 +1093,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -1193,6 +1206,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2080,6 +2094,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2489,6 +2504,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2610,6 +2626,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2718,6 +2735,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -5054,6 +5072,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -5201,6 +5220,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             },
             '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
               default: {
+                ...PLG_MODEL_DOMAIN_HELPERS,
                 STATUSES: {
                   IN_PROGRESS: 'IN_PROGRESS',
                   ONBOARDED: 'ONBOARDED',
@@ -5777,6 +5797,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -5881,6 +5902,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             },
             '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
               default: {
+                ...PLG_MODEL_DOMAIN_HELPERS,
                 STATUSES: {
                   IN_PROGRESS: 'IN_PROGRESS',
                   ONBOARDED: 'ONBOARDED',

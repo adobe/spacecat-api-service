@@ -241,34 +241,25 @@ const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.
 
 // Strip http:// or https:// scheme so callers can pass either scheme-prefixed input or a bare
 // hostname/path. Only the scheme is removed — port, userinfo, query, and fragment are NOT
-// stripped and will be rejected by DOMAIN_RE downstream.
+// stripped and will be rejected by the domain validator downstream.
 const stripScheme = (s) => s.replace(/^https?:\/\//i, '');
 
-// RFC 1123 hostname optionally followed by a URL path; no scheme, port, query, or fragment.
-// Hostname: max 253 chars, labels 1-63 alphanumeric/hyphen separated by dots.
-// Path segments: alphanumeric/hyphens/underscores with optional internal dots (e.g. v1.0).
-// Leading dots, dot-segments (..), and empty segments are rejected.
-// Valid: nba.com, nba.com/kings, nba.com/v1.0  Invalid: https://nba.com, nba.com/../etc
-// NOTE: DOMAIN_RE must stay in sync with DOMAIN_PATTERN in spacecat-shared
-// (plg-onboarding.model.js) and getDomainFromUrl.ts in the ESS UI (LLMO-4187).
-// eslint-disable-next-line max-len
-const DOMAIN_RE = /^(?=[^/]{1,253}(?:\/|$))([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)*$/;
+// Prepare a raw user-supplied domain for validation and persistence: strip scheme, then
+// lowercase via PlgOnboarding.normalizeDomain so callers can pass mixed-case input.
+// The shared schema requires lowercase, so callers must normalize before validating
+// or saving — otherwise the data-access layer would reject the write.
+const prepareDomain = (raw) => PlgOnboardingModel.normalizeDomain(stripScheme(raw));
 
-/**
- * Validates that a domain string is a syntactically valid hostname or hostname/path.
- * The hostname portion follows RFC 1123; the optional path portion is an extension to support
- * subpath onboarding (e.g. "nba.com/kings"). Scheme, port, query, and fragment are rejected.
- * @param {string} domain - The domain to validate (e.g. "nba.com" or "nba.com/kings").
- * @returns {boolean} true if valid, false otherwise.
- */
-function isValidDomain(domain) {
-  return DOMAIN_RE.test(domain);
-}
+// Delegates to the shared PlgOnboarding.isValidDomain validator so this service, the
+// data-access schema (plg-onboarding.schema.js), and any future consumer share a single
+// implementation. Do NOT import DOMAIN_PATTERN directly — it is incomplete on its own
+// (no length cap, no all-numeric/short-form-IP rejection, no control-char check).
+const isValidDomain = (domain) => PlgOnboardingModel.isValidDomain(domain);
 
 /**
  * Validates that a domain is not a private/internal address to prevent SSRF.
  *
- * IMPORTANT ordering contract: callers MUST invoke stripScheme() and isValidDomain() BEFORE
+ * IMPORTANT ordering contract: callers MUST invoke prepareDomain() and isValidDomain() BEFORE
  * this function. The hostname is extracted via `split('/')[0]`, so if a raw scheme-prefixed
  * input like "https://10.0.0.1" reaches this function, the split yields "https:" and the
  * private-IP blocklist is bypassed. isValidDomain() rejects any scheme-prefixed input, which
@@ -671,7 +662,7 @@ async function createOrFindProject(baseURL, organizationId, context) {
 async function performAsoPlgOnboarding({
   domain: rawDomain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
 }, context) {
-  const domain = stripScheme(rawDomain);
+  const domain = prepareDomain(rawDomain);
   const { dataAccess, env, log } = context;
   const callerIdentity = getReviewerIdentity(context);
   const {
@@ -1465,7 +1456,7 @@ function PlgOnboardingController(ctx) {
       return badRequest('domain is required');
     }
 
-    const domain = stripScheme(rawDomain);
+    const domain = prepareDomain(rawDomain);
 
     const { authInfo } = attributes;
 
@@ -1910,7 +1901,7 @@ function PlgOnboardingController(ctx) {
 
           // Handle alternateDomain: retire current domain, onboard a new domain under current org
           if (hasText(siteConfig?.alternateDomain)) {
-            const altDomain = stripScheme(siteConfig.alternateDomain);
+            const altDomain = prepareDomain(siteConfig.alternateDomain);
             if (!isValidDomain(altDomain)) {
               return badRequest(`Invalid alternate domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings): ${altDomain}`);
             }
