@@ -36,6 +36,8 @@ describe('llmo-source', () => {
   let fetchLlmoSource;
   let llmoSourceErrorResponse;
   let logNotProvisioned;
+  let NOT_PROVISIONED_HEADER;
+  let NOT_PROVISIONED_VALUE;
   let tracingFetchStub;
   let context;
 
@@ -56,6 +58,8 @@ describe('llmo-source', () => {
     fetchLlmoSource = mod.fetchLlmoSource;
     llmoSourceErrorResponse = mod.llmoSourceErrorResponse;
     logNotProvisioned = mod.logNotProvisioned;
+    NOT_PROVISIONED_HEADER = mod.NOT_PROVISIONED_HEADER;
+    NOT_PROVISIONED_VALUE = mod.NOT_PROVISIONED_VALUE;
   });
 
   afterEach(() => sinon.restore());
@@ -120,6 +124,18 @@ describe('llmo-source', () => {
     }
   });
 
+  it('propagates non-AbortError fetch rejections unchanged', async () => {
+    const netErr = new Error('ECONNREFUSED');
+    tracingFetchStub.rejects(netErr);
+    try {
+      await fetchLlmoSource(context, TEST_URL);
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).to.equal(netErr);
+      expect(err.isTimeout).to.be.undefined;
+    }
+  });
+
   it('throws isConfigError when LLMO_HLX_API_KEY is missing (no fetch)', async () => {
     context.env.LLMO_HLX_API_KEY = undefined;
     try {
@@ -173,5 +189,10 @@ describe('llmo-source', () => {
     const fixture = JSON.parse(readFileSync(join(here, '../../fixtures/llmo/empty-sheet.json'), 'utf-8'));
     const mod = await esmock('../../../src/controllers/llmo/llmo-source.js', {});
     expect(mod.EMPTY_SHEET_PAYLOAD).to.deep.equal(fixture);
+  });
+
+  it('exposes the not-provisioned discriminator header constants', () => {
+    expect(NOT_PROVISIONED_HEADER).to.equal('x-llmo-data-status');
+    expect(NOT_PROVISIONED_VALUE).to.equal('not-provisioned');
   });
 });
