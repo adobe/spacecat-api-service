@@ -94,62 +94,51 @@ function ScrapeJobController(context) {
 
   /**
    * Create and start a new scrape job.
+   *
+   * When `options.enableAuthentication === true`, the per-site `Authorization`
+   * header is resolved server-side in this Lambda (HEAD probe + optional IMS
+   * promise-token exchange + `retrievePageAuthentication`), merged into
+   * `customHeaders`, and `options.enableAuthentication` is stripped before
+   * delegation. This mirrors the `createBetaPreflightJob` pattern.
+   *
+   * Why bake the header here instead of letting content-scraper resolve it:
+   * content-scraper's SQS Event Source Mappings target the unqualified Lambda
+   * ARN, so helix-universal reports `ctx.func.version === '$LATEST'`, which
+   * AWS Secrets Manager rejects as an invalid name (`ValidationException`).
+   * The spacecat-api Lambda is API-Gateway-invoked (alias-qualified `:latest`),
+   * so `retrievePageAuthentication` works correctly here.
+   *
+   * Callers that do not set `enableAuthentication` get byte-identical legacy
+   * behavior — no Site lookup, no HEAD probe, no Secrets Manager call.
+   *
    * @param {UniversalContext} requestContext - The context of the universal serverless function.
    * @param {object} requestContext.data - Parsed json request data.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createScrapeJob(requestContext) {
-    const { data } = requestContext;
-
-    try {
-      const job = await scrapeClient.createScrapeJob(data);
-
-      return accepted(job);
-    } catch (error) {
-      log.error(error.message);
-      if (error?.message?.includes('Invalid request')) {
-        return badRequest(error);
-      }
-      return createErrorResponse(error);
-    }
-  }
-
-  /**
-   * Create a scrape job with the per-site Authorization header resolved server-side.
-   *
-   * Mirrors the auth-resolution path used by `createBetaPreflightJob` in preflight.js
-   * (HEAD probe + optional IMS promise-token exchange + `retrievePageAuthentication`),
-   * then delegates the resulting payload to the existing `scrapeClient.createScrapeJob`.
-   *
-   * Defensive guarantees:
-   *  - `metaData.siteId` is required; returns 400 otherwise.
-   *  - `options.enableAuthentication` is stripped from the delegated payload so the
-   *    downstream content-scraper does not attempt to re-resolve the token under an
-   *    unqualified Lambda ARN (which surfaces AWS Secrets Manager `ValidationException`
-   *    because helix-universal reports `ctx.func.version === '$LATEST'`).
-   *  - When the HEAD probe returns 2xx the endpoint delegates transparently with no
-   *    header injection — callers can safely use this endpoint for sites that may or
-   *    may not require authentication.
-   *
-   * Bakes the Authorization header in the spacecat-api Lambda (alias-qualified ARN
-   * via API Gateway, so `ctx.func.version === 'latest'`), avoiding the `$LATEST`
-   * bug entirely. Legacy `POST /tools/scrape/jobs` is unaffected.
-   *
-   * @param {UniversalContext} requestContext - The context of the universal serverless function.
-   * @param {object} requestContext.data - Parsed json request data.
-   * @param {object} requestContext.data.metaData - Required; must contain `siteId`.
-   * @returns {Promise<Response>} 202 Accepted on success; 400/403/404/500 otherwise.
-   */
-  async function createScrapeAuthenticatedJob(requestContext) {
     const { data, dataAccess } = requestContext;
 
-    if (!isNonEmptyObject(data)) {
-      return badRequest('Invalid request: missing application/json data');
+    // Legacy fast-path: no auth resolution requested, behave exactly as before.
+    if (!isNonEmptyObject(data) || data.options?.enableAuthentication !== true) {
+      try {
+        const job = await scrapeClient.createScrapeJob(data);
+        return accepted(job);
+      } catch (error) {
+        log.error(error.message);
+        if (error?.message?.includes('Invalid request')) {
+          return badRequest(error);
+        }
+        return createErrorResponse(error);
+      }
     }
 
+    // Auth-resolution path. metaData.siteId required — fail loud at the API edge
+    // rather than silently demote to an anonymous scrape that returns a login page.
     const siteId = data?.metaData?.siteId;
     if (!isValidUUID(siteId)) {
-      return badRequest('Invalid request: metaData.siteId is required and must be a valid UUID');
+      return badRequest(
+        'Invalid request: metaData.siteId is required when options.enableAuthentication is true',
+      );
     }
 
     let site;
@@ -178,16 +167,16 @@ function ScrapeJobController(context) {
       return internalServerError('Site has invalid baseURL');
     }
 
-    let enableAuthentication = false;
+    let needsAuth = false;
     try {
-      enableAuthentication = await checkEnableAuthentication(previewBaseURL);
+      needsAuth = await checkEnableAuthentication(previewBaseURL);
     } catch (e) {
-      // HEAD probe is best-effort; on failure delegate without auth (legacy behavior).
+      // HEAD probe is best-effort; on failure delegate without header injection.
       log.info(`HEAD probe failed for ${previewBaseURL}: ${e.message}`);
     }
 
     let authorizationHeader;
-    if (enableAuthentication) {
+    if (needsAuth) {
       let promiseTokenObj;
       try {
         promiseTokenObj = await resolvePromiseToken(site, requestContext);
@@ -209,8 +198,11 @@ function ScrapeJobController(context) {
       }
     }
 
-    // Strip enableAuthentication from options so content-scraper never re-resolves.
-    const { enableAuthentication: _, ...remainingOptions } = data.options || {};
+    // Always strip enableAuthentication before delegation — prevents content-scraper
+    // from re-resolving the token under its unqualified SQS ESM ARN (`$LATEST` bug).
+    // `data.options` is guaranteed non-null: we only reach this point when
+    // `data.options.enableAuthentication === true` was true above.
+    const { enableAuthentication: _, ...remainingOptions } = data.options;
 
     const delegatedData = {
       ...data,
@@ -393,7 +385,6 @@ function ScrapeJobController(context) {
 
   return {
     createScrapeJob,
-    createScrapeAuthenticatedJob,
     getScrapeJobStatus,
     getScrapeJobUrlResults,
     getScrapeJobsByBaseURL,

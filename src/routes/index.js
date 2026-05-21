@@ -383,7 +383,6 @@ export default function getRouteHandlers(
 
     // Scrape Jobs
     'POST /tools/scrape/jobs': scrapeJobController.createScrapeJob,
-    'POST /tools/scrape/authenticated-jobs': scrapeJobController.createScrapeAuthenticatedJob,
     'GET /tools/scrape/jobs/:jobId': scrapeJobController.getScrapeJobStatus,
     'GET /tools/scrape/jobs/:jobId/results': scrapeJobController.getScrapeJobUrlResults,
     'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs': scrapeJobController.getScrapeJobsByDateRange,

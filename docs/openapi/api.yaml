@@ -188,8 +188,6 @@ paths:
     $ref: './site-detection-api.yaml#/site-detection-job-status'
   /tools/scrape/jobs:
     $ref: './scrape-api.yaml#/create-scrape-job'
-  /tools/scrape/authenticated-jobs:
-    $ref: './scrape-api.yaml#/create-scrape-authenticated-job'
   /tools/scrape/jobs/{jobId}:
     $ref: './scrape-api.yaml#/get-scrape-job-status'
   /tools/scrape/jobs/{jobId}/results:
