@@ -41,6 +41,7 @@ const ALL_METHOD_NAMES = [
   'getTopicsStats',
   'getV1TopicBrandTopics',
   'getV1PromptBrandPrompts',
+  'getV1PromptPromptResponse',
 ];
 
 describe('AiVisibilityController', () => {
@@ -76,6 +77,7 @@ describe('AiVisibilityController', () => {
   let mockHandleTopicsResearchSourceDomains;
   let mockHandleV1TopicBrandTopics;
   let mockHandleV1PromptBrandPrompts;
+  let mockHandleV1PromptPromptResponse;
 
   const log = {
     info: sinon.stub(),
@@ -165,6 +167,9 @@ describe('AiVisibilityController', () => {
     mockHandleV1PromptBrandPrompts = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1PromptPromptResponse = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
 
     const mod = await esmock('../../src/controllers/ai-visibility.js', {
       '../../src/support/ai-visibility/grpc-transport.js': {
@@ -215,6 +220,9 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/v1/prompt/brand-prompts.js': {
         handleBrandPrompts: mockHandleV1PromptBrandPrompts,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/prompt-response.js': {
+        handlePromptResponse: mockHandleV1PromptPromptResponse,
       },
       '../../third-party/ai-seo-ts/v2/brand/service_pb.js': {
         BrandService: {},
@@ -283,9 +291,9 @@ describe('AiVisibilityController', () => {
   });
 
   describe('returned handler object', () => {
-    it('returns an object with all 24 method names', () => {
+    it('returns an object with all 25 method names', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      expect(Object.keys(handlers)).to.have.lengthOf(24);
+      expect(Object.keys(handlers)).to.have.lengthOf(25);
       for (const name of ALL_METHOD_NAMES) {
         expect(handlers).to.have.property(name).that.is.a('function');
       }
@@ -541,6 +549,7 @@ describe('AiVisibilityController', () => {
       getTopicsStats: mockHandleTopicsStats,
       getV1TopicBrandTopics: mockHandleV1TopicBrandTopics,
       getV1PromptBrandPrompts: mockHandleV1PromptBrandPrompts,
+      getV1PromptPromptResponse: mockHandleV1PromptPromptResponse,
     });
 
     it('each method invokes its corresponding handler', async () => {
