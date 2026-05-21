@@ -1,3 +1,31 @@
+# [1.504.0](https://github.com/adobe/spacecat-api-service/compare/v1.503.2...v1.504.0) (2026-05-20)
+
+
+### Features
+
+* canonical - remove from llmo onboarding set ([#2454](https://github.com/adobe/spacecat-api-service/issues/2454)) ([9bcc845](https://github.com/adobe/spacecat-api-service/commit/9bcc845239a8777799b6d51669366141d3e11763))
+
+## [1.503.2](https://github.com/adobe/spacecat-api-service/compare/v1.503.1...v1.503.2) (2026-05-20)
+
+
+### Bug Fixes
+
+* resolveTopicUuid and resolveCategoryUuid accept UUID input directly ([#2449](https://github.com/adobe/spacecat-api-service/issues/2449)) ([b951ed4](https://github.com/adobe/spacecat-api-service/commit/b951ed4dcac2210fb1ca5f851649451bc3ed40ed))
+
+## [1.503.1](https://github.com/adobe/spacecat-api-service/compare/v1.503.0...v1.503.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* **slack:** use projection_audit for agentic traffic DB status check ([#2448](https://github.com/adobe/spacecat-api-service/issues/2448)) ([38ee1e2](https://github.com/adobe/spacecat-api-service/commit/38ee1e29c2516cb0b458e2e304af72d3968e156d))
+
+# [1.503.0](https://github.com/adobe/spacecat-api-service/compare/v1.502.1...v1.503.0) (2026-05-20)
+
+
+### Features
+
+* enable trace-id propagation through preflight ([#2447](https://github.com/adobe/spacecat-api-service/issues/2447)) ([6418216](https://github.com/adobe/spacecat-api-service/commit/64182165c66cef9a4e603c73c40bc8f30545b781))
+
 ## [1.502.1](https://github.com/adobe/spacecat-api-service/compare/v1.502.0...v1.502.1) (2026-05-20)
 
 
