@@ -11,7 +11,7 @@
  */
 
 import { expect } from 'chai';
-import { getSkipReason, EVENT_JOB_MAP } from '../../src/utils/github-trigger-rules.js';
+import { getSkipReason, EVENT_JOB_MAP, isMysticatTargetedSkip } from '../../src/utils/github-trigger-rules.js';
 
 describe('github-trigger-rules', () => {
   describe('EVENT_JOB_MAP', () => {
@@ -197,5 +197,67 @@ describe('github-trigger-rules', () => {
     // Note: missing GITHUB_APP_SLUG is validated at controller entry (returns 500),
     // not by getSkipReason. The controller is the gate; this function only sees
     // calls with a validated appSlug.
+  });
+
+  describe('isMysticatTargetedSkip', () => {
+    it('returns true for draft PR', () => {
+      expect(isMysticatTargetedSkip('draft PR')).to.be.true;
+    });
+
+    it('returns true for bot sender', () => {
+      expect(isMysticatTargetedSkip('bot sender')).to.be.true;
+    });
+
+    it('returns true for non-default branch (with ref suffix)', () => {
+      expect(isMysticatTargetedSkip('non-default branch: release/v2')).to.be.true;
+    });
+
+    it('returns false for foreign reviewer', () => {
+      expect(isMysticatTargetedSkip('reviewer some-human is not mysticat[bot]')).to.be.false;
+    });
+
+    it('returns false for unsupported action', () => {
+      expect(isMysticatTargetedSkip('unsupported action: closed')).to.be.false;
+    });
+
+    it('returns false for auto-trigger', () => {
+      expect(isMysticatTargetedSkip('auto-trigger not yet supported: opened')).to.be.false;
+    });
+
+    // Drift guard: the classifier must agree with what getSkipReason actually emits.
+    describe('stays in lockstep with getSkipReason', () => {
+      const env = { GITHUB_APP_SLUG: 'mysticat' };
+      const base = {
+        action: 'review_requested',
+        requested_reviewer: { login: 'mysticat[bot]' },
+        repository: { default_branch: 'main' },
+        sender: { type: 'User' },
+        pull_request: { draft: false, base: { ref: 'main' } },
+      };
+
+      it('classifies the draft-PR reason as postable', () => {
+        const data = { ...base, pull_request: { draft: true, base: { ref: 'main' } } };
+        const reason = getSkipReason(data, 'review_requested', env);
+        expect(isMysticatTargetedSkip(reason)).to.be.true;
+      });
+
+      it('classifies the bot-sender reason as postable', () => {
+        const data = { ...base, sender: { type: 'Bot' } };
+        const reason = getSkipReason(data, 'review_requested', env);
+        expect(isMysticatTargetedSkip(reason)).to.be.true;
+      });
+
+      it('classifies the non-default-branch reason as postable', () => {
+        const data = { ...base, pull_request: { draft: false, base: { ref: 'release/v2' } } };
+        const reason = getSkipReason(data, 'review_requested', env);
+        expect(isMysticatTargetedSkip(reason)).to.be.true;
+      });
+
+      it('classifies the foreign-reviewer reason as silent', () => {
+        const data = { ...base, requested_reviewer: { login: 'some-human' } };
+        const reason = getSkipReason(data, 'review_requested', env);
+        expect(isMysticatTargetedSkip(reason)).to.be.false;
+      });
+    });
   });
 });

@@ -19,7 +19,9 @@ import {
   accepted, noContent, badRequest, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import wrap from '@adobe/helix-shared-wrap';
-import { getSkipReason, EVENT_JOB_MAP } from '../utils/github-trigger-rules.js';
+import { getSkipReason, EVENT_JOB_MAP, isMysticatTargetedSkip } from '../utils/github-trigger-rules.js';
+import { createObservabilitySlackClient } from '../support/slack/observability-client.js';
+import { enqueuedParentText, skippedStandaloneText } from '../support/slack/observability-messages.js';
 
 const DEFAULT_WORKSPACE_REPOS = [
   'adobe/mysticat-architecture',
@@ -65,6 +67,11 @@ function getWorkspaceRepos(env, log) {
 function WebhooksController(context) {
   const { sqs, log, env } = context;
   const workspaceRepos = getWorkspaceRepos(env, log);
+  const slackChannel = env.MYSTICAT_OBSERVABILITY_SLACK_CHANNEL;
+  const slack = createObservabilitySlackClient({
+    token: env.MYSTICAT_OBSERVABILITY_SLACK_TOKEN,
+    log,
+  });
 
   function errorHandler(fn) {
     return async (ctx) => {
@@ -143,7 +150,44 @@ function WebhooksController(context) {
         repo: data.repository.name,
         prNumber: pr.number,
       });
+      // Post a standalone Slack note only when Mysticat WAS the requested
+      // reviewer (draft / bot / non-default branch). Foreign-reviewer and
+      // unsupported-action skips stay silent to avoid channel flooding.
+      // Best-effort: postMessage never throws.
+      if (slack.enabled && slackChannel && isMysticatTargetedSkip(skipReason)) {
+        await slack.postMessage({
+          channel: slackChannel,
+          text: skippedStandaloneText({
+            owner: data.repository.owner.login,
+            repo: data.repository.name,
+            prNumber: pr.number,
+            reason: skipReason,
+          }),
+        });
+      }
       return noContent();
+    }
+
+    // Post the Slack thread root BEFORE enqueue (ordering invariant: parent
+    // before enqueue, never after). Best-effort - a Slack failure must never
+    // block the review, so we still enqueue. When the post fails we send
+    // slack_channel only (no thread_ts); the worker then degrades to a
+    // standalone message. When Slack is unconfigured we omit observability.
+    let observability;
+    if (slack.enabled && slackChannel) {
+      const threadTs = await slack.postMessage({
+        channel: slackChannel,
+        text: enqueuedParentText({
+          owner: data.repository.owner.login,
+          repo: data.repository.name,
+          prNumber: pr.number,
+          action,
+          jobType,
+        }),
+      });
+      observability = threadTs
+        ? { slack_channel: slackChannel, slack_thread_ts: threadTs }
+        : { slack_channel: slackChannel };
     }
 
     // Build and enqueue job payload
@@ -158,6 +202,7 @@ function WebhooksController(context) {
       job_type: jobType,
       workspace_repos: workspaceRepos,
       retry_count: 0,
+      ...(observability ? { observability } : {}),
     };
 
     const queueUrl = env.MYSTICAT_GITHUB_JOBS_QUEUE_URL;
