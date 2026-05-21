@@ -6044,23 +6044,23 @@ describe('LlmoController', () => {
         detectCdnForDomainStub.resolves(LOG_SOURCES.AEM_CS_FASTLY_SIMPLE_PROXY);
       });
 
-      it('returns 200 with routingType byocdn-manual and apiKeys without calling CDN API', async () => {
+      it('returns 200 with routingType aemcsfastly-manual and apiKeys without calling CDN API', async () => {
         const result = await controller.createOrUpdateEdgeConfig(makeByoCdnCtx());
         expect(result.status).to.equal(200);
         const body = await result.json();
-        expect(body.routingType).to.equal('byocdn-manual');
+        expect(body.routingType).to.equal('aemcsfastly-manual');
         expect(body.apiKeys).to.deep.equal(['byocdn-api-key']);
         expect(callCdnRoutingApiStub).to.not.have.been.called;
       });
 
-      it('upgrades aem-cs-fastly to aem-cs-fastly-simple-proxy when BYOCDN detected, returns 200 byocdn-manual', async () => {
+      it('upgrades aem-cs-fastly to aem-cs-fastly-simple-proxy when BYOCDN detected, returns 200 aemcsfastly-manual', async () => {
         // Simulates a site onboarded as 'aem-cs-fastly' before Case 1/2 detection existed.
         // The UI sends cdnType:'aem-cs-fastly', detection returns 'aem-cs-fastly-simple-proxy'.
         const ctx = makeByoCdnCtx({ data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY } });
         const result = await controller.createOrUpdateEdgeConfig(ctx);
         expect(result.status).to.equal(200);
         const body = await result.json();
-        expect(body.routingType).to.equal('byocdn-manual');
+        expect(body.routingType).to.equal('aemcsfastly-manual');
         expect(callCdnRoutingApiStub).to.not.have.been.called;
       });
 

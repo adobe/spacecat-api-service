@@ -1438,7 +1438,7 @@ function LlmoController(ctx) {
         let imsUserToken;
         try {
           imsUserToken = await getImsTokenFromPromiseToken(context);
-          log.info(`[edge-optimize-routing] IMS user token obtained for site ${siteId} (byocdn-manual)`);
+          log.info(`[edge-optimize-routing] IMS user token obtained for site ${siteId} (aemcsfastly-manual)`);
         } catch (tokenError) {
           log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to get IMS user token: ${tokenError.message}`);
           return createResponse({ message: tokenError.message }, tokenError.status ?? 401);
@@ -1460,7 +1460,7 @@ function LlmoController(ctx) {
         }
 
         log.info(`[edge-optimize-routing] ${baseURL} BYOCDN manual routing — returning API key for manual YAML setup`);
-        return ok({ ...metaconfig, routingType: 'byocdn-manual' });
+        return ok({ ...metaconfig, routingType: 'aemcsfastly-manual' });
       }
 
       // CDN routing — only when cdnType is provided
