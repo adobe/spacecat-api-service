@@ -20,6 +20,7 @@ import martechImpact from './commands/martech-impact.js';
 import runAudit from './commands/run-audit.js';
 import runImport from './commands/run-import.js';
 import runGlobalImport from './commands/run-global-import.js';
+import runCdnReportsBulkPublish from './commands/run-cdn-reports-bulk-publish.js';
 import runInternalReport from './commands/run-internal-report.js';
 import runReport from './commands/run-report.js';
 import runScrape from './commands/run-scrape.js';
@@ -74,6 +75,7 @@ export default (context) => [
   runAudit(context),
   runImport(context),
   runGlobalImport(context),
+  runCdnReportsBulkPublish(context),
   runInternalReport(context),
   runReport(context),
   runScrape(context),
