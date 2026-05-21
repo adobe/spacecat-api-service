@@ -83,3 +83,26 @@ export function getSkipReason(data, action, env) {
 
   return null;
 }
+
+/**
+ * Classifies a skip reason from getSkipReason as one that should post a
+ * standalone Slack observability note. Only skips where Mysticat WAS the
+ * requested reviewer (draft PR / bot sender / non-default branch) are
+ * interesting; foreign-reviewer, unsupported-action, and auto-trigger skips
+ * stay silent to avoid flooding the channel.
+ *
+ * Keep in lockstep with getSkipReason: these literals/prefix mirror the strings
+ * it returns AFTER the reviewer check passes. The drift-guard tests in
+ * test/utils/github-trigger-rules.test.js fail if the two diverge.
+ *
+ * @param {string} reason - The skip reason string returned by getSkipReason
+ * @returns {boolean} true if a standalone Slack note should be posted
+ */
+export function isMysticatTargetedSkip(reason) {
+  if (!reason) {
+    return false;
+  }
+  return reason === 'draft PR'
+    || reason === 'bot sender'
+    || reason.startsWith('non-default branch:');
+}

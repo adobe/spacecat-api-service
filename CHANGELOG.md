@@ -1,3 +1,10 @@
+# [1.506.0](https://github.com/adobe/spacecat-api-service/compare/v1.505.1...v1.506.0) (2026-05-21)
+
+
+### Features
+
+* GitHub review Slack observability (web tier) ([#2457](https://github.com/adobe/spacecat-api-service/issues/2457)) ([7f0841b](https://github.com/adobe/spacecat-api-service/commit/7f0841be552ad5289e1ffe2c03c9dc779aea26c8)), closes [adobe/spacecat-infrastructure#536](https://github.com/adobe/spacecat-infrastructure/issues/536) [#80](https://github.com/adobe/spacecat-api-service/issues/80)
+
 ## [1.505.1](https://github.com/adobe/spacecat-api-service/compare/v1.505.0...v1.505.1) (2026-05-21)
 
 
