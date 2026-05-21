@@ -168,12 +168,14 @@ describe('ScrapeJobController tests', () => {
       info, debug, error, warn,
     } = console;
 
-    // Set up the base context
+    // Set up the base context. log.warn is stubbed (not pass-through) so that
+    // fail-closed branches can be asserted — those log lines are the SRE
+    // triage signal in Coralogix; a refactor that drops them must fail tests.
     baseContext = {
       log: {
         info,
         debug,
-        warn,
+        warn: sandbox.stub().callsFake(warn),
         error: sandbox.stub().callsFake(error),
       },
       env: {
@@ -977,6 +979,7 @@ describe('ScrapeJobController tests', () => {
 
     it('returns 400 when IMS promise token resolution throws ErrorWithStatusCode', async () => {
       mockSite.getAuthoringType = () => SiteModel.AUTHORING_TYPES.AMS;
+      mockSite.getDeliveryType = () => SiteModel.DELIVERY_TYPES.AEM_CS;
       const ctrl = await buildController({
         getIMSPromiseToken: async () => {
           throw new ErrorWithStatusCode('Missing Authorization header', 400);
@@ -988,6 +991,7 @@ describe('ScrapeJobController tests', () => {
 
     it('returns 500 when IMS promise token resolution throws generic error', async () => {
       mockSite.getAuthoringType = () => SiteModel.AUTHORING_TYPES.AMS;
+      mockSite.getDeliveryType = () => SiteModel.DELIVERY_TYPES.AEM_CS;
       const ctrl = await buildController({
         getIMSPromiseToken: async () => {
           throw new Error('IMS down');
@@ -1022,6 +1026,9 @@ describe('ScrapeJobController tests', () => {
       const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(502);
       expect(mockSqsClient.sendMessage).to.not.have.been.called;
+      expect(baseContext.log.warn).to.have.been.calledWithMatch(
+        sinon.match(/HEAD probe failed for https:\/\/www\.okta\.com/),
+      );
     });
 
     it('fails closed (502) when HEAD returns a 3xx (cannot follow under redirect: manual)', async () => {
@@ -1030,6 +1037,9 @@ describe('ScrapeJobController tests', () => {
       const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(502);
       expect(mockSqsClient.sendMessage).to.not.have.been.called;
+      expect(baseContext.log.warn).to.have.been.calledWithMatch(
+        sinon.match(/ambiguous status 302/),
+      );
     });
 
     it('fails closed (502) when HEAD returns 5xx', async () => {
@@ -1037,6 +1047,9 @@ describe('ScrapeJobController tests', () => {
       const ctrl = await buildController();
       const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(502);
+      expect(baseContext.log.warn).to.have.been.calledWithMatch(
+        sinon.match(/ambiguous status 503/),
+      );
     });
 
     it('fails closed (502) when HEAD probe aborts on timeout', async () => {
@@ -1046,6 +1059,9 @@ describe('ScrapeJobController tests', () => {
       const ctrl = await buildController();
       const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(502);
+      expect(baseContext.log.warn).to.have.been.calledWithMatch(
+        sinon.match(/TimeoutError/),
+      );
     });
 
     it('passes signal: AbortSignal.timeout + redirect: manual to fetch', async () => {
@@ -1063,6 +1079,39 @@ describe('ScrapeJobController tests', () => {
       const response = await ctrl.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
       expect(fetchStub).to.not.have.been.called;
+      expect(baseContext.log.warn).to.have.been.calledWithMatch(
+        sinon.match(/Cross-origin URL rejected/),
+      );
+    });
+
+    it('400s on cross-port URL even when hostname matches', async () => {
+      baseContext.data.urls = ['https://www.okta.com:8443/admin'];
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(400);
+      expect(fetchStub).to.not.have.been.called;
+    });
+
+    it('400s on HTTP-to-HTTPS downgrade (site is https, url is http)', async () => {
+      baseContext.data.urls = ['http://www.okta.com/page'];
+      const ctrl = await buildController();
+      const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(400);
+      expect(fetchStub).to.not.have.been.called;
+    });
+
+    it('502s on unverified (promise authoring × non-AEM_CS delivery) before any token mint', async () => {
+      mockSite.getAuthoringType = () => SiteModel.AUTHORING_TYPES.CS_CW;
+      mockSite.getDeliveryType = () => SiteModel.DELIVERY_TYPES.OTHER;
+      const retrieveStub = sinon.stub().resolves('should-not-be-called');
+      const ctrl = await buildController({ retrievePageAuthentication: retrieveStub });
+      const response = await ctrl.createScrapeJob(baseContext);
+      expect(response.status).to.equal(502);
+      expect(retrieveStub).to.not.have.been.called;
+      expect(mockSqsClient.sendMessage).to.not.have.been.called;
+      expect(baseContext.log.warn).to.have.been.calledWithMatch(
+        sinon.match(/not a verified scheme combination/),
+      );
     });
 
     it('400s on malformed URL in auth flow', async () => {

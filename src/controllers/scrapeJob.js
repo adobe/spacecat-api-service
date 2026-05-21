@@ -99,8 +99,23 @@ function ScrapeJobController(context) {
     return 'ambiguous';
   }
 
+  // Mirrors `@adobe/spacecat-shared-ims-client/src/auth.js` (the promise-
+  // exchange gate inside `retrievePageAuthentication`): the ims-client gates
+  // promise-token exchange on `(promiseTypes.includes(authoringType) ||
+  // deliveryType === AEM_CS) && authOptions.promiseToken`. Keeping this
+  // predicate identical avoids the controller and the ims-client drifting on
+  // "is this a promise-path site?" — that asymmetry is silent today (the
+  // ims-client falls through to the Secrets Manager PAT branch when no
+  // promise token is provided) but would surface for a customer who adds
+  // AEM_CS delivery on a non-promise authoring type, or vice versa.
+  // Extraction to a shared util is tracked in SITES-45204.
+  function isPromisePathSite(site) {
+    return PROMISE_BASED_TYPES.includes(site.getAuthoringType())
+      || site.getDeliveryType() === DELIVERY_TYPES.AEM_CS;
+  }
+
   async function resolvePromiseToken(site, requestContext) {
-    if (!PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
+    if (!isPromisePathSite(site)) {
       return null;
     }
     const cookieToken = getCookieValue(requestContext, 'promiseToken');
@@ -199,37 +214,38 @@ function ScrapeJobController(context) {
     }
 
     const baseURL = site.getBaseURL();
-    let siteHostname;
+    let siteOrigin;
     let previewBaseURL;
     try {
       const parsed = new URL(baseURL);
-      siteHostname = parsed.hostname;
+      siteOrigin = parsed.origin;
       previewBaseURL = `${parsed.protocol}//${parsed.hostname}`;
     } catch {
       log.error(`Site ${siteId} has invalid baseURL: ${baseURL}`);
       return internalServerError('Site has invalid baseURL');
     }
 
-    // Bind every caller URL to the site origin before we mint a credential —
-    // otherwise a caller can submit a valid siteId with urls pointing at an
-    // attacker host and harvest the resolved Authorization header (cross-
-    // origin credential exfiltration). Mirrors the preflight controller's
-    // "all urls must belong to the same website" guard, but tightened to
-    // the *site's* origin rather than just same-hostname-as-first-url.
+    // Bind every caller URL to the site's *origin* before we mint a credential
+    // — otherwise a caller can submit a valid siteId with URLs pointing at an
+    // attacker host (or an adjacent service on a different port, or the HTTP
+    // counterpart of an HTTPS site) and harvest the resolved Authorization.
+    // Comparing `URL.origin` (scheme + host + port) closes all three vectors;
+    // `.hostname` alone misses cross-port and the http/https downgrade. Other
+    // subdomains are rejected — promote them to their own site if needed.
     if (!Array.isArray(data.urls) || data.urls.length === 0) {
       return badRequest('Invalid request: urls must be a non-empty array');
     }
     for (const u of data.urls) {
-      let urlHostname;
+      let urlOrigin;
       try {
-        urlHostname = new URL(u).hostname;
+        urlOrigin = new URL(u).origin;
       } catch {
         return badRequest(`Invalid request: malformed URL: ${u}`);
       }
-      if (urlHostname !== siteHostname) {
-        log.warn(`Cross-origin URL rejected for site ${siteId}: ${u}`);
+      if (urlOrigin !== siteOrigin) {
+        log.warn(`Cross-origin URL rejected for site ${siteId}: ${u} (site origin: ${siteOrigin})`);
         return badRequest(
-          `Invalid request: every URL must belong to the site origin (${siteHostname})`,
+          `Invalid request: every URL must belong to the site origin (${siteOrigin})`,
         );
       }
     }
@@ -250,6 +266,28 @@ function ScrapeJobController(context) {
 
     let authorizationHeader;
     if (probeResult === 'auth-required') {
+      // Guard `(promise-authoring) × (non-AEM_CS delivery)`: IMS access tokens
+      // belong under `Bearer` (RFC 6750), AEM EDS endpoints expect `token <PAT>`
+      // for static-PAT auth. Minting `token <IMS-JWT>` is unverified and the
+      // E2E in PR #2455 didn't exercise it (HEAD 200/301 sites). Reject with
+      // 502 until a per-site auth-policy attribute drives scheme selection,
+      // rather than guess. Promise-authoring sites whose delivery is AEM_CS
+      // get `Bearer <IMS-token>` correctly below.
+      if (PROMISE_BASED_TYPES.includes(site.getAuthoringType())
+          && site.getDeliveryType() !== DELIVERY_TYPES.AEM_CS) {
+        log.warn(
+          `Refusing to mint Authorization for site ${siteId}: `
+          + `authoringType=${site.getAuthoringType()} × deliveryType=${site.getDeliveryType()} `
+          + 'is not a verified scheme combination',
+        );
+        return createResponse({}, 502, {
+          [HEADER_ERROR]: cleanupHeaderValue(
+            `Authentication scheme for site ${siteId} is not yet supported (`
+            + `${site.getAuthoringType()} × ${site.getDeliveryType()})`,
+          ).slice(0, 500),
+        });
+      }
+
       let promiseTokenObj;
       try {
         promiseTokenObj = await resolvePromiseToken(site, requestContext);

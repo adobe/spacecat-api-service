@@ -45,6 +45,16 @@ create-scrape-job:
         description: Site not found for the provided `metaData.siteId` (only when `options.enableAuthentication` is true).
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        description: |
+          Authentication requirement could not be verified for the site's preview origin
+          (only when `options.enableAuthentication` is true). Returned when the HEAD probe
+          against the site's preview URL fails — network/DNS error, timeout, 3xx redirect
+          (manual-redirect mode), or 5xx — or when the resolved `(authoringType, deliveryType)`
+          combination is not a verified token-scheme pairing. The caller should treat this
+          as transient (retry after backoff) or, if persistent, surface to the site owner
+          to confirm the preview origin is reachable and the site is correctly configured
+          for authenticated scraping.
 
 get-scrape-job-status:
   parameters:
