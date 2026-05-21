@@ -68,6 +68,14 @@ describe('observability-client', () => {
     expect(log.warn.calledOnce).to.be.true;
   });
 
+  it('returns null when the post succeeds but ts is absent', async () => {
+    postMessageStub.resolves({ ok: true }); // no ts field
+    const client = createObservabilitySlackClient({ token: 'xoxb-test', log });
+    const ts = await client.postMessage({ channel: 'C123', text: 'hello' });
+    expect(ts).to.be.null;
+    expect(log.warn.called).to.be.false;
+  });
+
   it('returns null without calling Slack when channel is missing', async () => {
     const client = createObservabilitySlackClient({ token: 'xoxb-test', log });
     const ts = await client.postMessage({ channel: undefined, text: 'hello' });

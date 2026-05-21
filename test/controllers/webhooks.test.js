@@ -384,6 +384,7 @@ describe('WebhooksController', () => {
       expect(response.status).to.equal(202);
       // parent posted before enqueue
       expect(postMessage.calledOnce).to.be.true;
+      expect(postMessage.calledBefore(mockSqs.sendMessage)).to.be.true;
       const postArg = postMessage.firstCall.args[0];
       expect(postArg.channel).to.equal(channel);
       expect(postArg.text).to.include(':inbox_tray:');
