@@ -1,3 +1,10 @@
+## [1.504.1](https://github.com/adobe/spacecat-api-service/compare/v1.504.0...v1.504.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **routes:** validate :jobId as UUID before reaching controllers ([#2450](https://github.com/adobe/spacecat-api-service/issues/2450)) ([80e7bd4](https://github.com/adobe/spacecat-api-service/commit/80e7bd4602ac5cf47b9d627cd6ddd7c806c9ebdb))
+
 # [1.504.0](https://github.com/adobe/spacecat-api-service/compare/v1.503.2...v1.504.0) (2026-05-20)
 
 
