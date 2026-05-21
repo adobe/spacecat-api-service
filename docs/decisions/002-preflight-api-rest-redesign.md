@@ -202,7 +202,7 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `updatedAt` | ISO 8601 | When the preflight was last updated |
 | `startedAt` | ISO 8601 | When processing began |
 | `endedAt` | ISO 8601 | When processing completed |
-| `result` | object \| null | Audit results; always stored inline in `async_jobs.result` — `null` when the job has not yet completed |
+| `result` | object \| null | Audit results; always stored inline in `async_jobs.result` — `null` when the job has not yet completed. Shape is loosely typed here; the exact structure will be defined and strongly typed during implementation. |
 | `error` | object \| null | `{ code, message }` if the job failed |
 
 **Ownership validation:** The handler loads the job by `preflightId` then verifies the stored `siteId` matches the path's `:siteId`. A mismatch returns `404 Not Found` — the same response as a non-existent `preflightId` — so callers cannot confirm a preflight exists by probing with a different site path.
@@ -289,7 +289,7 @@ polling, result storage). The `asyncJobId` is never exposed to API consumers.
 | `updatedAt` | ISO 8601 | Last update timestamp |
 | `startedAt` | ISO 8601 | When processing began |
 | `endedAt` | ISO 8601 | When processing completed |
-| `result` | object \| null | Audit result payload; null until completed |
+| `result` | object \| null | Audit result payload; `null` until completed. Shape is loosely typed here; the exact structure will be defined and strongly typed during implementation. |
 | `error` | object \| null | `{ code, message }` on failure |
 
 **`PreflightCollection` — methods:**
