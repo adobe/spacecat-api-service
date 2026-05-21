@@ -64,6 +64,7 @@ describe('routeFacsCapabilities', () => {
       expect(routeFacsCapabilities).to.have.all.keys(
         'INTERNAL_ROUTES',
         'PRODUCTS_ROUTES',
+        'PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS',
         'PRODUCTS_FACS_RESOURCE_PARAM_ALIASES',
         'FACS_NON_RESOURCE_PARAMS',
       );
@@ -125,16 +126,19 @@ describe('routeFacsCapabilities', () => {
       });
     });
 
-    it('each permission value is a "<product>/<action>" string scoped to its product', () => {
+    it('each route value is a non-empty array of "<product>/<action>" strings scoped to its product', () => {
       Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
-        Object.entries(subMap).forEach(([route, permission]) => {
-          expect(permission, `${product} ${route}`)
-            .to.be.a('string').and.match(PERMISSION_RE);
-          const [prefix] = permission.split('/');
-          expect(
-            prefix,
-            `permission '${permission}' for ${product} ${route} must be prefixed with the product code`,
-          ).to.equal(product.toLowerCase());
+        Object.entries(subMap).forEach(([route, value]) => {
+          expect(value, `${product} ${route}`).to.be.an('array').and.not.empty;
+          value.forEach((permission) => {
+            expect(permission, `${product} ${route}`)
+              .to.be.a('string').and.match(PERMISSION_RE);
+            const [prefix] = permission.split('/');
+            expect(
+              prefix,
+              `permission '${permission}' for ${product} ${route} must be prefixed with the product code`,
+            ).to.equal(product.toLowerCase());
+          });
         });
       });
     });
@@ -183,6 +187,53 @@ describe('routeFacsCapabilities', () => {
    * and the exhaustive classification invariant against every `:param` in
    * `src/routes/index.js` (see mac-state-layer.md §"Resource Identification").
    */
+  describe('PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS', () => {
+    it('keys are uppercase product codes that exist in PRODUCTS_ROUTES', () => {
+      const productKeys = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES);
+      Object.keys(routeFacsCapabilities.PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS)
+        .forEach((p) => {
+          expect(p, `product '${p}' must be uppercase`).to.equal(p.toUpperCase());
+          expect(productKeys, `product '${p}' must also exist in PRODUCTS_ROUTES`).to.include(p);
+        });
+    });
+
+    it('each product value is an array of "<product>/<action>" strings scoped to that product', () => {
+      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS)
+        .forEach(([product, perms]) => {
+          expect(perms, `${product} exempt permissions`).to.be.an('array');
+          perms.forEach((permission) => {
+            expect(permission, `${product} exempt entry`).to.match(/^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/);
+            const [prefix] = permission.split('/');
+            expect(
+              prefix,
+              `exempt permission '${permission}' for ${product} must be prefixed with the product code`,
+            ).to.equal(product.toLowerCase());
+          });
+        });
+    });
+
+    it('every exempt permission appears as a required permission on at least one route', () => {
+      // Sanity check: an exempt permission that no route lists can never
+      // fire — flag it so the config stays honest. Per the design doc:
+      // "every permission listed in PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS[P]
+      //  either appears as a required permission on some route in
+      //  PRODUCTS_ROUTES[P]".
+      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS)
+        .forEach(([product, perms]) => {
+          if (perms.length === 0) {
+            return;
+          }
+          const productMap = routeFacsCapabilities.PRODUCTS_ROUTES[product] || {};
+          const requiredAcrossRoutes = new Set(Object.values(productMap).flat());
+          const orphans = perms.filter((p) => !requiredAcrossRoutes.has(p));
+          expect(
+            orphans,
+            `${product} declares exempt permissions that no route requires: ${orphans.join(', ')}`,
+          ).to.deep.equal([]);
+        });
+    });
+  });
+
   describe('PRODUCTS_FACS_RESOURCE_PARAM_ALIASES', () => {
     let allRouteParams;
     before(() => {
