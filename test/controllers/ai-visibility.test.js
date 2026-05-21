@@ -40,6 +40,7 @@ const ALL_METHOD_NAMES = [
   'getTopicsResearch',
   'getTopicsStats',
   'getV1TopicBrandTopics',
+  'getV1TopicGapTopics',
   'getV1PromptBrandPrompts',
   'getV1PromptPromptResponse',
 ];
@@ -76,6 +77,7 @@ describe('AiVisibilityController', () => {
   let mockHandleTopicsResearchBrands;
   let mockHandleTopicsResearchSourceDomains;
   let mockHandleV1TopicBrandTopics;
+  let mockHandleV1TopicGapTopics;
   let mockHandleV1PromptBrandPrompts;
   let mockHandleV1PromptPromptResponse;
 
@@ -164,6 +166,9 @@ describe('AiVisibilityController', () => {
     mockHandleV1TopicBrandTopics = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1TopicGapTopics = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1PromptBrandPrompts = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
@@ -217,6 +222,9 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/v1/topic/brand-topics.js': {
         handleBrandTopics: mockHandleV1TopicBrandTopics,
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/gap-topics.js': {
+        handleGapTopics: mockHandleV1TopicGapTopics,
       },
       '../../src/support/ai-visibility/handlers/v1/prompt/brand-prompts.js': {
         handleBrandPrompts: mockHandleV1PromptBrandPrompts,
@@ -291,9 +299,9 @@ describe('AiVisibilityController', () => {
   });
 
   describe('returned handler object', () => {
-    it('returns an object with all 25 method names', () => {
+    it('returns an object with all 26 method names', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      expect(Object.keys(handlers)).to.have.lengthOf(25);
+      expect(Object.keys(handlers)).to.have.lengthOf(26);
       for (const name of ALL_METHOD_NAMES) {
         expect(handlers).to.have.property(name).that.is.a('function');
       }
@@ -548,6 +556,7 @@ describe('AiVisibilityController', () => {
       getTopicsResearch: mockHandleTopicsResearch,
       getTopicsStats: mockHandleTopicsStats,
       getV1TopicBrandTopics: mockHandleV1TopicBrandTopics,
+      getV1TopicGapTopics: mockHandleV1TopicGapTopics,
       getV1PromptBrandPrompts: mockHandleV1PromptBrandPrompts,
       getV1PromptPromptResponse: mockHandleV1PromptPromptResponse,
     });

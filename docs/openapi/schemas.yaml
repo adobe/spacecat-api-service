@@ -9282,6 +9282,113 @@ AiVisibilityV1TopicBrandTopicsResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1TopicGapTopicMentionsByBrand:
+  type: object
+  description: |
+    One brand's mention count within a gap-topic row, from Semrush
+    `GapTopicsResponse.Topic.MentionsByBrand` as protobuf JSON (camelCase).
+  properties:
+    brand:
+      $ref: '#/AiVisibilitySemrushBrand'
+    mentions:
+      type: integer
+      description: Number of mentions for the given brand within the topic
+  additionalProperties: true
+
+AiVisibilityV1TopicGapTopicRow:
+  type: object
+  description: |
+    One topic from Semrush `GapTopicsResponse.Topic` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    hash:
+      description: Topic identifier (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    name:
+      type: string
+    gapMentions:
+      type: array
+      description: Per-brand mention counts included in the gap for this topic
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicMentionsByBrand'
+    visibility:
+      type: integer
+      description: AI Visibility score (0–100)
+    mentions:
+      type: integer
+      description: Prompt responses mentioning the target brand in this topic
+    volume:
+      description: Topic search volume (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    difficulty:
+      type: integer
+      description: Topic difficulty (0–100)
+    volumeTrend:
+      type: array
+      description: Historical volume scores per Semrush
+      items:
+        oneOf:
+          - type: string
+          - type: integer
+    intents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1TopicGapTopicsTotalRow:
+  type: object
+  description: |
+    One row from Semrush `GapTopicsTotalsResponse.TotalByKind` as protobuf JSON (camelCase).
+  properties:
+    kind:
+      description: Gap kind (`GAP_KIND` enum name or integer)
+      oneOf:
+        - type: string
+          enum:
+            - UNSPECIFIED
+            - ALL
+            - MISSING
+            - WEAK
+            - SHARED
+            - STRONG
+            - UNIQUE
+        - type: integer
+          enum: [0, 1, 2, 3, 4, 5, 6]
+    count:
+      description: Total topics for this gap kind (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1TopicGapTopicsResponse:
+  type: object
+  description: |
+    Gap topics list from `GET /llmo/ai-visibility/v1/topic/gap-topics`.
+    Wraps Semrush v2 topic `GapTopics` / `GapTopicsTotals` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicRow'
+    totals:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicsTotalRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityV1PromptBrandPromptRow:
   type: object
   description: |

@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 25 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – 26 GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 
@@ -200,6 +200,41 @@ x-ai-vis-v1-brand-topics-visibility-to: &v1BrandTopicsVisibilityToParam
     minimum: 0
     maximum: 100
     example: 100
+
+x-ai-vis-v1-gap-topics-sort-by: &v1GapTopicsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `TOPICS_REQUEST_ORDER_BY` for Semrush v2 `GapTopicsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `VISIBILITY` (2).
+  schema:
+    oneOf:
+      - type: string
+        enum:
+          - UNSPECIFIED
+          - NAME
+          - VISIBILITY
+          - DIFFICULTY
+          - MENTIONS
+          - VOLUME
+          - MENTIONS_COUNT_BY_BRAND
+          - MENTIONED_COMPETITORS
+          - TOTAL_COMPETITOR_MENTIONS
+      - type: integer
+        enum: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    example: VISIBILITY
+
+x-ai-vis-v1-gap-topics-gap-kinds: &v1GapTopicsGapKindsParam
+  name: gapKinds
+  in: query
+  required: false
+  description: |
+    Comma-separated list of gap kinds for Semrush v2 `GapTopicsRequest.kind[]`
+    (`ALL`, `MISSING`, `WEAK`, `SHARED`, `STRONG`, `UNIQUE`). Default when omitted: `ALL`.
+  schema:
+    type: string
+    example: ALL
 
 x-ai-vis-v1-prompts-sort-by: &v1PromptsSortByParam
   name: sortBy
@@ -985,6 +1020,56 @@ ai-visibility-v1-topic-brand-topics:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1TopicBrandTopicsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-gap-topics:
+  get:
+    tags: [ai-visibility]
+    summary: Get gap topics (Topic v2 JSON)
+    description: |
+      Returns topics with the gap between the target brand and its competitors using Semrush
+      `TopicService` v2 `GapTopics` and `GapTopicsTotals`. Returns each topic as **native
+      protobuf JSON** (camelCase) including `gapMentions` per competitor brand. Supports
+      `sortBy` / `sortDirection` on `TOPICS_REQUEST_ORDER_BY` (default `TOTAL_COMPETITOR_MENTIONS` descending).
+      The response body is `{ data, totals }` plus `srFilters`; `offset` and `limit` are not
+      echoed (use the query parameters).
+
+      ### Filters
+
+      The endpoint accepts optional filters that are forwarded as Semrush QL strings on both
+      the list and totals requests:
+
+      - `searchQuery` → `dimension_filter_ql: topic CONTAINS "<searchQuery>"` (backslash and
+        double-quote characters in the value are escaped automatically).
+      - `volumeFrom` / `volumeTo` → `metric_filter_ql` on `volume`. Supplying only one bound
+        emits `volume >= volumeFrom` or `volume <= volumeTo`; supplying both emits the closed
+        range `volume >= volumeFrom AND volume <= volumeTo`. Non-negative integers only —
+        invalid values return HTTP 400 `invalid_volume`.
+      - `gapKinds` → Semrush v2 `GapTopicsRequest.kind[]` (default `ALL`).
+    operationId: getAiVisibilityV1TopicGapTopics
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1GapTopicsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap topics (v2 topic payload) retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicGapTopicsResponse'
       <<: *errorResponses
     security:
       - api_key: []

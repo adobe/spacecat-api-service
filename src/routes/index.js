@@ -654,6 +654,7 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/topics/research': aiVisibilityController.getTopicsResearch,
     'GET /llmo/ai-visibility/topics/stats': aiVisibilityController.getTopicsStats,
     'GET /llmo/ai-visibility/v1/topic/brand-topics': aiVisibilityController.getV1TopicBrandTopics,
+    'GET /llmo/ai-visibility/v1/topic/gap-topics': aiVisibilityController.getV1TopicGapTopics,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
   };
