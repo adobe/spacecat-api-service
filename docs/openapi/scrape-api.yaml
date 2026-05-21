@@ -7,9 +7,21 @@ create-scrape-job:
     summary: Create new Scrape Job
     description: |
       ⚠️ **EXPERIMENTAL / PROTOTYPE**
-      This endpoint allows you to create a new async url scrape job.
-      The job is provided a list URLs to be scraped. The URLs are fed into a queue and processed 1 at a time.
-      The returned jobId can be used to poll for the status and the results of the job.
+
+      Create a new async URL scrape job. URLs are fed into a queue and processed
+      one at a time. The returned `jobId` can be used to poll for status and results.
+
+      ### Optional per-site authentication
+
+      When `options.enableAuthentication` is `true`, the server resolves a
+      per-site `Authorization` header (HEAD probe + optional IMS promise-token
+      exchange + `retrievePageAuthentication`), injects it into `customHeaders`,
+      and strips `options.enableAuthentication` before delegating to the scrape
+      pipeline. In this mode `metaData.siteId` is required (returns `400`
+      otherwise); the site must exist and the caller must have access to it.
+
+      Callers that do not set `enableAuthentication` get the legacy behavior —
+      no site lookup, no HEAD probe, no Secrets Manager call.
     operationId: createScrapeJob
     requestBody:
       content:
@@ -27,6 +39,10 @@ create-scrape-job:
         $ref: './responses.yaml#/400-max-scrape-urls-exceeded'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        description: Caller does not have access to the specified site (only when `options.enableAuthentication` is true).
+      '404':
+        description: Site not found for the provided `metaData.siteId` (only when `options.enableAuthentication` is true).
       '500':
         $ref: './responses.yaml#/500'
 

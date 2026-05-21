@@ -17,12 +17,27 @@ import {
   accepted,
   notFound,
   badRequest,
+  forbidden,
+  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isValidUrl,
+  isValidUUID,
+  isNonEmptyObject,
   hasText,
+  DELIVERY_TYPES,
 } from '@adobe/spacecat-shared-utils';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
+import AccessControlUtil from '../support/access-control-util.js';
+import { getCookieValue, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+
+const PROMISE_BASED_TYPES = [
+  SiteModel.AUTHORING_TYPES.CS,
+  SiteModel.AUTHORING_TYPES.CS_CW,
+  SiteModel.AUTHORING_TYPES.AMS,
+];
 
 /**
  * Scrape controller. Provides methods to create, read, and fetch the result of scrape jobs.
@@ -46,6 +61,27 @@ function ScrapeJobController(context) {
 
   const MAX_JOBS_BY_BASEURL = 100;
 
+  // Duplicated from preflight controller (decision: refactor to support/scrape-auth.js
+  // as follow-up once the second consumer ships and the abstraction is justified).
+  async function checkEnableAuthentication(previewBaseURL) {
+    const headResponse = await fetch(previewBaseURL, {
+      method: 'HEAD',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return headResponse.status === 401 || headResponse.status === 403;
+  }
+
+  async function resolvePromiseToken(site, requestContext) {
+    if (!PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
+      return null;
+    }
+    const cookieToken = getCookieValue(requestContext, 'promiseToken');
+    if (hasText(cookieToken)) {
+      return { promise_token: cookieToken };
+    }
+    return getIMSPromiseToken(requestContext);
+  }
+
   function createErrorResponse(error) {
     // cleanupHeaderValue strips chars HTTP headers can't carry (CR/LF and non-ASCII
     // that would otherwise throw ERR_INVALID_CHAR). The `|| 'Internal server error'`
@@ -58,16 +94,129 @@ function ScrapeJobController(context) {
 
   /**
    * Create and start a new scrape job.
+   *
+   * When `options.enableAuthentication === true`, the per-site `Authorization`
+   * header is resolved server-side in this Lambda (HEAD probe + optional IMS
+   * promise-token exchange + `retrievePageAuthentication`), merged into
+   * `customHeaders`, and `options.enableAuthentication` is stripped before
+   * delegation. This mirrors the `createBetaPreflightJob` pattern.
+   *
+   * Why bake the header here instead of letting content-scraper resolve it:
+   * content-scraper's SQS Event Source Mappings target the unqualified Lambda
+   * ARN, so helix-universal reports `ctx.func.version === '$LATEST'`, which
+   * AWS Secrets Manager rejects as an invalid name (`ValidationException`).
+   * The spacecat-api Lambda is API-Gateway-invoked (alias-qualified `:latest`),
+   * so `retrievePageAuthentication` works correctly here.
+   *
+   * Callers that do not set `enableAuthentication` get byte-identical legacy
+   * behavior — no Site lookup, no HEAD probe, no Secrets Manager call.
+   *
    * @param {UniversalContext} requestContext - The context of the universal serverless function.
    * @param {object} requestContext.data - Parsed json request data.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createScrapeJob(requestContext) {
-    const { data } = requestContext;
+    const { data, dataAccess } = requestContext;
+
+    // Legacy fast-path: no auth resolution requested, behave exactly as before.
+    if (!isNonEmptyObject(data) || data.options?.enableAuthentication !== true) {
+      try {
+        const job = await scrapeClient.createScrapeJob(data);
+        return accepted(job);
+      } catch (error) {
+        log.error(error.message);
+        if (error?.message?.includes('Invalid request')) {
+          return badRequest(error);
+        }
+        return createErrorResponse(error);
+      }
+    }
+
+    // Auth-resolution path. metaData.siteId required — fail loud at the API edge
+    // rather than silently demote to an anonymous scrape that returns a login page.
+    const siteId = data?.metaData?.siteId;
+    if (!isValidUUID(siteId)) {
+      return badRequest(
+        'Invalid request: metaData.siteId is required when options.enableAuthentication is true',
+      );
+    }
+
+    let site;
+    try {
+      site = await dataAccess.Site.findById(siteId);
+    } catch (error) {
+      log.error(`Failed to load site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to load site');
+    }
+    if (!site) {
+      return notFound(`Site not found: ${siteId}`);
+    }
+
+    const accessControlUtil = AccessControlUtil.fromContext(requestContext);
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const baseURL = site.getBaseURL();
+    let previewBaseURL;
+    try {
+      const parsed = new URL(baseURL);
+      previewBaseURL = `${parsed.protocol}//${parsed.hostname}`;
+    } catch {
+      log.error(`Site ${siteId} has invalid baseURL: ${baseURL}`);
+      return internalServerError('Site has invalid baseURL');
+    }
+
+    let needsAuth = false;
+    try {
+      needsAuth = await checkEnableAuthentication(previewBaseURL);
+    } catch (e) {
+      // HEAD probe is best-effort; on failure delegate without header injection.
+      log.info(`HEAD probe failed for ${previewBaseURL}: ${e.message}`);
+    }
+
+    let authorizationHeader;
+    if (needsAuth) {
+      let promiseTokenObj;
+      try {
+        promiseTokenObj = await resolvePromiseToken(site, requestContext);
+      } catch (e) {
+        log.error(`Failed to resolve promise token for site ${siteId}: ${e.message}`);
+        if (e instanceof ErrorWithStatusCode) {
+          return badRequest(e.message);
+        }
+        return internalServerError('Error getting promise token');
+      }
+      try {
+        const authOptions = promiseTokenObj ? { promiseToken: promiseTokenObj } : {};
+        const accessToken = await retrievePageAuthentication(site, requestContext, authOptions);
+        const isBearer = site.getDeliveryType() === DELIVERY_TYPES.AEM_CS && !!promiseTokenObj;
+        authorizationHeader = `${isBearer ? 'Bearer' : 'token'} ${accessToken}`;
+      } catch (e) {
+        log.error(`Failed to retrieve page authentication for site ${siteId}: ${e.message}`);
+        return internalServerError('Error retrieving page authentication');
+      }
+    }
+
+    // Always strip enableAuthentication before delegation — prevents content-scraper
+    // from re-resolving the token under its unqualified SQS ESM ARN (`$LATEST` bug).
+    // `data.options` is guaranteed non-null: we only reach this point when
+    // `data.options.enableAuthentication === true` was true above.
+    const { enableAuthentication: _, ...remainingOptions } = data.options;
+
+    const delegatedData = {
+      ...data,
+      options: remainingOptions,
+      ...(authorizationHeader && {
+        customHeaders: {
+          ...(data.customHeaders || {}),
+          Authorization: authorizationHeader,
+        },
+      }),
+    };
 
     try {
-      const job = await scrapeClient.createScrapeJob(data);
-
+      const job = await scrapeClient.createScrapeJob(delegatedData);
       return accepted(job);
     } catch (error) {
       log.error(error.message);
