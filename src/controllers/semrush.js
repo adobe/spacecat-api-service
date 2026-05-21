@@ -77,6 +77,22 @@ function parsedQuery(context) {
 }
 
 /**
+ * Stable machine-readable token per HTTP status class. Clients key on
+ * `error` for UX flows (e.g. an `authenticationRequired` envelope drives a
+ * token-refresh prompt) while `message` carries the sanitized human-facing
+ * detail. Keep this map narrow — every entry is a published contract.
+ */
+function errorTokenForStatus(status) {
+  switch (status) {
+    case 401: return 'authenticationRequired';
+    case 403: return 'forbidden';
+    case 404: return 'notFound';
+    case 409: return 'conflict';
+    default: return 'invalidRequest';
+  }
+}
+
+/**
  * Unified error envelope. All client-facing messages run through
  * `cleanupHeaderValue` and are length-capped. SemrushTransportError details
  * are deliberately NOT echoed — the upstream body may contain provider
@@ -86,7 +102,7 @@ function mapError(e, log) {
   if (e instanceof ErrorWithStatusCode) {
     const status = Number.isInteger(e.status) ? e.status : 400;
     return createResponse(
-      { error: 'invalidRequest', message: safeError(e.message) },
+      { error: errorTokenForStatus(status), message: safeError(e.message) },
       status,
     );
   }

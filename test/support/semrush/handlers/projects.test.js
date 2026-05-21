@@ -20,6 +20,7 @@ import sinonChai from 'sinon-chai';
 import {
   resolveLocation,
   clearLanguageCache,
+  clearTagCache,
   handleListProjects,
   handleCreateProject,
   handleListProjectTags,
@@ -67,6 +68,7 @@ function fakeLog() {
 describe('semrush projects handler', () => {
   beforeEach(() => {
     clearLanguageCache();
+    clearTagCache();
   });
 
   describe('resolveLocation', () => {
@@ -486,6 +488,66 @@ describe('semrush projects handler', () => {
       const result = await handleListProjectTags(transport, WORKSPACE, 'proj-1');
       expect(result.items).to.have.length(1);
       expect(transport.listPromptsByTags).to.have.been.calledOnce;
+    });
+
+    it('caches within the TTL — second call does not re-query the upstream', async () => {
+      const transport = {
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 's', name: 'p', tags: [{ id: 't', name: 'T' }] }],
+        }),
+      };
+      const a = await handleListProjectTags(transport, WORKSPACE, 'proj-1');
+      const b = await handleListProjectTags(transport, WORKSPACE, 'proj-1');
+      expect(b).to.deep.equal(a);
+      // Single upstream paginated walk for both invocations.
+      expect(transport.listPromptsByTags).to.have.been.calledOnce;
+    });
+
+    it('keeps cache entries per (workspace, project) — different keys do not collide', async () => {
+      const transport = {
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 's', name: 'p', tags: [{ id: 't', name: 'T' }] }],
+        }),
+      };
+      await handleListProjectTags(transport, WORKSPACE, 'proj-A');
+      await handleListProjectTags(transport, WORKSPACE, 'proj-B');
+      // One upstream walk per distinct project — the cache must not return
+      // proj-A's tags when asked for proj-B.
+      expect(transport.listPromptsByTags).to.have.been.calledTwice;
+    });
+
+    it('evicts the oldest entry once the tag cache exceeds capacity', async () => {
+      // TAG_CACHE_MAX_ENTRIES is 512. Fill past the cap with distinct keys,
+      // then verify the first key was evicted (re-querying it re-hits upstream).
+      const transport = {
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 's', name: 'p', tags: [{ id: 't', name: 'T' }] }],
+        }),
+      };
+      // 513 distinct projects → eviction loop must run at least once after
+      // the 513th insert (when size already == MAX).
+      for (let i = 0; i < 513; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await handleListProjectTags(transport, WORKSPACE, `proj-${i}`);
+      }
+      transport.listPromptsByTags.resetHistory();
+      // proj-0 was the first inserted and should now be evicted — call must
+      // miss the cache and re-fetch.
+      await handleListProjectTags(transport, WORKSPACE, 'proj-0');
+      expect(transport.listPromptsByTags).to.have.been.called;
+    });
+
+    it('clearTagCache resets the cache so subsequent calls re-fetch', async () => {
+      const transport = {
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 's', name: 'p', tags: [{ id: 't', name: 'T' }] }],
+        }),
+      };
+      await handleListProjectTags(transport, WORKSPACE, 'proj-cleared');
+      clearTagCache();
+      transport.listPromptsByTags.resetHistory();
+      await handleListProjectTags(transport, WORKSPACE, 'proj-cleared');
+      expect(transport.listPromptsByTags).to.have.been.called;
     });
   });
 

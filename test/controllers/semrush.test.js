@@ -173,11 +173,13 @@ describe('SemrushController', () => {
       expect(resolveBrandUuidStub).to.have.been.calledOnce;
     });
 
-    it('401s when the IMS bearer is missing', async () => {
+    it('401s when the IMS bearer is missing — error token authenticationRequired', async () => {
       const ctx = fakeContext({ bearer: '' });
       const controller = SemrushController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(401);
+      const body = await readBody(resp);
+      expect(body.error).to.equal('authenticationRequired');
     });
 
     it('401s when the caller authenticated via a non-IMS mechanism', async () => {
@@ -185,6 +187,8 @@ describe('SemrushController', () => {
       const controller = SemrushController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(401);
+      const body = await readBody(resp);
+      expect(body.error).to.equal('authenticationRequired');
     });
 
     it('404s when the organization is not found', async () => {

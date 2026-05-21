@@ -37,6 +37,14 @@ const MAX_WORKSPACE_PROJECTS_PAGES = 20; // 2000 projects ceiling
 const AI_MODELS_PAGE = 100;
 const MAX_AI_MODELS_PAGES = 5;
 
+// `handleListProjectTags` paginates over every prompt in a project to
+// derive the unique tag set; if the dashboard polls this on every page
+// load that's expensive at scale. Tags change rarely (operators add/rename
+// them manually), so a short-TTL cache is a clean fit. Same pattern as the
+// language cache below.
+const TAG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const TAG_CACHE_MAX_ENTRIES = 512;
+
 /**
  * Map ISO-2 country code (uppercase) -> { locationId, locationName }. Lazy
  * normalised on first access so we don't pay the work on cold start.
@@ -426,10 +434,44 @@ export async function handleCreateProject(
 }
 
 /**
+ * Module-scoped tag cache: `${workspaceId}::${projectId}` → { items, expiresAt }.
+ * Bounded by TAG_CACHE_MAX_ENTRIES with insertion-order eviction (matches the
+ * pattern used in workspace-resolver). Exported for tests.
+ */
+const tagCache = new Map();
+
+export function clearTagCache() {
+  tagCache.clear();
+}
+
+function evictTagCacheIfNeeded() {
+  while (tagCache.size >= TAG_CACHE_MAX_ENTRIES) {
+    const oldest = tagCache.keys().next().value;
+    /* c8 ignore next 3 -- defensive: size>=MAX implies a key exists */
+    if (oldest === undefined) {
+      break;
+    }
+    tagCache.delete(oldest);
+  }
+}
+
+/**
  * GET /semrush/projects/:workspaceId/:projectId/tags — unique tag names across
- * the project's prompts. Paginated.
+ * the project's prompts. Paginated, with a short-TTL cache to keep this
+ * cheap when called from dashboard polling.
+ *
+ * Tags change rarely (an operator adds them via the Semrush UI); the cache
+ * trades a few minutes of staleness for cutting up-to-50 round-trips per
+ * page load down to one.
  */
 export async function handleListProjectTags(transport, workspaceId, projectId) {
+  const cacheKey = `${workspaceId}::${projectId}`;
+  const now = Date.now();
+  const cached = tagCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return { items: cached.items };
+  }
+
   const seen = new Map();
   let page = 1;
   const LIMIT = 200;
@@ -462,9 +504,12 @@ export async function handleListProjectTags(transport, workspaceId, projectId) {
     }
     page += 1;
   }
-  return {
-    items: Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name)),
-  };
+
+  const sorted = Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
+  tagCache.delete(cacheKey);
+  evictTagCacheIfNeeded();
+  tagCache.set(cacheKey, { items: sorted, expiresAt: now + TAG_CACHE_TTL_MS });
+  return { items: sorted };
 }
 
 /**
