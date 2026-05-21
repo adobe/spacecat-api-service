@@ -686,8 +686,8 @@ describe('llmo-query-handler', () => {
     it('reports status no_data for an upstream-404 file in multi-file mode', async () => {
       tracingFetchStub.onFirstCall().resolves(createMockResponse({ ':type': 'sheet', data: [] }));
       tracingFetchStub.onSecondCall().resolves(createMockResponse(null, false, 404));
+      mockContext.params = { siteId: TEST_SITE_ID };
       mockContext.data = { file: ['a.json', 'b.json'] };
-      delete mockContext.params.dataSource;
 
       const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
