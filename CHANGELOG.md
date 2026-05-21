@@ -1,3 +1,24 @@
+## [1.505.1](https://github.com/adobe/spacecat-api-service/compare/v1.505.0...v1.505.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* updated the customer email ([#2439](https://github.com/adobe/spacecat-api-service/issues/2439)) ([ac44fa5](https://github.com/adobe/spacecat-api-service/commit/ac44fa5b9334754ca93e68e01e920b553c2a976c))
+
+# [1.505.0](https://github.com/adobe/spacecat-api-service/compare/v1.504.1...v1.505.0) (2026-05-21)
+
+
+### Features
+
+* **slack:** add 'run cdn reports bulk publish' command ([#2458](https://github.com/adobe/spacecat-api-service/issues/2458)) ([776a2a5](https://github.com/adobe/spacecat-api-service/commit/776a2a5f47ce3a7da274dc2fea99316ff380fc64))
+
+## [1.504.1](https://github.com/adobe/spacecat-api-service/compare/v1.504.0...v1.504.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **routes:** validate :jobId as UUID before reaching controllers ([#2450](https://github.com/adobe/spacecat-api-service/issues/2450)) ([80e7bd4](https://github.com/adobe/spacecat-api-service/commit/80e7bd4602ac5cf47b9d627cd6ddd7c806c9ebdb))
+
 # [1.504.0](https://github.com/adobe/spacecat-api-service/compare/v1.503.2...v1.504.0) (2026-05-20)
 
 
