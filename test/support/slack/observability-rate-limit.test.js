@@ -39,4 +39,16 @@ describe('observability-rate-limit', () => {
     expect(shouldRateLimitSlackPost('a', 1000)).to.be.false;
     expect(shouldRateLimitSlackPost('b', 1000)).to.be.false;
   });
+
+  it('clears tracked keys when the cap is exceeded (best-effort memory bound)', () => {
+    // Seed a key whose within-window re-check would normally be suppressed.
+    expect(shouldRateLimitSlackPost('k', 1000)).to.be.false;
+    // Fill past MAX_TRACKED_KEYS (1000) with distinct keys at the same instant;
+    // the size guard clears the map on overflow.
+    for (let i = 0; i < 1000; i += 1) {
+      shouldRateLimitSlackPost(`fill#${i}`, 1000);
+    }
+    // 'k' was evicted by the clear, so a within-window re-check is allowed again.
+    expect(shouldRateLimitSlackPost('k', 1000 + 5000)).to.be.false;
+  });
 });
