@@ -146,6 +146,8 @@
     "@semantic-release/git": "10.0.1",
     "@semantic-release/npm": "^13.1.5",
     "@xmldom/xmldom": "0.9.10",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "c8": "^11.0.0",
     "chai": "6.2.2",
     "chai-as-promised": "8.0.2",

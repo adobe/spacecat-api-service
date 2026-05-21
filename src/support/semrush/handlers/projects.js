@@ -345,12 +345,15 @@ export async function handleListProjectModels(transport, workspaceId, projectId)
 /**
  * GET /semrush/workspaces/:workspaceId/projects — all projects in a workspace.
  * Used by the Brand Presence dashboard's Category filter.
+ *
+ * Response shape uses `projects` (not `items`) to match
+ * SemrushWorkspaceProjectListResponse in docs/openapi/schemas.yaml.
  */
 export async function handleListWorkspaceProjects(transport, workspaceId) {
   const resp = await transport.listWorkspaceProjects(workspaceId);
   const items = Array.isArray(resp?.items) ? resp.items : [];
   return {
-    items: items
+    projects: items
       .filter((p) => p && hasText(p.id))
       .map((p) => ({
         id: p.id,

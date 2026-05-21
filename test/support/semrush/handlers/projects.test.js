@@ -392,7 +392,7 @@ describe('semrush projects handler', () => {
         }),
       };
       const result = await handleListWorkspaceProjects(transport, WORKSPACE);
-      expect(result.items).to.deep.equal([
+      expect(result.projects).to.deep.equal([
         { id: 'p1', name: 'one', domain: 'one.com' },
         { id: 'p2', name: 'two', domain: 'two.com' },
       ]);
