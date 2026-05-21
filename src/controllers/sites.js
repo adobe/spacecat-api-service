@@ -73,7 +73,8 @@ async function buildResolveData(org, site, context) {
  * @param {object} accessControlUtil - Access control utility for admin access checks.
  * @returns {Promise<object|null>} Resolved data or null.
  */
-export async function resolveOrgDefaultSite(org, productCode, context, ctx) {
+// eslint-disable-next-line max-params
+export async function resolveOrgDefaultSite(org, productCode, context, ctx, accessControlUtil) {
   const { dataAccess: { Site }, log } = ctx;
   try {
     const defaultSiteId = org.getConfig()?.getDefaults()?.[productCode]?.siteId;
@@ -103,7 +104,7 @@ export async function resolveOrgDefaultSite(org, productCode, context, ctx) {
     }
 
     const isVisibleTier = CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
-    if (!isVisibleTier) {
+    if (!isVisibleTier && !accessControlUtil.hasAdminAccess()) {
       return null;
     }
 
@@ -1300,7 +1301,8 @@ function SitesController(ctx, log, env) {
     //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
     //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
     const resolveByOrg = async (org, failureDetails) => {
-      const defaultData = await resolveOrgDefaultSite(org, productCode, context, ctx);
+      const args = [org, productCode, context, ctx, accessControlUtil];
+      const defaultData = await resolveOrgDefaultSite(...args);
       if (defaultData) {
         return ok({ data: defaultData });
       }
