@@ -1912,10 +1912,10 @@ function PlgOnboardingController(ctx) {
             onboarding.setWaitlistReason(null);
             await onboarding.save();
             await postPlgOnboardingNotification(onboarding, context);
-            log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${siteConfig.alternateDomain}`);
+            log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${altDomain}`);
             const result = await performAsoPlgOnboarding(
               {
-                domain: siteConfig.alternateDomain,
+                domain: altDomain,
                 imsOrgId: onboarding.getImsOrgId(),
               },
               context,

@@ -7234,6 +7234,40 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.save).to.have.been.called;
       });
 
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: subpath alternate domain reaches composeBaseURL and create with full path', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'Use alternate subpath',
+            siteConfig: { alternateDomain: 'other-example.com/kings' },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        // Pin that the FULL subpath (not just hostname) flows through the bypass entry
+        // point — locks in I4 equivalence for the alternateDomain code path.
+        expect(composeBaseURLStub).to.have.been.calledWith('other-example.com/kings');
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ domain: 'other-example.com/kings' }),
+        );
+      });
+
       it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: retires current record when imsOrgId is missing', async () => {
         const record = createMockOnboarding({
           imsOrgId: '',
