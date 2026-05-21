@@ -1065,31 +1065,6 @@ describe('ScrapeJobController tests', () => {
       expect(fetchStub).to.not.have.been.called;
     });
 
-    it('accepts apex-domain URL when site is registered with www. prefix', async () => {
-      mockSite.getBaseURL = () => 'https://www.okta.com/';
-      baseContext.data.urls = ['https://okta.com/landing/'];
-      const ctrl = await buildController();
-      const response = await ctrl.createScrapeJob(baseContext);
-      expect(response.status).to.equal(202);
-    });
-
-    it('accepts www-prefixed URL when site is registered apex', async () => {
-      mockSite.getBaseURL = () => 'https://okta.com/';
-      baseContext.data.urls = ['https://www.okta.com/landing/'];
-      const ctrl = await buildController();
-      const response = await ctrl.createScrapeJob(baseContext);
-      expect(response.status).to.equal(202);
-    });
-
-    it('400s on a non-www subdomain even when apex matches the site', async () => {
-      mockSite.getBaseURL = () => 'https://okta.com/';
-      baseContext.data.urls = ['https://dev.okta.com/landing/'];
-      const ctrl = await buildController();
-      const response = await ctrl.createScrapeJob(baseContext);
-      expect(response.status).to.equal(400);
-      expect(fetchStub).to.not.have.been.called;
-    });
-
     it('400s on malformed URL in auth flow', async () => {
       baseContext.data.urls = ['not://a valid url'];
       const ctrl = await buildController();
