@@ -56,16 +56,19 @@ const VALIDATION_ERROR_NAME = 'ValidationError';
  * Suggestions controller.
  * @param {object} ctx - Context of the request.
  * @param {SQS} sqs - SQS client.
+ * @param {SNS|object} snsOrEnv - SNS client or env (backward compatibility).
  * @param env
  * @returns {object} Suggestions controller.
  * @constructor
  */
-function SuggestionsController(ctx, sqs, env) {
+function SuggestionsController(ctx, sqs, snsOrEnv, envMaybe) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
 
   const { dataAccess } = ctx;
+  const sns = typeof snsOrEnv?.publish === 'function' ? snsOrEnv : null;
+  const env = (sns ? envMaybe : snsOrEnv) || {};
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -1097,14 +1100,29 @@ function SuggestionsController(ctx, sqs, env) {
       if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
         return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
       }
-      const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
-      // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
-      await sqs.sendMessage(queueUrl, {
+      const {
+        AUTOFIX_JOBS_QUEUE: queueUrl,
+        AUTOFIX_JOBS_TOPIC_ARN: topicArn,
+      } = env;
+      const message = {
         siteId,
         action: 'assess-urls',
         pages,
         ...(precheckOnly === true && { precheckOnly: true }),
-      });
+      };
+      // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
+      await sqs.sendMessage(queueUrl, message);
+      if (sns && hasText(topicArn)) {
+        try {
+          await sns.publish(topicArn, message);
+        } catch (e) {
+          context.log.warn('Failed to publish assess-urls message to SNS, continuing with SQS delivery only', {
+            topicArn,
+            queueUrl,
+            error: e?.message,
+          });
+        }
+      }
       return accepted({ message: 'Assess-urls job queued', siteId, pagesCount: pages.length });
     }
 
@@ -1287,7 +1305,10 @@ function SuggestionsController(ctx, sqs, env) {
       },
     };
     response.suggestions.sort((a, b) => a.index - b.index);
-    const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
+    const {
+      AUTOFIX_JOBS_QUEUE: queueUrl,
+      AUTOFIX_JOBS_TOPIC_ARN: topicArn,
+    } = env;
 
     // profile.email is the IMS user ID (e.g. 82521D...@AdobeOrg), not an actual email address.
     const { profile } = context.attributes.authInfo;
@@ -1317,13 +1338,17 @@ function SuggestionsController(ctx, sqs, env) {
         }) => sendAutofixMessage(
           sqs,
           queueUrl,
+          sns,
+          topicArn,
           siteId,
           opportunityId,
+          opportunity.getType(),
           groupedSuggestions.map((s) => s.getId()),
           promiseTokenResponse,
           variations,
           action,
           customData,
+          context.log,
           {
             ...autofixOptions(url),
             ...(isObject(relationshipContext) && { relationshipContext }),
@@ -1334,13 +1359,17 @@ function SuggestionsController(ctx, sqs, env) {
       await sendAutofixMessage(
         sqs,
         queueUrl,
+        sns,
+        topicArn,
         siteId,
         opportunityId,
+        opportunity.getType(),
         succeededSuggestions.map((s) => s.getId()),
         promiseTokenResponse,
         variations,
         action,
         customData,
+        context.log,
         autofixOptions(requestUrl),
       );
     }

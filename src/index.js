@@ -41,6 +41,7 @@ import { traceIdResponseWrapper } from './support/trace-id-response-wrapper.js';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
+import sns from './support/sns.js';
 import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
 
@@ -221,7 +222,12 @@ async function run(request, context) {
     const apiKeyController = ApiKeyController(context);
     const sitesAuditsToggleController = SitesAuditsToggleController(context);
     const opportunitiesController = OpportunitiesController(context);
-    const suggestionsController = SuggestionsController(context, context.sqs, context.env);
+    const suggestionsController = SuggestionsController(
+      context,
+      context.sqs,
+      context.sns,
+      context.env,
+    );
     const brandsController = BrandsController(context, log, context.env);
     const paidController = PaidController(context);
     const topPaidOpportunitiesController = TopPaidOpportunitiesController(context, context.env);
@@ -416,6 +422,7 @@ export const main = wrappedMain
   .with(multipartFormData)
   .with(enrichPathInfo)
   .with(sqs)
+  .with(sns)
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
