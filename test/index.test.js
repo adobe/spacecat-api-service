@@ -346,6 +346,17 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
   });
 
+  it('rejects bare /tools/scrape/jobs/by-base-url misroute with invalid jobId', async () => {
+    context.pathInfo.suffix = '/tools/scrape/jobs/by-base-url';
+
+    request = new Request(`${baseUrl}/tools/scrape/jobs/by-base-url`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
+  });
+
   it('rejects bare /tools/import/jobs/by-date-range misroute with invalid jobId', async () => {
     context.pathInfo.suffix = '/tools/import/jobs/by-date-range';
 
