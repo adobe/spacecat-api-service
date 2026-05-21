@@ -17,6 +17,11 @@ import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
 import { CDN_TYPES as LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
+import {
+  EMPTY_SHEET_PAYLOAD,
+  NOT_PROVISIONED_HEADER,
+  NOT_PROVISIONED_VALUE,
+} from '../../../src/controllers/llmo/llmo-source.js';
 import { UnauthorizedProductError } from '../../../src/support/errors.js';
 
 use(sinonChai);
@@ -3761,11 +3766,13 @@ describe('LlmoController', () => {
       const result = await cacheController.queryFiles(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(result.headers.get('x-llmo-data-status')).to.equal('not-provisioned');
+      expect(result.headers.get(NOT_PROVISIONED_HEADER)).to.equal(NOT_PROVISIONED_VALUE);
       const body = await result.json();
-      expect(body).to.deep.equal({
-        total: 0, offset: 0, limit: 0, data: [], ':type': 'sheet',
-      });
+      expect(body).to.deep.equal(EMPTY_SHEET_PAYLOAD);
+      expect(mockLog.info).to.have.been.calledWith(
+        'llmo_data_not_provisioned',
+        sinon.match({ event: 'llmo_data_not_provisioned' }),
+      );
     });
   });
 
