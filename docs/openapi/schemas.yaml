@@ -9498,6 +9498,98 @@ AiVisibilityV1PromptBrandPromptsResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1PromptGapPromptRow:
+  type: object
+  description: |
+    One prompt from Semrush v2 `GapPromptsResponse.PromptEntry` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      description: Prompt hash (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    briefResponse:
+      type: string
+    gapMentions:
+      type: array
+      description: Per-brand mention counts included in the gap for this prompt
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicMentionsByBrand'
+    mentionedBrandsCount:
+      type: integer
+    sourcesCount:
+      type: integer
+    serpId:
+      type: string
+    topicId:
+      description: Topic identifier (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    topicName:
+      type: string
+    topicVolume:
+      description: Topic search volume (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1PromptGapPromptsTotalRow:
+  type: object
+  description: |
+    One row from Semrush `GapPromptsTotalsResponse.TotalByKind` as protobuf JSON (camelCase).
+    Structurally identical to `AiVisibilityV1TopicGapTopicsTotalRow`.
+  properties:
+    kind:
+      description: Gap kind (`GAP_KIND` enum name or integer)
+      oneOf:
+        - type: string
+          enum:
+            - UNSPECIFIED
+            - ALL
+            - MISSING
+            - WEAK
+            - SHARED
+            - STRONG
+            - UNIQUE
+        - type: integer
+          enum: [0, 1, 2, 3, 4, 5, 6]
+    count:
+      description: Total prompts for this gap kind (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1PromptGapPromptsResponse:
+  type: object
+  description: |
+    Gap prompts list from `GET /llmo/ai-visibility/v1/prompt/gap-prompts`.
+    Wraps Semrush v2 prompt `GapPrompts` / `GapPromptsTotals` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptGapPromptRow'
+    totals:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptGapPromptsTotalRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityCompetitorsMetrics:
   type: object
   description: Competitor comparison time-series response

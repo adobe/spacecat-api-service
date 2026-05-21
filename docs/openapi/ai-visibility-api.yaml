@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 26 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – 27 GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 
@@ -256,6 +256,37 @@ x-ai-vis-v1-prompts-sort-by: &v1PromptsSortByParam
       - type: integer
         enum: [0, 1, 2, 3, 4, 5]
     example: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-v1-gap-prompts-sort-by: &v1GapPromptsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `GAP_PROMPTS_REQUEST_ORDER_BY` for Semrush v2 `GapPromptsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `MENTIONED_BRANDS_COUNT` (2).
+  schema:
+    oneOf:
+      - type: string
+        enum:
+          - UNSPECIFIED
+          - PROMPT
+          - MENTIONED_BRANDS_COUNT
+          - SOURCES_COUNT
+          - TOPIC_VOLUME
+      - type: integer
+        enum: [0, 1, 2, 3, 4]
+    example: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-v1-gap-prompts-source-domain: &v1GapPromptsSourceDomainParam
+  name: sourceDomain
+  in: query
+  required: false
+  description: |
+    Optional filter restricting gap prompts to the given source domain.
+    Forwarded as the native `GapPromptsRequest.source_domain` proto field (not a QL filter).
+  schema:
+    type: string
+    example: nytimes.com
 
 x-ai-vis-sort-direction: &sortDirectionParam
   name: sortDirection
@@ -1104,6 +1135,51 @@ ai-visibility-v1-prompt-brand-prompts:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1PromptBrandPromptsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-gap-prompts:
+  get:
+    tags: [ai-visibility]
+    summary: Get gap prompts (Prompt v2 JSON)
+    description: |
+      Returns prompts with the gap between the target brand and its competitors using Semrush
+      `PromptService` v2 `GapPrompts` and `GapPromptsTotals`. Returns each row as **native
+      protobuf JSON** (camelCase) including `gapMentions` per competitor brand. Supports
+      `sortBy` / `sortDirection` on `GAP_PROMPTS_REQUEST_ORDER_BY` (default
+      `MENTIONED_BRANDS_COUNT` descending). The response body is `{ data, totals }` plus
+      `srFilters`; `offset` and `limit` are not echoed (use the query parameters).
+
+      ### Filters
+
+      The endpoint accepts the following optional filters, forwarded as native protobuf fields
+      on both the list and totals requests (no QL filters):
+
+      - `gapKinds` → Semrush v2 `GapPromptsRequest.kinds[]` (default `ALL`).
+      - `topicId` → native `GapPromptsRequest.topic_hash` (uint64) — narrows results to a single topic.
+      - `sourceDomain` → native `GapPromptsRequest.source_domain` — narrows results to a single source domain.
+    operationId: getAiVisibilityV1PromptGapPrompts
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1GapPromptsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *topicIdOptionalParam
+      - *v1GapPromptsSourceDomainParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap prompts (v2 prompt payload) retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptGapPromptsResponse'
       <<: *errorResponses
     security:
       - api_key: []
