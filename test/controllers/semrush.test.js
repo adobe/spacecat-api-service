@@ -1,0 +1,318 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { use, expect } from 'chai';
+import chaiAsPromised from 'chai-as-promised';
+import sinon from 'sinon';
+import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
+
+use(chaiAsPromised);
+use(sinonChai);
+
+const ORG = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const BRAND = '11111111-2222-3333-4444-555555555555';
+const WORKSPACE = 'workspace-1';
+
+function fakeLog() {
+  return {
+    info: sinon.stub(), warn: sinon.stub(), error: sinon.stub(), debug: sinon.stub(),
+  };
+}
+
+function fakeContext({
+  bearer = 'ims-token-123',
+  params = {},
+  data = undefined,
+} = {}) {
+  return {
+    env: {},
+    pathInfo: {
+      headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+    },
+    dataAccess: {},
+    params: { spaceCatId: ORG, brandId: BRAND, ...params },
+    data,
+  };
+}
+
+async function readBody(response) {
+  // Helix Lambda Response carries the body as a stream we want to JSON.parse.
+  if (typeof response.text === 'function') {
+    const text = await response.text();
+    if (!text) {
+      return null;
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+  return null;
+}
+
+describe('SemrushController', () => {
+  const handlers = {
+    handleListPrompts: sinon.stub(),
+    handleCreatePrompts: sinon.stub(),
+    handleUpdatePrompt: sinon.stub(),
+    handleBulkDeletePrompts: sinon.stub(),
+    handleListProjects: sinon.stub(),
+    handleCreateProject: sinon.stub(),
+    handleListProjectTags: sinon.stub(),
+    handleListProjectModels: sinon.stub(),
+    handleListWorkspaceProjects: sinon.stub(),
+  };
+  let resolveWorkspaceIdStub;
+  let createTransportStub;
+  let MockTransportError;
+  let SemrushController;
+
+  beforeEach(async () => {
+    Object.values(handlers).forEach((s) => s.reset());
+    resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE);
+    createTransportStub = sinon.stub().returns({ name: 'transport' });
+    MockTransportError = class extends Error {
+      constructor(status, message, body) {
+        super(message);
+        this.status = status;
+        this.body = body;
+      }
+    };
+    SemrushController = (await esmock(
+      '../../src/controllers/semrush.js',
+      {
+        '../../src/support/semrush/rest-transport.js': {
+          createSemrushTransport: createTransportStub,
+          SemrushTransportError: MockTransportError,
+        },
+        '../../src/support/semrush/workspace-resolver.js': {
+          resolveWorkspaceId: resolveWorkspaceIdStub,
+        },
+        '../../src/support/semrush/handlers/prompts.js': {
+          handleListPrompts: handlers.handleListPrompts,
+          handleCreatePrompts: handlers.handleCreatePrompts,
+          handleUpdatePrompt: handlers.handleUpdatePrompt,
+          handleBulkDeletePrompts: handlers.handleBulkDeletePrompts,
+        },
+        '../../src/support/semrush/handlers/projects.js': {
+          handleListProjects: handlers.handleListProjects,
+          handleCreateProject: handlers.handleCreateProject,
+          handleListProjectTags: handlers.handleListProjectTags,
+          handleListProjectModels: handlers.handleListProjectModels,
+          handleListWorkspaceProjects: handlers.handleListWorkspaceProjects,
+        },
+      },
+    )).default;
+  });
+
+  it('throws when constructed without a context or log', () => {
+    expect(() => SemrushController(null, fakeLog())).to.throw(/Context required/);
+    expect(() => SemrushController(fakeContext(), null)).to.throw(/Log required/);
+  });
+
+  describe('listPrompts', () => {
+    it('200s on success with the handler payload', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const ctx = fakeContext();
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listPrompts(ctx);
+      expect(resp.status).to.equal(200);
+      const body = await readBody(resp);
+      expect(body).to.deep.include({ total: 0, page: 1 });
+      expect(createTransportStub).to.have.been.calledWith({ env: {}, imsToken: 'ims-token-123' });
+      expect(resolveWorkspaceIdStub).to.have.been.calledOnceWithExactly(ctx, ORG);
+    });
+
+    it('400s when the IMS bearer is missing', async () => {
+      const ctx = fakeContext({ bearer: '' });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listPrompts(ctx);
+      expect(resp.status).to.equal(400);
+    });
+
+    it('404s when the organization has no semrush_workspace_id', async () => {
+      resolveWorkspaceIdStub.resolves(null);
+      const ctx = fakeContext();
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listPrompts(ctx);
+      expect(resp.status).to.equal(404);
+    });
+
+    it('502 envelope when handler throws SemrushTransportError', async () => {
+      handlers.handleListPrompts.rejects(new MockTransportError(503, 'down', { code: 'x' }));
+      const ctx = fakeContext();
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listPrompts(ctx);
+      expect(resp.status).to.equal(503);
+      const body = await readBody(resp);
+      expect(body.error).to.equal('semrushUpstreamError');
+      expect(body.status).to.equal(503);
+    });
+
+    it('500s on unexpected handler errors', async () => {
+      handlers.handleListPrompts.rejects(new Error('something bad'));
+      const ctx = fakeContext();
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listPrompts(ctx);
+      expect(resp.status).to.equal(500);
+    });
+
+    it('parses semrushLocationId from query string', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const ctx = fakeContext();
+      ctx.request = { url: 'https://api/v2/orgs/x/brands/y/semrush/prompts?semrushLocationId=2840&language=en' };
+      const controller = SemrushController(ctx, fakeLog());
+      await controller.listPrompts(ctx);
+      const query = handlers.handleListPrompts.firstCall.args[4];
+      expect(query.semrushLocationId).to.equal(2840);
+      expect(query.language).to.equal('en');
+    });
+  });
+
+  describe('createPrompts', () => {
+    it('200s and delegates to handler', async () => {
+      handlers.handleCreatePrompts.resolves({ created: [], skipped: [], failed: [] });
+      const ctx = fakeContext({ data: { prompts: [{ text: 't' }] } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.createPrompts(ctx);
+      expect(resp.status).to.equal(200);
+    });
+  });
+
+  describe('updatePrompt', () => {
+    it('400s when promptId path param is missing', async () => {
+      const ctx = fakeContext({ params: { spaceCatId: ORG, brandId: BRAND } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.updatePrompt(ctx);
+      expect(resp.status).to.equal(400);
+    });
+
+    it('returns the handler status + body verbatim', async () => {
+      handlers.handleUpdatePrompt.resolves({ status: 200, body: { id: 'new' } });
+      const ctx = fakeContext({ params: { promptId: 'logical-1' } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.updatePrompt(ctx);
+      expect(resp.status).to.equal(200);
+      const body = await readBody(resp);
+      expect(body.id).to.equal('new');
+    });
+  });
+
+  describe('bulkDeletePrompts', () => {
+    it('200s and delegates', async () => {
+      handlers.handleBulkDeletePrompts.resolves({ deleted: 3, failed: [] });
+      const ctx = fakeContext({ data: { semrushIds: [] } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.bulkDeletePrompts(ctx);
+      expect(resp.status).to.equal(200);
+    });
+  });
+
+  describe('listProjects', () => {
+    it('200s with the handler payload', async () => {
+      handlers.handleListProjects.resolves({ items: [] });
+      const ctx = fakeContext();
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listProjects(ctx);
+      expect(resp.status).to.equal(200);
+    });
+  });
+
+  describe('createProject', () => {
+    it('returns the handler status + body verbatim (201 happy)', async () => {
+      handlers.handleCreateProject.resolves({
+        status: 201,
+        body: {
+          semrushProjectId: 'new-1',
+          semrushLocationId: 2840,
+          language: 'en',
+          name: 'X',
+          workspaceId: WORKSPACE,
+        },
+      });
+      const ctx = fakeContext({ data: { name: 'X', market: 'US', language: 'en' } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.createProject(ctx);
+      expect(resp.status).to.equal(201);
+      const body = await readBody(resp);
+      expect(body.semrushProjectId).to.equal('new-1');
+    });
+
+    it('returns 409 envelope from handler', async () => {
+      handlers.handleCreateProject.resolves({
+        status: 409,
+        body: { error: 'sliceExists' },
+      });
+      const ctx = fakeContext();
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.createProject(ctx);
+      expect(resp.status).to.equal(409);
+    });
+  });
+
+  describe('listProjectTags', () => {
+    it('400s on missing workspaceId/projectId path params', async () => {
+      const ctx = fakeContext({ params: { spaceCatId: ORG, brandId: BRAND } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listProjectTags(ctx);
+      expect(resp.status).to.equal(400);
+    });
+
+    it('200s on success', async () => {
+      handlers.handleListProjectTags.resolves({ items: [{ id: 't', name: 'T' }] });
+      const ctx = fakeContext({ params: { workspaceId: 'w', projectId: 'p' } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listProjectTags(ctx);
+      expect(resp.status).to.equal(200);
+    });
+  });
+
+  describe('listProjectModels', () => {
+    it('200s with handler payload', async () => {
+      handlers.handleListProjectModels.resolves({ models: [] });
+      const ctx = fakeContext({ params: { workspaceId: 'w', projectId: 'p' } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listProjectModels(ctx);
+      expect(resp.status).to.equal(200);
+    });
+
+    it('400s on missing path params', async () => {
+      const ctx = fakeContext({ params: { spaceCatId: ORG, brandId: BRAND } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listProjectModels(ctx);
+      expect(resp.status).to.equal(400);
+    });
+  });
+
+  describe('listWorkspaceProjects', () => {
+    it('200s with handler payload', async () => {
+      handlers.handleListWorkspaceProjects.resolves({ items: [] });
+      const ctx = fakeContext({ params: { workspaceId: 'w' } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listWorkspaceProjects(ctx);
+      expect(resp.status).to.equal(200);
+    });
+
+    it('400s on missing path param', async () => {
+      const ctx = fakeContext({ params: { spaceCatId: ORG, brandId: BRAND } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listWorkspaceProjects(ctx);
+      expect(resp.status).to.equal(400);
+    });
+  });
+});

@@ -104,6 +104,7 @@ import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
 import AiVisibilityController from './controllers/ai-visibility.js';
+import SemrushController from './controllers/semrush.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 
@@ -261,6 +262,7 @@ async function run(request, context) {
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
     const aiVisibilityController = AiVisibilityController(context, log, context.env);
+    const semrushController = SemrushController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -317,6 +319,7 @@ async function run(request, context) {
       webhooksController,
       aiVisibilityController,
       fanoutReportController,
+      semrushController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
