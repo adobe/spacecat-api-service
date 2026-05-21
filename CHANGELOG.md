@@ -1,3 +1,10 @@
+## [1.505.1](https://github.com/adobe/spacecat-api-service/compare/v1.505.0...v1.505.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* updated the customer email ([#2439](https://github.com/adobe/spacecat-api-service/issues/2439)) ([ac44fa5](https://github.com/adobe/spacecat-api-service/commit/ac44fa5b9334754ca93e68e01e920b553c2a976c))
+
 # [1.505.0](https://github.com/adobe/spacecat-api-service/compare/v1.504.1...v1.505.0) (2026-05-21)
 
 
