@@ -30,6 +30,63 @@ create-scrape-job:
       '500':
         $ref: './responses.yaml#/500'
 
+create-scrape-authenticated-job:
+  post:
+    tags:
+      - scrape
+    security:
+      - api_key: [ ]
+    summary: Create new authenticated Scrape Job
+    description: |
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+
+      Same as `POST /tools/scrape/jobs`, but the per-site `Authorization` header
+      is resolved server-side and injected into `customHeaders` before the job is
+      queued. Intended for sites whose pages require an `Authorization` header
+      (e.g. Okta) that cannot be carried by the standard browser flow.
+
+      The server:
+        1. Looks up the site by `metaData.siteId` (required, UUID).
+        2. Probes the site with a `HEAD` request. If the response is 401/403:
+           - For promise-based authoring types (CS, CS_CW, AMS) it resolves a
+             promise token from the `promiseToken` cookie or by IMS exchange.
+           - It calls `retrievePageAuthentication` and constructs an
+             `Authorization` header (`Bearer ...` for AEM_CS with promise token,
+             `token ...` otherwise).
+           - The resolved header is merged into the request's `customHeaders`.
+        3. Strips `options.enableAuthentication` from the delegated payload so
+           the downstream worker does not attempt to re-resolve the token.
+        4. Delegates to the same scrape pipeline used by `POST /tools/scrape/jobs`.
+
+      If the `HEAD` probe returns 2xx (no auth needed), the request is delegated
+      transparently with no header injection — safe to use for sites that may or
+      may not require authentication.
+    operationId: createScrapeAuthenticatedJob
+    requestBody:
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/AuthenticatedScrapeRequest'
+    responses:
+      '202':
+        description: Job accepted
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CreateAsyncJobAcceptedResponse'
+      '400':
+        description: |
+          Invalid request — missing or invalid `metaData.siteId`, malformed
+          payload, or rejected by the scrape pipeline validator.
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Caller does not have access to the specified site.
+      '404':
+        description: Site not found for the provided `metaData.siteId`.
+      '500':
+        $ref: './responses.yaml#/500'
+
 get-scrape-job-status:
   parameters:
     - $ref: './parameters.yaml#/jobId'
