@@ -335,6 +335,39 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Execution Id is invalid. Please provide a valid UUID.');
   });
 
+  it('rejects bare /tools/scrape/jobs/by-url misroute with invalid jobId', async () => {
+    context.pathInfo.suffix = '/tools/scrape/jobs/by-url';
+
+    request = new Request(`${baseUrl}/tools/scrape/jobs/by-url`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('rejects bare /tools/scrape/jobs/by-base-url misroute with invalid jobId', async () => {
+    context.pathInfo.suffix = '/tools/scrape/jobs/by-base-url';
+
+    request = new Request(`${baseUrl}/tools/scrape/jobs/by-base-url`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('rejects bare /tools/import/jobs/by-date-range misroute with invalid jobId', async () => {
+    context.pathInfo.suffix = '/tools/import/jobs/by-date-range';
+
+    request = new Request(`${baseUrl}/tools/import/jobs/by-date-range`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
+  });
+
   it('handles dynamic route errors', async () => {
     context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
 
