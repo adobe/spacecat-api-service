@@ -54,6 +54,10 @@ import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { cleanupPlgSiteSuggestionsAndFixes } from './plg-onboarding-cleanup.js';
 
+function isFromAsoUI(context) {
+  return context?.pathInfo?.headers?.['x-client-type'] === 'sites-optimizer-ui';
+}
+
 const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const ASO_TIER = EntitlementModel.TIERS.PLG;
@@ -704,6 +708,9 @@ async function performAsoPlgOnboarding({
     }
   }
   onboarding.setUpdatedBy(callerIdentity);
+  if (isFromAsoUI(context)) {
+    onboarding.setCreatedBy(callerIdentity);
+  }
 
   // Guard: only one domain per IMS org can be onboarded
   const existingRecords = await PlgOnboarding.allByImsOrgId(imsOrgId);

@@ -142,11 +142,19 @@ function PreflightController(ctx, log, env) {
     return configuration.isHandlerEnabledForSite(type, site);
   }
 
-  async function checkEnableAuthentication(previewBaseURL) {
-    const headResponse = await fetch(previewBaseURL, {
+  /**
+   * Checks if authentication is enabled for a given URL
+   * @param {string} url - The URL to check
+   * @returns {Promise<boolean>} True if authentication is enabled, false otherwise
+   */
+  async function checkEnableAuthentication(url) {
+    const headResponse = await fetch(url, {
       method: 'HEAD',
       headers: { 'Content-Type': 'application/json' },
     });
+
+    log.debug(`checkEnableAuthentication for ${url} returned status: ${headResponse.status}`);
+
     return headResponse.status === 401 || headResponse.status === 403;
   }
 
@@ -169,6 +177,7 @@ function PreflightController(ctx, log, env) {
 
   const createPreflightJob = async (context) => {
     logTraceIdHeader(context, '[preflight]');
+    log.debug('createPreflightJob started');
     const { data } = context;
     try {
       validateRequestData(data);
@@ -180,18 +189,22 @@ function PreflightController(ctx, log, env) {
     try {
       const isDev = env.AWS_ENV === 'dev';
       const step = data.step.toLowerCase();
-      let site;
       const url = new URL(data.urls[0]);
       const previewBaseURL = `${url.protocol}//${url.hostname}`;
+
+      let site;
       if (isValidUUID(data.siteId)) {
         site = await dataAccess.Site.findById(data.siteId);
       } else {
         site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
       }
 
+      log.debug(`createPreflightJob url: ${url}, siteId: ${data.siteId}, step: ${step}`);
+
       if (!site) {
         throw new Error(`No site found for preview URL: ${previewBaseURL}`);
       }
+
       const enableAuthentication = await checkEnableAuthentication(previewBaseURL);
 
       let promiseTokenResponse;
@@ -206,15 +219,19 @@ function PreflightController(ctx, log, env) {
       }
 
       // Create a new async job
+      const jobPayload = {
+        siteId: site.getId(),
+        urls: data.urls,
+        step,
+        enableAuthentication,
+      };
+
+      log.debug(`createPreflightJob creating async job with payload: ${JSON.stringify(jobPayload)}`);
+
       const job = await dataAccess.AsyncJob.create({
         status: 'IN_PROGRESS',
         metadata: {
-          payload: {
-            siteId: site.getId(),
-            urls: data.urls,
-            step,
-            enableAuthentication,
-          },
+          payload: jobPayload,
           jobType: 'preflight',
           tags: ['preflight'],
         },
@@ -226,13 +243,19 @@ function PreflightController(ctx, log, env) {
           jobId: job.getId(),
           siteId: site.getId(),
           type: 'preflight',
+          ...(ctx.traceId && { traceId: ctx.traceId }),
         };
+
+        // remove the promiseToken from the message if it exists from the debug log
+        log.debug(`createPreflightJob sending message to SQS with payload: ${JSON.stringify(sqsMessage)}`);
+
         if (PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
           sqsMessage.promiseToken = promiseTokenResponse;
         }
+
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);
       } catch (error) {
-        log.error(`Failed to send message to SQS: ${error.message}`);
+        log.error(`Failed to send message to SQS: ${error.message}, rolling back job ${job.getId()}`);
         // roll back the job
         await job.remove();
         throw new Error(`Failed to send message to SQS: ${error.message}`);
@@ -258,6 +281,8 @@ function PreflightController(ctx, log, env) {
    * @returns {Promise<Object>} The HTTP response object
    */
   const getPreflightJobStatusAndResult = async (context) => {
+    log.debug(`getPreflightJobStatusAndResult for jobId: ${context.params?.jobId}`);
+
     const jobId = context.params?.jobId;
 
     if (!isValidUUID(jobId)) {
@@ -272,6 +297,8 @@ function PreflightController(ctx, log, env) {
         log.error(`Job with ID ${jobId} not found`);
         return notFound(`Job with ID ${jobId} not found`);
       }
+
+      log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
 
       return ok({
         jobId: job.getId(),
