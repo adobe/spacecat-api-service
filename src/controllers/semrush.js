@@ -140,13 +140,13 @@ function SemrushController(context, log, env) {
 
   /**
    * Verifies the caller has access to the addressed org AND the brand belongs
-   * to that org. For brand-scoped endpoints (all 9 today). When
-   * `requireWorkspace` is true (default), also resolves the org's Semrush
-   * workspace and 404s if missing.
+   * to that org, then resolves the org's Semrush workspace and 404s if
+   * missing. All 9 endpoints today are brand-scoped + workspace-scoped, so
+   * the shape is uniform.
    *
-   * Returns either `{ error: Response }` or `{ brandUuid, workspaceId? }`.
+   * Returns either `{ error: Response }` or `{ brandUuid, workspaceId }`.
    */
-  async function authorize(ctx, { requireWorkspace = true } = {}) {
+  async function authorize(ctx) {
     const spaceCatId = ctx?.params?.spaceCatId;
     const brandId = ctx?.params?.brandId;
     const Organization = ctx?.dataAccess?.Organization;
@@ -177,9 +177,6 @@ function SemrushController(context, log, env) {
     const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
     if (!brandUuid) {
       return { error: notFound(`Brand not found for organization: ${brandId}`) };
-    }
-    if (!requireWorkspace) {
-      return { brandUuid };
     }
     const workspaceId = await resolveWorkspaceId(ctx, spaceCatId);
     if (!hasText(workspaceId)) {

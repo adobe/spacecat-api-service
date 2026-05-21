@@ -48,9 +48,11 @@ function evictIfNeeded() {
   // Map iteration order is insertion order; the first key is the oldest.
   while (cache.size >= MAX_ENTRIES) {
     const oldest = cache.keys().next().value;
+    /* c8 ignore start -- defensive: cache.size>=MAX_ENTRIES implies a key exists */
     if (oldest === undefined) {
       break;
     }
+    /* c8 ignore stop */
     cache.delete(oldest);
   }
 }

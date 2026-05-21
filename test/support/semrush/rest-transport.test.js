@@ -134,6 +134,14 @@ describe('Semrush REST transport', () => {
       expect(url).to.include('pid%3Fwith%23hash');
     });
 
+    it('re-throws non-abort fetch errors verbatim (network error, not timeout)', async () => {
+      const netErr = Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' });
+      fetchStub.rejects(netErr);
+      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      await expect(transport.publishProject(WORKSPACE_ID, PROJECT_ID))
+        .to.be.rejectedWith(/ECONNRESET/);
+    });
+
     it('aborts with SemrushTransportError(504) on fetch timeout', async () => {
       // fetch never resolves; the transport's AbortController should fire.
       fetchStub.callsFake((_url, init) => new Promise((resolve, reject) => {

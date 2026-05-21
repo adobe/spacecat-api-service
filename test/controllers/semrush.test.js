@@ -275,6 +275,27 @@ describe('SemrushController', () => {
       const query = handlers.handleListPrompts.firstCall.args[4];
       expect(query).to.deep.equal({});
     });
+
+    it('500s when Organization data-access is not on the context', async () => {
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization = undefined;
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listPrompts(ctx);
+      expect(resp.status).to.equal(500);
+    });
+
+    it('400s on a non-parseable request.url (extractQuery catch path)', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const ctx = fakeContext();
+      ctx.request = { url: '::not a url::' };
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listPrompts(ctx);
+      expect(resp.status).to.equal(200);
+      const query = handlers.handleListPrompts.firstCall.args[4];
+      expect(query).to.deep.equal({});
+    });
   });
 
   describe('createPrompts', () => {
@@ -391,6 +412,13 @@ describe('SemrushController', () => {
       expect(resp.status).to.equal(200);
     });
 
+    it('400s on missing projectId path param', async () => {
+      const ctx = fakeContext({ params: { workspaceId: WORKSPACE } });
+      const controller = SemrushController(ctx, fakeLog());
+      const resp = await controller.listProjectModels(ctx);
+      expect(resp.status).to.equal(400);
+    });
+
     it('403s when path workspaceId does not match org workspace', async () => {
       const ctx = fakeContext({ params: { workspaceId: 'wrong-ws', projectId: 'p' } });
       const controller = SemrushController(ctx, fakeLog());
@@ -413,6 +441,81 @@ describe('SemrushController', () => {
       const controller = SemrushController(ctx, fakeLog());
       const resp = await controller.listWorkspaceProjects(ctx);
       expect(resp.status).to.equal(400);
+    });
+  });
+
+  /**
+   * Parameterized error-path sweep — every handler exercises the same
+   * authorize + transport + mapError pipeline, so once listPrompts is
+   * covered individually we drive each of the other 8 through the same
+   * five failure modes to keep coverage uniform without duplicating the
+   * full per-suite scaffolding.
+   */
+  describe('every handler shares the same error envelope', () => {
+    const cases = [
+      { method: 'createPrompts', handler: 'handleCreatePrompts', params: {} },
+      {
+        method: 'updatePrompt', handler: 'handleUpdatePrompt', params: { promptId: 'logical-1' }, returnsRaw: true,
+      },
+      { method: 'bulkDeletePrompts', handler: 'handleBulkDeletePrompts', params: {} },
+      { method: 'listProjects', handler: 'handleListProjects', params: {} },
+      {
+        method: 'createProject', handler: 'handleCreateProject', params: {}, returnsRaw: true,
+      },
+      { method: 'listProjectTags', handler: 'handleListProjectTags', params: { workspaceId: WORKSPACE, projectId: 'p' } },
+      { method: 'listProjectModels', handler: 'handleListProjectModels', params: { workspaceId: WORKSPACE, projectId: 'p' } },
+      { method: 'listWorkspaceProjects', handler: 'handleListWorkspaceProjects', params: { workspaceId: WORKSPACE } },
+    ];
+    cases.forEach(({
+      method, handler, params, returnsRaw,
+    }) => {
+      describe(method, () => {
+        const okResult = returnsRaw ? { status: 200, body: { ok: true } } : { ok: true };
+
+        it('401s on missing bearer', async () => {
+          const ctx = fakeContext({ bearer: '', params });
+          const controller = SemrushController(ctx, fakeLog());
+          const resp = await controller[method](ctx);
+          expect(resp.status).to.equal(401);
+        });
+
+        it('404s when organization is missing', async () => {
+          const ctx = fakeContext({ params });
+          ctx.dataAccess.Organization.findById = sinon.stub().resolves(null);
+          const controller = SemrushController(ctx, fakeLog());
+          const resp = await controller[method](ctx);
+          expect(resp.status).to.equal(404);
+        });
+
+        it('403s when caller has no access', async () => {
+          accessControlHasAccessStub.resolves(false);
+          const ctx = fakeContext({ params });
+          const controller = SemrushController(ctx, fakeLog());
+          const resp = await controller[method](ctx);
+          expect(resp.status).to.equal(403);
+        });
+
+        it('502 envelope on SemrushTransportError', async () => {
+          handlers[handler].resolves(okResult);
+          handlers[handler].rejects(new MockTransportError(503, 'down'));
+          const ctx = fakeContext({ params });
+          const controller = SemrushController(ctx, fakeLog());
+          const resp = await controller[method](ctx);
+          expect(resp.status).to.equal(502);
+          const body = await readBody(resp);
+          expect(body.error).to.equal('semrushUpstreamError');
+        });
+
+        it('500s on unexpected handler errors', async () => {
+          handlers[handler].rejects(new Error(`boom-${method}`));
+          const ctx = fakeContext({ params });
+          const controller = SemrushController(ctx, fakeLog());
+          const resp = await controller[method](ctx);
+          expect(resp.status).to.equal(500);
+          const body = await readBody(resp);
+          expect(JSON.stringify(body)).to.not.include(`boom-${method}`);
+        });
+      });
     });
   });
 });

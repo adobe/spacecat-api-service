@@ -171,6 +171,24 @@ describe('semrush projects handler', () => {
       expect(result.items.map((p) => p.semrushProjectId)).to.deep.equal(['p-de']);
     });
 
+    it('language filter alone drops non-matching slices', async () => {
+      const projects = [
+        makeProject({ semrushProjectId: 'p-us-en', semrushLocationId: 2840, language: 'en' }),
+        makeProject({ semrushProjectId: 'p-us-de', semrushLocationId: 2840, language: 'de' }),
+      ];
+      const transport = {
+        listWorkspaceProjects: sinon.stub().resolves({ items: [] }),
+      };
+      const result = await handleListProjects(
+        transport,
+        makeDataAccess({ projects }),
+        BRAND,
+        WORKSPACE,
+        { language: 'en' }, // no locationId filter — only language branch fires
+      );
+      expect(result.items.map((p) => p.semrushProjectId)).to.deep.equal(['p-us-en']);
+    });
+
     it('returns empty when filter excludes all rows', async () => {
       const projects = [
         makeProject({
@@ -316,7 +334,7 @@ describe('semrush projects handler', () => {
       expect(transport.publishProject).to.not.have.been.called;
     });
 
-    it('propagates upstream error from publishProject; no row written', async () => {
+    it('propagates upstream error from publishProject + logs orphan; no row written', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
           items: [{ id: 'lang-en-uuid', code: 'en' }],
@@ -325,8 +343,89 @@ describe('semrush projects handler', () => {
         publishProject: sinon.stub().rejects(new Error('publish-down')),
       };
       const dataAccess = makeDataAccess();
-      await expect(handleCreateProject(transport, dataAccess, BRAND, WORKSPACE, validBody())).to.be.rejectedWith('publish-down');
+      const log = fakeLog();
+      await expect(handleCreateProject(transport, dataAccess, BRAND, WORKSPACE, validBody(), log))
+        .to.be.rejectedWith('publish-down');
       expect(dataAccess.BrandSemrushProject.create).to.not.have.been.called;
+      // The orphan id MUST be logged so operators can clean up.
+      expect(log.error).to.have.been.calledOnce;
+      const [msg, ctx] = log.error.firstCall.args;
+      expect(msg).to.match(/orphaned upstream Semrush project after publish failure/);
+      expect(ctx).to.include({
+        brandId: BRAND, workspaceId: WORKSPACE, semrushProjectId: 'new-1',
+      });
+    });
+
+    it('TOCTOU race: row INSERT fails -> log orphan + return 409 with winner id', async () => {
+      const transport = {
+        listLanguages: sinon.stub().resolves({
+          items: [{ id: 'lang-en-uuid', code: 'en' }],
+        }),
+        createProject: sinon.stub().resolves({ id: 'loser-pid' }),
+        publishProject: sinon.stub().resolves({}),
+      };
+      const winner = { getSemrushProjectId: () => 'winner-pid' };
+      const dataAccess = {
+        BrandSemrushProject: {
+          allByBrandId: sinon.stub().resolves([]),
+          // First findBySlice (the 409 gate) sees nothing; the create call
+          // fails (race partner won); the second findBySlice returns winner.
+          findBySlice: sinon.stub().onFirstCall().resolves(null)
+            .onSecondCall()
+            .resolves(winner),
+          create: sinon.stub().rejects(new Error('unique_violation')),
+        },
+      };
+      const log = fakeLog();
+      const result = await handleCreateProject(transport, dataAccess, BRAND, WORKSPACE, validBody(), log);
+      expect(result.status).to.equal(409);
+      expect(result.body.error).to.equal('sliceExists');
+      expect(result.body.semrushProjectId).to.equal('winner-pid');
+      // Orphan from our (losing) create must be logged.
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.match(/orphaned upstream Semrush project after row-create race/);
+    });
+
+    it('TOCTOU race with no winner found returns 409 with empty semrushProjectId', async () => {
+      const transport = {
+        listLanguages: sinon.stub().resolves({
+          items: [{ id: 'lang-en-uuid', code: 'en' }],
+        }),
+        createProject: sinon.stub().resolves({ id: 'loser-pid' }),
+        publishProject: sinon.stub().resolves({}),
+      };
+      const dataAccess = {
+        BrandSemrushProject: {
+          allByBrandId: sinon.stub().resolves([]),
+          findBySlice: sinon.stub().resolves(null),
+          create: sinon.stub().rejects(new Error('unique_violation')),
+        },
+      };
+      const result = await handleCreateProject(transport, dataAccess, BRAND, WORKSPACE, validBody(), fakeLog());
+      expect(result.status).to.equal(409);
+      expect(result.body.semrushProjectId).to.equal('');
+    });
+
+    it('400s on projectType !== "aio"', async () => {
+      const result = await handleCreateProject({}, makeDataAccess(), BRAND, WORKSPACE, validBody({ projectType: 'something-else' }));
+      expect(result.status).to.equal(400);
+      expect(result.body.messages.join(' ')).to.include('projectType');
+    });
+
+    it('warn-logs when the language catalog returns no usable tags', async () => {
+      // Items have neither `code`/`iso`/`tag` — cache stays empty → unknownLanguage.
+      const transport = {
+        listLanguages: sinon.stub().resolves({
+          items: [{ id: 'lang-en-uuid', label: 'English' }],
+        }),
+      };
+      const log = fakeLog();
+      const result = await handleCreateProject(transport, makeDataAccess(), BRAND, WORKSPACE, validBody(), log);
+      expect(result.status).to.equal(400);
+      expect(result.body.error).to.equal('unknownLanguage');
+      expect(log.warn).to.have.been.called;
+      const [msg] = log.warn.firstCall.args;
+      expect(msg).to.match(/no usable tags/);
     });
 
     it('caches the language catalog across calls within TTL', async () => {
@@ -410,6 +509,29 @@ describe('semrush projects handler', () => {
       expect(result.items).to.have.length(2);
       expect(result.items[0].key).to.equal('gpt-4o');
     });
+
+    it('paginates upstream pages until a short page is returned', async () => {
+      // Page 1 returns a full 100; page 2 returns 3 (short → stop).
+      const fullPage = Array.from({ length: 100 }, (_, i) => ({
+        model: { id: `m${i}`, key: `k${i}`, name: `n${i}` },
+      }));
+      const shortPage = Array.from({ length: 3 }, (_, i) => ({
+        model: { id: `m100${i}`, key: `k100${i}`, name: `n100${i}` },
+      }));
+      const transport = { listAiModels: sinon.stub() };
+      transport.listAiModels.onCall(0).resolves({ items: fullPage });
+      transport.listAiModels.onCall(1).resolves({ items: shortPage });
+      const result = await handleListProjectModels(transport, WORKSPACE, 'proj-1');
+      expect(result.items.length).to.equal(103);
+      expect(transport.listAiModels).to.have.been.calledTwice;
+    });
+
+    it('stops on first empty page', async () => {
+      const transport = { listAiModels: sinon.stub().resolves({ items: [] }) };
+      const result = await handleListProjectModels(transport, WORKSPACE, 'proj-1');
+      expect(result.items).to.deep.equal([]);
+      expect(transport.listAiModels).to.have.been.calledOnce;
+    });
   });
 
   describe('handleListWorkspaceProjects', () => {
@@ -428,6 +550,24 @@ describe('semrush projects handler', () => {
         { id: 'p1', name: 'one', domain: 'one.com' },
         { id: 'p2', name: 'two', domain: 'two.com' },
       ]);
+    });
+
+    it('paginates across multiple workspace pages', async () => {
+      const fullPage = Array.from({ length: 100 }, (_, i) => ({ id: `p${i}`, name: `n${i}` }));
+      const shortPage = [{ id: 'p100', name: 'last' }];
+      const transport = { listWorkspaceProjects: sinon.stub() };
+      transport.listWorkspaceProjects.onCall(0).resolves({ items: fullPage });
+      transport.listWorkspaceProjects.onCall(1).resolves({ items: shortPage });
+      const result = await handleListWorkspaceProjects(transport, WORKSPACE);
+      expect(result.items).to.have.length(101);
+      expect(transport.listWorkspaceProjects).to.have.been.calledTwice;
+    });
+
+    it('stops on the first empty page', async () => {
+      const transport = { listWorkspaceProjects: sinon.stub().resolves({ items: [] }) };
+      const result = await handleListWorkspaceProjects(transport, WORKSPACE);
+      expect(result.items).to.deep.equal([]);
+      expect(transport.listWorkspaceProjects).to.have.been.calledOnce;
     });
   });
 });

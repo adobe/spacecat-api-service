@@ -538,9 +538,8 @@ export async function handleBulkDeletePrompts(
       if (e?.status === 404) {
         deleted += ids.length;
         projectsToPublish.add(pid);
-        log?.info?.('bulk-delete: upstream already-deleted (404 treated as success)', {
-          semrushProjectId: pid, ids,
-        });
+        const idemptCtx = { semrushProjectId: pid, ids };
+        log?.info?.('bulk-delete: upstream already-deleted (404 treated as success)', idemptCtx);
         return;
       }
       ids.forEach((sid) => {

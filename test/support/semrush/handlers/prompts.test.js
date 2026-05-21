@@ -145,6 +145,44 @@ describe('semrush prompts handler', () => {
       expect(projectIds).to.deep.equal(['p-us']);
     });
 
+    it('filters projects by language query (drops non-matching slice)', async () => {
+      const projects = [
+        makeProject({ semrushProjectId: 'p-en', semrushLocationId: 2840, language: 'en' }),
+        makeProject({ semrushProjectId: 'p-de', semrushLocationId: 2840, language: 'de' }),
+      ];
+      const transport = {
+        listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+      };
+      await handleListPrompts(
+        transport,
+        makeDataAccess(projects),
+        BRAND,
+        WORKSPACE,
+        { language: 'EN' },
+      );
+      const projectIds = transport.listPromptsByTags.getCalls().map((c) => c.args[1]);
+      expect(projectIds).to.deep.equal(['p-en']);
+    });
+
+    it('drops prompt items with empty text (buildPromptDto returns null)', async () => {
+      const projects = [
+        makeProject({ semrushProjectId: 'p1', semrushLocationId: 2840, language: 'en' }),
+      ];
+      const transport = {
+        listPromptsByTags: sinon.stub().resolves({
+          items: [
+            { id: 's1', name: 'kept', tags: [] },
+            { id: 's2', name: '' }, // empty text → dropped
+            { id: 's3', name: undefined }, // missing text → dropped
+          ],
+          total: 3,
+        }),
+      };
+      const result = await handleListPrompts(transport, makeDataAccess(projects), BRAND, WORKSPACE, {});
+      expect(result.items).to.have.length(1);
+      expect(result.items[0].text).to.equal('kept');
+    });
+
     it('reports per-project upstream errors without failing the request', async () => {
       const projects = [
         makeProject({ semrushProjectId: 'p1', semrushLocationId: 2840, language: 'en' }),
