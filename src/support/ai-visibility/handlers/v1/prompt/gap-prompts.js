@@ -31,13 +31,9 @@ import {
   brandTarget,
   parseCompetitorDomainsList,
   responseFromGrpcError,
+  PROTO_FROM_JSON,
+  PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
-
-/** @type {import('@bufbuild/protobuf').JsonReadOptions} */
-const FROM_JSON = { ignoreUnknownFields: true };
-
-/** @type {import('@bufbuild/protobuf').JsonWriteOptions} */
-const TO_JSON = { useProtoFieldName: false, alwaysEmitImplicit: true };
 
 /* c8 ignore start */
 export async function handleGapPrompts(sp, clients) {
@@ -76,7 +72,7 @@ export async function handleGapPrompts(sp, clients) {
     if (sourceDomain) {
       listJson.source_domain = sourceDomain;
     }
-    listRequest = fromJson(GapPromptsRequestSchema, listJson, FROM_JSON);
+    listRequest = fromJson(GapPromptsRequestSchema, listJson, PROTO_FROM_JSON);
 
     const totalsJson = {
       country,
@@ -90,7 +86,7 @@ export async function handleGapPrompts(sp, clients) {
     if (sourceDomain) {
       totalsJson.source_domain = sourceDomain;
     }
-    totalsRequest = fromJson(GapPromptsTotalsRequestSchema, totalsJson, FROM_JSON);
+    totalsRequest = fromJson(GapPromptsTotalsRequestSchema, totalsJson, PROTO_FROM_JSON);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid gap prompts request';
     return {
@@ -106,10 +102,10 @@ export async function handleGapPrompts(sp, clients) {
     ]);
 
     const promptsJson = /** @type {{ prompts?: object[] }} */ (
-      toJson(GapPromptsResponseSchema, promptsMessage, TO_JSON)
+      toJson(GapPromptsResponseSchema, promptsMessage, PROTO_TO_JSON)
     );
     const totalsJson = /** @type {{ totals?: object[] }} */ (
-      toJson(GapPromptsTotalsResponseSchema, totalsMessage, TO_JSON)
+      toJson(GapPromptsTotalsResponseSchema, totalsMessage, PROTO_TO_JSON)
     );
 
     return {

@@ -33,13 +33,9 @@ import {
   responseFromGrpcError,
   buildRangeExpr,
   isValidVolume,
+  PROTO_FROM_JSON,
+  PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
-
-/** @type {import('@bufbuild/protobuf').JsonReadOptions} */
-const FROM_JSON = { ignoreUnknownFields: true };
-
-/** @type {import('@bufbuild/protobuf').JsonWriteOptions} */
-const TO_JSON = { useProtoFieldName: false, alwaysEmitImplicit: true };
 
 /* c8 ignore start */
 function buildGapTopicsDimensionFilterQl(sp) {
@@ -109,7 +105,7 @@ export async function handleGapTopics(sp, clients) {
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
       },
-      FROM_JSON,
+      PROTO_FROM_JSON,
     );
 
     totalsRequest = fromJson(
@@ -122,7 +118,7 @@ export async function handleGapTopics(sp, clients) {
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
       },
-      FROM_JSON,
+      PROTO_FROM_JSON,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid gap topics request';
@@ -139,10 +135,10 @@ export async function handleGapTopics(sp, clients) {
     ]);
 
     const topicsJson = /** @type {{ topics?: object[] }} */ (
-      toJson(GapTopicsResponseSchema, topicsMessage, TO_JSON)
+      toJson(GapTopicsResponseSchema, topicsMessage, PROTO_TO_JSON)
     );
     const totalsJson = /** @type {{ totals?: object[] }} */ (
-      toJson(GapTopicsTotalsResponseSchema, totalsMessage, TO_JSON)
+      toJson(GapTopicsTotalsResponseSchema, totalsMessage, PROTO_TO_JSON)
     );
 
     return {

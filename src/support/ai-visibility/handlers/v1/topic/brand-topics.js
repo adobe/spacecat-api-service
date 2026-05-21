@@ -34,13 +34,9 @@ import {
   buildRangeExpr,
   isValidVisibility,
   isValidVolume,
+  PROTO_FROM_JSON,
+  PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
-
-/** @type {import('@bufbuild/protobuf').JsonReadOptions} */
-const FROM_JSON = { ignoreUnknownFields: true };
-
-/** @type {import('@bufbuild/protobuf').JsonWriteOptions} */
-const TO_JSON = { useProtoFieldName: false, alwaysEmitImplicit: true };
 
 /* c8 ignore start */
 function buildBrandTopicsDimensionFilterQl(sp) {
@@ -129,7 +125,7 @@ export async function handleBrandTopics(sp, clients) {
       dimension_filter_ql: dimensionFilterQl,
       metric_filter_ql: metricFilterQl,
     },
-    FROM_JSON,
+    PROTO_FROM_JSON,
   );
 
   const totalsRequest = fromJson(
@@ -142,7 +138,7 @@ export async function handleBrandTopics(sp, clients) {
       dimension_filter_ql: dimensionFilterQl,
       metric_filter_ql: metricFilterQl,
     },
-    FROM_JSON,
+    PROTO_FROM_JSON,
   );
 
   try {
@@ -152,10 +148,10 @@ export async function handleBrandTopics(sp, clients) {
     ]);
 
     const topicsJson = /** @type {{ topics?: object[] }} */ (
-      toJson(BrandTopicsResponseSchema, topicsMessage, TO_JSON)
+      toJson(BrandTopicsResponseSchema, topicsMessage, PROTO_TO_JSON)
     );
     const totalsJson = /** @type {{ total?: string|number }} */ (
-      toJson(BrandTopicsTotalsResponseSchema, totalsMessage, TO_JSON)
+      toJson(BrandTopicsTotalsResponseSchema, totalsMessage, PROTO_TO_JSON)
     );
 
     return {

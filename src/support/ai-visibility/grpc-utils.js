@@ -21,6 +21,20 @@ import { ConnectError, Code } from '@connectrpc/connect';
 
 export { COUNTRY_ENUM, LLM_ENUM, TOPIC_INTENT_ENUM };
 
+/**
+ * Shared JSON read options for v1 protobuf-es handlers. Ignores unknown fields so
+ * incoming JSON forwarded into `fromJson` does not fail on extra keys.
+ * @type {import('@bufbuild/protobuf').JsonReadOptions}
+ */
+export const PROTO_FROM_JSON = { ignoreUnknownFields: true };
+
+/**
+ * Shared JSON write options for v1 protobuf-es handlers. Emits camelCase field names
+ * and includes implicit (default-valued) fields so the response shape is stable.
+ * @type {import('@bufbuild/protobuf').JsonWriteOptions}
+ */
+export const PROTO_TO_JSON = { useProtoFieldName: false, alwaysEmitImplicit: true };
+
 export const LLM_UI = {
   [LLM_ENUM.CHAT_GPT]: 'chatgpt',
   [LLM_ENUM.GEMINI]: 'gemini',
