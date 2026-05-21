@@ -116,7 +116,7 @@ describe('atomic-strategy-helper', () => {
 
     expect(result).to.deep.include({ success: true, attempts: 2 });
     expect(writeStrategyStub).to.have.been.calledTwice;
-    expect(log.warn).to.have.been.calledWithMatch(/step=atomic-strategy-create phase=attempt-failed.*attempt=1\/3/);
+    expect(log.warn).to.have.been.calledWithMatch(/attempt 1\/3 failed/);
   });
 
   it('treats already-present strategy id as idempotent success (no second write)', async () => {
@@ -152,10 +152,10 @@ describe('atomic-strategy-helper', () => {
 
     expect(result).to.deep.include({ success: true, attempts: 2 });
     expect(writeStrategyStub).to.have.been.calledOnce;
-    expect(log.info).to.have.been.calledWithMatch(/step=atomic-strategy-create phase=ok.*idempotentSkip=true/);
+    expect(log.info).to.have.been.calledWithMatch(/idempotent skip/);
   });
 
-  it('logs phase=failed and throws after 3 attempts fail', async () => {
+  it('logs [atomic-strategy-create-failed] and throws after 3 attempts fail', async () => {
     readStrategyStub.resolves({
       exists: true,
       data: { opportunities: [], strategies: [] },
@@ -177,17 +177,17 @@ describe('atomic-strategy-helper', () => {
     expect(thrown.cause).to.equal(boom);
 
     expect(log.error).to.have.been.calledOnce;
-    const [message] = log.error.firstCall.args;
-    expect(message).to.match(/\[edge-deploy\] step=atomic-strategy-create phase=failed/);
-    expect(message).to.include(`siteId=${baseArgs.siteId}`);
-    expect(message).to.include(`strategyId=${baseArgs.geoExperimentId}`);
-    expect(message).to.include(`geoExperimentId=${baseArgs.geoExperimentId}`);
-    expect(message).to.include(`opportunityId=${baseArgs.opportunityId}`);
-    expect(message).to.include(`opportunityType=${baseArgs.opportunityType}`);
-    expect(message).to.include('attempts=3');
-    expect(message).to.include('message=persistent S3 failure');
-    expect(message).to.include(`"id":"${baseArgs.geoExperimentId}"`);
-    expect(message).to.include('"type":"atomic"');
+    const [tag, payload] = log.error.firstCall.args;
+    expect(tag).to.equal('[atomic-strategy-create-failed]');
+    expect(payload).to.include({
+      siteId: baseArgs.siteId,
+      geoExperimentId: baseArgs.geoExperimentId,
+      strategyId: baseArgs.geoExperimentId,
+      opportunityId: baseArgs.opportunityId,
+      opportunityType: baseArgs.opportunityType,
+      error: 'persistent S3 failure',
+    });
+    expect(payload.intendedStrategy).to.include({ id: baseArgs.geoExperimentId, type: 'atomic' });
   });
 
   it('defaults missing opportunities/strategies fields when readStrategy returns partial data', async () => {
@@ -331,7 +331,7 @@ describe('atomic-strategy-helper', () => {
 
       expect(result).to.deep.include({ success: true, removed: false });
       expect(writeStrategyStub).to.not.have.been.called;
-      expect(log.info).to.have.been.calledWithMatch(/step=atomic-strategy-delete phase=ok.*idempotentSkip=blob-missing/);
+      expect(log.info).to.have.been.calledWithMatch(/idempotent skip: blob does not exist/);
     });
 
     it('is idempotent when the strategy is already absent (returns success without writing)', async () => {
@@ -348,7 +348,7 @@ describe('atomic-strategy-helper', () => {
 
       expect(result).to.deep.include({ success: true, removed: false });
       expect(writeStrategyStub).to.not.have.been.called;
-      expect(log.info).to.have.been.calledWithMatch(/step=atomic-strategy-delete phase=ok.*idempotentSkip=not-present/);
+      expect(log.info).to.have.been.calledWithMatch(/idempotent skip: strategy .* not present/);
     });
 
     it('retries and succeeds on attempt 2 after a transient write failure', async () => {
@@ -392,7 +392,7 @@ describe('atomic-strategy-helper', () => {
       expect(writeStrategyStub).to.have.been.calledOnce;
     });
 
-    it('logs phase=failed and throws after 3 attempts fail', async () => {
+    it('logs [atomic-strategy-delete-failed] and throws after 3 attempts fail', async () => {
       readStrategyStub.resolves({
         exists: true,
         data: {
@@ -417,12 +417,13 @@ describe('atomic-strategy-helper', () => {
       expect(thrown.cause).to.equal(boom);
 
       expect(log.error).to.have.been.calledOnce;
-      const [message] = log.error.firstCall.args;
-      expect(message).to.match(/\[edge-deploy\] step=atomic-strategy-delete phase=failed/);
-      expect(message).to.include(`siteId=${deleteArgs.siteId}`);
-      expect(message).to.include(`strategyId=${deleteArgs.strategyId}`);
-      expect(message).to.include('attempts=3');
-      expect(message).to.include('message=persistent S3 failure');
+      const [tag, payload] = log.error.firstCall.args;
+      expect(tag).to.equal('[atomic-strategy-delete-failed]');
+      expect(payload).to.include({
+        siteId: deleteArgs.siteId,
+        strategyId: deleteArgs.strategyId,
+        error: 'persistent S3 failure',
+      });
     });
 
     it('defaults missing opportunities/strategies fields when readStrategy returns partial data', async () => {

@@ -6913,7 +6913,7 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.suggestions[0].message).to.include('geo save failed');
       expect(removeStubFn).to.have.been.calledOnce;
-      expect(context.log.error.calledWithMatch(/\[edge-deploy\] step=geoexperiment-save-preid phase=failed/)).to.equal(true);
+      expect(context.log.error.calledWithMatch('Failed to update GeoExperiment pre schedule ID')).to.equal(true);
     });
 
     it('returns 207 success and logs warning when marking suggestion as EXPERIMENT_IN_PROGRESS fails', async () => {
@@ -6929,7 +6929,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.geoExperimentId).to.be.a('string');
-      expect(context.log.warn.calledWithMatch(/\[edge-deploy\] step=mark-suggestions phase=partial-failure/)).to.equal(true);
+      expect(context.log.warn.calledWithMatch(/suggestion.*failed to mark as EXPERIMENT_IN_PROGRESS/i)).to.equal(true);
     });
 
     it('returns 207 with failure when S3 prompts upload fails before GeoExperiment is created', async () => {
@@ -8144,9 +8144,8 @@ describe('Suggestions Controller', () => {
       // The GeoExperiment row created earlier in the flow must be removed.
       expect(geoExperimentRemoveStub).to.have.been.calledOnce;
 
-      // The outer catch logs the failure under the [edge-deploy] root tag
-      // with step=request phase=failed and the underlying error message.
-      expect(context.log.error).to.have.been.calledWithMatch(/\[edge-deploy\] step=request phase=failed.*strategy boom/);
+      // The outer catch logs the failure with the [edge-geo-exp-failed] tag.
+      expect(context.log.error).to.have.been.calledWithMatch(/edge-geo-exp-failed.*Error initiating experiment: strategy boom/);
     });
 
     it('rolls back the GeoExperiment AND deletes the strategy when DRS fails after strategy is created', async () => {
@@ -8253,7 +8252,7 @@ describe('Suggestions Controller', () => {
       // still surfaces as a 500 per-suggestion result.
       expect(response.status).to.equal(207);
       expect(deleteAtomicStrategyStub).to.have.been.calledOnce;
-      expect(context.log.error).to.have.been.calledWithMatch(/\[edge-deploy\] step=atomic-strategy-cleanup-failed.*cleanup boom/);
+      expect(context.log.error).to.have.been.calledWithMatch(/atomic-strategy-cleanup-failed.*cleanup boom/);
     });
 
     it('falls back to <type>-<date> name when geoExperiment.getName() returns falsy', async () => {
