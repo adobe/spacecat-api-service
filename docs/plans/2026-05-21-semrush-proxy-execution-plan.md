@@ -122,22 +122,15 @@ test/unit/models/brand-to-semrush-project/
 
 ### Schema shape
 
-- Attributes: `brandId`, `organizationId`, `semrushWorkspaceId`, `semrushProjectId`,
-  `category`, `market`, `language`,
-  `status` (enum: `pending|live|publish_failed|create_failed`),
-  `retryCount`, `nextRetryAt`, `lastError`.
-- References: `belongs_to Brand`, `belongs_to Organization`.
-- Indices: `byBrandId`, `bySemrushProjectId`, `byStatusAndNextRetryAt`.
-  SchemaBuilder auto-generates `allByBrandId()`, `findBySemrushProjectId()`,
-  `allByStatusAndNextRetryAt()`.
+- Attributes: `brandId`, `semrushProjectId`, `semrushLocationId`, `language`.
+- Reference: `belongs_to Brand`.
+- Indices: `byBrandId`, `bySemrushProjectId`. SchemaBuilder auto-generates
+  `allByBrandId()` and `findBySemrushProjectId()`.
 
 ### Custom collection methods
 
-- `findBySlice(brandId, category, market, language)` — composite lookup used by
-  the 409-conflict check in `POST /semrush/projects`.
-- `allDueForRetry()` — filters
-  `status IN ('pending','publish_failed','create_failed') AND next_retry_at <= now()`,
-  for the follow-up retry sweeper.
+- `findBySlice(brandId, semrushLocationId, language)` — composite lookup used
+  by the 409-conflict check in `POST /semrush/projects`.
 
 ### Wiring (apply correction #4)
 
@@ -155,9 +148,8 @@ test/unit/models/brand-to-semrush-project/
 Reuse `createElectroMocks(...)` from `test/unit/util.js` (same pattern as
 `site-enrollment.collection.test.js`). Cover:
 - constructor
-- `allByBrandId`, `findBySlice`, `allDueForRetry`
+- `allByBrandId`, `findBySlice`
 - index-driven `findBySemrushProjectId`
-- enum validation on `status`
 
 ### Validation gates
 
@@ -237,14 +229,14 @@ npx mocha test/support/semrush/rest-transport.test.js test/support/semrush/works
 
 | File | Action |
 |---|---|
-| `src/support/semrush/handlers/prompts.js` | NEW. Port from `feat/prompts-management:src/support/serenity/handlers/prompts.js`. Replace `resolveProject` / `listProjectsForBrand` / `resolveProjectsForPrompt` calls with `ctx.dataAccess.BrandToSemrushProject.allByBrandId(brandId)` + in-memory filter on `(category, market, language)`. Keep `encodeLogicalId` / `decodeLogicalId` verbatim. Drop `matrix.js`. Accept `workspaceId` as explicit arg. |
-| `src/support/semrush/handlers/projects.js` | NEW. Onboarding per design doc — language UUID cache (1h TTL) + location_id from `locations.json` → upstream `POST /enterprise/projects/api/v1/workspaces/{ws}/projects` → write `pending` row → publish → row → `live` (or `publish_failed`). |
+| `src/support/semrush/handlers/prompts.js` | NEW. Port from `feat/prompts-management:src/support/serenity/handlers/prompts.js`. Replace `resolveProject` / `listProjectsForBrand` / `resolveProjectsForPrompt` calls with `ctx.dataAccess.BrandToSemrushProject.allByBrandId(brandId)` + in-memory filter on `(semrushLocationId, language)` (with ISO `market` → `location_id` translation via `locations.json` at the controller boundary). Keep `encodeLogicalId` / `decodeLogicalId` verbatim. Drop `matrix.js`. Accept `workspaceId` as explicit arg. |
+| `src/support/semrush/handlers/projects.js` | NEW. Onboarding per design doc — resolve `semrush_location_id` from ISO market via `locations.json`; resolve `language_id` UUID via cached `/v1/languages` (1h TTL); upstream `POST /enterprise/projects/api/v1/workspaces/{ws}/projects` → `POST .../publish` → **only on full success** INSERT one row into `brand_to_semrush_projects`. On any upstream failure, no row is written and the Semrush error envelope is returned. |
 | `src/controllers/semrush.js` | NEW. Factory `SemrushController(ctx, log, env)`. 9 handlers. Each: `getImsUserToken(ctx)` → build transport → `resolveWorkspaceId` → delegate. Use **shared** `getImsUserToken` (throws), not the local `getImsToken` from prompts-management. |
 | `src/routes/index.js` | 9 entries: `'<METHOD> /v2/orgs/:spaceCatId/brands/:brandId/semrush/<path>': semrushController.<method>`. |
 | `src/routes/required-capabilities.js` | Reads → `organization:read`, writes → `organization:write`. |
 | `src/index.js` | Instantiate `SemrushController(context, log, env)` per request. Pass as positional arg to `getRouteHandlers(...)`. |
 | `test/support/semrush/handlers/prompts.test.js` | NEW. Replace `matrix` stubs with `dataAccess.BrandToSemrushProject` stubs. |
-| `test/support/semrush/handlers/projects.test.js` | NEW. Happy path; `publish_failed` row write on upstream 5xx; 409 on existing slice (`live`/`pending`); retry-allowed on `publish_failed`/`create_failed`. |
+| `test/support/semrush/handlers/projects.test.js` | NEW. Happy path (row written only on full success); no row written when upstream `POST /projects` fails; no row written when `POST .../publish` fails; 409 on existing slice; 400 on unknown ISO market not in `locations.json`. |
 | `test/controllers/semrush.test.js` | NEW. Per route: 400 / 404 / 502 / 200 envelope checks. |
 
 ### Validation gates

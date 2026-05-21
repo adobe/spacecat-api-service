@@ -27,7 +27,7 @@ Cross-repo design doc: https://github.com/adobe-rnd/llmo-data-retrieval-service/
 | Auth modes | IMS bearer + `SEMRUSH_COOKIE` fallback | **IMS bearer only.** Cookie path removed everywhere. |
 | Upstream host | `www.semrush.com` (with cookie shim) | `adobe-hackathon.semrush.com` (server-side IMS → Semrush exchange) |
 | Workspace mapping | `organizations.semrush_workspace_id` (DB) | unchanged — `organizations.semrush_workspace_id` (DB) |
-| Project mapping | `SEMRUSH_PROJECT_MATRIX` env JSON | **`brand_to_semrush_projects` DB table on `mysticat-data-service`** |
+| Project mapping | `SEMRUSH_PROJECT_MATRIX` env JSON | **`brand_to_semrush_projects` DB table on `mysticat-data-service`** — minimal mapping `(brand_id, semrush_location_id, language) -> semrush_project_id`. Workspace is reached via `brands -> organizations.semrush_workspace_id`; no `status` / retry bookkeeping on this table (failed onboarding writes no row). |
 | URL namespace | `/v2/orgs/:spaceCatId/brands/:brandId/serenity/*` | `/v2/orgs/:spaceCatId/brands/:brandId/semrush/*` |
 | Reporting endpoint | `POST /serenity/reporting/elements/:elementId` | dropped (different upstream auth, separate feature) |
 | `visibility-filters` / `visibility-response-normalize` | brought along | not touched here — those belong to the `/apis/serenity/v1/ai-visibility/*` gRPC bridge feature |
@@ -84,7 +84,7 @@ spacecat-api-service
   │       → 404 if null
   │  5. resolveProjects(ctx, brandId, filter)                              (new)
   │       → dataAccess.BrandToSemrushProject.allByBrandId(brandId)
-  │       → returns rows {projectId, market, language, category, status}
+  │       → returns rows {semrushProjectId, semrushLocationId, language}
   │  6. forward to adobe-hackathon.semrush.com                             (new transport)
   │       Authorization: Bearer <IMS user token>   (forwarded as-is)
   ▼
@@ -96,8 +96,8 @@ Semrush AIO backend
 
 ### Why two-tier (workspace from `organizations`, projects from `brand_to_semrush_projects`)
 
-- **Workspace** is durable and org-level (one Semrush workspace per Adobe org; onboarded one-time when Semrush provisions the workspace). Lives on `organizations.semrush_workspace_id` (already shipped, migration `20260525000000`).
-- **Projects** churn weekly per brand × market × language as customers onboard new locales. Lives on a junction table keyed by brand. `POST /semrush/projects` is the write path; `GET /semrush/projects` reads it.
+- **Workspace** is durable and org-level (one Semrush workspace per Adobe org; onboarded one-time when Semrush provisions the workspace). Lives on `organizations.semrush_workspace_id` (already shipped, migration `20260525000000`). The proxy reaches it via `brands -> organizations.semrush_workspace_id` — not duplicated on the mapping table.
+- **Projects** churn per brand × location × language as customers onboard new locales. Lives on `brand_to_semrush_projects` keyed by `(brand_id, semrush_location_id, language)`. `POST /semrush/projects` is the write path; `GET /semrush/projects` reads it.
 
 ### IMS token forwarding
 
@@ -187,7 +187,6 @@ All paths under `/v2/orgs/:spaceCatId/brands/:brandId/semrush`. All require `Aut
   ```json
   {
     "name": "adobe-com · AU · en",
-    "category": "Creative Cloud",
     "market": "AU",
     "language": "en",
     "brandDomain": "adobe.com",
@@ -195,14 +194,16 @@ All paths under `/v2/orgs/:spaceCatId/brands/:brandId/semrush`. All require `Aut
     "projectType": "aio"
   }
   ```
+  `market` is the ISO 2-letter country code Elmo speaks; the api-service resolves it to a Semrush `location_id` (Google Ads Geo Target ID) via the static `locations.json` map before calling Semrush and before writing the DB row.
 - Behaviour:
   1. Resolve `workspaceId` from `org.getSemrushWorkspaceId()` (404 if not onboarded)
-  2. `409 Conflict` if `brand_to_semrush_projects` already has a row for `(brandId, category, market, language)` in status `live` or `pending`
-  3. Resolve `language_id` (Semrush UUID) — cache `GET /v1/languages` once on boot, 1h TTL
-  4. Resolve `location_id` from a static `src/support/semrush/data/locations.json` (ISO 2-letter → Google geo target id) — same map the migration scripts use (`https://github.com/adobe-rnd/llmo-data-retrieval-service/blob/feat/prompt_management/scripts/serenity/locations.json` once they merge)
-  5. `POST /enterprise/projects/api/v1/workspaces/{ws}/projects` with `{name, type, brand_name_display, brand_names, domain, country_code, location_id, location_name, language_id}` — store the `(workspaceId, brandId, category, market, language, semrushProjectId, status=pending)` row in `brand_to_semrush_projects` **before** the publish call so a publish failure leaves the row in `pending` for the future retry sweeper
-  6. `POST /v1/workspaces/{ws}/projects/{pid}/publish` — update the row to `status=live` on success, `status=publish_failed` (with `retry_count` bump + `next_retry_at`) on failure
-- Response: `{ workspaceId, projectId, name, status: 'live' | 'pending' | 'publish_failed' }`
+  2. Resolve `semrush_location_id` from `market` via `src/support/semrush/data/locations.json` (ISO 2-letter → Google geo target id) — same map the migration scripts use (`https://github.com/adobe-rnd/llmo-data-retrieval-service/blob/feat/prompt_management/scripts/serenity/locations.json` once they merge). 400 if the market is not in the map.
+  3. `409 Conflict` if `brand_to_semrush_projects` already has a row for `(brandId, semrush_location_id, language)`
+  4. Resolve `language_id` (Semrush UUID) — cache `GET /v1/languages` once on boot, 1h TTL
+  5. `POST /enterprise/projects/api/v1/workspaces/{ws}/projects` with `{name, type, brand_name_display, brand_names, domain, country_code, location_id, location_name, language_id}`
+  6. `POST /v1/workspaces/{ws}/projects/{pid}/publish`
+  7. **Only on full success (both create + publish 2xx):** INSERT one row into `brand_to_semrush_projects` with `(brand_id, semrush_project_id, semrush_location_id, language)`. On any upstream failure, return the Semrush error envelope to the caller and write no row — the customer retries by calling `POST /semrush/projects` again with the same body.
+- Response: `{ workspaceId, projectId, name, semrushLocationId, language }`
 
 ---
 
@@ -218,91 +219,71 @@ All paths under `/v2/orgs/:spaceCatId/brands/:brandId/semrush`. All require `Aut
 -- =============================================================================
 -- Table: brand_to_semrush_projects
 --
--- Junction between an Adobe brand and a Semrush AIO project. Each row pins
--- a (brand, category, market, language) slice to a Semrush projectId inside
--- the org's workspace (organizations.semrush_workspace_id).
+-- Mapping between an Adobe brand and a Semrush AIO project. One row per
+-- (brand_id, semrush_location_id, language) slice. The Semrush workspace is
+-- reachable via brands -> organizations.semrush_workspace_id and is not
+-- duplicated here.
 --
 -- Read path: spacecat-api-service /v2/orgs/:org/brands/:brand/semrush/*
 -- Write path: spacecat-api-service POST /semrush/projects (onboarding)
 --             llmo-data-retrieval-service scripts/serenity/* (bulk migration)
 --
--- retry_count + next_retry_at + status drive a future Semrush retry sweeper.
--- They are populated on POST /semrush/projects publish failures and consumed
--- by a follow-up worker (not modelled in this PR).
+-- A row only exists when onboarding fully succeeded (project create + publish
+-- both OK). Failed onboarding returns the upstream error to the caller and
+-- writes no row — no retry / status / DLQ bookkeeping on this table.
 -- =============================================================================
 
-CREATE TYPE brand_to_semrush_status AS ENUM (
-    'pending',          -- project create succeeded, publish in flight
-    'live',             -- project created + published
-    'publish_failed',   -- publish returned non-2xx; sweeper will retry
-    'create_failed'     -- create itself failed; row written for retry/audit
-);
-
 CREATE TABLE brand_to_semrush_projects (
-    id                     uuid PRIMARY KEY DEFAULT uuid_generate_v7(),
-    brand_id               uuid NOT NULL
-        REFERENCES brands (id) ON DELETE CASCADE,
-    organization_id        uuid NOT NULL
-        REFERENCES organizations (id) ON DELETE CASCADE,
-    semrush_workspace_id   text NOT NULL,
-    semrush_project_id     text NOT NULL,
-    category               text NOT NULL,
-    market                 text NOT NULL,
-    language               text NOT NULL,
-    status                 brand_to_semrush_status NOT NULL DEFAULT 'pending',
-    retry_count            integer NOT NULL DEFAULT 0,
-    next_retry_at          timestamptz,
-    last_error             text,
-    created_at             timestamptz NOT NULL DEFAULT now(),
-    updated_at             timestamptz NOT NULL DEFAULT now(),
-    created_by             text DEFAULT 'system',
-    updated_by             text DEFAULT 'system',
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v7(),
+    brand_id uuid NOT NULL REFERENCES brands (id) ON DELETE CASCADE,
+    semrush_project_id text NOT NULL,
+    semrush_location_id integer NOT NULL,
+    language text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    created_by text DEFAULT 'system',
+    updated_by text DEFAULT 'system',
     CONSTRAINT uq_brand_to_semrush_slice
-        UNIQUE (brand_id, category, market, language),
+    UNIQUE (brand_id, semrush_location_id, language),
     CONSTRAINT uq_brand_to_semrush_project
-        UNIQUE (semrush_workspace_id, semrush_project_id)
+    UNIQUE (semrush_project_id)
 );
 
-CREATE INDEX idx_b2s_brand                ON brand_to_semrush_projects (brand_id);
-CREATE INDEX idx_b2s_organization         ON brand_to_semrush_projects (organization_id);
-CREATE INDEX idx_b2s_project              ON brand_to_semrush_projects (semrush_project_id);
-CREATE INDEX idx_b2s_retry_sweeper        ON brand_to_semrush_projects (status, next_retry_at)
-    WHERE status IN ('pending', 'publish_failed', 'create_failed');
+CREATE INDEX idx_brand_to_semrush_projects_brand_id
+ON brand_to_semrush_projects (brand_id);
 
-GRANT SELECT, INSERT, UPDATE ON brand_to_semrush_projects TO postgrest_writer;
-GRANT SELECT ON brand_to_semrush_projects TO postgrest_anon;
+CREATE INDEX idx_brand_to_semrush_projects_project_id
+ON brand_to_semrush_projects (semrush_project_id);
+
+CREATE TRIGGER brand_to_semrush_projects_updated_at
+BEFORE UPDATE ON brand_to_semrush_projects
+FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+GRANT SELECT, INSERT ON brand_to_semrush_projects TO postgrest_anon;
+GRANT UPDATE, DELETE ON brand_to_semrush_projects TO postgrest_writer;
 
 COMMENT ON TABLE brand_to_semrush_projects IS
-'Junction between Adobe brands and Semrush AIO projects. One row per (brand, category, market, language) slice. Read by spacecat-api-service /v2/orgs/:org/brands/:brand/semrush/*; written by POST /semrush/projects onboarding + migration scripts.';
-COMMENT ON COLUMN brand_to_semrush_projects.semrush_workspace_id IS
-'Denormalised from organizations.semrush_workspace_id for direct lookups without a join. Must match the org''s current workspace.';
+'Mapping between Adobe brands and Semrush AIO projects. One row per (brand, semrush_location_id, language) slice. The Semrush workspace is derivable via brands -> organizations.semrush_workspace_id. Read by spacecat-api-service /v2/orgs/:org/brands/:brand/semrush/*; written by POST /semrush/projects onboarding and bulk migration scripts.';
 COMMENT ON COLUMN brand_to_semrush_projects.semrush_project_id IS
-'Semrush AIO project identifier. UNIQUE across the table — one project can only be bound to one slice.';
-COMMENT ON COLUMN brand_to_semrush_projects.status IS
-'Lifecycle: pending (create OK, publish in flight) → live (publish OK), or publish_failed / create_failed (sweeper retries via next_retry_at).';
-COMMENT ON COLUMN brand_to_semrush_projects.retry_count IS
-'Increments on each sweeper retry; sweeper drops the row to a DLQ when it crosses a configured threshold.';
-
--- updated_at trigger — uses the workspace's existing tg_set_updated_at()
-CREATE TRIGGER trg_b2s_set_updated_at
-    BEFORE UPDATE ON brand_to_semrush_projects
-    FOR EACH ROW
-    EXECUTE FUNCTION tg_set_updated_at();
+'Semrush AIO project identifier. UNIQUE across the table — one Semrush project binds to exactly one (brand, location, language) slice.';
+COMMENT ON COLUMN brand_to_semrush_projects.semrush_location_id IS
+'Semrush ProjectRequest.location_id (Google Ads Geo Target ID, e.g. 2840 = United States). Country, region, city and postal-code targeting all use the same integer namespace; country is implicit in the hierarchy.';
+COMMENT ON COLUMN brand_to_semrush_projects.language IS
+'ISO 639-1 language code (e.g. en, de). Resolved to the Semrush language_id UUID at write time via /v1/languages.';
 
 NOTIFY pgrst, 'reload schema';
 
 -- migrate:down
 
 DROP TABLE IF EXISTS brand_to_semrush_projects;
-DROP TYPE IF EXISTS brand_to_semrush_status;
 ```
 
 ### Validation gates
 
-- `dbmate up` clean on a fresh dev DB
-- `dbmate down` followed by `dbmate up` roundtrips (idempotent)
-- `npx mocha tests/...` (or whatever IT runner mysticat-data-service uses) green
-- Re-running migration on a populated dev DB does not error
+- `make migrate` clean on a fresh dev DB
+- `dbmate down` followed by `make migrate` roundtrips (idempotent)
+- `make lint` (sqlfluff) clean
+- `uv run pytest tests/api/test_brand_to_semrush_projects.py` green
 - PostgREST schema reload picks up the new table (visible at `/brand_to_semrush_projects?limit=1`)
 
 ---
@@ -313,9 +294,9 @@ DROP TYPE IF EXISTS brand_to_semrush_status;
 
 | File | Purpose |
 |---|---|
-| `brand-to-semrush-project.schema.js` | `SchemaBuilder(BrandToSemrushProject, BrandToSemrushProjectCollection)` — declares attributes (`brandId`, `organizationId`, `semrushWorkspaceId`, `semrushProjectId`, `category`, `market`, `language`, `status`, `retryCount`, `nextRetryAt`, `lastError`), references (`belongs_to Brand`, `belongs_to Organization`), indices for the read paths (`byBrandId`, `bySemrushProjectId`, `byStatusAndNextRetryAt`). |
+| `brand-to-semrush-project.schema.js` | `SchemaBuilder(BrandToSemrushProject, BrandToSemrushProjectCollection)` — declares attributes (`brandId`, `semrushProjectId`, `semrushLocationId`, `language`), reference (`belongs_to Brand`), indices for the read paths (`byBrandId`, `bySemrushProjectId`). |
 | `brand-to-semrush-project.model.js` | `class BrandToSemrushProject extends BaseModel` — `static ENTITY_NAME = 'BrandToSemrushProject'`. Custom methods only if needed (none planned for this PR). |
-| `brand-to-semrush-project.collection.js` | `class BrandToSemrushProjectCollection extends BaseCollection` — adds `allByBrandId(brandId)`, `findBySlice(brandId, category, market, language)`, `allDueForRetry()` (status IN ('pending','publish_failed','create_failed') AND next_retry_at <= now()). `BaseCollection` already routes through `postgrestService`; this mirrors the existing `SiteEnrollmentCollection` pattern. |
+| `brand-to-semrush-project.collection.js` | `class BrandToSemrushProjectCollection extends BaseCollection` — adds `allByBrandId(brandId)` and `findBySlice(brandId, semrushLocationId, language)` (composite lookup for the 409-conflict check). `BaseCollection` already routes through `postgrestService`; this mirrors the existing `SiteEnrollmentCollection` pattern. |
 | `index.d.ts` | Public TypeScript types — `BrandToSemrushProject`, `BrandToSemrushProjectCollection`, `BrandToSemrushProjectStatus` enum. |
 
 Wiring:
