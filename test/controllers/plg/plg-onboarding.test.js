@@ -402,6 +402,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               CLOSED: 'CLOSED',
               REOPENED: 'REOPENED',
               OFFBOARDED: 'OFFBOARDED',
+              PENDING: 'PENDING',
             },
           },
         },
@@ -626,6 +627,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 CLOSED: 'CLOSED',
                 REOPENED: 'REOPENED',
                 OFFBOARDED: 'OFFBOARDED',
+                PENDING: 'PENDING',
               },
             },
           },
@@ -2095,7 +2097,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2504,7 +2506,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2625,7 +2627,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2733,7 +2735,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -5826,6 +5828,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 CLOSED: 'CLOSED',
                 REOPENED: 'REOPENED',
                 OFFBOARDED: 'OFFBOARDED',
+                PENDING: 'PENDING',
               },
             },
           },
@@ -6157,6 +6160,88 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setUpdatedBy).to.have.been.calledWith('admin');
         const reviews = record.setReviews.firstCall.args[0];
         expect(reviews[0].reviewedBy).to.equal('admin');
+      });
+
+      it('PENDING: records review without changing status', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain is not an AEM site',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Emailed customer, awaiting response' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setReviews).to.have.been.calledOnce;
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(1);
+        expect(reviews[0].decision).to.equal('PENDING');
+        expect(reviews[0].justification).to.equal('Emailed customer, awaiting response');
+        expect(reviews[0].reviewedBy).to.equal('ese@adobe.com');
+        expect(record.setStatus).to.not.have.been.called;
+        expect(record.setWaitlistReason).to.not.have.been.called;
+        expect(record.save).to.have.been.calledOnce;
+      });
+
+      it('PENDING: preserves existing reviews', async () => {
+        const existingReview = {
+          reason: 'Domain is not an AEM site',
+          decision: 'PENDING',
+          reviewedBy: 'other-ese@adobe.com',
+          reviewedAt: '2026-05-01T10:00:00.000Z',
+          justification: 'First contact attempt',
+        };
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain is not an AEM site',
+          reviews: [existingReview],
+        });
+        record.getReviews.returns([existingReview]);
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Second follow-up sent' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(2);
+        expect(reviews[0]).to.deep.equal(existingReview);
+        expect(reviews[1].decision).to.equal('PENDING');
+        expect(reviews[1].justification).to.equal('Second follow-up sent');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
+      it('PENDING: succeeds even when waitlistReason is absent (no checkKey needed)', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: null,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Emailed customer, awaiting response' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews[0].decision).to.equal('PENDING');
+        expect(record.setStatus).to.not.have.been.called;
+        expect(record.save).to.have.been.calledOnce;
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: replaces old domain and re-runs flow', async () => {
