@@ -1,3 +1,10 @@
+## [1.509.1](https://github.com/adobe/spacecat-api-service/compare/v1.509.0...v1.509.1) (2026-05-22)
+
+
+### Bug Fixes
+
+* SITES-43989 inline error-rate remediation (LLMO not-provisioned + webhook log noise) ([#2464](https://github.com/adobe/spacecat-api-service/issues/2464)) ([25e8529](https://github.com/adobe/spacecat-api-service/commit/25e8529fd30e599f081e3ddc9911e314abfd0773)), closes [#1777](https://github.com/adobe/spacecat-api-service/issues/1777) [#2452](https://github.com/adobe/spacecat-api-service/issues/2452)
+
 # [1.509.0](https://github.com/adobe/spacecat-api-service/compare/v1.508.1...v1.509.0) (2026-05-22)
 
 
