@@ -3897,6 +3897,131 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('patchLlmoDataRow', () => {
+    const validateSheetRowPatchStub = (data) => {
+      if (!data || typeof data !== 'object') {
+        return 'Request body must be an object';
+      }
+      if (!data.sheet) {
+        return 'sheet must be a non-empty string identifying the worksheet';
+      }
+      if (!data.match || Object.keys(data.match).length === 0) {
+        return 'match must be a non-empty object of column-value pairs identifying the row';
+      }
+      if (!data.values || Object.keys(data.values).length === 0) {
+        return 'values must be a non-empty object of column-value pairs to update';
+      }
+      return null;
+    };
+
+    const buildControllerWithSheetWriteStub = async (patchSheetRowImpl) => {
+      const patchSheetRowStub = sinon.stub().callsFake(patchSheetRowImpl);
+      const LlmoControllerWithStub = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-sheet-write.js': {
+          patchSheetRow: patchSheetRowStub,
+          validateSheetRowPatch: validateSheetRowPatchStub,
+          sharepointPathFor: (folder, type, src) => (
+            type
+              ? `/sites/elmo-ui-data/${folder}/${type}/${src}.xlsx`
+              : `/sites/elmo-ui-data/${folder}/${src}.xlsx`
+          ),
+          publishPathFor: (folder, type, src) => (
+            type ? `${folder}/${type}/${src}.json` : `${folder}/${src}.json`
+          ),
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+      return { subjectController: LlmoControllerWithStub(mockContext), stub: patchSheetRowStub };
+    };
+
+    const baseParams = {
+      siteId: TEST_SITE_ID,
+      sheetType: 'strategic-recommendations',
+      dataSource: 'strategic-recommendations-template',
+    };
+
+    it('updates the row and returns 200 with the result', async () => {
+      const { subjectController, stub } = await buildControllerWithSheetWriteStub(
+        async () => ({ rowNumber: 5, updated: { deleted: 'true' } }),
+      );
+      const ctx = {
+        ...mockContext,
+        params: baseParams,
+        data: {
+          sheet: 'Semrush',
+          match: { topic_id: '111', prompt: 'first' },
+          values: { deleted: 'true' },
+        },
+      };
+      const result = await subjectController.patchLlmoDataRow(ctx);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.include({
+        siteId: TEST_SITE_ID,
+        sheetType: 'strategic-recommendations',
+        dataSource: 'strategic-recommendations-template',
+        sheet: 'Semrush',
+        rowNumber: 5,
+      });
+      expect(stub).to.have.been.calledOnce;
+      const callArg = stub.firstCall.args[0];
+      expect(callArg.sharepointPath).to.include('/strategic-recommendations/strategic-recommendations-template.xlsx');
+      expect(callArg.publishPath).to.include('/strategic-recommendations/strategic-recommendations-template.json');
+    });
+
+    it('returns 400 when the body is invalid', async () => {
+      const { subjectController } = await buildControllerWithSheetWriteStub(async () => ({}));
+      const ctx = {
+        ...mockContext,
+        params: baseParams,
+        data: { sheet: 'Semrush' }, // missing match + values
+      };
+      const result = await subjectController.patchLlmoDataRow(ctx);
+      expect(result.status).to.equal(400);
+    });
+
+    it('maps a 404 from sheet-write to 404 response', async () => {
+      const { subjectController } = await buildControllerWithSheetWriteStub(async () => {
+        const err = new Error('No row matches');
+        err.statusCode = 404;
+        throw err;
+      });
+      const result = await subjectController.patchLlmoDataRow({
+        ...mockContext,
+        params: baseParams,
+        data: { sheet: 'Semrush', match: { topic_id: 'x' }, values: { deleted: 'true' } },
+      });
+      expect(result.status).to.equal(404);
+    });
+
+    it('maps a 409 from sheet-write to 409 response', async () => {
+      const { subjectController } = await buildControllerWithSheetWriteStub(async () => {
+        const err = new Error('ambiguous');
+        err.statusCode = 409;
+        throw err;
+      });
+      const result = await subjectController.patchLlmoDataRow({
+        ...mockContext,
+        params: baseParams,
+        data: { sheet: 'Semrush', match: { topic_id: 'x' }, values: { deleted: 'true' } },
+      });
+      expect(result.status).to.equal(409);
+    });
+
+    it('maps an unexpected error to 500', async () => {
+      const { subjectController } = await buildControllerWithSheetWriteStub(async () => {
+        throw new Error('SharePoint exploded');
+      });
+      const result = await subjectController.patchLlmoDataRow({
+        ...mockContext,
+        params: baseParams,
+        data: { sheet: 'Semrush', match: { topic_id: 'x' }, values: { deleted: 'true' } },
+      });
+      expect(result.status).to.equal(500);
+    });
+  });
+
   describe('getLlmoRationale', () => {
     let mockS3Client;
     let mockS3Response;

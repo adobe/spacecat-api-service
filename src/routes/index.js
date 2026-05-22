@@ -413,6 +413,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/data/:dataSource': llmoController.queryFiles,
     'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': llmoController.queryFiles,
     'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource': llmoController.queryFiles,
+    'PATCH /sites/:siteId/llmo/data/:dataSource/row': llmoController.patchLlmoDataRow,
+    'PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row': llmoController.patchLlmoDataRow,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
     'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,

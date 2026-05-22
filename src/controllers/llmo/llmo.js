@@ -68,6 +68,12 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import {
+  patchSheetRow,
+  validateSheetRowPatch,
+  sharepointPathFor,
+  publishPathFor,
+} from './llmo-sheet-write.js';
+import {
   fetchLlmoSource,
   llmoSourceErrorResponse,
   logNotProvisioned,
@@ -1132,6 +1138,72 @@ function LlmoController(ctx) {
     }
   };
 
+  // Updates a single row in an LLMO XLSX data sheet stored in SharePoint.
+  // Round-trips the workbook (read → modify → upload → publish), so this is
+  // intended for low-frequency UI edits (e.g. soft-delete on Strategic Recommendations).
+  const patchLlmoDataRow = async (context) => {
+    const { log, env } = context;
+    const { siteId, sheetType, dataSource } = context.params;
+    const { data } = context;
+
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) {
+        return siteValidation;
+      }
+      const { llmoConfig } = siteValidation;
+
+      if (!hasText(dataSource)) {
+        return badRequest('dataSource path parameter is required');
+      }
+
+      const validationError = validateSheetRowPatch(data);
+      if (validationError) {
+        return badRequest(validationError);
+      }
+
+      const sharepointPath = sharepointPathFor(llmoConfig.dataFolder, sheetType, dataSource);
+      const publishPath = publishPathFor(llmoConfig.dataFolder, sheetType, dataSource);
+
+      log.info(`Patching LLMO sheet row for site ${siteId} at ${sharepointPath} sheet=${data.sheet}`);
+      const result = await patchSheetRow(
+        {
+          sharepointPath,
+          publishPath,
+          sheet: data.sheet,
+          match: data.match,
+          values: data.values,
+        },
+        { env, log },
+      );
+
+      return ok({
+        siteId,
+        sheetType: sheetType || null,
+        dataSource,
+        sheet: data.sheet,
+        rowNumber: result.rowNumber,
+        updated: result.updated,
+      });
+    } catch (error) {
+      log.error(`Error patching LLMO sheet row for site ${siteId}: ${error.message}`);
+      const status = error.statusCode;
+      if (status === 404) {
+        return notFound(cleanupHeaderValue(error.message));
+      }
+      if (status === 409) {
+        return createResponse(
+          { message: cleanupHeaderValue(error.message) },
+          409,
+        );
+      }
+      if (status === 400) {
+        return badRequest(cleanupHeaderValue(error.message));
+      }
+      return internalServerError(cleanupHeaderValue(error.message));
+    }
+  };
+
   // Handles requests to the LLMO rationale endpoint
   const getLlmoRationale = async (context) => {
     const { log } = context;
@@ -2009,6 +2081,7 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryFiles,
+    patchLlmoDataRow,
     getLlmoRationale,
     getBrandClaims,
     getDemoBrandPresence,

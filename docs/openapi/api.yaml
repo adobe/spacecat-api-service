@@ -468,6 +468,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-data-with-type'
   /sites/{siteId}/llmo/data/{sheetType}/{week}/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-data-with-type-and-week'
+  /sites/{siteId}/llmo/data/{dataSource}/row:
+    $ref: './llmo-api.yaml#/llmo-data-row-with-datasource'
+  /sites/{siteId}/llmo/data/{sheetType}/{dataSource}/row:
+    $ref: './llmo-api.yaml#/llmo-data-row-with-type'
   /sites/{siteId}/llmo/sheet-data/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
   /sites/{siteId}/llmo/sheet-data/{sheetType}/{dataSource}:

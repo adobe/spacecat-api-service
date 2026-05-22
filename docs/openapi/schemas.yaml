@@ -4681,6 +4681,66 @@ LlmoCustomerIntentUpdate:
       example: 'enterprise customers'
   additionalProperties: false
 
+LlmoSheetRowPatch:
+  type: object
+  description: |
+    Row update for an LLMO XLSX data sheet. The `match` keys identify exactly one
+    row in the named worksheet; the `values` keys are written to the matching row.
+    All keys in `match` and `values` must correspond to columns in the worksheet
+    header row.
+  required:
+    - sheet
+    - match
+    - values
+  properties:
+    sheet:
+      type: string
+      description: Worksheet name within the XLSX (e.g. 'Semrush')
+      example: 'Semrush'
+    match:
+      type: object
+      description: Column-value pairs that must all match exactly one row
+      additionalProperties:
+        type: string
+      example:
+        topic_id: '14239648398373927587'
+        prompt: "What's the best free online photo editor for non-designers?"
+    values:
+      type: object
+      description: Column-value pairs to write to the matched row
+      additionalProperties:
+        type: string
+      example:
+        deleted: 'true'
+  additionalProperties: false
+
+LlmoSheetRowPatchResult:
+  type: object
+  description: Result of a successful LLMO sheet row update
+  properties:
+    siteId:
+      type: string
+      format: uuid
+    sheetType:
+      type: [string, 'null']
+      description: Sheet type path segment, or null if the dataSource sits directly under dataFolder
+      example: 'strategic-recommendations'
+    dataSource:
+      type: string
+      example: 'strategic-recommendations-template'
+    sheet:
+      type: string
+      example: 'Semrush'
+    rowNumber:
+      type: integer
+      description: 1-based Excel row number that was updated (header row is row 1)
+      example: 42
+    updated:
+      type: object
+      description: The column-value pairs that were written
+      additionalProperties:
+        type: string
+
 LlmoCdnLogsFilter:
   type: array
   description: Array of CDN logs filter items

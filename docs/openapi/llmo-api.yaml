@@ -583,6 +583,119 @@ llmo-data-with-type:
     security:
       - api_key: [ ]
 
+llmo-data-row-with-datasource:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: dataSource
+      in: path
+      required: true
+      description: The data source identifier (without extension); the underlying SharePoint workbook is {dataSource}.xlsx
+      schema:
+        type: string
+        example: 'strategic-recommendations-template'
+  patch:
+    tags:
+      - llmo
+    summary: Update a single row in an LLMO XLSX data sheet
+    description: |
+      Updates one row of the SharePoint XLSX file backing the LLMO data file at
+      {dataFolder}/{dataSource}.xlsx, then republishes the JSON projection so the
+      Helix CDN serves the new contents.
+
+      The endpoint is intended for low-frequency UI-driven edits such as soft-deleting
+      a prompt in Strategic Recommendations. Each call performs a read–modify–write
+      on the full workbook, so concurrent calls targeting the same workbook can clobber
+      each other.
+
+      The `match` object must uniquely identify exactly one row (no match → 404,
+      multiple matches → 409). Column names in `match` and `values` must exist in the
+      worksheet header row.
+    operationId: patchLlmoDataRow
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetRowPatch'
+    responses:
+      '200':
+        description: Row updated and republished successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoSheetRowPatchResult'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '409':
+        description: Match criteria identify more than one row
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-data-row-with-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: sheetType
+      in: path
+      required: true
+      description: The sheet type identifier (folder under dataFolder)
+      schema:
+        type: string
+        example: 'strategic-recommendations'
+    - name: dataSource
+      in: path
+      required: true
+      description: The data source identifier (without extension)
+      schema:
+        type: string
+        example: 'strategic-recommendations-template'
+  patch:
+    tags:
+      - llmo
+    summary: Update a single row in an LLMO XLSX data sheet (with sheet type)
+    description: |
+      Same as PATCH /sites/{siteId}/llmo/data/{dataSource}/row, but the underlying
+      SharePoint workbook lives at {dataFolder}/{sheetType}/{dataSource}.xlsx.
+
+      Used by the elmo UI to mark a single prompt in the Strategic Recommendations
+      workbook as deleted by writing `"deleted": "true"` on the matching row of the
+      `Semrush`, `Synthetic Personas`, or `Citation Attempt` worksheet.
+    operationId: patchLlmoDataRowWithType
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetRowPatch'
+    responses:
+      '200':
+        description: Row updated and republished successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoSheetRowPatchResult'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '409':
+        description: Match criteria identify more than one row
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 llmo-data-with-type-and-week:
   parameters:
     - $ref: './parameters.yaml#/siteId'
