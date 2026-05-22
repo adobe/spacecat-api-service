@@ -19,6 +19,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { isSafeDomain } from '../../../src/controllers/plg/plg-onboarding.js';
 
 const PLG_MODEL_DOMAIN_HELPERS = {
   normalizeDomain: RealPlgOnboardingModel.normalizeDomain,
@@ -8544,6 +8545,52 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           expect(mockOnboarding.remove).to.have.been.called;
         });
       });
+    });
+  });
+
+  // Direct unit tests for the isSafeDomain defense-in-depth layer. These exercise
+  // branches that cannot be reached through the controller because isValidDomain
+  // rejects the relevant inputs upstream (hex IPs, malformed hostnames). The
+  // defense-in-depth contract still needs coverage so a future regression in
+  // isValidDomain does not silently expose the fetch path.
+  describe('isSafeDomain (direct unit tests for defense-in-depth)', () => {
+    it('returns false when new URL throws on a malformed rawHostname', () => {
+      // `[` makes WHATWG URL parser throw (unbalanced bracket).
+      expect(isSafeDomain('[')).to.be.false;
+    });
+
+    it('returns false when canonicalized hostname is an IPv4 literal', () => {
+      // Hex IPv4 canonicalizes to a private IP via new URL.
+      expect(isSafeDomain('0xa9.254.169.254')).to.be.false; // → 169.254.169.254 (AWS IMDS)
+      expect(isSafeDomain('0x7f.0.0.1')).to.be.false; // → 127.0.0.1
+      expect(isSafeDomain('0xa.0.0.1')).to.be.false; // → 10.0.0.1
+    });
+
+    it('returns false when canonicalized hostname is bare IPv4', () => {
+      expect(isSafeDomain('127.0.0.1')).to.be.false;
+      expect(isSafeDomain('10.0.0.1')).to.be.false;
+      expect(isSafeDomain('169.254.169.254')).to.be.false;
+    });
+
+    it('returns false for denylist string matches (non-IP)', () => {
+      expect(isSafeDomain('foo.localhost')).to.be.false;
+      expect(isSafeDomain('myhost.local')).to.be.false;
+      expect(isSafeDomain('service.internal')).to.be.false;
+      expect(isSafeDomain('foo.private.adobe.io')).to.be.false;
+      expect(isSafeDomain('localhost')).to.be.false;
+    });
+
+    it('returns true for legitimate public hostnames', () => {
+      expect(isSafeDomain('nba.com')).to.be.true;
+      expect(isSafeDomain('nba.com/kings')).to.be.true;
+      expect(isSafeDomain('1.2.3.4.example.com')).to.be.true;
+    });
+
+    it('extracts hostname from path-qualified domains before checking', () => {
+      // The path is stripped before canonicalization so an internal target in the
+      // hostname segment cannot be hidden behind a path.
+      expect(isSafeDomain('127.0.0.1/some/path')).to.be.false;
+      expect(isSafeDomain('myhost.local/api')).to.be.false;
     });
   });
 });

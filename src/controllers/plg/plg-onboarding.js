@@ -279,13 +279,12 @@ const isValidDomain = (domain) => PlgOnboardingModel.isValidDomain(domain);
  * @param {string} domain - The domain to validate (may include a path, e.g. "nba.com/kings").
  * @returns {boolean} true if safe, false if potentially dangerous.
  */
-function isSafeDomain(domain) {
+export function isSafeDomain(domain) {
   const rawHostname = domain.split('/')[0];
-  let hostname = rawHostname;
+  let hostname;
   try {
     hostname = new URL(`https://${rawHostname}`).hostname;
   } catch {
-    /* c8 ignore next 2 */
     return false;
   }
   // net.isIP returns 4 (IPv4), 6 (IPv6), or 0 (not an IP). Any IP literal that survives
@@ -302,6 +301,8 @@ function isSafeDomain(domain) {
     /^192\.168\./,
     /^169\.254\./,
     /^0\./,
+    // RFC 6761 reserves .localhost for loopback; runtime resolution is platform-dependent
+    // (Linux glibc/systemd hardcode it; macOS does not), so the static gate is required.
     /^\[::1\]/,
     /\.local$/i,
     /\.internal$/i,
@@ -692,7 +693,9 @@ async function performAsoPlgOnboarding({
     Site, PlgOnboarding, Organization,
   } = dataAccess;
 
-  /* c8 ignore next 7 */
+  // Defense-in-depth: outer entry points (onboard, alternateDomain bypass) already
+  // prepareDomain + isValidDomain + isSafeDomain. These inner checks guard against any
+  // future caller that constructs an unvalidated payload (admin tooling, backfill scripts).
   if (!isValidDomain(domain)) {
     throw Object.assign(
       new Error('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)'),
@@ -1518,6 +1521,7 @@ function PlgOnboardingController(ctx) {
     }
 
     if (!isValidDomain(domain)) {
+      log.warn(`PLG onboard rejected — invalid domain syntax. rawDomain=${JSON.stringify(rawDomain)} normalized=${JSON.stringify(domain)} imsOrgId=${imsOrgId}`);
       return badRequest('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)');
     }
 
@@ -1935,9 +1939,11 @@ function PlgOnboardingController(ctx) {
           if (hasText(siteConfig?.alternateDomain)) {
             const altDomain = prepareDomain(siteConfig.alternateDomain);
             if (!isValidDomain(altDomain)) {
+              log.warn(`PLG bypass rejected — invalid alternate domain syntax. raw=${JSON.stringify(siteConfig.alternateDomain)} normalized=${JSON.stringify(altDomain)} onboardingId=${onboarding.getId?.()}`);
               return badRequest(`Invalid alternate domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings): ${altDomain}`);
             }
             if (!isSafeDomain(altDomain)) {
+              log.warn(`PLG bypass rejected — unsafe alternate domain (SSRF gate). normalized=${JSON.stringify(altDomain)} onboardingId=${onboarding.getId?.()}`);
               return badRequest(`Invalid alternate domain: ${altDomain}`);
             }
             onboarding.setStatus(STATUSES.OUTDATED);
