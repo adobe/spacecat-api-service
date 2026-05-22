@@ -67,6 +67,7 @@ describe('WebhooksController', () => {
       info: sandbox.stub(),
       warn: sandbox.stub(),
       error: sandbox.stub(),
+      debug: sandbox.stub(),
     };
     controller = buildController();
   });
@@ -264,13 +265,37 @@ describe('WebhooksController', () => {
     ]);
   });
 
-  it('logs warning and uses defaults when MYSTICAT_WORKSPACE_REPOS is not set', async () => {
-    // buildController() in beforeEach does not set the env var, so defaults are used
-    // but the log.warn occurs at controller construction — already recorded.
-    expect(mockLog.warn.called).to.be.true;
-    const warnMessage = mockLog.warn.getCalls()
+  it('does not warn or debug at construction (constructor is side-effect-free)', () => {
+    const freshLog = {
+      info: sandbox.stub(),
+      warn: sandbox.stub(),
+      error: sandbox.stub(),
+      debug: sandbox.stub(),
+    };
+    WebhooksController({
+      sqs: mockSqs,
+      log: freshLog,
+      env: { MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl, GITHUB_APP_SLUG: 'mysticat' },
+    });
+    expect(freshLog.warn.called).to.be.false;
+    expect(freshLog.debug.called).to.be.false;
+  });
+
+  it('uses defaults at debug (not warn) when MYSTICAT_WORKSPACE_REPOS is not set', async () => {
+    await controller.processGitHubWebhook(validContext);
+
+    const [, payload] = mockSqs.sendMessage.firstCall.args;
+    expect(payload.workspace_repos).to.deep.equal([
+      'adobe/mysticat-architecture',
+      'adobe/mysticat-ai-native-guidelines',
+      'Adobe-AEM-Sites/aem-sites-architecture',
+    ]);
+    const notSetWarn = mockLog.warn.getCalls()
       .find((c) => c.args[0].includes('MYSTICAT_WORKSPACE_REPOS not set'));
-    expect(warnMessage).to.not.be.undefined;
+    expect(notSetWarn, 'unset path must not warn').to.be.undefined;
+    const notSetDebug = mockLog.debug.getCalls()
+      .find((c) => c.args[0].includes('MYSTICAT_WORKSPACE_REPOS not set'));
+    expect(notSetDebug, 'unset path should debug-log').to.not.be.undefined;
   });
 
   it('filters invalid entries from MYSTICAT_WORKSPACE_REPOS and logs warning', async () => {
