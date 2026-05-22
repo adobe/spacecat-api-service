@@ -4020,6 +4020,61 @@ describe('LlmoController', () => {
       });
       expect(result.status).to.equal(500);
     });
+
+    it('maps a 400 from sheet-write (unknown column) to 400 response', async () => {
+      const { subjectController } = await buildControllerWithSheetWriteStub(async () => {
+        const err = new Error('Unknown column(s) foo. Available: topic_id, prompt, deleted');
+        err.statusCode = 400;
+        throw err;
+      });
+      const result = await subjectController.patchLlmoDataRow({
+        ...mockContext,
+        params: baseParams,
+        data: { sheet: 'Semrush', match: { topic_id: 'x' }, values: { foo: 'bar' } },
+      });
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns 400 when dataSource path parameter is missing', async () => {
+      const { subjectController } = await buildControllerWithSheetWriteStub(async () => ({}));
+      const result = await subjectController.patchLlmoDataRow({
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID, sheetType: 'strategic-recommendations' }, // no dataSource
+        data: { sheet: 'Semrush', match: { topic_id: 'x' }, values: { deleted: 'true' } },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.match(/dataSource/);
+    });
+
+    it('passes through site-validation error responses unchanged', async () => {
+      // Build a controller where the site lookup returns notFound directly.
+      const patchSheetRowStub = sinon.stub();
+      const NotFoundController = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-sheet-write.js': {
+          patchSheetRow: patchSheetRowStub,
+          validateSheetRowPatch: validateSheetRowPatchStub,
+          sharepointPathFor: () => '/x',
+          publishPathFor: () => 'x',
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+      // Replace Site.findById to return null, which makes getSiteAndValidateLlmo return 404.
+      const ctxWithMissingSite = {
+        ...mockContext,
+        dataAccess: {
+          ...mockContext.dataAccess,
+          Site: { findById: sinon.stub().resolves(null) },
+        },
+        params: baseParams,
+        data: { sheet: 'Semrush', match: { topic_id: 'x' }, values: { deleted: 'true' } },
+      };
+      const result = await NotFoundController(ctxWithMissingSite)
+        .patchLlmoDataRow(ctxWithMissingSite);
+      expect(result.status).to.equal(404);
+      expect(patchSheetRowStub).to.not.have.been.called;
+    });
   });
 
   describe('getLlmoRationale', () => {

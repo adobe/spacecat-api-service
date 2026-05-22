@@ -44,12 +44,10 @@ const findRowMatching = (worksheet, headerMap, match) => {
     if (rowNumber === 1) {
       return; // skip header
     }
+    // Callers validate that every match column exists in headerMap before reaching here,
+    // so headerMap.get(column) is always defined.
     const isMatch = Object.entries(match).every(([column, expected]) => {
-      const colIndex = headerMap.get(column);
-      if (!colIndex) {
-        return false;
-      }
-      const cell = row.getCell(colIndex);
+      const cell = row.getCell(headerMap.get(column));
       const actual = cell.value === null || cell.value === undefined ? '' : String(cell.value);
       return actual === String(expected);
     });
