@@ -1,3 +1,10 @@
+## [1.510.1](https://github.com/adobe/spacecat-api-service/compare/v1.510.0...v1.510.1) (2026-05-22)
+
+
+### Bug Fixes
+
+* **semrush:** re-land AIO proxy with bundling fix + CI bundle gate + CLAUDE.md guidance ([#2466](https://github.com/adobe/spacecat-api-service/issues/2466)) ([ee7a48d](https://github.com/adobe/spacecat-api-service/commit/ee7a48d4363acae8ec88eea8fa09f36c06ccfcc6))
+
 # [1.510.0](https://github.com/adobe/spacecat-api-service/compare/v1.509.1...v1.510.0) (2026-05-22)
 
 
