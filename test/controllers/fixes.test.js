@@ -94,6 +94,7 @@ describe('Fixes Controller', () => {
     sandbox.stub(fixEntityCollection, 'findById');
     sandbox.stub(fixEntityCollection, 'setSuggestionsForFixEntity');
     sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionByCreatedAt');
+    fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId = sandbox.stub();
     sandbox.stub(fixEntityCollection, 'updateByKeys');
     sandbox.stub(fixEntityCollection, 'getSuggestionsByFixEntityId');
     sandbox.stub(suggestionCollection, 'bulkUpdateStatus');
@@ -131,7 +132,7 @@ describe('Fixes Controller', () => {
       });
     });
 
-    it('can get all fixes for an opportunity', async () => {
+    it('can get all fixes for an opportunity with suggestions', async () => {
       const fixEntities = await Promise.all([
         fixEntityCollection.create({
           type: Suggestion.TYPES.CONTENT_UPDATE,
@@ -143,26 +144,43 @@ describe('Fixes Controller', () => {
           opportunityId,
           changeDetails: { arbitrary: 'value 2' },
         }),
-        fixEntityCollection.create({
-          type: Suggestion.TYPES.METADATA_UPDATE,
-          opportunityId,
-          changeDetails: { arbitrary: 'value 3' },
-        }),
       ]);
-      fixEntityCollection.allByOpportunityId.resolves(fixEntities);
+
+      const suggestions = await Promise.all([
+        suggestionCollection.create({ opportunityId, type: Suggestion.TYPES.CONTENT_UPDATE }),
+        suggestionCollection.create({ opportunityId, type: Suggestion.TYPES.REDIRECT_UPDATE }),
+      ]);
+
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId.resolves([
+        { fixEntity: fixEntities[0], suggestions: [suggestions[0]] },
+        { fixEntity: fixEntities[1], suggestions: [suggestions[1]] },
+      ]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
       expect(response).includes({ status: 200 });
-      expect(await response.json()).deep.equals(fixEntities.map(FixDto.toJSON));
+      const result = await response.json();
+      expect(result).to.have.lengthOf(2);
+      expect(result[0].suggestions).to.have.lengthOf(1);
+      expect(result[1].suggestions).to.have.lengthOf(1);
+    });
+
+    it('responds 200 with empty array when no fixes exist', async () => {
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId.resolves([]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
     });
 
     it('responds 404 if the fix does not belong to the given opportunity', async () => {
-      fixEntityCollection.allByOpportunityId.resolves([
-        await fixEntityCollection.create({
-          type: Suggestion.TYPES.CONTENT_UPDATE,
-          opportunityId: 'wrong-opportunity-id',
-        }),
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId: 'wrong-opportunity-id',
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId.resolves([
+        { fixEntity, suggestions: [] },
       ]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
@@ -173,7 +191,13 @@ describe('Fixes Controller', () => {
     });
 
     it('responds 404 if the opportunity does not belong to the given site', async () => {
-      fixEntityCollection.allByOpportunityId.resolves([]);
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId.resolves([
+        { fixEntity, suggestions: [] },
+      ]);
       opportunityGetStub.callsFake((data) => ({
         go: async () => ({ data: { ...data, siteId: 'wrong-site-id' } }),
       }));
