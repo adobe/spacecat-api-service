@@ -10,22 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve as resolvePath } from 'node:path';
-
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-// JSON import assertions ('with { type: "json" }') aren't supported by the
-// repo's eslint parser, so we read the locations table from disk once at
-// module load. The file ships in the lambda bundle next to this handler.
-const LOCATIONS_JSON_PATH = resolvePath(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  'data',
-  'locations.json',
-);
-const locationsData = JSON.parse(readFileSync(LOCATIONS_JSON_PATH, 'utf8'));
+import { LOCATIONS } from '../data/locations.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 const LANGUAGE_TAG_REGEX = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
@@ -53,7 +40,7 @@ let normalizedLocations = null;
 function getLocations() {
   if (!normalizedLocations) {
     normalizedLocations = new Map();
-    for (const [iso, value] of Object.entries(locationsData)) {
+    for (const [iso, value] of Object.entries(LOCATIONS)) {
       if (value && Number.isInteger(value.locationId)) {
         normalizedLocations.set(String(iso).toUpperCase(), {
           locationId: value.locationId,
