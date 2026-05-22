@@ -69,15 +69,7 @@ describe('Fixes Controller', () => {
 
   const siteId = '86ef4aae-7296-417d-9658-8cd4c7edc374';
   const opportunityId = 'a3d2f1e9-5f4c-4e6b-8c7d-0c7b5a2f1a2f';
-  const testOrgId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
   const testExternalUserId = 'ABCD1234@AdobeOrg';
-
-  const mockTrialUser = {
-    getExternalUserId: () => testExternalUserId,
-    getFirstName: () => 'John',
-    getLastName: () => 'Doe',
-    getEmailId: () => 'john.doe@example.com',
-  };
 
   const log = {
     ...console, debug: () => undefined, info: () => undefined, warn: () => undefined,
@@ -115,11 +107,8 @@ describe('Fixes Controller', () => {
     sandbox.stub(fixEntitySuggestionCollection, 'allBySuggestionId');
     sandbox.stub(suggestionCollection, 'batchGetByKeys');
     sandbox.stub(dataAccess.Site.entity, 'get').returns({
-      go: async () => ({ data: { siteId, organizationId: testOrgId } }),
+      go: async () => ({ data: { siteId } }),
     });
-    dataAccess.TrialUser = {
-      allByOrganizationId: sandbox.stub().resolves([mockTrialUser]),
-    };
 
     accessControlUtil = sandbox.createStubInstance(AccessControlUtil);
     accessControlUtil.hasAccess.resolves(true);
@@ -169,7 +158,19 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals(fixEntities.map(FixDto.toJSON));
     });
 
-    it('hydrates executedByUser when executedBy matches a TrialUser', async () => {
+    it('hydrates executedByUser by resolving executedBy via IMS admin profile', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'John',
+          last_name: 'Doe',
+          email: 'john.doe@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
       const fixEntity = await fixEntityCollection.create({
         type: Suggestion.TYPES.CONTENT_UPDATE,
         opportunityId,
@@ -189,13 +190,22 @@ describe('Fixes Controller', () => {
         email: 'john.doe@example.com',
       });
       expect(result[0]).to.have.property('executedBy', testExternalUserId);
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(testExternalUserId);
     });
 
-    it('omits executedByUser when executedBy does not match any TrialUser', async () => {
+    it('omits executedByUser when IMS profile lookup fails', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().rejects(new Error('IMS unavailable')),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
       const fixEntity = await fixEntityCollection.create({
         type: Suggestion.TYPES.CONTENT_UPDATE,
         opportunityId,
-        executedBy: 'unknown-user@AdobeOrg',
+        executedBy: testExternalUserId,
         changeDetails: { arbitrary: 'value 1' },
       });
       fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
@@ -207,8 +217,7 @@ describe('Fixes Controller', () => {
       expect(result[0]).to.not.have.property('executedByUser');
     });
 
-    it('does not fail when TrialUser lookup throws', async () => {
-      dataAccess.TrialUser.allByOrganizationId.rejects(new Error('DB error'));
+    it('omits executedByUser when imsClient is not configured', async () => {
       const fixEntity = await fixEntityCollection.create({
         type: Suggestion.TYPES.CONTENT_UPDATE,
         opportunityId,

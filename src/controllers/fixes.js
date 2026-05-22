@@ -70,7 +70,7 @@ export class FixesController {
   /** @type {SuggestionCollection} */
   #Suggestion;
 
-  #TrialUser;
+  #imsClient;
 
   /** @type {AccessControlUtil} */
   #accessControl;
@@ -89,7 +89,7 @@ export class FixesController {
     this.#Opportunity = dataAccess.Opportunity;
     this.#Site = dataAccess.Site;
     this.#Suggestion = dataAccess.Suggestion;
-    this.#TrialUser = dataAccess.TrialUser;
+    this.#imsClient = ctx.imsClient;
     this.#accessControl = accessControl;
   }
 
@@ -135,7 +135,7 @@ export class FixesController {
         return res;
       }
 
-      await this.#enrichFixesWithUserNames(fixEntities, siteId);
+      await this.#enrichFixesWithUserNames(fixEntities);
       fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
       return ok(fixes);
     }
@@ -149,7 +149,7 @@ export class FixesController {
       return res;
     }
 
-    await this.#enrichFixesWithUserNames(fixEntities, siteId);
+    await this.#enrichFixesWithUserNames(fixEntities);
     fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);
   }
@@ -685,13 +685,12 @@ export class FixesController {
   }
 
   /**
-   * Attaches `_executedByUser` to each fix whose `executedBy` matches a TrialUser
-   * in the site's organization. Fails silently so callers always get a response.
+   * Attaches `_executedByUser` to each fix by resolving `executedBy` IMS user IDs
+   * via the IMS admin profile API. Fails silently so callers always get a response.
    * @param {FixEntity[]} fixes
-   * @param {string} siteId
    */
-  async #enrichFixesWithUserNames(fixes, siteId) {
-    if (!this.#TrialUser) {
+  async #enrichFixesWithUserNames(fixes) {
+    if (!this.#imsClient) {
       return;
     }
 
@@ -701,20 +700,23 @@ export class FixesController {
     }
 
     try {
-      const site = await this.#Site.findById(siteId);
-      const organizationId = site?.getOrganizationId();
-      if (!organizationId) {
-        return;
-      }
-
-      const trialUsers = await this.#TrialUser.allByOrganizationId(organizationId);
-      const userMap = new Map(
-        trialUsers.map((u) => [u.getExternalUserId(), {
-          firstName: u.getFirstName(),
-          lastName: u.getLastName(),
-          email: u.getEmailId(),
-        }]),
+      const imsResults = await Promise.allSettled(
+        userIds.map((id) => this.#imsClient.getImsAdminProfile(id)),
       );
+
+      const userMap = new Map();
+      imsResults.forEach((result, i) => {
+        if (result.status === 'fulfilled') {
+          const { first_name: firstName, last_name: lastName, email } = result.value;
+          userMap.set(userIds[i], {
+            firstName: firstName || '-',
+            lastName: lastName || '-',
+            email: email || '',
+          });
+        } else {
+          this.#ctx.log?.warn?.(`Failed to resolve IMS profile for user ${userIds[i]}: ${result.reason?.message}`);
+        }
+      });
 
       for (const fix of fixes) {
         const userId = fix.getExecutedBy();
