@@ -10,8 +10,7 @@ https://opensource.adobe.com/spacecat-api-service/
 
 Server-side proxy in front of the Semrush AIO API. See [docs/semrush.md](docs/semrush.md)
 for the operator guide (auth flow, workspace resolution, error envelopes, smoke
-runbook). TypeScript types are generated from the OpenAPI spec on demand via
-`npm run gen:types:semrush` — they are not committed to the repo.
+runbook).
 
 ### Build documentation locally
 
