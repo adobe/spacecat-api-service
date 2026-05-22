@@ -1124,6 +1124,10 @@ function LlmoController(ctx) {
       return cachedOk(queryResult.data, queryResult.headers);
     } catch (error) {
       log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
+      const mapped = llmoSourceErrorResponse(error);
+      if (mapped) {
+        return mapped;
+      }
       return badRequest(cleanupHeaderValue(error.message));
     }
   };

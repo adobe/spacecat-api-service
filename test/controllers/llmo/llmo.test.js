@@ -3789,6 +3789,45 @@ describe('LlmoController', () => {
       );
     });
 
+    it('maps a tagged upstream 5xx from the cached query to 502', async () => {
+      const err = new Error('External API returned 503');
+      err.upstreamStatus = 503;
+      const queryLlmoFilesStub = sinon.stub().rejects(err);
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': { queryLlmoFiles: queryLlmoFilesStub },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+      const result = await LlmoControllerWithCache(mockContext).queryFiles(mockContext);
+      expect(result.status).to.equal(502);
+    });
+
+    it('maps a cached-query timeout to 504', async () => {
+      const err = new Error('Request timeout after 15000ms');
+      err.isTimeout = true;
+      const queryLlmoFilesStub = sinon.stub().rejects(err);
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': { queryLlmoFiles: queryLlmoFilesStub },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+      const result = await LlmoControllerWithCache(mockContext).queryFiles(mockContext);
+      expect(result.status).to.equal(504);
+    });
+
+    it('maps a cached-query missing-key config error to 500', async () => {
+      const err = new Error('LLMO_HLX_API_KEY environment variable is not configured');
+      err.isConfigError = true;
+      const queryLlmoFilesStub = sinon.stub().rejects(err);
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': { queryLlmoFiles: queryLlmoFilesStub },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+      const result = await LlmoControllerWithCache(mockContext).queryFiles(mockContext);
+      expect(result.status).to.equal(500);
+    });
+
     describe('HLX PG migration blocking (brand-presence)', () => {
       it('should return 403 for PG migration site when sheetType is brand-presence', async () => {
         const queryLlmoFilesStub = sinon.stub().resolves({ data: {}, headers: {} });
