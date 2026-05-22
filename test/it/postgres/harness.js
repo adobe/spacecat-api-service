@@ -18,13 +18,21 @@
  *
  * Starts Docker Compose (Postgres + PostgREST) and the dev server once
  * before all test files, and tears both down after all test files complete.
+ *
+ * Force HTTP/1.1 (no keep-alive on Node ≥19) for every shared library's
+ * @adobe/fetch context. Static ES imports hoist before code, and mocha CLI
+ * --require this file before package.json `mocha.require` runs, so this is
+ * the earliest point in process startup where we can set the env var before
+ * any module-level fetch context is constructed. Subsequent imports must be
+ * dynamic so they evaluate AFTER this line.
  */
+process.env.HELIX_FETCH_FORCE_HTTP1 = '1';
 
-import { initAuth, createAllTokens } from '../shared/auth.js';
-import { buildEnv } from '../env.js';
-import { startServer, stopServer } from '../server.js';
-import { createHttpClient } from '../shared/http-client.js';
-import { startPostgres, stopPostgres } from './setup.js';
+const { initAuth, createAllTokens } = await import('../shared/auth.js');
+const { buildEnv } = await import('../env.js');
+const { startServer, stopServer } = await import('../server.js');
+const { createHttpClient } = await import('../shared/http-client.js');
+const { startPostgres, stopPostgres } = await import('./setup.js');
 
 /** Shared state populated during beforeAll, consumed by test files. */
 export const ctx = {};
