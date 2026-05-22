@@ -274,14 +274,14 @@ function PreflightController(ctx, log, env) {
    * @returns {Promise<Object>} The HTTP response object
    */
   const getPreflightJobStatusAndResult = async (context) => {
-    log.debug(`getPreflightJobStatusAndResult for jobId: ${context.params?.jobId}`);
-
     const jobId = context.params?.jobId;
 
     if (!isValidUUID(jobId)) {
       log.error(`Invalid jobId: ${jobId}`);
       return badRequest('Invalid jobId');
     }
+
+    log.debug(`[jobId=${context.params?.jobId}] getPreflightJobStatusAndResult start`);
 
     try {
       const job = await dataAccess.AsyncJob.findById(jobId);
@@ -291,7 +291,7 @@ function PreflightController(ctx, log, env) {
         return notFound(`Job with ID ${jobId} not found`);
       }
 
-      log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
+      log.debug(`[jobId=${context.params?.jobId}] getPreflightJobStatusAndResult ended`);
 
       return ok({
         jobId: job.getId(),
