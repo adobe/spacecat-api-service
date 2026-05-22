@@ -17,7 +17,9 @@ import { CDN_TYPES } from '../controllers/llmo/llmo-utils.js';
 import {
   AEM_CS_FASTLY_CNAME_PATTERNS,
   AEM_CS_FASTLY_IPS,
-  detectAemCsFastlyBehindWaf,
+  detectAemCsFastlyWafSimpleProxy,
+  EDGE_OPTIMIZE_USER_AGENT,
+  UA_ROUTING_HEADER,
 } from './cdn-detection.js';
 
 // Per-CDN strategies for edge optimize routing.
@@ -43,8 +45,6 @@ export const OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE = 'optimize-at-edge-enabled-m
 // Gives the CDN API time to propagate before Tokowaka detects the change.
 export const EDGE_OPTIMIZE_MARKING_DELAY_SECONDS = 300;
 
-const EDGE_OPTIMIZE_USER_AGENT = 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0';
-const UA_ROUTING_HEADER = 'x-edgeoptimize-request-id';
 const PROBE_TIMEOUT_MS = 5000;
 const CDN_CALL_TIMEOUT_MS = 5000;
 
@@ -232,7 +232,7 @@ export async function detectAemCsFastlyForDomain(domain, log) {
     }
     // DNS missed — a WAF or reverse proxy may be hiding AEM CS Fastly.
     // Run Phase 1.5 HTTP probes directly (no Phase 2 — we only care about AEM CS).
-    return await detectAemCsFastlyBehindWaf(domain, log);
+    return await detectAemCsFastlyWafSimpleProxy(domain, log);
   } catch (err) {
     log?.error('detectAemCsFastlyForDomain error', err);
   }

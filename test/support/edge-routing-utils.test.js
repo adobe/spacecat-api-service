@@ -303,7 +303,7 @@ describe('edge-routing-utils', () => {
         '../../src/support/cdn-detection.js': {
           AEM_CS_FASTLY_CNAME_PATTERNS: ['cdn.adobeaemcloud.com', 'adobe-aem.map.fastly.net'],
           AEM_CS_FASTLY_IPS: new Set(['151.101.195.10', '151.101.67.10', '151.101.3.10', '151.101.131.10']),
-          detectAemCsFastlyBehindWaf: detectCdnStub,
+          detectAemCsFastlyWafSimpleProxy: detectCdnStub,
         },
       });
     });

@@ -171,37 +171,36 @@ async function detectAdobeManagedCdn(domain, log) {
 }
 
 /* ============================================================================
- * Phase 1.5 — Case 0 (WAF Simple Proxy) HTTP probe.
+ * Phase 1.5 — Case 0: AEM CS WAF Simple Proxy HTTP probe.
  *
  * When Phase 1 DNS resolves cleanly to non-Adobe IPs ('byocdn-other'), a WAF
  * may sit in front of AEM CS Fastly. Four signals confirm this topology:
  *   1. x-correlation-id echoed unchanged in every response
- *   2. x-tokowaka-request-id or x-edgeoptimize-request-id present in every response
- *   3. x-request-id unique across all CASE0_PROBE_COUNT responses (WAF is not caching)
+ *   2. x-edgeoptimize-request-id present in every response
+ *   3. x-request-id unique across all AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT responses (no caching)
  *   4. x-aem-debug response header contains host=<probed-domain>
  *
- * CASE0_PROBE_COUNT sequential probes (default 3). All four signals must hold
+ * AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT sequential probes (default 3). All four signals must hold
  * across every response; any failure returns null.
  * ========================================================================== */
 
-const CASE0_PROBE_TIMEOUT_MS = 3000;
+export const EDGE_OPTIMIZE_USER_AGENT = 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0';
+export const UA_ROUTING_HEADER = 'x-edgeoptimize-request-id';
+
+const AEMCS_WAF_SIMPLE_PROXY_PROBE_TIMEOUT_MS = 3000;
 const TEST_CORRELATION_ID = 'adobeedgetest';
 const AEM_DEBUG_VALUE = 'edge=true';
-const EDGE_OPTIMIZE_TEST_USER_AGENT = 'AdobeEdgeOptimize-Test';
 const HEADER_AEM_DEBUG = 'x-aem-debug';
 const HEADER_CORRELATION_ID = 'x-correlation-id';
-const HEADER_EDGEOPTIMIZE_REQUEST_ID = 'x-edgeoptimize-request-id';
 const HEADER_REQUEST_ID = 'x-request-id';
-const HEADER_TOKOWAKA_REQUEST_ID = 'x-tokowaka-request-id';
-const HEADER_USER_AGENT = 'User-Agent';
 
-// Number of sequential probes sent to verify all Case 0 signals.
+// Number of sequential probes sent to verify all Case 0: WAF Simple Proxy signals.
 // Increase to raise the false-positive bar; decrease to reduce latency.
-export const CASE0_PROBE_COUNT = 3;
+export const AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT = 3;
 
-async function makeCase0Probe(domain, log) {
+async function makeAemCsWafSimpleProxyProbe(domain, log) {
   const url = `https://${domain}/`;
-  // Disable only the local @adobe/fetch response cache so repeated Case 0 probes
+  // Disable only the local @adobe/fetch response cache so repeated probes
   // always hit the network from this process. This Request.cache option is not an
   // outbound Cache-Control header, so it does not bypass or alter customer CDN caching.
   try {
@@ -209,11 +208,11 @@ async function makeCase0Probe(domain, log) {
       method: 'GET',
       redirect: 'manual',
       cache: 'no-store',
-      timeout: CASE0_PROBE_TIMEOUT_MS,
+      timeout: AEMCS_WAF_SIMPLE_PROXY_PROBE_TIMEOUT_MS,
       headers: {
         [HEADER_CORRELATION_ID]: TEST_CORRELATION_ID,
         [HEADER_AEM_DEBUG]: AEM_DEBUG_VALUE,
-        [HEADER_USER_AGENT]: EDGE_OPTIMIZE_TEST_USER_AGENT,
+        'User-Agent': EDGE_OPTIMIZE_USER_AGENT,
       },
     });
     const responseHeaders = {};
@@ -230,18 +229,35 @@ async function makeCase0Probe(domain, log) {
   }
 }
 
+function checkCachingAtProxy(responses, log, domain) {
+  if (!responses.every((r) => r[HEADER_CORRELATION_ID] === TEST_CORRELATION_ID)) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 1 absent — x-correlation-id not echoed', { domain });
+    return false;
+  }
+  if (!responses.every((r) => r[UA_ROUTING_HEADER])) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 2 absent — no edgeoptimize request-id header', { domain });
+    return false;
+  }
+  const requestIds = responses.map((r) => r[HEADER_REQUEST_ID]);
+  if (requestIds.some((rid) => !rid) || new Set(requestIds).size < responses.length) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 3 absent — x-request-id not unique or missing', { domain });
+    return false;
+  }
+  return true;
+}
+
 /**
  * Phase 1.5: Detect AEM CS Fastly behind a WAF simple proxy (Case 0).
  *
- * Sends CASE0_PROBE_COUNT sequential HTTP probes and verifies four signals
+ * Sends AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT sequential HTTP probes and verifies four signals
  * that uniquely identify AEM CS Fastly responses. Returns 'aem-cs-fastly'
  * when all signals are confirmed, null otherwise.
  */
-export async function detectAemCsFastlyBehindWaf(domain, log) {
+export async function detectAemCsFastlyWafSimpleProxy(domain, log) {
   const allResponses = [];
   /* eslint-disable no-await-in-loop -- sequential probes; each must see a unique x-request-id */
-  for (let i = 0; i < CASE0_PROBE_COUNT; i += 1) {
-    const resp = await makeCase0Probe(domain, log);
+  for (let i = 0; i < AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT; i += 1) {
+    const resp = await makeAemCsWafSimpleProxyProbe(domain, log);
     if (!resp) {
       return null;
     }
@@ -249,30 +265,7 @@ export async function detectAemCsFastlyBehindWaf(domain, log) {
   }
   /* eslint-enable no-await-in-loop */
 
-  const expectedHost = domain;
-
-  // Signal 1: every response echoes the correlation id unchanged.
-  const signal1 = allResponses.every(
-    (r) => r[HEADER_CORRELATION_ID] === TEST_CORRELATION_ID,
-  );
-  if (!signal1) {
-    log?.info?.('[cdn-detection] Phase 1.5: signal 1 absent — x-correlation-id not echoed', { domain });
-    return null;
-  }
-
-  // Signal 2: every response carries a Tokowaka/EdgeOptimize request-id header.
-  const signal2 = allResponses.every(
-    (r) => r[HEADER_TOKOWAKA_REQUEST_ID] || r[HEADER_EDGEOPTIMIZE_REQUEST_ID],
-  );
-  if (!signal2) {
-    log?.info?.('[cdn-detection] Phase 1.5: signal 2 absent — no request-id header', { domain });
-    return null;
-  }
-
-  // Signal 3: x-request-id unique across all probed responses (WAF is not caching)
-  const requestIds = allResponses.map((r) => r[HEADER_REQUEST_ID]);
-  if (requestIds.some((rid) => !rid) || new Set(requestIds).size < allResponses.length) {
-    log?.info?.('[cdn-detection] Phase 1.5: signal 3 absent — x-request-id not unique or missing', { domain });
+  if (!checkCachingAtProxy(allResponses, log, domain)) {
     return null;
   }
 
@@ -283,14 +276,14 @@ export async function detectAemCsFastlyBehindWaf(domain, log) {
   // in the debug header, separated by spaces, semicolons, commas, or other text.
   const signal4 = allResponses.every((r) => {
     const hostField = (r[HEADER_AEM_DEBUG] || '').match(/(?:^|[^\w-])host=([^,\s;]+)/)?.[1] ?? '';
-    return hostField === expectedHost;
+    return hostField === domain;
   });
   if (!signal4) {
     log?.info?.('[cdn-detection] Phase 1.5: signal 4 absent — x-aem-debug host mismatch', { domain });
     return null;
   }
 
-  log?.info?.('[cdn-detection] Phase 1.5: all signals confirmed — AEM CS Fastly behind WAF', { domain });
+  log?.info?.('[cdn-detection] Phase 1.5: all signals confirmed — AEM CS Fastly WAF simple proxy', { domain });
   return 'aem-cs-fastly';
 }
 
@@ -802,16 +795,16 @@ export async function detectCdnForDomain(input, log) {
       return phase1;
     }
 
-    // Phase 1.5: Case 0 — WAF in front of AEM CS Fastly.
+    // Phase 1.5: Case 0 — AEM CS WAF Simple Proxy.
     // DNS resolved cleanly to non-Adobe IPs; an HTTP probe with four signals
     // distinguishes WAF-proxied AEM CS from a genuine third-party CDN.
     if (phase1 === 'byocdn-other') {
-      let case0Result = await detectAemCsFastlyBehindWaf(`www.${bareDomain}`, log);
-      if (!case0Result) {
-        case0Result = await detectAemCsFastlyBehindWaf(bareDomain, log);
+      let aemcsWafSimpleProxyResult = await detectAemCsFastlyWafSimpleProxy(`www.${bareDomain}`, log);
+      if (!aemcsWafSimpleProxyResult) {
+        aemcsWafSimpleProxyResult = await detectAemCsFastlyWafSimpleProxy(bareDomain, log);
       }
-      if (case0Result === 'aem-cs-fastly') {
-        return case0Result;
+      if (aemcsWafSimpleProxyResult === 'aem-cs-fastly') {
+        return aemcsWafSimpleProxyResult;
       }
     }
 
