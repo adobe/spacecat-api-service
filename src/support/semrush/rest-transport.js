@@ -12,10 +12,6 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-// FIXME(2026-05-22): move the base URL fully to env/vault; see follow-up
-// "Wire Semrush base URL via env/vault" — the hardcoded fallback remains
-// only so dev environments without the secret wired still resolve.
-const DEFAULT_BASE_URL = 'https://adobe-hackathon.semrush.com';
 const API_PREFIX = '/enterprise/projects/api';
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
@@ -38,13 +34,26 @@ export class SemrushTransportError extends Error {
 }
 
 /**
- * Resolves and validates the upstream base URL. The default is the Adobe-
- * managed hackathon host; an env override is permitted but only if it parses
- * as a same-protocol https URL — refuses arbitrary schemes so a compromised
- * env can't redirect IMS bearers to an attacker host.
+ * Resolves and validates the upstream base URL. The URL is required and must
+ * arrive via `env.SEMRUSH_PROJECTS_BASE_URL` — sourced from Vault
+ * (`dx_mysticat/<env>/api-service`) and injected through AWS Secrets Manager.
+ * No source default: the upstream host is operational config that must be
+ * settable per-environment without a code change.
+ *
+ * Refuses non-https schemes so a compromised env can't redirect IMS bearers
+ * to an attacker host.
  */
 function baseUrl(env) {
-  const candidate = (env?.SEMRUSH_PROJECTS_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
+  const raw = typeof env?.SEMRUSH_PROJECTS_BASE_URL === 'string'
+    ? env.SEMRUSH_PROJECTS_BASE_URL.trim()
+    : env?.SEMRUSH_PROJECTS_BASE_URL;
+  if (!hasText(raw)) {
+    throw new Error(
+      'SEMRUSH_PROJECTS_BASE_URL is not set. Configure it via Vault '
+      + '(dx_mysticat/<env>/api-service) or .env for local dev.',
+    );
+  }
+  const candidate = raw.replace(/\/$/, '');
   let parsed;
   try {
     parsed = new URL(candidate);

@@ -8,11 +8,31 @@ api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API a
 
 ## Environment configuration
 
-No new env vars. The proxy reads:
+The proxy is configured via a single env var that is **required at runtime** — Lambda fails at first request if it is unset.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `SEMRUSH_PROJECTS_BASE_URL` | `https://adobe-hackathon.semrush.com` | Override target host (used in tests; left default in dev/stage/prod) |
+| Variable | Required | Source | Purpose |
+|---|---|---|---|
+| `SEMRUSH_PROJECTS_BASE_URL` | yes (no source default) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Upstream host for the Semrush AIO REST API. Must be `https://…`. Trailing slashes are stripped. Per-environment value so the production target can differ from the hackathon host without a code change. |
+
+### Vault writes (dev / stage / prod)
+
+```bash
+export VAULT_ADDR=https://vault-amer.adobe.net
+vault login -method=oidc   # opens browser
+
+# value used for all three today; production target host may differ later
+vault kv patch dx_mysticat/dev/api-service \
+  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+vault kv patch dx_mysticat/stage/api-service \
+  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+vault kv patch dx_mysticat/prod/api-service \
+  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+
+# verify
+vault kv get -field=SEMRUSH_PROJECTS_BASE_URL dx_mysticat/<env>/api-service
+```
+
+The next `hedy --aws-update-secrets` deploy step ships the value through AWS Secrets Manager at `/helix-deploy/spacecat-services/api-service/latest`; the Lambda's `secrets` middleware then injects it into `context.env` on every cold start.
 
 The IMS forwarding pipeline:
 
