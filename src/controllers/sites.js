@@ -104,7 +104,7 @@ export async function resolveOrgDefaultSite(org, productCode, context, ctx, acce
     }
 
     const isVisibleTier = CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
-    if (!isVisibleTier && !accessControlUtil.hasAdminAccess()) {
+    if (!isVisibleTier && !accessControlUtil.hasAdminReadAccess()) {
       return null;
     }
 
@@ -1318,13 +1318,13 @@ function SitesController(ctx, log, env) {
       }
 
       if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
-        if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+        if (!callerIsInternal && !accessControlUtil.hasAdminReadAccess()) {
           return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
         }
         log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
       }
 
-      if (enrolledSite && (accessControlUtil.hasAdminAccess()
+      if (enrolledSite && (accessControlUtil.hasAdminReadAccess()
         || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
         return ok({ data: await buildResolveData(org, enrolledSite, context) });
       }
