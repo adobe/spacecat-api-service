@@ -734,6 +734,16 @@ function SitesController(ctx, log, env) {
           ...requestBody.config.auditTargetURLs,
         };
       }
+      // Deep-merge `llmo` so a partial llmo patch (e.g. { brand } from a lossy
+      // list-DTO round-trip) does not wipe sibling fields like cdnBucketConfig,
+      // questions, cdnlogsFilter, etc. Callers wanting to remove an llmo field
+      // must use the dedicated partial endpoints (e.g. /llmo/cdn-bucket-config).
+      if (requestBody.config?.llmo && existingConfig?.llmo) {
+        merged.llmo = {
+          ...existingConfig.llmo,
+          ...requestBody.config.llmo,
+        };
+      }
       const auditTargetURLsResult = auditTargetURLsPatchGuard(
         merged,
         site.getBaseURL(),
