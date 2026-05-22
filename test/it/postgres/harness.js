@@ -58,21 +58,59 @@ export const mochaHooks = {
     await stopServer();
     await stopPostgres();
 
-    // DIAGNOSTIC (do not merge): if the Node event loop is still alive 5s after
-    // teardown completes, dump active handles via why-is-node-running and
-    // force-exit so the CI job ends quickly instead of hitting the 15-min
-    // step timeout. This is a temporary probe to identify the leaked handle
-    // that intermittently causes ci/it-postgres cancellations on main.
-    setTimeout(async () => {
-      console.log('\n=== why-is-node-running: handles still keeping the loop alive ===');
-      try {
-        const mod = await import('why-is-node-running');
-        (mod.default || mod)();
-      } catch (err) {
-        console.error('why-is-node-running failed to load:', err);
+    // DIAGNOSTIC (do not merge): identify the intermittent handle that
+    // sometimes keeps mocha from exiting after IT teardown and causes the
+    // ci/it-postgres job to hit the 15-min step timeout. Dump active handles
+    // immediately, then every 5s, force-exit at 60s. Also list child-process
+    // tree state so we can tell whether the hang is in Node (unclosed handle)
+    // or outside Node (orphaned helper / npm exec wrapper).
+    let wirn = null;
+    try {
+      const mod = await import('why-is-node-running');
+      wirn = mod.default || mod;
+    } catch (err) {
+      console.error('why-is-node-running load failed:', err);
+    }
+
+    const dump = (label) => {
+      console.log(`\n=== handle dump [${label}] ===`);
+      const handles = process.getActiveResourcesInfo
+        ? process.getActiveResourcesInfo()
+        : [];
+      console.log('process.getActiveResourcesInfo():', JSON.stringify(handles));
+      if (wirn) {
+        try {
+          wirn(process.stderr);
+        } catch (err) {
+          console.error('wirn failed:', err);
+        }
       }
-      console.log('=== end handle dump — force-exiting ===');
-      process.exit(0);
-    }, 5000).unref();
+      console.log(`=== end dump [${label}] ===`);
+    };
+
+    // Snapshot child processes (Linux only — CI is ubuntu-latest).
+    try {
+      const { execSync } = await import('child_process');
+      const psOut = execSync('ps -eo pid,ppid,stat,comm,args --no-headers 2>/dev/null | head -200', { encoding: 'utf8' });
+      console.log('\n=== ps snapshot (post-teardown) ===');
+      console.log(psOut);
+      console.log('=== end ps snapshot ===');
+    } catch (err) {
+      console.error('ps snapshot failed:', err.message);
+    }
+
+    dump('t=0 immediately after teardown');
+
+    let elapsed = 0;
+    const interval = setInterval(() => {
+      elapsed += 5;
+      dump(`t=${elapsed}s`);
+      if (elapsed >= 60) {
+        clearInterval(interval);
+        console.log('=== diagnostic timeout reached — force-exiting ===');
+        process.exit(0);
+      }
+    }, 5000);
+    interval.unref();
   },
 };
