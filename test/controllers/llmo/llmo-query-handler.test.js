@@ -61,7 +61,11 @@ describe('llmo-query-handler', () => {
   // Helper to get fetch options from stub
   const getFetchOptions = () => tracingFetchStub.getCall(0).args[1];
 
-  before(async () => {
+  before(async function () {
+    // esmock with a 3rd-arg global mock deep-replaces the spacecat-shared-utils
+    // import tree, which can exceed the default 10s hook timeout on slower CI
+    // runners. Mirrors the 120s before-hook timeout used in llmo.test.js.
+    this.timeout(120000);
     tracingFetchStub = sinon.stub();
 
     const module = await esmock(
