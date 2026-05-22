@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 25 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – 27 GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 
@@ -132,6 +132,110 @@ x-ai-vis-v1-brand-topics-sort-by: &v1BrandTopicsSortByParam
         enum: [0, 1, 2, 3, 4, 5, 6]
     example: VISIBILITY
 
+x-ai-vis-v1-brand-topics-search-query: &v1BrandTopicsSearchQueryParam
+  name: searchQuery
+  in: query
+  required: false
+  description: |
+    Free-text substring filter on the topic name. Maps to Semrush v2
+    `BrandTopicsRequest.dimension_filter_ql` as `topic CONTAINS "<searchQuery>"`.
+    Backslash and double-quote characters in the value are escaped automatically
+    so embedded quotes do not break the QL string.
+  schema:
+    type: string
+    example: link build
+
+x-ai-vis-v1-brand-topics-volume-from: &v1BrandTopicsVolumeFromParam
+  name: volumeFrom
+  in: query
+  required: false
+  description: |
+    Inclusive lower bound on `volume` for Semrush v2 `BrandTopicsRequest.metric_filter_ql`.
+    When only `volumeFrom` is supplied the filter becomes `volume >= volumeFrom`;
+    when only `volumeTo` is supplied it becomes `volume <= volumeTo`;
+    supplying both yields the closed range `volume >= volumeFrom AND volume <= volumeTo`.
+    Values that are not non-negative integers produce HTTP 400 `invalid_volume`.
+  schema:
+    type: integer
+    minimum: 0
+    example: 101
+
+x-ai-vis-v1-brand-topics-volume-to: &v1BrandTopicsVolumeToParam
+  name: volumeTo
+  in: query
+  required: false
+  description: |
+    Inclusive upper bound on `volume` for Semrush v2 `BrandTopicsRequest.metric_filter_ql`.
+    See `volumeFrom` for the combined semantics. Values that are not non-negative
+    integers produce HTTP 400 `invalid_volume`.
+  schema:
+    type: integer
+    minimum: 0
+    example: 1000
+
+x-ai-vis-v1-brand-topics-visibility-from: &v1BrandTopicsVisibilityFromParam
+  name: visibilityFrom
+  in: query
+  required: false
+  description: |
+    Inclusive lower bound on `visibility` for Semrush v2 `BrandTopicsRequest.metric_filter_ql`.
+    Same single-bound semantics as `volumeFrom` / `volumeTo`. Values outside `[0, 100]`
+    (or non-integers) produce HTTP 400 `invalid_visibility`.
+  schema:
+    type: integer
+    minimum: 0
+    maximum: 100
+    example: 81
+
+x-ai-vis-v1-brand-topics-visibility-to: &v1BrandTopicsVisibilityToParam
+  name: visibilityTo
+  in: query
+  required: false
+  description: |
+    Inclusive upper bound on `visibility` for Semrush v2 `BrandTopicsRequest.metric_filter_ql`.
+    See `visibilityFrom` for the combined semantics. Values outside `[0, 100]`
+    (or non-integers) produce HTTP 400 `invalid_visibility`.
+  schema:
+    type: integer
+    minimum: 0
+    maximum: 100
+    example: 100
+
+x-ai-vis-v1-gap-topics-sort-by: &v1GapTopicsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `TOPICS_REQUEST_ORDER_BY` for Semrush v2 `GapTopicsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `VISIBILITY` (2).
+  schema:
+    oneOf:
+      - type: string
+        enum:
+          - UNSPECIFIED
+          - NAME
+          - VISIBILITY
+          - DIFFICULTY
+          - MENTIONS
+          - VOLUME
+          - MENTIONS_COUNT_BY_BRAND
+          - MENTIONED_COMPETITORS
+          - TOTAL_COMPETITOR_MENTIONS
+      - type: integer
+        enum: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    example: VISIBILITY
+
+x-ai-vis-v1-gap-topics-gap-kinds: &v1GapTopicsGapKindsParam
+  name: gapKinds
+  in: query
+  required: false
+  description: |
+    Comma-separated list of gap kinds for Semrush v2 `GapTopicsRequest.kind[]`
+    (`ALL`, `MISSING`, `WEAK`, `SHARED`, `STRONG`, `UNIQUE`). Default when omitted: `ALL`.
+  schema:
+    type: string
+    example: ALL
+
 x-ai-vis-v1-prompts-sort-by: &v1PromptsSortByParam
   name: sortBy
   in: query
@@ -152,6 +256,37 @@ x-ai-vis-v1-prompts-sort-by: &v1PromptsSortByParam
       - type: integer
         enum: [0, 1, 2, 3, 4, 5]
     example: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-v1-gap-prompts-sort-by: &v1GapPromptsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `GAP_PROMPTS_REQUEST_ORDER_BY` for Semrush v2 `GapPromptsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `MENTIONED_BRANDS_COUNT` (2).
+  schema:
+    oneOf:
+      - type: string
+        enum:
+          - UNSPECIFIED
+          - PROMPT
+          - MENTIONED_BRANDS_COUNT
+          - SOURCES_COUNT
+          - TOPIC_VOLUME
+      - type: integer
+        enum: [0, 1, 2, 3, 4]
+    example: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-v1-gap-prompts-source-domain: &v1GapPromptsSourceDomainParam
+  name: sourceDomain
+  in: query
+  required: false
+  description: |
+    Optional filter restricting gap prompts to the given source domain.
+    Forwarded as the native `GapPromptsRequest.source_domain` proto field (not a QL filter).
+  schema:
+    type: string
+    example: nytimes.com
 
 x-ai-vis-sort-direction: &sortDirectionParam
   name: sortDirection
@@ -978,6 +1113,24 @@ ai-visibility-v1-topic-brand-topics:
       `VISIBILITY` descending). Row fields include `visibility`, `difficulty`, `volumeTrend`, and
       `intents` (`TOPIC_INTENT` distribution). The response body is `{ data, total }` plus `srFilters`;
       `offset` and `limit` are not echoed (use the query parameters).
+
+      ### Filters
+
+      The endpoint accepts optional filters that are forwarded as Semrush QL strings on both the
+      list and totals requests:
+
+      - `searchQuery` → `dimension_filter_ql: topic CONTAINS "<searchQuery>"` (backslash and
+        double-quote characters in the value are escaped automatically).
+      - `volumeFrom` / `volumeTo` → `metric_filter_ql` on `volume`. Supplying only one bound emits
+        `volume >= volumeFrom` or `volume <= volumeTo`; supplying both emits the closed range
+        `volume >= volumeFrom AND volume <= volumeTo`. Non-negative integers only —
+        invalid values return HTTP 400 `invalid_volume`.
+      - `visibilityFrom` / `visibilityTo` → `metric_filter_ql` on `visibility` with the same
+        single-bound semantics. Integers in `[0, 100]` only — invalid values return HTTP 400
+        `invalid_visibility`.
+
+      When both volume and visibility ranges are supplied they are joined with ` AND ` into a
+      single `metric_filter_ql` value.
     operationId: getAiVisibilityV1TopicBrandTopics
     parameters:
       - *domainParam
@@ -986,6 +1139,11 @@ ai-visibility-v1-topic-brand-topics:
       - *engineParam
       - *v1BrandTopicsSortByParam
       - *sortDirectionParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+      - *v1BrandTopicsVisibilityFromParam
+      - *v1BrandTopicsVisibilityToParam
       - *limitParam
       - *offsetParam
     responses:
@@ -995,6 +1153,56 @@ ai-visibility-v1-topic-brand-topics:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1TopicBrandTopicsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-gap-topics:
+  get:
+    tags: [ai-visibility]
+    summary: Get gap topics (Topic v2 JSON)
+    description: |
+      Returns topics with the gap between the target brand and its competitors using Semrush
+      `TopicService` v2 `GapTopics` and `GapTopicsTotals`. Returns each topic as **native
+      protobuf JSON** (camelCase) including `gapMentions` per competitor brand. Supports
+      `sortBy` / `sortDirection` on `TOPICS_REQUEST_ORDER_BY` (default `TOTAL_COMPETITOR_MENTIONS` descending).
+      The response body is `{ data, totals }` plus `srFilters`; `offset` and `limit` are not
+      echoed (use the query parameters).
+
+      ### Filters
+
+      The endpoint accepts optional filters that are forwarded as Semrush QL strings on both
+      the list and totals requests:
+
+      - `searchQuery` → `dimension_filter_ql: topic CONTAINS "<searchQuery>"` (backslash and
+        double-quote characters in the value are escaped automatically).
+      - `volumeFrom` / `volumeTo` → `metric_filter_ql` on `volume`. Supplying only one bound
+        emits `volume >= volumeFrom` or `volume <= volumeTo`; supplying both emits the closed
+        range `volume >= volumeFrom AND volume <= volumeTo`. Non-negative integers only —
+        invalid values return HTTP 400 `invalid_volume`.
+      - `gapKinds` → Semrush v2 `GapTopicsRequest.kind[]` (default `ALL`).
+    operationId: getAiVisibilityV1TopicGapTopics
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1GapTopicsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap topics (v2 topic payload) retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicGapTopicsResponse'
       <<: *errorResponses
     security:
       - api_key: []
@@ -1029,6 +1237,51 @@ ai-visibility-v1-prompt-brand-prompts:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1PromptBrandPromptsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-gap-prompts:
+  get:
+    tags: [ai-visibility]
+    summary: Get gap prompts (Prompt v2 JSON)
+    description: |
+      Returns prompts with the gap between the target brand and its competitors using Semrush
+      `PromptService` v2 `GapPrompts` and `GapPromptsTotals`. Returns each row as **native
+      protobuf JSON** (camelCase) including `gapMentions` per competitor brand. Supports
+      `sortBy` / `sortDirection` on `GAP_PROMPTS_REQUEST_ORDER_BY` (default
+      `MENTIONED_BRANDS_COUNT` descending). The response body is `{ data, totals }` plus
+      `srFilters`; `offset` and `limit` are not echoed (use the query parameters).
+
+      ### Filters
+
+      The endpoint accepts the following optional filters, forwarded as native protobuf fields
+      on both the list and totals requests (no QL filters):
+
+      - `gapKinds` → Semrush v2 `GapPromptsRequest.kinds[]` (default `ALL`).
+      - `topicId` → native `GapPromptsRequest.topic_hash` (uint64) — narrows results to a single topic.
+      - `sourceDomain` → native `GapPromptsRequest.source_domain` — narrows results to a single source domain.
+    operationId: getAiVisibilityV1PromptGapPrompts
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1GapPromptsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *topicIdOptionalParam
+      - *v1GapPromptsSourceDomainParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap prompts (v2 prompt payload) retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptGapPromptsResponse'
       <<: *errorResponses
     security:
       - api_key: []

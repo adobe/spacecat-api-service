@@ -31,13 +31,9 @@ import {
   resolveCountry,
   engineToLlm,
   responseFromGrpcError,
+  PROTO_FROM_JSON,
+  PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
-
-/** @type {import('@bufbuild/protobuf').JsonReadOptions} */
-const FROM_JSON = { ignoreUnknownFields: true };
-
-/** @type {import('@bufbuild/protobuf').JsonWriteOptions} */
-const TO_JSON = { useProtoFieldName: false, alwaysEmitImplicit: true };
 
 /* c8 ignore start */
 export async function handleBrandPrompts(sp, clients) {
@@ -68,7 +64,7 @@ export async function handleBrandPrompts(sp, clients) {
       categories,
       dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
     },
-    FROM_JSON,
+    PROTO_FROM_JSON,
   );
 
   const totalsRequest = fromJson(
@@ -80,7 +76,7 @@ export async function handleBrandPrompts(sp, clients) {
       categories,
       dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
     },
-    FROM_JSON,
+    PROTO_FROM_JSON,
   );
 
   try {
@@ -90,10 +86,10 @@ export async function handleBrandPrompts(sp, clients) {
     ]);
 
     const promptsJson = /** @type {{ prompts?: object[] }} */ (
-      toJson(PromptsResponseSchema, promptsMessage, TO_JSON)
+      toJson(PromptsResponseSchema, promptsMessage, PROTO_TO_JSON)
     );
     const totalsJson = /** @type {{ total?: string|number }} */ (
-      toJson(PromptsTotalsResponseSchema, totalsMessage, TO_JSON)
+      toJson(PromptsTotalsResponseSchema, totalsMessage, PROTO_TO_JSON)
     );
 
     return {
