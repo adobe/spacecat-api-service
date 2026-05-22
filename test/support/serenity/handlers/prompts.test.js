@@ -24,7 +24,7 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
-} from '../../../../src/support/semrush/handlers/prompts.js';
+} from '../../../../src/support/serenity/handlers/prompts.js';
 
 use(chaiAsPromised);
 use(sinonChai);

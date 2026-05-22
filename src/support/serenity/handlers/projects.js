@@ -198,7 +198,7 @@ async function fetchAllAiModels(transport, workspaceId, projectId) {
 }
 
 /**
- * GET /semrush/projects — DB rows enriched with live Semrush metadata
+ * GET /serenity/projects — DB rows enriched with live Semrush metadata
  * (name, domain) via `listWorkspaceProjects` (paginated).
  *
  * Enrichment failures are surfaced as `enrichment: 'failed'` in the response
@@ -239,7 +239,7 @@ export async function handleListProjects(transport, dataAccess, brandId, workspa
   } catch (e) {
     // Only swallow upstream transport failures — let TypeErrors etc. bubble
     // so a real bug isn't hidden as "enrichment unavailable".
-    if (e?.name !== 'SemrushTransportError') {
+    if (e?.name !== 'SerenityTransportError') {
       throw e;
     }
     enrichmentFailed = true;
@@ -296,7 +296,7 @@ function validateCreateBody(body) {
 }
 
 /**
- * POST /semrush/projects — onboard a new (brand, location, language) slice.
+ * POST /serenity/projects — onboard a new (brand, location, language) slice.
  *
  * Strict ordering: upstream create -> upstream publish -> DB row.
  * A row is written **only** when both upstream calls succeed. Callers may
@@ -384,7 +384,7 @@ export async function handleCreateProject(
     language_id: languageId,
   };
 
-  // Upstream create. SemrushTransportError propagates to the controller, which
+  // Upstream create. SerenityTransportError propagates to the controller, which
   // maps it to a 502 envelope. No row written when this throws.
   const createResp = await transport.createProject(workspaceId, upstreamBody);
   const semrushProjectId = String(createResp?.id || '');
@@ -491,7 +491,7 @@ function evictTagCacheIfNeeded() {
 }
 
 /**
- * GET /semrush/projects/:workspaceId/:projectId/tags — unique tag names across
+ * GET /serenity/projects/:workspaceId/:projectId/tags — unique tag names across
  * the project's prompts. Paginated, with a short-TTL cache to keep this
  * cheap when called from dashboard polling.
  *
@@ -548,7 +548,7 @@ export async function handleListProjectTags(transport, workspaceId, projectId) {
 }
 
 /**
- * GET /semrush/projects/:workspaceId/:projectId/models — AI models configured
+ * GET /serenity/projects/:workspaceId/:projectId/models — AI models configured
  * for the project. `key` is what the Semrush Reporting API expects in
  * `CBF_model` filter clauses.
  */
@@ -567,7 +567,7 @@ export async function handleListProjectModels(transport, workspaceId, projectId)
 }
 
 /**
- * GET /semrush/workspaces/:workspaceId/projects — all projects in a workspace.
+ * GET /serenity/workspaces/:workspaceId/projects — all projects in a workspace.
  * Used by the Brand Presence dashboard's Category filter.
  */
 export async function handleListWorkspaceProjects(transport, workspaceId) {

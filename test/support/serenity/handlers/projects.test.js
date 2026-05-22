@@ -26,7 +26,7 @@ import {
   handleListProjectTags,
   handleListProjectModels,
   handleListWorkspaceProjects,
-} from '../../../../src/support/semrush/handlers/projects.js';
+} from '../../../../src/support/serenity/handlers/projects.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -120,8 +120,8 @@ describe('semrush projects handler', () => {
           semrushProjectId: 'proj-1', semrushLocationId: 2840, language: 'en',
         }),
       ];
-      // Use a SemrushTransportError shape so the handler's narrow catch picks it up.
-      const upstreamErr = Object.assign(new Error('upstream-down'), { name: 'SemrushTransportError' });
+      // Use a SerenityTransportError shape so the handler's narrow catch picks it up.
+      const upstreamErr = Object.assign(new Error('upstream-down'), { name: 'SerenityTransportError' });
       const transport = {
         listWorkspaceProjects: sinon.stub().rejects(upstreamErr),
       };
@@ -138,7 +138,7 @@ describe('semrush projects handler', () => {
         }),
       ];
       const transport = {
-        // Plain Error (no name='SemrushTransportError') — represents a TypeError
+        // Plain Error (no name='SerenityTransportError') — represents a TypeError
         // / programming bug, not an upstream outage.
         listWorkspaceProjects: sinon.stub().rejects(new TypeError('boom')),
       };

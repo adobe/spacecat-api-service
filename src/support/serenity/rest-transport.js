@@ -24,10 +24,10 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  * JSON (or raw text when not valid JSON). The controller's `mapError` does
  * NOT leak `.body` to clients — it is kept here only for server-side logging.
  */
-export class SemrushTransportError extends Error {
+export class SerenityTransportError extends Error {
   constructor(status, message, body) {
     super(message);
-    this.name = 'SemrushTransportError';
+    this.name = 'SerenityTransportError';
     this.status = status;
     this.body = body;
   }
@@ -73,7 +73,7 @@ function baseUrl(env) {
  */
 function buildHeaders(imsToken) {
   if (!hasText(imsToken)) {
-    throw new SemrushTransportError(
+    throw new SerenityTransportError(
       401,
       'Missing IMS bearer token for Semrush transport',
     );
@@ -113,7 +113,7 @@ async function request(method, url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_
     response = await fetch(url, init);
   } catch (e) {
     if (e?.name === 'AbortError') {
-      throw new SemrushTransportError(
+      throw new SerenityTransportError(
         504,
         `Semrush ${method} ${url} timed out after ${timeoutMs}ms`,
       );
@@ -124,7 +124,7 @@ async function request(method, url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_
   }
   const parsed = await parseBody(response);
   if (!response.ok) {
-    throw new SemrushTransportError(
+    throw new SerenityTransportError(
       response.status,
       `Semrush ${method} ${url} failed: ${response.status}`,
       parsed,
@@ -154,7 +154,7 @@ function aioPromptsPath(workspaceId, projectId, suffix) {
  * @param {object} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL override).
  * @param {string} args.imsToken - IMS user bearer token (without 'Bearer ' prefix).
  */
-export function createSemrushTransport({ env, imsToken }) {
+export function createSerenityTransport({ env, imsToken }) {
   const root = baseUrl(env);
 
   return {

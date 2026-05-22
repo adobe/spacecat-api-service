@@ -104,7 +104,7 @@ import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
 import AiVisibilityController from './controllers/ai-visibility.js';
-import SemrushController from './controllers/semrush.js';
+import SerenityController from './controllers/serenity.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 
@@ -136,7 +136,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -262,7 +262,7 @@ async function run(request, context) {
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
     const aiVisibilityController = AiVisibilityController(context, log, context.env);
-    const semrushController = SemrushController(context, log, context.env);
+    const serenityController = SerenityController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -319,7 +319,7 @@ async function run(request, context) {
       webhooksController,
       aiVisibilityController,
       fanoutReportController,
-      semrushController,
+      serenityController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

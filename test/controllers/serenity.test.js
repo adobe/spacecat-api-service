@@ -82,7 +82,7 @@ async function readBody(response) {
   return null;
 }
 
-describe('SemrushController', () => {
+describe('SerenityController', () => {
   const handlers = {
     handleListPrompts: sinon.stub(),
     handleCreatePrompts: sinon.stub(),
@@ -99,7 +99,7 @@ describe('SemrushController', () => {
   let resolveBrandUuidStub;
   let accessControlHasAccessStub;
   let MockTransportError;
-  let SemrushController;
+  let SerenityController;
 
   beforeEach(async () => {
     Object.values(handlers).forEach((s) => s.reset());
@@ -121,23 +121,23 @@ describe('SemrushController', () => {
         }),
       },
     };
-    SemrushController = (await esmock(
-      '../../src/controllers/semrush.js',
+    SerenityController = (await esmock(
+      '../../src/controllers/serenity.js',
       {
-        '../../src/support/semrush/rest-transport.js': {
-          createSemrushTransport: createTransportStub,
-          SemrushTransportError: MockTransportError,
+        '../../src/support/serenity/rest-transport.js': {
+          createSerenityTransport: createTransportStub,
+          SerenityTransportError: MockTransportError,
         },
-        '../../src/support/semrush/workspace-resolver.js': {
+        '../../src/support/serenity/workspace-resolver.js': {
           resolveWorkspaceId: resolveWorkspaceIdStub,
         },
-        '../../src/support/semrush/handlers/prompts.js': {
+        '../../src/support/serenity/handlers/prompts.js': {
           handleListPrompts: handlers.handleListPrompts,
           handleCreatePrompts: handlers.handleCreatePrompts,
           handleUpdatePrompt: handlers.handleUpdatePrompt,
           handleBulkDeletePrompts: handlers.handleBulkDeletePrompts,
         },
-        '../../src/support/semrush/handlers/projects.js': {
+        '../../src/support/serenity/handlers/projects.js': {
           handleListProjects: handlers.handleListProjects,
           handleCreateProject: handlers.handleCreateProject,
           handleListProjectTags: handlers.handleListProjectTags,
@@ -153,8 +153,8 @@ describe('SemrushController', () => {
   });
 
   it('throws when constructed without a context or log', () => {
-    expect(() => SemrushController(null, fakeLog())).to.throw(/Context required/);
-    expect(() => SemrushController(fakeContext(), null)).to.throw(/Log required/);
+    expect(() => SerenityController(null, fakeLog())).to.throw(/Context required/);
+    expect(() => SerenityController(fakeContext(), null)).to.throw(/Log required/);
   });
 
   describe('listPrompts', () => {
@@ -163,7 +163,7 @@ describe('SemrushController', () => {
         items: [], total: 0, page: 1, limit: 50,
       });
       const ctx = fakeContext();
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(200);
       const body = await readBody(resp);
@@ -175,7 +175,7 @@ describe('SemrushController', () => {
 
     it('401s when the IMS bearer is missing — error token authenticationRequired', async () => {
       const ctx = fakeContext({ bearer: '' });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(401);
       const body = await readBody(resp);
@@ -184,7 +184,7 @@ describe('SemrushController', () => {
 
     it('401s when the caller authenticated via a non-IMS mechanism', async () => {
       const ctx = fakeContext({ authType: 'jwt' });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(401);
       const body = await readBody(resp);
@@ -194,7 +194,7 @@ describe('SemrushController', () => {
     it('404s when the organization is not found', async () => {
       const ctx = fakeContext();
       ctx.dataAccess.Organization.findById = sinon.stub().resolves(null);
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(404);
     });
@@ -202,7 +202,7 @@ describe('SemrushController', () => {
     it('403s when the caller has no access to the organization', async () => {
       accessControlHasAccessStub.resolves(false);
       const ctx = fakeContext();
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(403);
     });
@@ -210,7 +210,7 @@ describe('SemrushController', () => {
     it('404s when the brand does not belong to the organization', async () => {
       resolveBrandUuidStub.resolves(null);
       const ctx = fakeContext();
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(404);
     });
@@ -218,7 +218,7 @@ describe('SemrushController', () => {
     it('503s when PostgREST is not available', async () => {
       const ctx = fakeContext();
       ctx.dataAccess.services = {};
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(503);
     });
@@ -226,15 +226,15 @@ describe('SemrushController', () => {
     it('404s when the organization has no semrush_workspace_id', async () => {
       resolveWorkspaceIdStub.resolves(null);
       const ctx = fakeContext();
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(404);
     });
 
-    it('502 envelope when handler throws SemrushTransportError; no upstream body leaked', async () => {
+    it('502 envelope when handler throws SerenityTransportError; no upstream body leaked', async () => {
       handlers.handleListPrompts.rejects(new MockTransportError(503, 'down', { code: 'x' }));
       const ctx = fakeContext();
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(502);
       const body = await readBody(resp);
@@ -246,7 +246,7 @@ describe('SemrushController', () => {
     it('500s on unexpected handler errors', async () => {
       handlers.handleListPrompts.rejects(new Error('something bad'));
       const ctx = fakeContext();
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(500);
       const body = await readBody(resp);
@@ -260,8 +260,8 @@ describe('SemrushController', () => {
         items: [], total: 0, page: 1, limit: 50,
       });
       const ctx = fakeContext();
-      ctx.request = { url: 'https://api/v2/orgs/x/brands/y/semrush/prompts?semrushLocationId=2840&language=en' };
-      const controller = SemrushController(ctx, fakeLog());
+      ctx.request = { url: 'https://api/v2/orgs/x/brands/y/serenity/prompts?semrushLocationId=2840&language=en' };
+      const controller = SerenityController(ctx, fakeLog());
       await controller.listPrompts(ctx);
       const query = handlers.handleListPrompts.firstCall.args[4];
       expect(query.semrushLocationId).to.equal(2840);
@@ -274,7 +274,7 @@ describe('SemrushController', () => {
       });
       const ctx = fakeContext({ data: { semrushLocationId: 9999 } });
       // No `request.url` → query must be empty, not pulled from body.
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       await controller.listPrompts(ctx);
       const query = handlers.handleListPrompts.firstCall.args[4];
       expect(query).to.deep.equal({});
@@ -283,7 +283,7 @@ describe('SemrushController', () => {
     it('500s when Organization data-access is not on the context', async () => {
       const ctx = fakeContext();
       ctx.dataAccess.Organization = undefined;
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(500);
     });
@@ -294,7 +294,7 @@ describe('SemrushController', () => {
       });
       const ctx = fakeContext();
       ctx.request = { url: '::not a url::' };
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listPrompts(ctx);
       expect(resp.status).to.equal(200);
       const query = handlers.handleListPrompts.firstCall.args[4];
@@ -306,7 +306,7 @@ describe('SemrushController', () => {
     it('200s and delegates to handler', async () => {
       handlers.handleCreatePrompts.resolves({ created: [], skipped: [], failed: [] });
       const ctx = fakeContext({ data: { prompts: [{ text: 't' }] } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.createPrompts(ctx);
       expect(resp.status).to.equal(200);
     });
@@ -315,7 +315,7 @@ describe('SemrushController', () => {
   describe('updatePrompt', () => {
     it('400s when promptId path param is missing', async () => {
       const ctx = fakeContext({ params: { spaceCatId: ORG, brandId: BRAND } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.updatePrompt(ctx);
       expect(resp.status).to.equal(400);
     });
@@ -323,7 +323,7 @@ describe('SemrushController', () => {
     it('returns the handler status + body verbatim', async () => {
       handlers.handleUpdatePrompt.resolves({ status: 200, body: { id: 'new' } });
       const ctx = fakeContext({ params: { promptId: 'logical-1' } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.updatePrompt(ctx);
       expect(resp.status).to.equal(200);
       const body = await readBody(resp);
@@ -335,7 +335,7 @@ describe('SemrushController', () => {
     it('200s and delegates', async () => {
       handlers.handleBulkDeletePrompts.resolves({ deleted: 3, failed: [] });
       const ctx = fakeContext({ data: { semrushIds: [{ semrushProjectId: 'p', semrushPromptId: 'x' }] } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.bulkDeletePrompts(ctx);
       expect(resp.status).to.equal(200);
     });
@@ -345,7 +345,7 @@ describe('SemrushController', () => {
     it('200s with the handler payload', async () => {
       handlers.handleListProjects.resolves({ items: [] });
       const ctx = fakeContext();
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listProjects(ctx);
       expect(resp.status).to.equal(200);
     });
@@ -364,7 +364,7 @@ describe('SemrushController', () => {
         },
       });
       const ctx = fakeContext({ data: { name: 'X', market: 'US', language: 'en' } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.createProject(ctx);
       expect(resp.status).to.equal(201);
       const body = await readBody(resp);
@@ -377,7 +377,7 @@ describe('SemrushController', () => {
         body: { error: 'sliceExists' },
       });
       const ctx = fakeContext();
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.createProject(ctx);
       expect(resp.status).to.equal(409);
     });
@@ -386,14 +386,14 @@ describe('SemrushController', () => {
   describe('listProjectTags', () => {
     it('400s on missing projectId path param', async () => {
       const ctx = fakeContext({ params: { workspaceId: WORKSPACE } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listProjectTags(ctx);
       expect(resp.status).to.equal(400);
     });
 
     it('403s when path workspaceId does not match the org workspace', async () => {
       const ctx = fakeContext({ params: { workspaceId: 'wrong-ws', projectId: 'p' } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listProjectTags(ctx);
       expect(resp.status).to.equal(403);
     });
@@ -401,7 +401,7 @@ describe('SemrushController', () => {
     it('200s on success', async () => {
       handlers.handleListProjectTags.resolves({ items: [{ id: 't', name: 'T' }] });
       const ctx = fakeContext({ params: { workspaceId: WORKSPACE, projectId: 'p' } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listProjectTags(ctx);
       expect(resp.status).to.equal(200);
     });
@@ -411,21 +411,21 @@ describe('SemrushController', () => {
     it('200s with handler payload', async () => {
       handlers.handleListProjectModels.resolves({ items: [] });
       const ctx = fakeContext({ params: { workspaceId: WORKSPACE, projectId: 'p' } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listProjectModels(ctx);
       expect(resp.status).to.equal(200);
     });
 
     it('400s on missing projectId path param', async () => {
       const ctx = fakeContext({ params: { workspaceId: WORKSPACE } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listProjectModels(ctx);
       expect(resp.status).to.equal(400);
     });
 
     it('403s when path workspaceId does not match org workspace', async () => {
       const ctx = fakeContext({ params: { workspaceId: 'wrong-ws', projectId: 'p' } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listProjectModels(ctx);
       expect(resp.status).to.equal(403);
     });
@@ -435,14 +435,14 @@ describe('SemrushController', () => {
     it('200s with handler payload', async () => {
       handlers.handleListWorkspaceProjects.resolves({ items: [] });
       const ctx = fakeContext({ params: { workspaceId: WORKSPACE } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listWorkspaceProjects(ctx);
       expect(resp.status).to.equal(200);
     });
 
     it('400s on missing path param', async () => {
       const ctx = fakeContext({ params: { spaceCatId: ORG, brandId: BRAND } });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const resp = await controller.listWorkspaceProjects(ctx);
       expect(resp.status).to.equal(400);
     });
@@ -478,7 +478,7 @@ describe('SemrushController', () => {
 
         it('401s on missing bearer', async () => {
           const ctx = fakeContext({ bearer: '', params });
-          const controller = SemrushController(ctx, fakeLog());
+          const controller = SerenityController(ctx, fakeLog());
           const resp = await controller[method](ctx);
           expect(resp.status).to.equal(401);
         });
@@ -486,7 +486,7 @@ describe('SemrushController', () => {
         it('404s when organization is missing', async () => {
           const ctx = fakeContext({ params });
           ctx.dataAccess.Organization.findById = sinon.stub().resolves(null);
-          const controller = SemrushController(ctx, fakeLog());
+          const controller = SerenityController(ctx, fakeLog());
           const resp = await controller[method](ctx);
           expect(resp.status).to.equal(404);
         });
@@ -494,16 +494,16 @@ describe('SemrushController', () => {
         it('403s when caller has no access', async () => {
           accessControlHasAccessStub.resolves(false);
           const ctx = fakeContext({ params });
-          const controller = SemrushController(ctx, fakeLog());
+          const controller = SerenityController(ctx, fakeLog());
           const resp = await controller[method](ctx);
           expect(resp.status).to.equal(403);
         });
 
-        it('502 envelope on SemrushTransportError', async () => {
+        it('502 envelope on SerenityTransportError', async () => {
           handlers[handler].resolves(okResult);
           handlers[handler].rejects(new MockTransportError(503, 'down'));
           const ctx = fakeContext({ params });
-          const controller = SemrushController(ctx, fakeLog());
+          const controller = SerenityController(ctx, fakeLog());
           const resp = await controller[method](ctx);
           expect(resp.status).to.equal(502);
           const body = await readBody(resp);
@@ -513,7 +513,7 @@ describe('SemrushController', () => {
         it('500s on unexpected handler errors', async () => {
           handlers[handler].rejects(new Error(`boom-${method}`));
           const ctx = fakeContext({ params });
-          const controller = SemrushController(ctx, fakeLog());
+          const controller = SerenityController(ctx, fakeLog());
           const resp = await controller[method](ctx);
           expect(resp.status).to.equal(500);
           const body = await readBody(resp);

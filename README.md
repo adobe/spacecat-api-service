@@ -6,9 +6,9 @@
 
 https://opensource.adobe.com/spacecat-api-service/
 
-### Semrush proxy (`/semrush/*`)
+### Semrush proxy (`/serenity/*`)
 
-Server-side proxy in front of the Semrush AIO API. See [docs/semrush.md](docs/semrush.md)
+Server-side proxy in front of the Semrush AIO API. See [docs/serenity.md](docs/serenity.md)
 for the operator guide (auth flow, workspace resolution, error envelopes, smoke
 runbook).
 

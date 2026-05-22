@@ -9567,8 +9567,8 @@ AiVisibilitySourceDomainsResponse:
   required: [data, total, offset, limit]
 
 # ── Semrush AIO proxy ─────────────────────────────────────────────────────────
-# Schemas for /v2/orgs/{spaceCatId}/brands/{brandId}/semrush/*. See
-# docs/openapi/semrush-api.yaml for the operations.
+# Schemas for /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/*. See
+# docs/openapi/serenity-api.yaml for the operations.
 
 SemrushPrompt:
   type: object
@@ -9868,7 +9868,7 @@ SemrushWorkspaceProjectListResponse:
 SemrushErrorResponse:
   type: object
   description: |
-    Unified error envelope for the /semrush/* surface. `error` is a stable
+    Unified error envelope for the /serenity/* surface. `error` is a stable
     machine-readable token (`invalidRequest`, `semrushUpstreamError`,
     `sliceExists`, etc.); `message` is a sanitized human-readable summary.
     Provider-specific detail (Semrush HTTP status, raw upstream body) is
