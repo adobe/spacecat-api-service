@@ -14,6 +14,11 @@
 
 import { expect } from 'chai';
 import sinon from 'sinon';
+import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
+import { TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
+import { PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
+import { BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/brand/enums_pb.js';
+import { SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
   handleTopicsResearchStats,
   handleTopicsResearch,
@@ -1313,6 +1318,393 @@ describe('AI Visibility – topics handlers', () => {
       const n = await countDistinctTopicIdsAcrossFtsLlms(COUNTRY_ENUM.US, 'q', clients, { maxPages: 0 });
       expect(n).to.equal(0);
       expect(clients.topicClient.topicsByFTS.called).to.equal(false);
+    });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  Sort param handling for the 4 FTS topic-research endpoints         */
+  /* ------------------------------------------------------------------ */
+  describe('FTS topic-research sort params', () => {
+    // Captures the most recent `order` argument passed to the list-page call of a stubbed
+    // gRPC method. Filters out the topicsByFTS paging helper (which always uses
+    // `range.limit === 1000`) so single-engine assertions see the order the handler chose,
+    // not the order the pagination probe hard-codes.
+    function lastOrder(stub) {
+      const call = stub.getCalls().find(
+        (c) => c.args[0] && c.args[0].order && c.args[0].range?.limit !== 1000,
+      );
+      return call ? call.args[0].order : null;
+    }
+
+    // ---------------- handleTopicsResearch ----------------
+    describe('handleTopicsResearch', () => {
+      beforeEach(() => {
+        clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+          if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+          return Promise.resolve({ topics: [] });
+        });
+      });
+
+      it('single-engine: forwards default sortBy + DESC when params omitted', async () => {
+        const sp = new URLSearchParams('searchQuery=q&engine=chatgpt');
+        await handleTopicsResearch(sp, clients);
+        const order = lastOrder(clients.topicClient.topicsByFTS);
+        expect(order.by).to.equal(TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.RELEVANCE_SCORE);
+        expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.DESC);
+      });
+
+      it('single-engine: forwards VOLUME + ASC when explicitly requested', async () => {
+        const sp = new URLSearchParams('searchQuery=q&engine=chatgpt&sortBy=VOLUME&sortDirection=ASC');
+        await handleTopicsResearch(sp, clients);
+        const order = lastOrder(clients.topicClient.topicsByFTS);
+        expect(order.by).to.equal(TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME);
+        expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.ASC);
+      });
+
+      it('all-engines: forwards order to every per-LLM call', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortBy=VOLUME&sortDirection=DESC');
+        await handleTopicsResearch(sp, clients);
+        for (const llm of FTS_LLMS) {
+          const call = clients.topicClient.topicsByFTS.getCalls()
+            .find((c) => c.args[0]?.llm === llm && c.args[0]?.range?.limit !== 1000);
+          expect(call, `expected list-page call for llm ${llm}`).to.exist;
+          expect(call.args[0].order.by).to.equal(TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME);
+          expect(call.args[0].order.direction).to.equal(ORDER_DIRECTION_ENUM.DESC);
+        }
+      });
+
+      it('all-engines: merge comparator honours VOLUME sort', async () => {
+        clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+          if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+          return Promise.resolve({
+            topics: [
+              { id: '1', name: 'A', volume: 10, promptsCount: 1, relevanceScore: 99 },
+              { id: '2', name: 'B', volume: 500, promptsCount: 1, relevanceScore: 1 },
+            ],
+          });
+        });
+        const sp = new URLSearchParams('searchQuery=q&sortBy=VOLUME');
+        const res = await handleTopicsResearch(sp, clients);
+        expect(res.body.data[0].topicId).to.equal('2');
+      });
+
+      it('all-engines: ASC reverses the merge order', async () => {
+        clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+          if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+          return Promise.resolve({
+            topics: [
+              { id: '1', name: 'A', volume: 10, promptsCount: 1, relevanceScore: 99 },
+              { id: '2', name: 'B', volume: 500, promptsCount: 1, relevanceScore: 1 },
+            ],
+          });
+        });
+        const sp = new URLSearchParams('searchQuery=q&sortBy=RELEVANCE_SCORE&sortDirection=ASC');
+        const res = await handleTopicsResearch(sp, clients);
+        expect(res.body.data[0].topicId).to.equal('2');
+      });
+
+      it('returns 400 invalid_sort_by for an unknown sortBy value', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortBy=BOGUS');
+        const res = await handleTopicsResearch(sp, clients);
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalid_sort_by');
+      });
+
+      it('returns 400 invalid_sort_direction for an unknown sortDirection value', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortDirection=SIDEWAYS');
+        const res = await handleTopicsResearch(sp, clients);
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalid_sort_direction');
+      });
+    });
+
+    // ---------------- handleTopicsResearchPrompts ----------------
+    describe('handleTopicsResearchPrompts', () => {
+      beforeEach(() => {
+        clients.promptClient.promptsByTopicFTSTotals.resolves({ total: 0 });
+        clients.promptClient.promptsByTopicFTS.resolves({ prompts: [] });
+      });
+
+      it('single-engine: forwards default sortBy + DESC when params omitted', async () => {
+        const sp = new URLSearchParams('searchQuery=q&engine=chatgpt');
+        await handleTopicsResearchPrompts(sp, clients);
+        const order = lastOrder(clients.promptClient.promptsByTopicFTS);
+        expect(order.by).to.equal(PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT);
+        expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.DESC);
+      });
+
+      it('single-engine: forwards SOURCES_COUNT + ASC when explicitly requested', async () => {
+        const sp = new URLSearchParams('searchQuery=q&engine=chatgpt&sortBy=SOURCES_COUNT&sortDirection=ASC');
+        await handleTopicsResearchPrompts(sp, clients);
+        const order = lastOrder(clients.promptClient.promptsByTopicFTS);
+        expect(order.by).to.equal(PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.SOURCES_COUNT);
+        expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.ASC);
+      });
+
+      it('all-engines: forwards order to every per-LLM list call', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortBy=PROMPT&sortDirection=ASC');
+        await handleTopicsResearchPrompts(sp, clients);
+        for (const llm of FTS_LLMS) {
+          const call = clients.promptClient.promptsByTopicFTS.getCalls()
+            .find((c) => c.args[0]?.llm === llm);
+          expect(call, `expected list call for llm ${llm}`).to.exist;
+          expect(call.args[0].order.by).to.equal(PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.PROMPT);
+          expect(call.args[0].order.direction).to.equal(ORDER_DIRECTION_ENUM.ASC);
+        }
+      });
+
+      it('all-engines: merge picker honours SOURCES_COUNT sort', async () => {
+        clients.promptClient.promptsByTopicFTS.callsFake(({ llm }) => {
+          if (llm === FTS_LLMS[0]) {
+            return Promise.resolve({
+              prompts: [{
+                prompt: 'low sources', promptHash: 'h1', serpId: 's1', topicName: 'T', topicId: '1', mentionedBrandsCount: 99, sourcesCount: 1,
+              }],
+            });
+          }
+          if (llm === FTS_LLMS[1]) {
+            return Promise.resolve({
+              prompts: [{
+                prompt: 'high sources', promptHash: 'h2', serpId: 's2', topicName: 'T', topicId: '1', mentionedBrandsCount: 1, sourcesCount: 99,
+              }],
+            });
+          }
+          return Promise.resolve({ prompts: [] });
+        });
+        const sp = new URLSearchParams('searchQuery=q&sortBy=SOURCES_COUNT&limit=10');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.body.data[0].prompt).to.equal('high sources');
+      });
+
+      it('all-engines: PROMPT sort is lexicographic', async () => {
+        clients.promptClient.promptsByTopicFTS.callsFake(({ llm }) => {
+          if (llm === FTS_LLMS[0]) {
+            return Promise.resolve({
+              prompts: [{
+                prompt: 'zebra question', promptHash: 'h1', serpId: 's1', topicName: 'T', topicId: '1', mentionedBrandsCount: 5, sourcesCount: 5,
+              }],
+            });
+          }
+          if (llm === FTS_LLMS[1]) {
+            return Promise.resolve({
+              prompts: [{
+                prompt: 'apple question', promptHash: 'h2', serpId: 's2', topicName: 'T', topicId: '1', mentionedBrandsCount: 5, sourcesCount: 5,
+              }],
+            });
+          }
+          return Promise.resolve({ prompts: [] });
+        });
+        const sp = new URLSearchParams('searchQuery=q&sortBy=PROMPT&sortDirection=ASC&limit=10');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.body.data[0].prompt).to.equal('apple question');
+      });
+
+      it('all-engines: multi-engine duplicate rows still surface under the new sort', async () => {
+        clients.promptClient.promptsByTopicFTS.callsFake(({ llm }) => {
+          if (llm === FTS_LLMS[0]) {
+            return Promise.resolve({
+              prompts: [{
+                prompt: 'shared prompt', promptHash: 'h1', serpId: 's1', topicName: 'T', topicId: '1', mentionedBrandsCount: 4, sourcesCount: 7,
+              }],
+            });
+          }
+          if (llm === FTS_LLMS[1]) {
+            return Promise.resolve({
+              prompts: [{
+                prompt: 'shared prompt', promptHash: 'h2', serpId: 's2', topicName: 'T', topicId: '1', mentionedBrandsCount: 6, sourcesCount: 3,
+              }],
+            });
+          }
+          return Promise.resolve({ prompts: [] });
+        });
+        const sp = new URLSearchParams('searchQuery=q&sortBy=SOURCES_COUNT&limit=10');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        const engines = res.body.data.filter((r) => r.prompt === 'shared prompt').map((r) => r.engine);
+        expect(engines.length).to.be.greaterThan(1);
+      });
+
+      it('returns 400 invalid_sort_by for an unknown sortBy value', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortBy=BOGUS');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalid_sort_by');
+      });
+
+      it('returns 400 invalid_sort_direction for an unknown sortDirection value', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortDirection=SIDEWAYS');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalid_sort_direction');
+      });
+    });
+
+    // ---------------- handleTopicsResearchBrands ----------------
+    describe('handleTopicsResearchBrands', () => {
+      beforeEach(() => {
+        clients.brandClient.brandsByTopicFTSTotals.resolves({ total: 0 });
+        clients.brandClient.brandsByTopicFTS.resolves({ brands: [] });
+      });
+
+      it('single-engine: forwards default sortBy + DESC when params omitted', async () => {
+        const sp = new URLSearchParams('searchQuery=q&engine=chatgpt');
+        await handleTopicsResearchBrands(sp, clients);
+        const order = lastOrder(clients.brandClient.brandsByTopicFTS);
+        expect(order.by).to.equal(BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS);
+        expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.DESC);
+      });
+
+      it('single-engine: forwards NAME + ASC when explicitly requested', async () => {
+        const sp = new URLSearchParams('searchQuery=q&engine=chatgpt&sortBy=NAME&sortDirection=ASC');
+        await handleTopicsResearchBrands(sp, clients);
+        const order = lastOrder(clients.brandClient.brandsByTopicFTS);
+        expect(order.by).to.equal(BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.NAME);
+        expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.ASC);
+      });
+
+      it('all-engines: forwards order to every per-LLM list call', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortBy=SOURCES_COUNT&sortDirection=DESC');
+        await handleTopicsResearchBrands(sp, clients);
+        for (const llm of FTS_LLMS) {
+          const call = clients.brandClient.brandsByTopicFTS.getCalls()
+            .find((c) => c.args[0]?.llm === llm);
+          expect(call, `expected list call for llm ${llm}`).to.exist;
+          expect(call.args[0].order.by).to.equal(BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.SOURCES_COUNT);
+          expect(call.args[0].order.direction).to.equal(ORDER_DIRECTION_ENUM.DESC);
+        }
+      });
+
+      it('all-engines: merge comparator honours NAME sort ASC', async () => {
+        clients.brandClient.brandsByTopicFTS.resolves({
+          brands: [
+            { domain: 'zebra.com', name: 'Zebra', mentions: 5, sourceDomainsCount: 1 },
+            { domain: 'alpha.com', name: 'Alpha', mentions: 5, sourceDomainsCount: 1 },
+          ],
+        });
+        const sp = new URLSearchParams('searchQuery=q&sortBy=NAME&sortDirection=ASC');
+        const res = await handleTopicsResearchBrands(sp, clients);
+        expect(res.body.data[0].name).to.equal('Alpha');
+      });
+
+      it('all-engines: SOURCES_COUNT sort ranks by sourceDomainsCount', async () => {
+        clients.brandClient.brandsByTopicFTS.callsFake(({ llm }) => {
+          if (llm === FTS_LLMS[0]) {
+            return Promise.resolve({
+              brands: [{ domain: 'a.com', name: 'A', mentions: 99, sourceDomainsCount: 1 }],
+            });
+          }
+          if (llm === FTS_LLMS[1]) {
+            return Promise.resolve({
+              brands: [{ domain: 'b.com', name: 'B', mentions: 1, sourceDomainsCount: 99 }],
+            });
+          }
+          return Promise.resolve({ brands: [] });
+        });
+        const sp = new URLSearchParams('searchQuery=q&sortBy=SOURCES_COUNT');
+        const res = await handleTopicsResearchBrands(sp, clients);
+        expect(res.body.data[0].domain).to.equal('b.com');
+      });
+
+      it('returns 400 invalid_sort_by for an unknown sortBy value', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortBy=BOGUS');
+        const res = await handleTopicsResearchBrands(sp, clients);
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalid_sort_by');
+      });
+
+      it('returns 400 invalid_sort_direction for an unknown sortDirection value', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortDirection=SIDEWAYS');
+        const res = await handleTopicsResearchBrands(sp, clients);
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalid_sort_direction');
+      });
+    });
+
+    // ---------------- handleTopicsResearchSourceDomains ----------------
+    describe('handleTopicsResearchSourceDomains', () => {
+      beforeEach(() => {
+        clients.sourceClient.sourceDomainsByTopicFTSTotals.resolves({ total: 0 });
+        clients.sourceClient.sourceDomainsByTopicFTS.resolves({ sourceDomains: [] });
+      });
+
+      it('single-engine: forwards default sortBy + DESC when params omitted', async () => {
+        const sp = new URLSearchParams('searchQuery=q&engine=chatgpt');
+        await handleTopicsResearchSourceDomains(sp, clients);
+        const order = lastOrder(clients.sourceClient.sourceDomainsByTopicFTS);
+        expect(order.by).to.equal(SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS);
+        expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.DESC);
+      });
+
+      it('single-engine: forwards ORGANIC_TRAFFIC + ASC when explicitly requested', async () => {
+        const sp = new URLSearchParams('searchQuery=q&engine=chatgpt&sortBy=ORGANIC_TRAFFIC&sortDirection=ASC');
+        await handleTopicsResearchSourceDomains(sp, clients);
+        const order = lastOrder(clients.sourceClient.sourceDomainsByTopicFTS);
+        expect(order.by).to.equal(SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC);
+        expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.ASC);
+      });
+
+      it('all-engines: forwards order to every per-LLM list call', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortBy=DOMAIN&sortDirection=ASC');
+        await handleTopicsResearchSourceDomains(sp, clients);
+        for (const llm of FTS_LLMS) {
+          const call = clients.sourceClient.sourceDomainsByTopicFTS.getCalls()
+            .find((c) => c.args[0]?.llm === llm);
+          expect(call, `expected list call for llm ${llm}`).to.exist;
+          expect(call.args[0].order.by).to.equal(SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.DOMAIN);
+          expect(call.args[0].order.direction).to.equal(ORDER_DIRECTION_ENUM.ASC);
+        }
+      });
+
+      it('all-engines: ORGANIC_TRAFFIC sort ranks by organicTraffic', async () => {
+        clients.sourceClient.sourceDomainsByTopicFTS.callsFake(({ llm }) => {
+          if (llm === FTS_LLMS[0]) {
+            return Promise.resolve({
+              sourceDomains: [{ domain: 'low.com', sourcesCount: 1, mentions: 1, organicTraffic: 100 }],
+            });
+          }
+          if (llm === FTS_LLMS[1]) {
+            return Promise.resolve({
+              sourceDomains: [{ domain: 'high.com', sourcesCount: 1, mentions: 1, organicTraffic: 9999 }],
+            });
+          }
+          return Promise.resolve({ sourceDomains: [] });
+        });
+        const sp = new URLSearchParams('searchQuery=q&sortBy=ORGANIC_TRAFFIC');
+        const res = await handleTopicsResearchSourceDomains(sp, clients);
+        expect(res.body.data[0].sourceDomain).to.equal('high.com');
+      });
+
+      it('all-engines: DOMAIN sort is lexicographic ASC', async () => {
+        clients.sourceClient.sourceDomainsByTopicFTS.callsFake(({ llm }) => {
+          if (llm === FTS_LLMS[0]) {
+            return Promise.resolve({
+              sourceDomains: [{ domain: 'zebra.com', sourcesCount: 1, mentions: 1 }],
+            });
+          }
+          if (llm === FTS_LLMS[1]) {
+            return Promise.resolve({
+              sourceDomains: [{ domain: 'apple.com', sourcesCount: 1, mentions: 1 }],
+            });
+          }
+          return Promise.resolve({ sourceDomains: [] });
+        });
+        const sp = new URLSearchParams('searchQuery=q&sortBy=DOMAIN&sortDirection=ASC');
+        const res = await handleTopicsResearchSourceDomains(sp, clients);
+        expect(res.body.data[0].sourceDomain).to.equal('apple.com');
+      });
+
+      it('returns 400 invalid_sort_by for an unknown sortBy value', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortBy=BOGUS');
+        const res = await handleTopicsResearchSourceDomains(sp, clients);
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalid_sort_by');
+      });
+
+      it('returns 400 invalid_sort_direction for an unknown sortDirection value', async () => {
+        const sp = new URLSearchParams('searchQuery=q&sortDirection=SIDEWAYS');
+        const res = await handleTopicsResearchSourceDomains(sp, clients);
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalid_sort_direction');
+      });
     });
   });
 });
