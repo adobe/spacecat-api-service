@@ -20,6 +20,12 @@
  * before all test files, and tears both down after all test files complete.
  */
 
+// DIAGNOSTIC: import why-is-node-running FIRST so its async_hooks listener is
+// active before any other module creates a handle. Lazy-importing it later
+// means it misses everything created before its import — which is why
+// previous diagnostic runs only ever attributed handles to our own console.log.
+import wirn from 'why-is-node-running';
+
 import { initAuth, createAllTokens } from '../shared/auth.js';
 import { buildEnv } from '../env.js';
 import { startServer, stopServer } from '../server.js';
@@ -64,27 +70,16 @@ export const mochaHooks = {
     // immediately, then every 5s, force-exit at 60s. Also list child-process
     // tree state so we can tell whether the hang is in Node (unclosed handle)
     // or outside Node (orphaned helper / npm exec wrapper).
-    let wirn = null;
-    try {
-      const mod = await import('why-is-node-running');
-      wirn = mod.default || mod;
-    } catch (err) {
-      console.error('why-is-node-running load failed:', err);
-    }
-
     const dump = (label) => {
       console.log(`\n=== handle dump [${label}] ===`);
       const handles = process.getActiveResourcesInfo
         ? process.getActiveResourcesInfo()
         : [];
       console.log('process.getActiveResourcesInfo():', JSON.stringify(handles));
-      if (wirn) {
-        try {
-          // wirn() expects a logger object with .error(); default is console.
-          wirn();
-        } catch (err) {
-          console.error('wirn failed:', err);
-        }
+      try {
+        wirn();
+      } catch (err) {
+        console.error('wirn failed:', err);
       }
       // Extra context for diagnosing PipeWrap handles (stdio).
       /* eslint-disable no-underscore-dangle */
