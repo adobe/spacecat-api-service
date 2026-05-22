@@ -223,6 +223,28 @@ describe('SerenityController', () => {
       expect(resp.status).to.equal(503);
     });
 
+    it('503 configurationError envelope when transport construction fails on missing env', async () => {
+      // Mirrors what happens in prod when SEMRUSH_PROJECTS_BASE_URL is unset:
+      // baseUrl() throws ErrorWithStatusCode(message, 503), mapError surfaces
+      // it as { error: 'configurationError', message } with status 503 —
+      // distinguishing operational failures from generic 500s.
+      const { ErrorWithStatusCode } = await import('../../src/support/utils.js');
+      createTransportStub.throws(new ErrorWithStatusCode(
+        'SEMRUSH_PROJECTS_BASE_URL is not set',
+        503,
+      ));
+      const ctx = fakeContext();
+      const controller = SerenityController(ctx, fakeLog());
+      const resp = await controller.listPrompts(ctx);
+      expect(resp.status).to.equal(503);
+      const body = await readBody(resp);
+      expect(body.error).to.equal('configurationError');
+      expect(body.message).to.match(/SEMRUSH_PROJECTS_BASE_URL is not set/);
+      // Reset for subsequent tests in this describe block.
+      createTransportStub.reset();
+      createTransportStub.returns({});
+    });
+
     it('404s when the organization has no semrush_workspace_id', async () => {
       resolveWorkspaceIdStub.resolves(null);
       const ctx = fakeContext();

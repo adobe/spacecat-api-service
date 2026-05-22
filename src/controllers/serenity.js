@@ -88,6 +88,7 @@ function errorTokenForStatus(status) {
     case 403: return 'forbidden';
     case 404: return 'notFound';
     case 409: return 'conflict';
+    case 503: return 'configurationError';
     default: return 'invalidRequest';
   }
 }

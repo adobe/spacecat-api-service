@@ -124,18 +124,73 @@ describe('Semrush REST transport', () => {
       expect(url).to.match(/^https:\/\/override\.semrush\.com\/enterprise\//);
     });
 
-    it('rejects a non-https SEMRUSH_PROJECTS_BASE_URL', () => {
-      expect(() => createSerenityTransport({
-        env: { SEMRUSH_PROJECTS_BASE_URL: 'http://attacker.example/' },
+    it('reduces a value with path/query/fragment to its bare origin', async () => {
+      // A misconfigured `https://host/path-prefix` would otherwise silently
+      // prepend the path to every outbound request. baseUrl() returns the
+      // origin only — no path, no query, no fragment.
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({
+        env: { SEMRUSH_PROJECTS_BASE_URL: 'https://override.semrush.com/some/path?x=1#frag' },
         imsToken: IMS,
-      })).to.throw(/must use https/);
+      });
+
+      await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+
+      const [url] = fetchStub.firstCall.args;
+      expect(url).to.match(/^https:\/\/override\.semrush\.com\/enterprise\/projects\/api\/v1\//);
+      expect(url).to.not.include('/some/path');
+      expect(url).to.not.include('x=1');
+      expect(url).to.not.include('#frag');
     });
 
-    it('rejects an unparseable SEMRUSH_PROJECTS_BASE_URL', () => {
-      expect(() => createSerenityTransport({
-        env: { SEMRUSH_PROJECTS_BASE_URL: 'not a url' },
+    it('strips userinfo from the base URL so credentials never leak outbound', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({
+        env: { SEMRUSH_PROJECTS_BASE_URL: 'https://user:pass@override.semrush.com/' },
         imsToken: IMS,
-      })).to.throw(/not a valid URL/);
+      });
+
+      await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+
+      const [url] = fetchStub.firstCall.args;
+      expect(url).to.not.include('user:pass@');
+      expect(url).to.match(/^https:\/\/override\.semrush\.com\//);
+    });
+
+    it('rejects a non-https SEMRUSH_PROJECTS_BASE_URL with 503 configuration error', () => {
+      try {
+        createSerenityTransport({
+          env: { SEMRUSH_PROJECTS_BASE_URL: 'http://attacker.example/' },
+          imsToken: IMS,
+        });
+        expect.fail('expected createSerenityTransport to throw');
+      } catch (e) {
+        expect(e.message).to.match(/must use https/);
+        expect(e.status).to.equal(503);
+      }
+    });
+
+    it('rejects an unparseable SEMRUSH_PROJECTS_BASE_URL with 503 configuration error', () => {
+      try {
+        createSerenityTransport({
+          env: { SEMRUSH_PROJECTS_BASE_URL: 'not a url' },
+          imsToken: IMS,
+        });
+        expect.fail('expected createSerenityTransport to throw');
+      } catch (e) {
+        expect(e.message).to.match(/not a valid URL/);
+        expect(e.status).to.equal(503);
+      }
+    });
+
+    it('attaches status 503 to the missing-env error so mapError returns configurationError', () => {
+      try {
+        createSerenityTransport({ env: {}, imsToken: IMS });
+        expect.fail('expected createSerenityTransport to throw');
+      } catch (e) {
+        expect(e.message).to.match(/SEMRUSH_PROJECTS_BASE_URL is not set/);
+        expect(e.status).to.equal(503);
+      }
     });
 
     it('encodes path segments so reserved chars stay inside the segment', async () => {

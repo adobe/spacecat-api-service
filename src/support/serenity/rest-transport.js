@@ -11,6 +11,7 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { ErrorWithStatusCode } from '../utils.js';
 
 const API_PREFIX = '/enterprise/projects/api';
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
@@ -40,17 +41,26 @@ export class SerenityTransportError extends Error {
  * No source default: the upstream host is operational config that must be
  * settable per-environment without a code change.
  *
- * Refuses non-https schemes so a compromised env can't redirect IMS bearers
- * to an attacker host.
+ * Returns the canonical `protocol//host` origin — never the raw value. A
+ * misconfigured value like `https://host/path-prefix` or
+ * `https://user:pass@host` would otherwise silently bleed path/userinfo into
+ * every outbound request (and the userinfo form would leak credentials in
+ * each fetch's `Authorization`-adjacent metadata). Always returning the
+ * parsed origin closes both classes of injection.
+ *
+ * Failure mapping (controller `mapError`):
+ *   - Missing/invalid/non-https → throws ErrorWithStatusCode(503,
+ *     'configurationError'): operational failure, not a runtime bug.
  */
 function baseUrl(env) {
   const raw = typeof env?.SEMRUSH_PROJECTS_BASE_URL === 'string'
     ? env.SEMRUSH_PROJECTS_BASE_URL.trim()
     : env?.SEMRUSH_PROJECTS_BASE_URL;
   if (!hasText(raw)) {
-    throw new Error(
+    throw new ErrorWithStatusCode(
       'SEMRUSH_PROJECTS_BASE_URL is not set. Configure it via Vault '
       + '(dx_mysticat/<env>/api-service) or .env for local dev.',
+      503,
     );
   }
   const candidate = raw.replace(/\/$/, '');
@@ -58,12 +68,18 @@ function baseUrl(env) {
   try {
     parsed = new URL(candidate);
   } catch {
-    throw new Error(`SEMRUSH_PROJECTS_BASE_URL is not a valid URL: ${candidate}`);
+    throw new ErrorWithStatusCode(
+      `SEMRUSH_PROJECTS_BASE_URL is not a valid URL: ${candidate}`,
+      503,
+    );
   }
   if (parsed.protocol !== 'https:') {
-    throw new Error(`SEMRUSH_PROJECTS_BASE_URL must use https (got ${parsed.protocol})`);
+    throw new ErrorWithStatusCode(
+      `SEMRUSH_PROJECTS_BASE_URL must use https (got ${parsed.protocol})`,
+      503,
+    );
   }
-  return candidate;
+  return `${parsed.protocol}//${parsed.host}`;
 }
 
 /**

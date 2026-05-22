@@ -289,8 +289,13 @@ function validateCreateBody(body) {
       || !body.brandNames.every(hasText)) {
     errors.push('brandNames must be a non-empty array of strings');
   }
-  if (body?.projectType !== undefined && body.projectType !== 'aio') {
-    errors.push("projectType, when provided, must be 'aio'");
+  // Only 'ai' is meaningful here — that's the value Semrush expects upstream
+  // and the only project type this proxy creates. Pre-launch revisions of
+  // this validator accepted 'aio' (the value the GET listing endpoint uses
+  // as a *collection filter*, not a project type) — Semrush rejects that on
+  // the create path with a `ProjectRequest.Type ... oneof` validation error.
+  if (body?.projectType !== undefined && body.projectType !== 'ai') {
+    errors.push("projectType, when provided, must be 'ai'");
   }
   return errors;
 }

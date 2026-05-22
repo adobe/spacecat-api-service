@@ -408,10 +408,50 @@ describe('semrush projects handler', () => {
       expect(result.body.semrushProjectId).to.equal('');
     });
 
-    it('400s on projectType !== "aio"', async () => {
-      const result = await handleCreateProject({}, makeDataAccess(), BRAND, WORKSPACE, validBody({ projectType: 'something-else' }));
-      expect(result.status).to.equal(400);
-      expect(result.body.messages.join(' ')).to.include('projectType');
+    it("400s on projectType !== 'ai'", async () => {
+      // The Semrush GET-projects endpoint uses `?type=AIO` as a collection
+      // filter, which is what made an earlier draft of this validator accept
+      // 'aio'. The CREATE endpoint rejects 'aio' with a `ProjectRequest.Type
+      // ... oneof` error, so we hard-require 'ai' on the way in too. Each
+      // call is independent of the others — no need for serial awaits.
+      const bads = ['aio', 'something-else', '', 0, false];
+      const results = await Promise.all(bads.map((bad) => handleCreateProject(
+        {},
+        makeDataAccess(),
+        BRAND,
+        WORKSPACE,
+        validBody({ projectType: bad }),
+      )));
+      for (let i = 0; i < bads.length; i += 1) {
+        const result = results[i];
+        expect(result.status, `projectType=${JSON.stringify(bads[i])}`).to.equal(400);
+        expect(result.body.messages.join(' ')).to.include('projectType');
+      }
+    });
+
+    it("accepts projectType 'ai' and forwards type:'ai' on the upstream create body", async () => {
+      // Locks the validator-to-upstream contract: the only accepted client
+      // value is 'ai', and the handler sends exactly that to Semrush. Catches
+      // regressions where someone reintroduces the GET-collection 'aio' value
+      // on the create path.
+      const transport = {
+        listLanguages: sinon.stub().resolves({
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
+        }),
+        createProject: sinon.stub().resolves({ id: 'p1' }),
+        publishProject: sinon.stub().resolves({}),
+      };
+      const result = await handleCreateProject(
+        transport,
+        makeDataAccess(),
+        BRAND,
+        WORKSPACE,
+        validBody({ projectType: 'ai' }),
+      );
+      expect(result.status).to.equal(201);
+      expect(transport.createProject).to.have.been.calledOnce;
+      const [, upstreamBody] = transport.createProject.firstCall.args;
+      expect(upstreamBody.type).to.equal('ai');
     });
 
     it('warn-logs when the language catalog returns no usable names', async () => {
@@ -447,6 +487,44 @@ describe('semrush projects handler', () => {
         language: 'en',
       }));
       expect(transport.listLanguages).to.have.been.calledOnce;
+    });
+
+    it('refreshes the language catalog after the 1h TTL expires', async () => {
+      // Pin Date.now() across the test so we can advance past TTL deterministically.
+      // Without this test, a bug that pinned `expiresAt` permanently (e.g. dropping
+      // the `now + TTL` assignment) would pass CI silently — the cache would never
+      // refetch and new languages added to the upstream catalog would be invisible
+      // until a Lambda cold start.
+      const clock = sinon.useFakeTimers({ now: 1_700_000_000_000, toFake: ['Date'] });
+      try {
+        clearLanguageCache();
+        const transport = {
+          listLanguages: sinon.stub().resolves({
+            items: [{ id: 'lang-en-uuid', name: 'English' }],
+          }),
+          createProject: sinon.stub().resolves({ id: 'p1' }),
+          publishProject: sinon.stub().resolves({}),
+        };
+        const dataAccess = makeDataAccess();
+
+        // 1st call → upstream listLanguages fires.
+        await handleCreateProject(transport, dataAccess, BRAND, WORKSPACE, validBody());
+        expect(transport.listLanguages).to.have.been.calledOnce;
+
+        // Within TTL → no refetch.
+        clock.tick(59 * 60 * 1000); // 59 min
+        dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+        await handleCreateProject(transport, dataAccess, BRAND, WORKSPACE, validBody({ market: 'DE' }));
+        expect(transport.listLanguages).to.have.been.calledOnce;
+
+        // Past 1h TTL → cache refreshes; expect a 2nd upstream call.
+        clock.tick(2 * 60 * 1000); // +2 min → 61 min total
+        dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+        await handleCreateProject(transport, dataAccess, BRAND, WORKSPACE, validBody({ market: 'FR' }));
+        expect(transport.listLanguages).to.have.been.calledTwice;
+      } finally {
+        clock.restore();
+      }
     });
   });
 
