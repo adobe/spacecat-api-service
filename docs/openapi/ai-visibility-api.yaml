@@ -178,6 +178,7 @@ x-ai-vis-fts-sort-direction: &ftsSortDirectionParam
     type: string
     enum: [ASC, DESC]
     default: DESC
+    example: DESC
 
 x-ai-vis-fts-topics-sort-by: &ftsTopicsSortByParam
   name: sortBy
@@ -242,7 +243,6 @@ x-ai-vis-fts-source-domains-sort-by: &ftsSourceDomainsSortByParam
     type: string
     enum: [DOMAIN, SOURCES_COUNT, MENTIONS, ORGANIC_TRAFFIC]
     default: MENTIONS
-    example: DESC
 
 x-ai-vis-prompt-hash: &promptHashParam
   name: promptHash

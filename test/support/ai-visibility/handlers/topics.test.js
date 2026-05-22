@@ -1453,19 +1453,25 @@ describe('AI Visibility – topics handlers', () => {
         }
       });
 
+      // Prompt names are intentionally chosen so the alphabetical tiebreak in the
+      // merge-comparator (`cmpStr(a.norm, b.norm)`) DISAGREES with the SOURCES_COUNT
+      // ordering: 'aaa low sources' would win alphabetically while 'zzz high sources'
+      // must win on SOURCES_COUNT DESC. This way a regression that breaks the sort key
+      // accessor (e.g. reading the wrong field name) would fall back to the alphabetical
+      // tiebreak and flip the result, failing this test.
       it('all-engines: merge picker honours SOURCES_COUNT sort', async () => {
         clients.promptClient.promptsByTopicFTS.callsFake(({ llm }) => {
           if (llm === FTS_LLMS[0]) {
             return Promise.resolve({
               prompts: [{
-                prompt: 'low sources', promptHash: 'h1', serpId: 's1', topicName: 'T', topicId: '1', mentionedBrandsCount: 99, sourcesCount: 1,
+                prompt: 'aaa low sources', promptHash: 'h1', serpId: 's1', topicName: 'T', topicId: '1', mentionedBrandsCount: 99, sourcesCount: 1,
               }],
             });
           }
           if (llm === FTS_LLMS[1]) {
             return Promise.resolve({
               prompts: [{
-                prompt: 'high sources', promptHash: 'h2', serpId: 's2', topicName: 'T', topicId: '1', mentionedBrandsCount: 1, sourcesCount: 99,
+                prompt: 'zzz high sources', promptHash: 'h2', serpId: 's2', topicName: 'T', topicId: '1', mentionedBrandsCount: 1, sourcesCount: 99,
               }],
             });
           }
@@ -1473,7 +1479,7 @@ describe('AI Visibility – topics handlers', () => {
         });
         const sp = new URLSearchParams('searchQuery=q&sortBy=SOURCES_COUNT&limit=10');
         const res = await handleTopicsResearchPrompts(sp, clients);
-        expect(res.body.data[0].prompt).to.equal('high sources');
+        expect(res.body.data[0].prompt).to.equal('zzz high sources');
       });
 
       it('all-engines: PROMPT sort is lexicographic', async () => {

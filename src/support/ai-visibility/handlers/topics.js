@@ -103,6 +103,13 @@ function resolveFtsSort(sp, sortByMap, defaultByKey) {
   };
 }
 
+// Numeric comparator with intentional 0-fallback: Semrush gRPC responses occasionally
+// omit numeric fields (e.g. `volume`, `organicTraffic`) or return non-finite stringy
+// values, and `Number(undefined) || 0` keeps the sort stable rather than producing NaN
+// (which would make `Array.prototype.sort` non-deterministic). Missing values therefore
+// rank identically to genuine zeros — on ASC they cluster at the start, on DESC at the
+// end. If we ever need to distinguish "missing" from "zero" in the sort order, replace
+// this with an explicit sentinel-aware comparator instead of relying on the truthy `||`.
 function cmpNum(a, b) {
   return (Number(a) || 0) - (Number(b) || 0);
 }
@@ -268,6 +275,12 @@ async function brandsAndSourceDomainsMetricsByFtsAllModels(country, query, clien
   }
 }
 
+// UI/proto field-name map for prompt rows. Two renames are deliberate and load-bearing
+// for downstream consumers (notably `promptsResearchSortKey`):
+//   proto `mentionedBrandsCount` -> UI `mentions`
+//   proto `sourcesCount`         -> UI `citedPages`
+// If you ever sort by these in the merge path, read `row.mentions` / `row.citedPages`
+// off the mapped row, NOT the proto field names.
 function mapPromptRow(p) {
   const tv = p.topicVolume;
   return {
@@ -505,6 +518,10 @@ export async function handleTopicsStats(sp, clients) {
 /**
  * @param {{ sortByKey: string }} sort
  * @returns {(row: object) => number | string}
+ *
+ * Note on field names: rows passed here are post-`mapPromptRow`, so the proto fields
+ * `mentionedBrandsCount` and `sourcesCount` are exposed as `mentions` and `citedPages`
+ * respectively. Sorting on the proto names would silently no-op.
  */
 function promptsResearchSortKey(sort) {
   if (sort.sortByKey === 'PROMPT') {
@@ -729,6 +746,9 @@ export async function handleTopicsResearchBrands(sp, clients) {
 function sourceDomainsResearchComparator(sort) {
   const { sortByKey, dirMult } = sort;
   if (sortByKey === 'DOMAIN') {
+    // No tiebreak needed: the upstream `agg` Map is keyed by `sourceDomain`, so duplicate
+    // domains are merged before they reach this comparator. The sort key is therefore
+    // already unique across `merged` and a secondary key would never fire.
     return (a, b) => cmpStr(a.sourceDomain, b.sourceDomain) * dirMult;
   }
   if (sortByKey === 'SOURCES_COUNT') {
