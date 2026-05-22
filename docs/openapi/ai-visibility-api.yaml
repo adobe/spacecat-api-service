@@ -166,7 +166,83 @@ x-ai-vis-sort-direction: &sortDirectionParam
         enum: [UNKNOWN, ASC, DESC]
       - type: integer
         enum: [0, 1, 2]
+
+x-ai-vis-fts-sort-direction: &ftsSortDirectionParam
+  name: sortDirection
+  in: query
+  required: false
+  description: |
+    `ORDER_DIRECTION` for Semrush `order.direction`. Accepted values: `ASC`, `DESC`.
+    Default when omitted: `DESC`. Returns `400 invalid_sort_direction` for any other value.
+  schema:
+    type: string
+    enum: [ASC, DESC]
+    default: DESC
     example: DESC
+
+x-ai-vis-fts-topics-sort-by: &ftsTopicsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `TOPICS_BY_FTS_REQUEST_ORDER_BY` for Semrush v2 `TopicsByFTSRequest.order.by`.
+    Default when omitted: `RELEVANCE_SCORE`. Returns `400 invalid_sort_by` for any other value.
+
+    Note: on the all-engines path (no `engine` query param) the sort is applied
+    server-side per LLM and the merged page is re-sorted in-process, so ordering
+    is fully consistent within each page but only approximate across pages.
+  schema:
+    type: string
+    enum: [RELEVANCE_SCORE, VOLUME]
+    default: RELEVANCE_SCORE
+
+x-ai-vis-fts-prompts-sort-by: &ftsPromptsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY` for Semrush v2 `PromptsByTopicFTSRequest.order.by`.
+    Default when omitted: `MENTIONED_BRANDS_COUNT`. Returns `400 invalid_sort_by` for any other value.
+
+    Note: on the all-engines path (no `engine` query param) the sort is applied
+    server-side per LLM and the merged page is re-sorted in-process, so ordering
+    is fully consistent within each page but only approximate across pages.
+  schema:
+    type: string
+    enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT]
+    default: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-fts-brands-sort-by: &ftsBrandsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY` for Semrush v2 `BrandsByTopicFTSRequest.order.by`.
+    Default when omitted: `MENTIONS`. Returns `400 invalid_sort_by` for any other value.
+
+    Note: on the all-engines path (no `engine` query param) the sort is applied
+    server-side per LLM and the merged page is re-sorted in-process, so ordering
+    is fully consistent within each page but only approximate across pages.
+  schema:
+    type: string
+    enum: [NAME, MENTIONS, SOURCES_COUNT]
+    default: MENTIONS
+
+x-ai-vis-fts-source-domains-sort-by: &ftsSourceDomainsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY` for Semrush v2 `SourceDomainsByTopicFTSRequest.order.by`.
+    Default when omitted: `MENTIONS`. Returns `400 invalid_sort_by` for any other value.
+
+    Note: on the all-engines path (no `engine` query param) the sort is applied
+    server-side per LLM and the merged page is re-sorted in-process, so ordering
+    is fully consistent within each page but only approximate across pages.
+  schema:
+    type: string
+    enum: [DOMAIN, SOURCES_COUNT, MENTIONS, ORGANIC_TRAFFIC]
+    default: MENTIONS
 
 x-ai-vis-prompt-hash: &promptHashParam
   name: promptHash
@@ -733,12 +809,18 @@ ai-visibility-topics-research:
       Returns a paginated list of topics matching the search query.
       All-models queries merge and deduplicate rows across LLMs.
       Data from `TopicService/TopicsByFTS`.
+
+      Sortable via `sortBy` (`RELEVANCE_SCORE` (default), `VOLUME`) and `sortDirection`
+      (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is applied per LLM
+      and the merged page is re-sorted in-process, so cross-page ordering is approximate.
     operationId: getAiVisibilityTopicsResearch
     parameters:
       - *searchQueryParam
       - *countryParam
       - *regionParam
       - *engineParam
+      - *ftsTopicsSortByParam
+      - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
     responses:
@@ -788,12 +870,19 @@ ai-visibility-topics-research-prompts:
       All-models queries merge and deduplicate across LLMs; total is
       the sum of per-LLM totals.
       Data from `PromptService/PromptsByTopicFTS` and `PromptsByTopicFTSTotals`.
+
+      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT` (default), `SOURCES_COUNT`)
+      and `sortDirection` (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is
+      applied per LLM and the merged page is re-sorted in-process; cross-page ordering is
+      approximate.
     operationId: getAiVisibilityTopicsResearchPrompts
     parameters:
       - *searchQueryParam
       - *countryParam
       - *regionParam
       - *engineParam
+      - *ftsPromptsSortByParam
+      - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
     responses:
@@ -816,12 +905,18 @@ ai-visibility-topics-research-brands:
       All-models queries merge rows (deduplicated by domain); total is
       the sum of per-LLM `BrandsByTopicFTSTotals`.
       Data from `BrandService/BrandsByTopicFTS` and `BrandsByTopicFTSTotals`.
+
+      Sortable via `sortBy` (`NAME`, `MENTIONS` (default), `SOURCES_COUNT`) and `sortDirection`
+      (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is applied per LLM and the
+      merged page is re-sorted in-process; cross-page ordering is approximate.
     operationId: getAiVisibilityTopicsResearchBrands
     parameters:
       - *searchQueryParam
       - *countryParam
       - *regionParam
       - *engineParam
+      - *ftsBrandsSortByParam
+      - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
     responses:
@@ -845,12 +940,19 @@ ai-visibility-topics-research-source-domains:
       containing `sourceDomain`, `sourcesCount`, `mentions`, `organicTraffic`,
       and optionally `promptExample`.
       Data from `SourceService/SourceDomainsByTopicFTS` and `SourceDomainsByTopicFTSTotals`.
+
+      Sortable via `sortBy` (`DOMAIN`, `SOURCES_COUNT`, `MENTIONS` (default), `ORGANIC_TRAFFIC`)
+      and `sortDirection` (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is
+      applied per LLM and the merged page is re-sorted in-process; cross-page ordering is
+      approximate.
     operationId: getAiVisibilityTopicsResearchSourceDomains
     parameters:
       - *searchQueryParam
       - *countryParam
       - *regionParam
       - *engineParam
+      - *ftsSourceDomainsSortByParam
+      - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
     responses:
