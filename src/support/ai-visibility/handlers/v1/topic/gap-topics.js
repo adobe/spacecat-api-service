@@ -32,6 +32,7 @@ import {
   parseCompetitorDomainsList,
   responseFromGrpcError,
   buildRangeExpr,
+  escapeQlString,
   isValidVolume,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
@@ -43,8 +44,7 @@ function buildGapTopicsDimensionFilterQl(sp) {
   if (!q) {
     return '';
   }
-  const escaped = q.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  return `topic CONTAINS "${escaped}"`;
+  return `topic CONTAINS "${escapeQlString(q)}"`;
 }
 
 /**

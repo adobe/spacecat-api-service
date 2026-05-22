@@ -32,6 +32,7 @@ import {
   engineToLlm,
   responseFromGrpcError,
   buildRangeExpr,
+  escapeQlString,
   isValidVisibility,
   isValidVolume,
   PROTO_FROM_JSON,
@@ -44,8 +45,7 @@ function buildBrandTopicsDimensionFilterQl(sp) {
   if (!q) {
     return '';
   }
-  const escaped = q.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  return `topic CONTAINS "${escaped}"`;
+  return `topic CONTAINS "${escapeQlString(q)}"`;
 }
 
 /**

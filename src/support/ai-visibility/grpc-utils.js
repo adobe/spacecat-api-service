@@ -163,6 +163,18 @@ export function parseLimitOffset(sp) {
 
 /* c8 ignore start -- thin QL/validation helpers for V1 brand-topics filters */
 /**
+ * Escape a user-supplied string for embedding inside a Semrush QL double-quoted
+ * literal. Backslashes are doubled and double-quotes are backslash-escaped so the
+ * literal cannot break out of the surrounding `"..."` quotes.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+export function escapeQlString(s) {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
  * Build a Semrush QL range expression like `volume >= 10 AND volume <= 100`.
  * - both bounds present → `metric >= from AND metric <= to`
  * - only `from` present → `metric >= from`
