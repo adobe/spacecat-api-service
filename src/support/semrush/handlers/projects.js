@@ -11,8 +11,7 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-
-import { LOCATIONS } from '../data/locations.js';
+import { iso31661Alpha2ToNumeric } from 'iso-3166';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 const LANGUAGE_TAG_REGEX = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
@@ -32,35 +31,56 @@ const MAX_AI_MODELS_PAGES = 5;
 const TAG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const TAG_CACHE_MAX_ENTRIES = 512;
 
-/**
- * Map ISO-2 country code (uppercase) -> { locationId, locationName }. Lazy
- * normalised on first access so we don't pay the work on cold start.
- */
-let normalizedLocations = null;
-function getLocations() {
-  if (!normalizedLocations) {
-    normalizedLocations = new Map();
-    for (const [iso, value] of Object.entries(LOCATIONS)) {
-      if (value && Number.isInteger(value.locationId)) {
-        normalizedLocations.set(String(iso).toUpperCase(), {
-          locationId: value.locationId,
-          locationName: value.locationName,
-        });
-      }
-    }
-  }
-  return normalizedLocations;
-}
+// Reusable English region-name formatter (ICU-backed, built into Node). Used
+// for the `location_name` we send upstream — matches the form Semrush already
+// stores on existing projects (`United States`, `Germany`, `Türkiye`).
+const ENGLISH_REGION_NAMES = new Intl.DisplayNames(['en'], { type: 'region' });
 
 /**
- * Resolves an ISO-2 market code to Semrush's location_id (= Google Ads
- * Geo Target ID). Returns null on unknown markets; controllers map to 400.
+ * Resolves an ISO 3166-1 alpha-2 country code to Semrush's `location_id`
+ * (= Google Ads "Geo Target ID") plus an English display name suitable for
+ * `location_name` on the upstream create-project body. Returns null on
+ * unknown / unassigned codes; the controller maps that to 400.
+ *
+ * Why `2000 + ISO numeric` works
+ * ─────────────────────────────────────────────────────────────────────────
+ * Google Ads Geo Targets use a multi-digit `criterion_id` whose first digit
+ * encodes the target *type*:
+ *   - 1xxx: region / metro / state
+ *   - 2xxx: country
+ *   - 5xxx, 9xxx, …: airport, postal code, neighbourhood, university, …
+ * For countries, the remaining digits are the country's ISO 3166-1 numeric
+ * code, so `criterion_id = 2000 + ISO numeric`. Verified 2026-05-22 against
+ * every project in the Adobe LLMO-Dev Semrush workspace
+ * (US→2840, DE→2276, FR→2250, AU→2036, …). Semrush echoes the same
+ * `location.id` back on read, so this stays consistent over time.
+ *
+ * Canonical Google Ads dataset (countries + cities + ZIPs + airports + …) is
+ * downloadable as CSV from:
+ *   https://developers.google.com/google-ads/api/data/geotargets
+ *
+ * TODO(LLMO-XXXX): cities / regions / postal codes do NOT follow this
+ * formula — their `criterion_id`s come from the Google CSV above and aren't
+ * derivable from ISO codes. When sub-national geo lands in the UX, either
+ * (a) proxy a Semrush-side location-search endpoint if/when they expose one
+ * (verified absent 2026-05-22 — they accept the integer but don't expose a
+ * `/v1/locations/search`), or (b) lazy-load the Google geotargets CSV from
+ * S3 on first use and search in-memory. Whichever path, only this function
+ * needs to change — `semrush_location_id` is already the slice key.
  */
 export function resolveLocation(market) {
   if (!hasText(market)) {
     return null;
   }
-  return getLocations().get(String(market).toUpperCase()) || null;
+  const alpha2 = String(market).toUpperCase();
+  const numeric = iso31661Alpha2ToNumeric[alpha2];
+  if (!numeric) {
+    return null;
+  }
+  return {
+    locationId: 2000 + Number(numeric),
+    locationName: ENGLISH_REGION_NAMES.of(alpha2),
+  };
 }
 
 /**
