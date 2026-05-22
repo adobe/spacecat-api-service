@@ -262,6 +262,9 @@ export class FixesController {
 
     const log = this.#ctx.log || console;
 
+    const profile = context.attributes?.authInfo?.getProfile?.();
+    const callerUserId = profile?.user_id ?? profile?.sub;
+
     // Pre-fetch site and opportunity info for documentPath enrichment of manual fixes
     const enrichmentCtx = await this.#prepareDocumentPathEnrichment(
       context.data,
@@ -278,7 +281,13 @@ export class FixesController {
           log,
         );
 
-        const fixEntity = await FixEntity.create({ ...enrichedFixData, opportunityId });
+        const fixEntity = await FixEntity.create({
+          ...enrichedFixData,
+          opportunityId,
+          // Override any client-supplied executedBy with the authenticated caller's identity
+          // so the IMS admin profile API is never called for an arbitrary user ID.
+          ...(hasText(callerUserId) && { executedBy: callerUserId }),
+        });
         if (fixData.suggestionIds) {
           const suggestions = await Promise.all(
             fixData.suggestionIds.map((id) => this.#Suggestion.findById(id)),
@@ -525,9 +534,15 @@ export class FixesController {
         hasUpdates = true;
       }
 
-      if (executedBy !== fix.getExecutedBy() && hasText(executedBy)) {
-        fix.setExecutedBy(executedBy);
-        hasUpdates = true;
+      if (hasText(executedBy)) {
+        // Client signals intent to record the executor; always resolve from the authenticated
+        // caller's identity so the IMS admin API is never called for an arbitrary user ID.
+        const profile = context.attributes?.authInfo?.getProfile?.();
+        const callerUserId = profile?.user_id ?? profile?.sub;
+        if (hasText(callerUserId) && callerUserId !== fix.getExecutedBy()) {
+          fix.setExecutedBy(callerUserId);
+          hasUpdates = true;
+        }
       }
 
       if (executedAt !== fix.getExecutedAt() && isIsoDate(executedAt)) {

@@ -4045,9 +4045,6 @@ FixUpdate:
       description: Optional array of suggestion IDs to associate with this fix. Replaces existing associations.
       items:
         $ref: '#/Id'
-    executedBy:
-      type: string
-      description: Email or identifier of who executed the fix
     executedAt:
       $ref: '#/DateTime'
       description: ISO timestamp when the fix was executed

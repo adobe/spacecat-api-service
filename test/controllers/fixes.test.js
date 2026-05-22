@@ -780,6 +780,24 @@ describe('Fixes Controller', () => {
       expect(fixes[0].fix).includes(fixData);
     });
 
+    it('auto-populates executedBy from the auth profile, ignoring any client-supplied value', async () => {
+      requestContext.attributes = {
+        authInfo: { getProfile: () => ({ user_id: testExternalUserId }) },
+      };
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        executedBy: 'attacker@evil.org',
+        changeDetails: { arbitrary: 'value' },
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 207 });
+
+      const { fixes } = await response.json();
+      expect(fixes[0].fix.executedBy).to.equal(testExternalUserId);
+    });
+
     it('reflects failures of creating a single fix', async () => {
       sandbox.stub(log, 'error'); // silence error logging
       electroService.entities.fixEntity.create
@@ -1665,6 +1683,9 @@ describe('Fixes Controller', () => {
       sandbox.stub(fix.patcher, 'save');
       fixEntityCollection.findById.withArgs(fixEntityId).resolves(fix);
       requestContext.params.fixId = fixEntityId;
+      requestContext.attributes = {
+        authInfo: { getProfile: () => ({ user_id: testExternalUserId }) },
+      };
     });
 
     it('responds 403 if the request does not have authorization/access', async () => {
@@ -1718,7 +1739,7 @@ describe('Fixes Controller', () => {
       const response = await fixesController.patchFix(requestContext);
       expect(response).includes({ status: 200 });
       expect(await response.json()).deep.equals(FixDto.toJSON(fix));
-      expect(fix.getExecutedBy()).equals('me');
+      expect(fix.getExecutedBy()).equals(testExternalUserId);
       expect(fix.getExecutedAt()).equals(executedAt);
       expect(fix.getPublishedAt()).equals(publishedAt);
       expect(fix.getChangeDetails()).deep.equals(changeDetails);
@@ -1922,8 +1943,8 @@ describe('Fixes Controller', () => {
       const response = await fixesController.patchFix(requestContext);
       expect(response).includes({ status: 200 });
 
-      // Verify all updates were applied
-      expect(fix.getExecutedBy()).equals('updated-user');
+      // Verify all updates were applied; executedBy is auto-populated from the auth profile
+      expect(fix.getExecutedBy()).equals(testExternalUserId);
       expect(fix.getExecutedAt()).equals(executedAt);
       expect(fix.getChangeDetails()).deep.equals(changeDetails);
 
