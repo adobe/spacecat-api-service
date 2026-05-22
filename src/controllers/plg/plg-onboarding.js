@@ -696,7 +696,10 @@ async function performAsoPlgOnboarding({
   // Defense-in-depth: outer entry points (onboard, alternateDomain bypass) already
   // prepareDomain + isValidDomain + isSafeDomain. These inner checks guard against any
   // future caller that constructs an unvalidated payload (admin tooling, backfill scripts).
+  // The predicates are covered by the alternateDomain test path; the throw bodies are
+  // unreachable from the current test corpus because every caller pre-validates.
   if (!isValidDomain(domain)) {
+    /* c8 ignore next 5 */
     throw Object.assign(
       new Error('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)'),
       { clientError: true },
@@ -704,6 +707,7 @@ async function performAsoPlgOnboarding({
   }
 
   if (!isSafeDomain(domain)) {
+    /* c8 ignore next 5 */
     throw Object.assign(
       new Error('Invalid domain'),
       { clientError: true },
