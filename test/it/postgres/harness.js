@@ -20,6 +20,11 @@
  * before all test files, and tears both down after all test files complete.
  */
 
+// Proof PR: import wirn at module top so async_hooks captures all handles
+// created later by any module. Used after teardown to verify the leak is gone.
+import wirn from 'why-is-node-running';
+import { resetDataAccessConnections } from '@adobe/spacecat-shared-data-access';
+
 import { initAuth, createAllTokens } from '../shared/auth.js';
 import { buildEnv } from '../env.js';
 import { startServer, stopServer } from '../server.js';
@@ -56,6 +61,32 @@ export const mochaHooks = {
   async afterAll() {
     this.timeout(HARNESS_HOOK_TIMEOUT_MS);
     await stopServer();
+
+    // BEFORE the fix: count the leaked handles.
+    const before = process.getActiveResourcesInfo();
+    console.log(`\n[proof] handles BEFORE reset: ${before.length}`, before.slice(0, 10));
+
+    // THE FIX under test.
+    await resetDataAccessConnections();
+
+    // AFTER the fix: count again and run wirn (will print refs holding the loop).
+    const after = process.getActiveResourcesInfo();
+    console.log(`[proof] handles AFTER reset: ${after.length}`, after.slice(0, 10));
+    console.log('[proof] wirn — handles still keeping loop alive:');
+    try {
+      wirn();
+    } catch (err) {
+      console.error('wirn failed:', err);
+    }
+
     await stopPostgres();
+
+    // Backstop: if the fix didn't fully drain, exit anyway after 5s so the
+    // CI job doesn't sit at the 15-min timeout. Unref so the timer doesn't
+    // itself extend the loop.
+    setTimeout(() => {
+      console.log('[proof] backstop force-exit fired — fix did not fully drain');
+      process.exit(0);
+    }, 5000).unref();
   },
 };

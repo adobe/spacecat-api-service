@@ -1,0 +1,15 @@
+diff --git a/node_modules/@adobe/spacecat-shared-data-access/src/service/index.js b/node_modules/@adobe/spacecat-shared-data-access/src/service/index.js
+index 6b67ada..89c6eca 100644
+--- a/node_modules/@adobe/spacecat-shared-data-access/src/service/index.js
++++ b/node_modules/@adobe/spacecat-shared-data-access/src/service/index.js
+@@ -28,6 +28,10 @@ const fetchContext = process.env.HELIX_FETCH_FORCE_HTTP1
+   ? h1NoCache() : keepAliveNoCache();
+ const { fetch: postgrestFetch } = fetchContext;
+ 
++// Releases the keep-alive fetch context. For test/script teardown only —
++// Lambda runtimes intentionally keep the context alive between invocations.
++export const resetDataAccessConnections = () => fetchContext.reset();
++
+ /**
+  * Creates a fetch wrapper that converts native (WHATWG) Headers instances to plain objects.
+  * @adobe/fetch's Headers class doesn't recognize native Headers instances (instanceof check
