@@ -26,7 +26,7 @@ import nock from 'nock';
 import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
 
-import SitesController from '../../src/controllers/sites.js';
+import SitesController, { resolveOrgDefaultSite } from '../../src/controllers/sites.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
@@ -4687,6 +4687,22 @@ describe('Sites Controller', () => {
     let testOrganizations;
     let testSites;
 
+    // Must include Config methods because OrganizationDto.toJSON calls Config.toDynamoItem.
+    const makeConfigWithDefault = (siteId) => ({
+      getDefaults: () => ({ abcd: { siteId } }),
+      getSlackConfig: () => undefined,
+      getHandlers: () => undefined,
+      getContentAiConfig: () => undefined,
+      getImports: () => undefined,
+      getFetchConfig: () => undefined,
+      getBrandConfig: () => undefined,
+      getBrandProfile: () => undefined,
+      getCdnLogsConfig: () => undefined,
+      getLlmoConfig: () => undefined,
+      getTokowakaConfig: () => undefined,
+      getEdgeOptimizeConfig: () => undefined,
+    });
+
     beforeEach(() => {
       accessControlStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       testOrganizations = [
@@ -5366,6 +5382,153 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    describe('config.defaults resolution', () => {
+      it('uses config.defaults site when organizationId is provided', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+        expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
+      });
+
+      it('uses config.defaults site when imsOrg is provided', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { imsOrg: testOrganizations[0].getImsOrgId() };
+        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+        expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
+      });
+
+      it('falls back to first-enrolled site when config.defaults has no entry for the product', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(Config({}));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+      });
+    });
+
+    describe('resolveOrgDefaultSite', () => {
+      const productCode = 'abcd';
+      let mockCtx;
+      let org;
+      let mockAccessControlUtil;
+
+      let resolveDefault;
+
+      beforeEach(() => {
+        [org] = testOrganizations;
+        mockCtx = { dataAccess: mockDataAccess, log: { warn: sandbox.stub() } };
+        mockAccessControlUtil = { hasAdminAccess: sandbox.stub().returns(false) };
+        sandbox.stub(org, 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+        const args = [org, productCode, context, mockCtx, mockAccessControlUtil];
+        resolveDefault = () => resolveOrgDefaultSite(...args);
+      });
+
+      it('returns null when org has no default configured for the product', async () => {
+        org.getConfig.returns({ getDefaults: () => ({}) });
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+        expect(mockDataAccess.Site.findById).to.not.have.been.called;
+      });
+
+      it('returns null and warns when the configured site no longer exists', async () => {
+        mockDataAccess.Site.findById.resolves(null);
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+        expect(mockCtx.log.warn).to.have.been.called;
+      });
+
+      it('returns null and warns when the configured site belongs to a different org', async () => {
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+        expect(mockCtx.log.warn).to.have.been.called;
+      });
+
+      it('returns null when the configured site has no active enrollments', async () => {
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [],
+        });
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+      });
+
+      it('returns null when the configured site is on a non-customer-visible tier for non-admin', async () => {
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+      });
+
+      it('returns data when the configured site is on a non-customer-visible tier for admin', async () => {
+        mockAccessControlUtil.hasAdminAccess.returns(true);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const result = await resolveDefault();
+
+        expect(result).to.not.be.null;
+      });
+
+      it('returns null gracefully when TierClient throws', async () => {
+        TierClient.createForSite.throws(new Error('tier service unavailable'));
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+        expect(mockCtx.log.warn).to.have.been.called;
+      });
     });
 
     it('should return 404 with no_entitlement_for_product for non-existent organizationId (external caller)', async () => {
