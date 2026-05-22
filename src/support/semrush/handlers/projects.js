@@ -78,6 +78,32 @@ export function clearLanguageCache() {
   languageCache.byTag.clear();
 }
 
+// Semrush's /v1/languages returns `{ id: <uuid>, name: <english name> }` per
+// entry — no ISO/BCP-47 code field (verified 2026-05-22 against
+// adobe-hackathon.semrush.com). Map the caller-supplied tag to the catalog's
+// English name via the ECMAScript `Intl.DisplayNames` API (ICU-backed, built
+// into Node, no dep). The constructor is reusable, so we cache one instance.
+const ENGLISH_LANGUAGE_NAMES = new Intl.DisplayNames(['en'], { type: 'language' });
+
+/**
+ * Maps a BCP-47 primary-subtag (`en`, `de`, `zh`, `zho`, ...) to the English
+ * language name Semrush uses in its catalog (`English`, `German`, `Chinese`).
+ * Returns null when the ICU table doesn't recognise the code (`.of()` echoes
+ * the input back in that case, which we treat as "no name available").
+ */
+function isoToEnglishName(languageTag) {
+  // Strip region/script subtag — Semrush's catalog is keyed by primary
+  // language only (no `en-US` / `pt-BR` rows).
+  const primary = String(languageTag).toLowerCase().split('-')[0];
+  if (!hasText(primary)) {
+    return null;
+  }
+  const name = ENGLISH_LANGUAGE_NAMES.of(primary);
+  // ICU echoes the input back when the code is unknown. Treat that as a
+  // miss — the lookup against the catalog would fail anyway.
+  return name && name.toLowerCase() !== primary ? name : null;
+}
+
 async function resolveLanguageId(transport, languageTag, log) {
   const now = Date.now();
   if (languageCache.expiresAt <= now) {
@@ -85,25 +111,23 @@ async function resolveLanguageId(transport, languageTag, log) {
     const items = Array.isArray(resp?.items) ? resp.items : [];
     languageCache.byTag.clear();
     for (const item of items) {
-      // Semrush's documented field for the BCP-47 tag is `code`. We tolerate
-      // `iso`/`tag` as historical aliases but warn-log if the catalog comes
-      // back without any recognizable tag field — that means the upstream
-      // shape has drifted and POST /projects will start failing with
-      // unknownLanguage until we adapt.
-      const code = item?.code || item?.iso || item?.tag;
-      if (hasText(code) && hasText(item?.id)) {
-        languageCache.byTag.set(String(code).toLowerCase(), String(item.id));
+      if (hasText(item?.name) && hasText(item?.id)) {
+        languageCache.byTag.set(String(item.name).toLowerCase(), String(item.id));
       }
     }
     if (languageCache.byTag.size === 0 && items.length > 0) {
       log?.warn?.(
-        'resolveLanguageId: language catalog returned no usable tags — Semrush field shape may have changed',
+        'resolveLanguageId: language catalog returned no usable names — Semrush field shape may have changed',
         { receivedKeys: Object.keys(items[0] || {}) },
       );
     }
     languageCache.expiresAt = now + LANGUAGE_CACHE_TTL_MS;
   }
-  return languageCache.byTag.get(String(languageTag).toLowerCase()) || null;
+  const englishName = isoToEnglishName(languageTag);
+  if (!englishName) {
+    return null;
+  }
+  return languageCache.byTag.get(englishName.toLowerCase()) || null;
 }
 
 /**
@@ -326,7 +350,12 @@ export async function handleCreateProject(
 
   const upstreamBody = {
     name: String(body.name),
-    type: 'aio',
+    // Semrush's POST /v1/workspaces/{ws}/projects expects type='ai' (the value
+    // the existing projects on /v2/workspaces/{ws}/projects come back with).
+    // The 'AIO' value used as a query filter on the GET endpoint is a
+    // distinct collection-level view, NOT a project type — using it on
+    // the POST yields `ProjectRequest.Type ... 'oneof'` validation error.
+    type: 'ai',
     brand_name_display: body.brandNames[0],
     brand_names: body.brandNames,
     domain: body.brandDomain,

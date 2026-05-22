@@ -394,7 +394,7 @@ describe('Semrush REST transport', () => {
 
       const body = {
         name: 'adobe.com · US · en',
-        type: 'aio',
+        type: 'ai',
         brand_name_display: 'Adobe',
         brand_names: ['Adobe', 'Adobe Inc.'],
         domain: 'adobe.com',

@@ -259,7 +259,7 @@ describe('semrush projects handler', () => {
     it('400s on language not in Semrush catalog', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
       };
       const dataAccess = makeDataAccess();
@@ -271,7 +271,7 @@ describe('semrush projects handler', () => {
     it('happy path: upstream create+publish+row written, returns 201', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({ id: 'new-proj-1' }),
         publishProject: sinon.stub().resolves({}),
@@ -298,7 +298,7 @@ describe('semrush projects handler', () => {
       // Upstream body shape is what Semrush expects.
       const upstreamBody = transport.createProject.firstCall.args[1];
       expect(upstreamBody).to.deep.include({
-        type: 'aio',
+        type: 'ai',
         country_code: 'us',
         location_id: 2840,
         language_id: 'lang-en-uuid',
@@ -310,7 +310,7 @@ describe('semrush projects handler', () => {
     it('502 envelope when create returns no id; no row written', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({}),
         publishProject: sinon.stub(),
@@ -325,7 +325,7 @@ describe('semrush projects handler', () => {
     it('propagates upstream error from createProject; no row written', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().rejects(new Error('upstream-down')),
         publishProject: sinon.stub(),
@@ -339,7 +339,7 @@ describe('semrush projects handler', () => {
     it('propagates upstream error from publishProject + logs orphan; no row written', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({ id: 'new-1' }),
         publishProject: sinon.stub().rejects(new Error('publish-down')),
@@ -361,7 +361,7 @@ describe('semrush projects handler', () => {
     it('TOCTOU race: row INSERT fails -> log orphan + return 409 with winner id', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({ id: 'loser-pid' }),
         publishProject: sinon.stub().resolves({}),
@@ -391,7 +391,7 @@ describe('semrush projects handler', () => {
     it('TOCTOU race with no winner found returns 409 with empty semrushProjectId', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({ id: 'loser-pid' }),
         publishProject: sinon.stub().resolves({}),
@@ -414,8 +414,8 @@ describe('semrush projects handler', () => {
       expect(result.body.messages.join(' ')).to.include('projectType');
     });
 
-    it('warn-logs when the language catalog returns no usable tags', async () => {
-      // Items have neither `code`/`iso`/`tag` — cache stays empty → unknownLanguage.
+    it('warn-logs when the language catalog returns no usable names', async () => {
+      // Items are missing the `name` field — cache stays empty → unknownLanguage.
       const transport = {
         listLanguages: sinon.stub().resolves({
           items: [{ id: 'lang-en-uuid', label: 'English' }],
@@ -427,13 +427,13 @@ describe('semrush projects handler', () => {
       expect(result.body.error).to.equal('unknownLanguage');
       expect(log.warn).to.have.been.called;
       const [msg] = log.warn.firstCall.args;
-      expect(msg).to.match(/no usable tags/);
+      expect(msg).to.match(/no usable names/);
     });
 
     it('caches the language catalog across calls within TTL', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({ id: 'p1' }),
         publishProject: sinon.stub().resolves({}),
