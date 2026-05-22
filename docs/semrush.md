@@ -28,8 +28,12 @@ vault kv patch dx_mysticat/stage/api-service \
 vault kv patch dx_mysticat/prod/api-service \
   SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
 
-# verify
-vault kv get -field=SEMRUSH_PROJECTS_BASE_URL dx_mysticat/<env>/api-service
+# verify (must export VAULT_ADDR — the CLI default is 127.0.0.1:8200)
+export VAULT_ADDR=https://vault-amer.adobe.net
+for ENV in dev stage prod; do
+  echo "--- $ENV ---"
+  vault kv get -field=SEMRUSH_PROJECTS_BASE_URL dx_mysticat/$ENV/api-service
+done
 ```
 
 The next `hedy --aws-update-secrets` deploy step ships the value through AWS Secrets Manager at `/helix-deploy/spacecat-services/api-service/latest`; the Lambda's `secrets` middleware then injects it into `context.env` on every cold start.
