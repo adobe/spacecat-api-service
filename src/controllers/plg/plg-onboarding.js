@@ -287,9 +287,13 @@ export function isSafeDomain(domain) {
   } catch {
     return false;
   }
-  // net.isIP returns 4 (IPv4), 6 (IPv6), or 0 (not an IP). Any IP literal that survives
-  // isValidDomain is unexpected — reject it rather than rely on prefix matching alone.
-  if (isIP(hostname)) {
+  // net.isIP returns 4 (IPv4), 6 (IPv6), or 0 (not an IP). new URL serializes IPv6
+  // hostnames WITH brackets (`[fd00::1]`), which makes a naive isIP(hostname) check
+  // return 0 and silently misses every IPv6 private/loopback/link-local/IPv4-mapped
+  // form. Unwrap the brackets before the isIP test so the backstop catches IPv6
+  // literals (RFC 4193 ULA, RFC 4291 link-local, IPv4-mapped IMDS, etc.) too.
+  const ipLiteral = hostname.replace(/^\[|\]$/g, '');
+  if (isIP(ipLiteral)) {
     return false;
   }
   const blocked = [

@@ -8572,6 +8572,17 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(isSafeDomain('169.254.169.254')).to.be.false;
     });
 
+    it('returns false when canonicalized hostname is a bracketed IPv6 literal', () => {
+      // new URL serializes IPv6 with brackets; the bracket-strip in isSafeDomain
+      // is what lets net.isIP recognize it. Without the strip, every private/
+      // link-local/IPv4-mapped IPv6 form would slip past the backstop.
+      expect(isSafeDomain('[fd00::1]')).to.be.false; // RFC 4193 ULA
+      expect(isSafeDomain('[fe80::1]')).to.be.false; // RFC 4291 link-local
+      expect(isSafeDomain('[::1]')).to.be.false; // loopback
+      expect(isSafeDomain('[::ffff:169.254.169.254]')).to.be.false; // IPv4-mapped IMDS
+      expect(isSafeDomain('[::ffff:7f00:1]')).to.be.false; // IPv4-mapped loopback
+    });
+
     it('returns false for denylist string matches (non-IP)', () => {
       expect(isSafeDomain('foo.localhost')).to.be.false;
       expect(isSafeDomain('myhost.local')).to.be.false;
