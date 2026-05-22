@@ -50,6 +50,25 @@ npm run deploy-stage      # Deploy to stage environment
 npm run deploy            # Deploy to production
 ```
 
+## Lambda Bundle Constraints
+
+**Source code is bundled into a single Lambda artifact via `helix-deploy` (esbuild). Tests import from source where `import.meta.url` resolves to the real source path — the failure mode of "works in tests, breaks in production" is the bundling layer dropping a non-JS sibling asset on its way into the zip.**
+
+History: SITES-45260 — `handlers/projects.js` read `data/locations.json` synchronously at module load via `readFileSync(import.meta.url)`. The JSON was not in `package.json` `hlx.static`, so `helix-deploy` never copied it into the Lambda zip. Every cold start hit `ENOENT … data/locations.json`, the module export went undefined, and the deploy wrapper raised `TypeError: main2 is not a function` on every invocation. Tests stayed green throughout.
+
+### Rules
+
+- **Do NOT use `readFileSync(import.meta.url, ...)` or any sibling-file reads at module load.** The bundled artifact does not preserve source-relative paths — `import.meta.url` resolves to the bundle location, not the original source location. Anything you read from a sibling path will be missing.
+- **Prefer JS-module imports for static data.** Inline JSON / locale data / lookup tables as `export const FOO = { ... }` in a `.js` file and `import` it normally. The bundler resolves it at build time; no FS access at runtime; no static-asset registry to maintain. This is the preferred shape — see `src/support/semrush/data/locations.js`.
+- **If you must keep a file as a non-JS asset**, declare its repo-relative path in `package.json` under `hlx.static` so `helix-deploy` copies it into the Lambda zip. Do NOT compute its runtime path from `import.meta.url` — read it from the Lambda task root (`process.env.LAMBDA_TASK_ROOT` or a known absolute path inside the zip).
+- **JSON import attributes** (`import x from './x.json' with { type: 'json' }`) are blocked by the repo's eslint parser today; don't try to work around the lint rule. Use the JS-module pattern instead.
+
+### CI gate (`.github/workflows/ci.yaml::bundle-build`)
+
+`npm run build` runs `hedy -v --test-bundle` on every push/PR. It bundles, zips, imports the bundled `main`, and invokes `lambda()` against a healthcheck event — exits non-zero on any non-2xx response. This is the load-bearing catch for module-load failures in the bundled artifact (the mysticat-ci reusable workflow only runs lint+test+coverage, which is source-only and would have missed SITES-45260).
+
+If you change anything that touches the bundle layer (new asset, new dependency that uses FS at boot, change to `hlx.static`, new top-level side-effect), run `npm run build` locally before pushing — the CI gate will catch it, but it's faster to know on your laptop.
+
 ## Architecture Overview
 
 ### Request Flow

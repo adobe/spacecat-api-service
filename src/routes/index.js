@@ -100,6 +100,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
+ * @param {Object} semrushController - Semrush AIO proxy controller (prompts + projects).
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -157,6 +158,7 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
+  semrushController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -201,6 +203,15 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/brands': brandsController.createBrandForOrg,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId': brandsController.updateBrandForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts': semrushController.listPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts': semrushController.createPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/bulk-delete': semrushController.bulkDeletePrompts,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/:promptId': semrushController.updatePrompt,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects': semrushController.listProjects,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects': semrushController.createProject,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/tags': semrushController.listProjectTags,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/models': semrushController.listProjectModels,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/workspaces/:workspaceId/projects': semrushController.listWorkspaceProjects,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.getPromptByBrandAndId,

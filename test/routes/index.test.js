@@ -501,6 +501,18 @@ describe('getRouteHandlers', () => {
     getFanoutReport: sinon.stub(),
   };
 
+  const mockSemrushController = {
+    listPrompts: sinon.stub(),
+    createPrompts: sinon.stub(),
+    updatePrompt: sinon.stub(),
+    bulkDeletePrompts: sinon.stub(),
+    listProjects: sinon.stub(),
+    createProject: sinon.stub(),
+    listProjectTags: sinon.stub(),
+    listProjectModels: sinon.stub(),
+    listWorkspaceProjects: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -557,6 +569,7 @@ describe('getRouteHandlers', () => {
       mockWebhooksController,
       mockAiVisibilityController,
       mockFanoutReportController,
+      mockSemrushController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -725,6 +738,15 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/bulk-delete',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/:promptId',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/tags',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/models',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/workspaces/:workspaceId/projects',
       'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',
