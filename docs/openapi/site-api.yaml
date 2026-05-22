@@ -170,9 +170,10 @@ site-scraper-config:
       **Header restrictions:** header names must conform to RFC 7230 token
       characters (`A-Za-z0-9!#$%&'*+-.^_`|~`), values must be printable ASCII
       with no CR/LF/NUL, and the following names are rejected because they are
-      reserved by the scraper or its environment: `Authorization`, `Cookie`,
-      `Proxy-Authorization`, `Host`, `Content-Length`, `Transfer-Encoding`,
-      `User-Agent` (case-insensitive). Maximum 32 headers, 64-char names,
+      reserved by the scraper or its environment (case-insensitive):
+      `Authorization`, `Cookie`, `Proxy-Authorization`, `Host`, `User-Agent`,
+      `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`,
+      `Upgrade`, `TE`, `Trailer`. Maximum 32 headers, 64-char names,
       1024-char values.
     operationId: updateSiteScraperConfig
     security:

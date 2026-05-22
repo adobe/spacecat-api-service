@@ -1143,25 +1143,34 @@ function SitesController(ctx, log, env) {
   // site config would either get overwritten at scrape time or open a credential
   // surface that is out of scope for this endpoint.
   const RESERVED_HEADER_NAMES = new Set([
+    // Credential / identity surface owned by the scraper or its environment.
     'authorization',
     'cookie',
     'proxy-authorization',
     'host',
+    'user-agent',
+    // Connection-management / hop-by-hop headers (RFC 7230 sec 6.1). These are
+    // managed by the HTTP client; persisting them as per-site overrides will
+    // either be stripped or break request framing.
     'content-length',
     'transfer-encoding',
-    'user-agent',
+    'connection',
+    'keep-alive',
+    'upgrade',
+    'te',
+    'trailer',
   ]);
 
-  const validateScraperHeaders = (customHeaders) => {
-    if (customHeaders === undefined) {
+  const validateScraperHeaders = (headers) => {
+    if (headers === undefined) {
       return null;
     }
-    if (!isObject(customHeaders)) {
-      return 'customHeaders must be an object';
+    if (!isObject(headers)) {
+      return 'headers must be an object';
     }
-    const entries = Object.entries(customHeaders);
+    const entries = Object.entries(headers);
     if (entries.length > 32) {
-      return 'customHeaders has more than 32 entries';
+      return 'headers has more than 32 entries';
     }
     for (const [key, value] of entries) {
       if (typeof key !== 'string' || !HEADER_NAME_PATTERN.test(key) || key.length > 64) {
@@ -1196,7 +1205,7 @@ function SitesController(ctx, log, env) {
       return badRequest('Scraper config required');
     }
 
-    const headerError = validateScraperHeaders(scraperConfig.customHeaders);
+    const headerError = validateScraperHeaders(scraperConfig.headers);
     if (headerError) {
       return badRequest(headerError);
     }
@@ -1228,7 +1237,7 @@ function SitesController(ctx, log, env) {
       }
       log.error(
         `Error updating scraper config for site ${siteId} (headers=${
-          Object.keys(scraperConfig.customHeaders || {}).join(',')
+          Object.keys(scraperConfig.headers || {}).join(',')
         }): ${error.message}`,
         error,
       );
@@ -1237,7 +1246,7 @@ function SitesController(ctx, log, env) {
 
     log.info(
       `Scraper config updated for site ${siteId} (headers=${
-        Object.keys(scraperConfig.customHeaders || {}).join(',')
+        Object.keys(scraperConfig.headers || {}).join(',')
       })`,
     );
     // Narrow response: do not echo unrelated site config (which may contain
