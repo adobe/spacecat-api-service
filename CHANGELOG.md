@@ -1,3 +1,10 @@
+# [1.509.0](https://github.com/adobe/spacecat-api-service/compare/v1.508.1...v1.509.0) (2026-05-22)
+
+
+### Features
+
+* per-product default site resolution via org.config.defaults (SITES-43695) ([#2434](https://github.com/adobe/spacecat-api-service/issues/2434)) ([7be79d4](https://github.com/adobe/spacecat-api-service/commit/7be79d4e0ed1017fcaedba969230aa7e312fa46d))
+
 ## [1.508.1](https://github.com/adobe/spacecat-api-service/compare/v1.508.0...v1.508.1) (2026-05-21)
 
 
