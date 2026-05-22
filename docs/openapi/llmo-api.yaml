@@ -19,6 +19,9 @@ llmo-sheet-data:
     responses:
       '200':
         description: LLMO sheet data retrieved successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -31,6 +34,10 @@ llmo-sheet-data:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
   post:
@@ -52,6 +59,9 @@ llmo-sheet-data:
     responses:
       '200':
         description: LLMO sheet data queried and processed successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -64,6 +74,10 @@ llmo-sheet-data:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -96,6 +110,9 @@ llmo-sheet-data-with-type:
     responses:
       '200':
         description: LLMO sheet data retrieved successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -108,6 +125,10 @@ llmo-sheet-data-with-type:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
   post:
@@ -130,6 +151,9 @@ llmo-sheet-data-with-type:
     responses:
       '200':
         description: LLMO sheet data queried and processed successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -142,6 +166,10 @@ llmo-sheet-data-with-type:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -183,6 +211,9 @@ llmo-sheet-data-with-type-and-week:
     responses:
       '200':
         description: LLMO sheet data retrieved successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -195,6 +226,10 @@ llmo-sheet-data-with-type-and-week:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
   post:
@@ -218,6 +253,9 @@ llmo-sheet-data-with-type-and-week:
     responses:
       '200':
         description: LLMO sheet data queried and processed successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -230,6 +268,10 @@ llmo-sheet-data-with-type-and-week:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -309,6 +351,9 @@ llmo-data:
     responses:
       '200':
         description: LLMO data queried and processed successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -332,8 +377,8 @@ llmo-data:
                         description: The file path that was fetched
                       status:
                         type: string
-                        enum: [success, error]
-                        description: The status of the fetch operation
+                        enum: [success, error, no_data]
+                        description: The status of the fetch operation. `no_data` indicates the file's upstream data is not provisioned.
                       data:
                         type: object
                         description: The processed data (only present if status is success)
@@ -346,6 +391,10 @@ llmo-data:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -412,6 +461,9 @@ llmo-data-with-datasource:
     responses:
       '200':
         description: LLMO data queried successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -429,6 +481,10 @@ llmo-data-with-datasource:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -502,6 +558,9 @@ llmo-data-with-type:
     responses:
       '200':
         description: LLMO data queried successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -517,6 +576,10 @@ llmo-data-with-type:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -598,6 +661,9 @@ llmo-data-with-type-and-week:
     responses:
       '200':
         description: LLMO data queried successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -613,6 +679,10 @@ llmo-data-with-type-and-week:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -638,6 +708,9 @@ llmo-global-sheet-data:
     responses:
       '200':
         description: LLMO global sheet data retrieved successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -650,6 +723,10 @@ llmo-global-sheet-data:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 

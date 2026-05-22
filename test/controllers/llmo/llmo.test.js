@@ -17,6 +17,11 @@ import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
 import { CDN_TYPES as LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
+import {
+  EMPTY_SHEET_PAYLOAD,
+  NOT_PROVISIONED_HEADER,
+  NOT_PROVISIONED_VALUE,
+} from '../../../src/controllers/llmo/llmo-source.js';
 import { UnauthorizedProductError } from '../../../src/support/errors.js';
 
 use(sinonChai);
@@ -41,10 +46,10 @@ const HLX_PG_MIGRATION_SITE_ID_STAGE = 'c2473d89-e997-458d-a86d-b4096649c12b';
 const HLX_SHEET_TYPE_BRAND_PRESENCE = 'brand-presence';
 const HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE = 'Access to HLX sheet data has been blocked for this site due to PG migration';
 
-const createMockResponse = (data, ok = true, status = 200) => ({
+const createMockResponse = (data, ok = true, status = 200, statusText = null) => ({
   ok,
   status,
-  statusText: ok ? 'OK' : 'Not Found',
+  statusText: statusText || (ok ? 'OK' : 'Not Found'),
   json: sinon.stub().resolves(data),
   headers: { entries: sinon.stub().returns([]) },
 });
@@ -350,6 +355,11 @@ describe('LlmoController', () => {
         OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE: 'optimize-at-edge-enabled-marking',
         EDGE_OPTIMIZE_MARKING_DELAY_SECONDS: 300,
         LOG_SOURCES,
+      },
+    }, {
+      '@adobe/spacecat-shared-utils': {
+        SPACECAT_USER_AGENT: TEST_USER_AGENT,
+        tracingFetch: (...args) => tracingFetchStub(...args),
       },
     });
 
@@ -719,13 +729,13 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
-      expect(tracingFetchStub).to.have.been.calledWith(testUrl, {
+      expect(tracingFetchStub).to.have.been.calledWith(testUrl, sinon.match({
         headers: {
           Authorization: `token ${TEST_API_KEY}`,
           'User-Agent': TEST_USER_AGENT,
           'Accept-Encoding': 'br',
         },
-      });
+      }));
     });
 
     ['limit', 'offset', 'sheet'].forEach((param) => {
@@ -779,31 +789,45 @@ describe('LlmoController', () => {
       });
     });
 
-    it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined', async () => {
-      const mockResponse = createMockResponse({ data: 'test-data' });
-      tracingFetchStub.resolves(mockResponse);
+    it('returns 500 and does not call the source when LLMO_HLX_API_KEY is undefined', async () => {
       mockContext.env.LLMO_HLX_API_KEY = undefined;
-
-      await controller.getLlmoSheetData(mockContext);
-
-      expect(tracingFetchStub).to.have.been.calledWith(testUrl, {
-        headers: {
-          Authorization: 'token hlx_api_key_missing',
-          'User-Agent': TEST_USER_AGENT,
-          'Accept-Encoding': 'br',
-        },
-      });
+      const result = await controller.getLlmoSheetData(mockContext);
+      expect(result.status).to.equal(500);
+      expect(tracingFetchStub).to.not.have.been.called;
     });
 
-    it('should handle external API errors', async () => {
-      const mockResponse = createMockResponse(null, false, 404);
-      tracingFetchStub.resolves(mockResponse);
-
+    it('returns empty 200 + not-provisioned header on upstream 404', async () => {
+      tracingFetchStub.resolves(createMockResponse(null, false, 404));
       const result = await controller.getLlmoSheetData(mockContext);
+      expect(result.status).to.equal(200);
+      expect(result.headers.get(NOT_PROVISIONED_HEADER)).to.equal(NOT_PROVISIONED_VALUE);
+      const body = await result.json();
+      expect(body).to.deep.equal(EMPTY_SHEET_PAYLOAD);
+      expect(mockLog.error).to.not.have.been.called;
+    });
 
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('External API returned 404');
+    it('maps upstream 5xx to 502', async () => {
+      tracingFetchStub.resolves(createMockResponse(null, false, 503, 'Service Unavailable'));
+      const result = await controller.getLlmoSheetData(mockContext);
+      expect(result.status).to.equal(502);
+      expect(result.headers.get('x-error')).to.exist;
+      expect(mockLog.error).to.have.been.called;
+    });
+
+    it('maps timeout/abort to 504', async () => {
+      const abort = new Error('aborted');
+      abort.name = 'AbortError';
+      tracingFetchStub.rejects(abort);
+      const result = await controller.getLlmoSheetData(mockContext);
+      expect(result.status).to.equal(504);
+      expect(result.headers.get('x-error')).to.exist;
+      expect(mockLog.error).to.have.been.called;
+    });
+
+    it('passes through a non-404 4xx (e.g. 401)', async () => {
+      tracingFetchStub.resolves(createMockResponse(null, false, 401, 'Unauthorized'));
+      const result = await controller.getLlmoSheetData(mockContext);
+      expect(result.status).to.equal(401);
     });
 
     it('should handle network errors', async () => {
@@ -1041,26 +1065,55 @@ describe('LlmoController', () => {
       });
     });
 
-    it('should handle external API errors', async () => {
-      const mockResponse = createMockResponse(null, false, 404);
-      tracingFetchStub.resolves(mockResponse);
+    it('returns 500 and does not call the source when LLMO_HLX_API_KEY is undefined', async () => {
+      mockContext.env.LLMO_HLX_API_KEY = undefined;
+      const result = await controller.getLlmoGlobalSheetData(mockContext);
+      expect(result.status).to.equal(500);
+      expect(tracingFetchStub).to.not.have.been.called;
+    });
+
+    it('returns empty 200 + not-provisioned header on upstream 404', async () => {
+      tracingFetchStub.resolves(createMockResponse(null, false, 404));
+      const result = await controller.getLlmoGlobalSheetData(mockContext);
+      expect(result.status).to.equal(200);
+      expect(result.headers.get(NOT_PROVISIONED_HEADER)).to.equal(NOT_PROVISIONED_VALUE);
+      const body = await result.json();
+      expect(body).to.deep.equal(EMPTY_SHEET_PAYLOAD);
+      expect(mockLog.error).to.not.have.been.called;
+    });
+
+    it('maps upstream 5xx to 502', async () => {
+      tracingFetchStub.resolves(createMockResponse(null, false, 503, 'Service Unavailable'));
+      const result = await controller.getLlmoGlobalSheetData(mockContext);
+      expect(result.status).to.equal(502);
+      expect(result.headers.get('x-error')).to.exist;
+      expect(mockLog.error).to.have.been.called;
+    });
+
+    it('maps timeout/abort to 504', async () => {
+      const abort = new Error('aborted');
+      abort.name = 'AbortError';
+      tracingFetchStub.rejects(abort);
+      const result = await controller.getLlmoGlobalSheetData(mockContext);
+      expect(result.status).to.equal(504);
+      expect(result.headers.get('x-error')).to.exist;
+      expect(mockLog.error).to.have.been.called;
+    });
+
+    it('passes through a non-404 4xx (e.g. 401)', async () => {
+      tracingFetchStub.resolves(createMockResponse(null, false, 401, 'Unauthorized'));
+      const result = await controller.getLlmoGlobalSheetData(mockContext);
+      expect(result.status).to.equal(401);
+    });
+
+    it('should handle network errors', async () => {
+      tracingFetchStub.rejects(new Error('Network error'));
 
       const result = await controller.getLlmoGlobalSheetData(mockContext);
 
       expect(result.status).to.equal(400);
-    });
-
-    it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined', async () => {
-      tracingFetchStub.resolves(createMockResponse({ data: 'test-data' }));
-      mockContext.env.LLMO_HLX_API_KEY = undefined;
-
-      const result = await controller.getLlmoGlobalSheetData(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(tracingFetchStub).to.have.been.calledWith(
-        sinon.match.string,
-        sinon.match({ headers: sinon.match({ Authorization: 'token hlx_api_key_missing' }) }),
-      );
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Network error');
     });
 
     it('should handle undefined response headers', async () => {
@@ -1440,18 +1493,16 @@ describe('LlmoController', () => {
       expect(responseBody.sheet2.data[0]).to.not.have.property('email');
     });
 
-    it('should log error when external API fails', async () => {
-      const mockResponse = createMockResponse(null, false, 500);
-      mockResponse.statusText = 'Internal Server Error';
+    it('maps upstream 5xx to 502', async () => {
+      const mockResponse = createMockResponse(null, false, 500, 'Internal Server Error');
       tracingFetchStub.resolves(mockResponse);
       mockContext.data = { filters: { status: 'active' } };
 
       const result = await controller.queryLlmoSheetData(mockContext);
 
-      expect(result.status).to.equal(400);
-      expect(mockLog.debug).to.have.been.calledWith(
-        sinon.match(/Failed to fetch data from external endpoint: 500/),
-      );
+      expect(result.status).to.equal(502);
+      expect(result.headers.get('x-error')).to.exist;
+      expect(mockLog.error).to.have.been.called;
     });
 
     it('should handle missing response headers in queryLlmoSheetData', async () => {
@@ -1466,18 +1517,52 @@ describe('LlmoController', () => {
       expect(await result.json()).to.deep.equal({ ':type': 'sheet', data: [{ id: 1 }] });
     });
 
-    it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined in queryLlmoSheetData', async () => {
-      tracingFetchStub.resolves(createMockResponse({ ':type': 'sheet', data: [] }));
+    it('returns 500 and does not call the source when LLMO_HLX_API_KEY is undefined', async () => {
       mockContext.env.LLMO_HLX_API_KEY = undefined;
+      mockContext.data = null;
+      const result = await controller.queryLlmoSheetData(mockContext);
+      expect(result.status).to.equal(500);
+      expect(tracingFetchStub).to.not.have.been.called;
+    });
+
+    it('returns empty 200 + not-provisioned header on upstream 404', async () => {
+      tracingFetchStub.resolves(createMockResponse(null, false, 404));
+      mockContext.data = null;
+      const result = await controller.queryLlmoSheetData(mockContext);
+      expect(result.status).to.equal(200);
+      expect(result.headers.get(NOT_PROVISIONED_HEADER)).to.equal(NOT_PROVISIONED_VALUE);
+      const body = await result.json();
+      expect(body).to.deep.equal(EMPTY_SHEET_PAYLOAD);
+      expect(mockLog.error).to.not.have.been.called;
+    });
+
+    it('maps timeout/abort to 504', async () => {
+      const abort = new Error('aborted');
+      abort.name = 'AbortError';
+      tracingFetchStub.rejects(abort);
+      mockContext.data = null;
+      const result = await controller.queryLlmoSheetData(mockContext);
+      expect(result.status).to.equal(504);
+      expect(result.headers.get('x-error')).to.exist;
+      expect(mockLog.error).to.have.been.called;
+    });
+
+    it('passes through a non-404 4xx (e.g. 401)', async () => {
+      tracingFetchStub.resolves(createMockResponse(null, false, 401, 'Unauthorized'));
+      mockContext.data = null;
+      const result = await controller.queryLlmoSheetData(mockContext);
+      expect(result.status).to.equal(401);
+    });
+
+    it('should handle network errors', async () => {
+      tracingFetchStub.rejects(new Error('Network error'));
       mockContext.data = null;
 
       const result = await controller.queryLlmoSheetData(mockContext);
 
-      expect(result.status).to.equal(200);
-      expect(tracingFetchStub).to.have.been.calledWith(
-        sinon.match.string,
-        sinon.match({ headers: sinon.match({ Authorization: 'token hlx_api_key_missing' }) }),
-      );
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Network error');
     });
 
     it('should construct URL without sheetType when not provided', async () => {
@@ -3710,6 +3795,47 @@ describe('LlmoController', () => {
       );
     });
 
+    it('maps a tagged upstream 5xx from the cached query to 502', async () => {
+      const err = new Error('External API returned 503');
+      err.upstreamStatus = 503;
+      const queryLlmoFilesStub = sinon.stub().rejects(err);
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': { queryLlmoFiles: queryLlmoFilesStub },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+      const result = await LlmoControllerWithCache(mockContext).queryFiles(mockContext);
+      expect(result.status).to.equal(502);
+      expect(result.headers.get('x-error')).to.exist;
+    });
+
+    it('maps a cached-query timeout to 504', async () => {
+      const err = new Error('Request timeout after 15000ms');
+      err.isTimeout = true;
+      const queryLlmoFilesStub = sinon.stub().rejects(err);
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': { queryLlmoFiles: queryLlmoFilesStub },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+      const result = await LlmoControllerWithCache(mockContext).queryFiles(mockContext);
+      expect(result.status).to.equal(504);
+      expect(result.headers.get('x-error')).to.exist;
+    });
+
+    it('maps a cached-query missing-key config error to 500', async () => {
+      const err = new Error('LLMO_HLX_API_KEY environment variable is not configured');
+      err.isConfigError = true;
+      const queryLlmoFilesStub = sinon.stub().rejects(err);
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': { queryLlmoFiles: queryLlmoFilesStub },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+      const result = await LlmoControllerWithCache(mockContext).queryFiles(mockContext);
+      expect(result.status).to.equal(500);
+    });
+
     describe('HLX PG migration blocking (brand-presence)', () => {
       it('should return 403 for PG migration site when sheetType is brand-presence', async () => {
         const queryLlmoFilesStub = sinon.stub().resolves({ data: {}, headers: {} });
@@ -3745,6 +3871,29 @@ describe('LlmoController', () => {
       const { controller: cacheController } = await createControllerWithCacheStub({});
       const result = await cacheController.queryFiles(mockContext);
       expect(result.status).to.equal(404);
+    });
+
+    it('returns empty 200 with not-provisioned header when single-file query reports noData', async () => {
+      const queryLlmoFilesStub = sinon.stub().resolves({ noData: true });
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+      const cacheController = LlmoControllerWithCache(mockContext);
+
+      const result = await cacheController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(result.headers.get(NOT_PROVISIONED_HEADER)).to.equal(NOT_PROVISIONED_VALUE);
+      const body = await result.json();
+      expect(body).to.deep.equal(EMPTY_SHEET_PAYLOAD);
+      expect(mockLog.info).to.have.been.calledWith(
+        'llmo_data_not_provisioned',
+        sinon.match({ event: 'llmo_data_not_provisioned' }),
+      );
     });
   });
 

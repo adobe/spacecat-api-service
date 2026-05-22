@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 24 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – 25 GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 
@@ -110,13 +110,35 @@ x-ai-vis-topic-id-optional: &topicIdOptionalParam
     pattern: '^\d+$'
     example: '12345'
 
+x-ai-vis-v1-brand-topics-sort-by: &v1BrandTopicsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `BRAND_TOPICS_ORDER_BY` for Semrush v2 `BrandTopicsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `VISIBILITY` (2).
+  schema:
+    oneOf:
+      - type: string
+        enum:
+          - UNSPECIFIED
+          - RELEVANCY
+          - VISIBILITY
+          - DIFFICULTY
+          - MENTIONS
+          - VOLUME
+          - NAME
+      - type: integer
+        enum: [0, 1, 2, 3, 4, 5, 6]
+    example: VISIBILITY
+
 x-ai-vis-v1-prompts-sort-by: &v1PromptsSortByParam
   name: sortBy
   in: query
   required: false
   description: |
-    `PROMPTS_REQUEST_ORDER_BY` field for Semrush v2 `PromptsRequest.order.by` (name or integer).
-    When omitted, the service applies its default ordering.
+    `PROMPTS_REQUEST_ORDER_BY` for Semrush v2 `PromptsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `MENTIONED_BRANDS_COUNT` (3).
   schema:
     oneOf:
       - type: string
@@ -129,12 +151,15 @@ x-ai-vis-v1-prompts-sort-by: &v1PromptsSortByParam
           - TOPIC_VOLUME
       - type: integer
         enum: [0, 1, 2, 3, 4, 5]
+    example: MENTIONED_BRANDS_COUNT
 
 x-ai-vis-sort-direction: &sortDirectionParam
   name: sortDirection
   in: query
   required: false
-  description: Sort direction for `order.direction` (default descending).
+  description: |
+    `ORDER_DIRECTION` for Semrush `order.direction` (protobuf name or integer).
+    Default when omitted: `DESC` (2).
   schema:
     oneOf:
       - type: string
@@ -142,6 +167,24 @@ x-ai-vis-sort-direction: &sortDirectionParam
       - type: integer
         enum: [0, 1, 2]
     example: DESC
+
+x-ai-vis-prompt-hash: &promptHashParam
+  name: promptHash
+  in: query
+  required: true
+  description: Hash of the prompt (`PromptRequest.prompt_hash` / `uint64`, passed as decimal string).
+  schema:
+    type: string
+    pattern: '^\d+$'
+    example: '18446744073709551615'
+
+x-ai-vis-serp-id: &serpIdParam
+  name: serpId
+  in: query
+  required: false
+  description: SERP identifier for a specific LLM response (`PromptRequest.serp_id`).
+  schema:
+    type: string
 
 x-ai-vis-competitors: &competitorsParam
   name: competitors
@@ -828,9 +871,10 @@ ai-visibility-v1-topic-brand-topics:
     description: |
       Returns brand-associated topics using Semrush `TopicService` v2 `BrandTopics` and
       `BrandTopicsTotals`. Unlike `/llmo/ai-visibility/brands/topics`, this route fixes prompt
-      categories to **mentions target** and **cites target**, orders by **topic volume**,
-      and returns each topic as **native protobuf JSON** (camelCase), including fields such as `visibility`,
-      `difficulty`, `volumeTrend`, and `intents`. The response body is `{ data, total }` plus `srFilters`;
+      categories to `MENTIONS_TARGET` and `CITES_TARGET`, returns each topic as **native protobuf JSON**
+      (camelCase), and supports `sortBy` / `sortDirection` on `BRAND_TOPICS_ORDER_BY` (default
+      `VISIBILITY` descending). Row fields include `visibility`, `difficulty`, `volumeTrend`, and
+      `intents` (`TOPIC_INTENT` distribution). The response body is `{ data, total }` plus `srFilters`;
       `offset` and `limit` are not echoed (use the query parameters).
     operationId: getAiVisibilityV1TopicBrandTopics
     parameters:
@@ -838,6 +882,8 @@ ai-visibility-v1-topic-brand-topics:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *v1BrandTopicsSortByParam
+      - *sortDirectionParam
       - *limitParam
       - *offsetParam
     responses:
@@ -858,9 +904,11 @@ ai-visibility-v1-prompt-brand-prompts:
     description: |
       Returns prompts for the target domain using Semrush `PromptService` v2 `Prompts` and
       `PromptsTotals`. Unlike `/llmo/ai-visibility/brands/prompts`, this route fixes prompt
-      categories to **mentions target** and **cites target**, returns each row as **native protobuf JSON**
-      (camelCase), and responds with `{ data, total }` plus `srFilters`; `offset` and `limit` are not echoed
-      (use the query parameters). Optional `topicId` applies a `topic_hash` dimension filter.
+      categories to `MENTIONS_TARGET` and `CITES_TARGET`, returns each row as **native protobuf JSON**
+      (camelCase) with `PROMPT_CATEGORY` in `categories`, and supports `sortBy` / `sortDirection` on
+      `PROMPTS_REQUEST_ORDER_BY` (default `MENTIONED_BRANDS_COUNT` descending). Responds with
+      `{ data, total }` plus `srFilters`; `offset` and `limit` are not echoed (use the query parameters).
+      Optional `topicId` applies a `topic_hash = <topicId>` dimension filter.
     operationId: getAiVisibilityV1PromptBrandPrompts
     parameters:
       - *domainParam
@@ -879,6 +927,34 @@ ai-visibility-v1-prompt-brand-prompts:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1PromptBrandPromptsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-prompt-response:
+  get:
+    tags: [ai-visibility]
+    summary: Get full prompt response (Relations v1 JSON)
+    description: |
+      Returns the full LLM response for a single prompt via Semrush `Relations/Prompt`
+      (`PromptResponse` protobuf JSON, camelCase). Requires `promptHash`; optional `serpId` and
+      `topicId` narrow the lookup. Response includes `value` (prompt text, Markdown `response`,
+      `mentionedBrands`, `sources`, `isoDate`) and `sourcesWithTitles`.
+    operationId: getAiVisibilityV1PromptPromptResponse
+    parameters:
+      - *promptHashParam
+      - *serpIdParam
+      - *topicIdOptionalParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+    responses:
+      '200':
+        description: Prompt response retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptPromptResponse'
       <<: *errorResponses
     security:
       - api_key: []

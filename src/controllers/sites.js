@@ -51,6 +51,74 @@ import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
+ * Builds the standard resolve-site success payload.
+ */
+async function buildResolveData(org, site, context) {
+  const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
+  return {
+    organization: OrganizationDto.toJSON(org),
+    site: SiteDto.toJSON(site),
+    isSummitPlgEnabled,
+  };
+}
+
+/**
+ * Resolves the org's per-product default site from config.defaults, validating it belongs
+ * to the org and is enrolled. Returns the resolved data object or null to fall through
+ * to getFirstEnrollment().
+ * @param {object} org - Organization model instance.
+ * @param {string} productCode - Product code from x-product header.
+ * @param {object} context - Request context.
+ * @param {object} ctx - Controller context (provides dataAccess.Site and log).
+ * @param {object} accessControlUtil - Access control utility for admin access checks.
+ * @returns {Promise<object|null>} Resolved data or null.
+ */
+// eslint-disable-next-line max-params
+export async function resolveOrgDefaultSite(org, productCode, context, ctx, accessControlUtil) {
+  const { dataAccess: { Site }, log } = ctx;
+  try {
+    const defaultSiteId = org.getConfig()?.getDefaults()?.[productCode]?.siteId;
+    if (!hasText(defaultSiteId) || !isValidUUID(defaultSiteId)) {
+      return null;
+    }
+
+    const defaultSite = await Site.findById(defaultSiteId);
+    if (!defaultSite) {
+      log.warn(
+        `[resolveSite] stale config.defaults entry: site ${defaultSiteId} not found for org ${org.getId()} product ${productCode}`,
+      );
+      return null;
+    }
+    if (defaultSite.getOrganizationId() !== org.getId()) {
+      log.warn(
+        `[resolveSite] config.defaults cross-org mismatch: site ${defaultSiteId} belongs to org ${defaultSite.getOrganizationId()}, not ${org.getId()} — falling back`,
+      );
+      return null;
+    }
+
+    const siteTierClient = await TierClient.createForSite(context, defaultSite, productCode);
+    const { entitlement, enrollments } = await siteTierClient.getAllEnrollment();
+
+    if (!entitlement || !enrollments?.length) {
+      return null;
+    }
+
+    const isVisibleTier = CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+    if (!isVisibleTier && !accessControlUtil.hasAdminAccess()) {
+      return null;
+    }
+
+    return buildResolveData(org, defaultSite, context);
+  } catch (e) {
+    log.warn(
+      `[resolveSite] resolveOrgDefaultSite failed for org ${org.getId()} product ${productCode} — falling back`,
+      e,
+    );
+    return null;
+  }
+}
+
+/**
  * Sites controller. Provides methods to create, read, update and delete sites.
  * @param {object} ctx - Context of the request.
  * @returns {object} Sites controller.
@@ -1233,6 +1301,12 @@ function SitesController(ctx, log, env) {
     //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
     //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
     const resolveByOrg = async (org, failureDetails) => {
+      const args = [org, productCode, context, ctx, accessControlUtil];
+      const defaultData = await resolveOrgDefaultSite(...args);
+      if (defaultData) {
+        return ok({ data: defaultData });
+      }
+
       const tierClient = TierClient.createForOrg(context, org, productCode);
       const { entitlement, site: enrolledSite } = await tierClient.getFirstEnrollment();
 
@@ -1252,14 +1326,7 @@ function SitesController(ctx, log, env) {
 
       if (enrolledSite && (accessControlUtil.hasAdminAccess()
         || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
-        const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-        return ok({
-          data: {
-            organization: OrganizationDto.toJSON(org),
-            site: SiteDto.toJSON(enrolledSite),
-            isSummitPlgEnabled,
-          },
-        });
+        return ok({ data: await buildResolveData(org, enrolledSite, context) });
       }
 
       return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
@@ -1312,14 +1379,7 @@ function SitesController(ctx, log, env) {
                 return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
               }
 
-              const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
-              return ok({
-                data: {
-                  organization: OrganizationDto.toJSON(organization),
-                  site: SiteDto.toJSON(site),
-                  isSummitPlgEnabled,
-                },
-              });
+              return ok({ data: await buildResolveData(organization, site, context) });
             }
           }
         }
