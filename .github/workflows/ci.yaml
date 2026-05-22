@@ -21,3 +21,41 @@ jobs:
       it-postgres: true
       vpc-enabled: true
     secrets: inherit
+
+  bundle-build:
+    # Runs `npm run build` (= `hedy -v --test-bundle`), which bundles the Lambda
+    # artifact, creates the deploy zip, AND invokes the bundled `lambda()`
+    # against a synthetic healthcheck event. Exits non-zero on any non-2xx
+    # response — including the "TypeError: main2 is not a function" /
+    # "ENOENT … data/locations.json" class of bundling failures that take down
+    # cold starts in production but never surface in source-based unit tests.
+    #
+    # Mysticat-ci's reusable build job runs lint + test + coverage only, never
+    # `npm run build`, so this gap is what allowed SITES-45260 to escape to
+    # prod. Until the equivalent step is added to mysticat-ci, this repo-local
+    # job is the gate.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node & NPM
+        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
+        env:
+          MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
+
+      - name: Build production bundle (catches module-load failures)
+        env:
+          # hedy substitutes these into hlx.* fields at build time. They are
+          # deploy-time concerns only — dummy values keep the build hermetic
+          # and unblock the check on PRs that don't have access to
+          # environment-scoped secrets.
+          VPC_SUBNET_1: subnet-00000000000000000
+          VPC_SUBNET_2: subnet-00000000000000000
+          VPC_SG_ID: sg-00000000000000000
+          AWS_ACCOUNT_ID: '000000000000'
+        run: npm run build
