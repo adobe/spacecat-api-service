@@ -1,3 +1,100 @@
+# [1.510.0](https://github.com/adobe/spacecat-api-service/compare/v1.509.1...v1.510.0) (2026-05-22)
+
+
+### Bug Fixes
+
+* **fixes:** load suggestions in getAllForOpportunity without fixCreatedDate (SITES-45274) ([#2468](https://github.com/adobe/spacecat-api-service/issues/2468)) ([5c3fe08](https://github.com/adobe/spacecat-api-service/commit/5c3fe08321266b37814a5dea9004ec45cc5a6922))
+* **sites:** deep-merge config.llmo on PATCH to preserve siblings ([#2470](https://github.com/adobe/spacecat-api-service/issues/2470)) ([bca4b83](https://github.com/adobe/spacecat-api-service/commit/bca4b835c0c7da0cc8b799d781e258cda3e62e63))
+
+
+### Features
+
+* **scrape:** server-side per-site auth resolution on /tools/scrape/jobs (SITES-40597) ([#2455](https://github.com/adobe/spacecat-api-service/issues/2455)) ([153d135](https://github.com/adobe/spacecat-api-service/commit/153d135eac4b41351022756a7621d4f0a4dc241d)), closes [#1797](https://github.com/adobe/spacecat-api-service/issues/1797) [#2255](https://github.com/adobe/spacecat-api-service/issues/2255)
+
+## [1.509.1](https://github.com/adobe/spacecat-api-service/compare/v1.509.0...v1.509.1) (2026-05-22)
+
+
+### Bug Fixes
+
+* SITES-43989 inline error-rate remediation (LLMO not-provisioned + webhook log noise) ([#2464](https://github.com/adobe/spacecat-api-service/issues/2464)) ([25e8529](https://github.com/adobe/spacecat-api-service/commit/25e8529fd30e599f081e3ddc9911e314abfd0773)), closes [#1777](https://github.com/adobe/spacecat-api-service/issues/1777) [#2452](https://github.com/adobe/spacecat-api-service/issues/2452)
+
+# [1.509.0](https://github.com/adobe/spacecat-api-service/compare/v1.508.1...v1.509.0) (2026-05-22)
+
+
+### Features
+
+* per-product default site resolution via org.config.defaults (SITES-43695) ([#2434](https://github.com/adobe/spacecat-api-service/issues/2434)) ([7be79d4](https://github.com/adobe/spacecat-api-service/commit/7be79d4e0ed1017fcaedba969230aa7e312fa46d))
+
+## [1.508.1](https://github.com/adobe/spacecat-api-service/compare/v1.508.0...v1.508.1) (2026-05-21)
+
+
+### Reverts
+
+* Revert "feat(semrush): IMS-bearer-only AIO proxy + onboarding + DB-backed projects ([#2456](https://github.com/adobe/spacecat-api-service/issues/2456))" ([873eddb](https://github.com/adobe/spacecat-api-service/commit/873eddb9c8eb613984537cdf648b2c4c97b8c761))
+
+# [1.508.0](https://github.com/adobe/spacecat-api-service/compare/v1.507.0...v1.508.0) (2026-05-21)
+
+
+### Features
+
+* **semrush:** IMS-bearer-only AIO proxy + onboarding + DB-backed projects ([#2456](https://github.com/adobe/spacecat-api-service/issues/2456)) ([882dbab](https://github.com/adobe/spacecat-api-service/commit/882dbab5d2776a3096a322d3a397a0331f19d30b))
+
+# [1.507.0](https://github.com/adobe/spacecat-api-service/compare/v1.506.0...v1.507.0) (2026-05-21)
+
+
+### Features
+
+* added Pending review decision ([#2436](https://github.com/adobe/spacecat-api-service/issues/2436)) ([fab83c4](https://github.com/adobe/spacecat-api-service/commit/fab83c4256e92fafc81cad704318b7e3b4b03b95))
+
+# [1.506.0](https://github.com/adobe/spacecat-api-service/compare/v1.505.1...v1.506.0) (2026-05-21)
+
+
+### Features
+
+* GitHub review Slack observability (web tier) ([#2457](https://github.com/adobe/spacecat-api-service/issues/2457)) ([7f0841b](https://github.com/adobe/spacecat-api-service/commit/7f0841be552ad5289e1ffe2c03c9dc779aea26c8)), closes [adobe/spacecat-infrastructure#536](https://github.com/adobe/spacecat-infrastructure/issues/536) [#80](https://github.com/adobe/spacecat-api-service/issues/80)
+
+## [1.505.1](https://github.com/adobe/spacecat-api-service/compare/v1.505.0...v1.505.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* updated the customer email ([#2439](https://github.com/adobe/spacecat-api-service/issues/2439)) ([ac44fa5](https://github.com/adobe/spacecat-api-service/commit/ac44fa5b9334754ca93e68e01e920b553c2a976c))
+
+# [1.505.0](https://github.com/adobe/spacecat-api-service/compare/v1.504.1...v1.505.0) (2026-05-21)
+
+
+### Features
+
+* **slack:** add 'run cdn reports bulk publish' command ([#2458](https://github.com/adobe/spacecat-api-service/issues/2458)) ([776a2a5](https://github.com/adobe/spacecat-api-service/commit/776a2a5f47ce3a7da274dc2fea99316ff380fc64))
+
+## [1.504.1](https://github.com/adobe/spacecat-api-service/compare/v1.504.0...v1.504.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **routes:** validate :jobId as UUID before reaching controllers ([#2450](https://github.com/adobe/spacecat-api-service/issues/2450)) ([80e7bd4](https://github.com/adobe/spacecat-api-service/commit/80e7bd4602ac5cf47b9d627cd6ddd7c806c9ebdb))
+
+# [1.504.0](https://github.com/adobe/spacecat-api-service/compare/v1.503.2...v1.504.0) (2026-05-20)
+
+
+### Features
+
+* canonical - remove from llmo onboarding set ([#2454](https://github.com/adobe/spacecat-api-service/issues/2454)) ([9bcc845](https://github.com/adobe/spacecat-api-service/commit/9bcc845239a8777799b6d51669366141d3e11763))
+
+## [1.503.2](https://github.com/adobe/spacecat-api-service/compare/v1.503.1...v1.503.2) (2026-05-20)
+
+
+### Bug Fixes
+
+* resolveTopicUuid and resolveCategoryUuid accept UUID input directly ([#2449](https://github.com/adobe/spacecat-api-service/issues/2449)) ([b951ed4](https://github.com/adobe/spacecat-api-service/commit/b951ed4dcac2210fb1ca5f851649451bc3ed40ed))
+
+## [1.503.1](https://github.com/adobe/spacecat-api-service/compare/v1.503.0...v1.503.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* **slack:** use projection_audit for agentic traffic DB status check ([#2448](https://github.com/adobe/spacecat-api-service/issues/2448)) ([38ee1e2](https://github.com/adobe/spacecat-api-service/commit/38ee1e29c2516cb0b458e2e304af72d3968e156d))
+
 # [1.503.0](https://github.com/adobe/spacecat-api-service/compare/v1.502.1...v1.503.0) (2026-05-20)
 
 
