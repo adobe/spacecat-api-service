@@ -1,3 +1,10 @@
+# [1.511.0](https://github.com/adobe/spacecat-api-service/compare/v1.510.1...v1.511.0) (2026-05-22)
+
+
+### Features
+
+* **llmo:** align agentic-traffic export with s3-export-framework ADR ([#2441](https://github.com/adobe/spacecat-api-service/issues/2441)) ([68cf995](https://github.com/adobe/spacecat-api-service/commit/68cf995320e99309a0687e684bf7f6982b330124))
+
 ## [1.510.1](https://github.com/adobe/spacecat-api-service/compare/v1.510.0...v1.510.1) (2026-05-22)
 
 
