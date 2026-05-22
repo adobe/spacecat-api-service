@@ -12,6 +12,7 @@
 
 import { SPACECAT_USER_AGENT, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import { createResponse, internalServerError } from '@adobe/spacecat-shared-http-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 const TIMEOUT_MS = 15000;
 
@@ -99,16 +100,20 @@ export const fetchLlmoSource = async (context, url) => {
  */
 export const llmoSourceErrorResponse = (error) => {
   if (error.isConfigError) {
-    return internalServerError(error.message);
+    // internalServerError() sets the standard x-error header itself.
+    return internalServerError(cleanupHeaderValue(error.message));
   }
   if (error.isTimeout) {
-    return createResponse({ message: error.message }, 504);
+    const message = cleanupHeaderValue(error.message);
+    return createResponse({ message }, 504, { 'x-error': message });
   }
   if (typeof error.upstreamStatus === 'number') {
-    if (error.upstreamStatus >= 500) {
-      return createResponse({ message: error.message }, 502);
-    }
-    return createResponse({ message: error.message }, error.upstreamStatus);
+    // upstream 5xx -> 502; non-404 4xx -> passthrough. createResponse (unlike
+    // badRequest/internalServerError) does not set the x-error header, so set it
+    // explicitly to keep the error contract (and responses.yaml) consistent.
+    const message = cleanupHeaderValue(error.message);
+    const status = error.upstreamStatus >= 500 ? 502 : error.upstreamStatus;
+    return createResponse({ message }, status, { 'x-error': message });
   }
   return null;
 };

@@ -148,25 +148,33 @@ describe('llmo-source', () => {
   });
 
   describe('llmoSourceErrorResponse', () => {
-    it('maps isTimeout -> 504', () => {
+    it('maps isTimeout -> 504 with x-error header', () => {
       const e = new Error('Request timeout after 15000ms');
       e.isTimeout = true;
-      expect(llmoSourceErrorResponse(e).status).to.equal(504);
+      const res = llmoSourceErrorResponse(e);
+      expect(res.status).to.equal(504);
+      expect(res.headers.get('x-error')).to.equal('Request timeout after 15000ms');
     });
-    it('maps 5xx -> 502', () => {
+    it('maps 5xx -> 502 with x-error header', () => {
       const e = new Error('External API returned 503');
       e.upstreamStatus = 503;
-      expect(llmoSourceErrorResponse(e).status).to.equal(502);
+      const res = llmoSourceErrorResponse(e);
+      expect(res.status).to.equal(502);
+      expect(res.headers.get('x-error')).to.equal('External API returned 503');
     });
-    it('passes through non-404 4xx', () => {
+    it('passes through non-404 4xx with x-error header', () => {
       const e = new Error('External API returned 401');
       e.upstreamStatus = 401;
-      expect(llmoSourceErrorResponse(e).status).to.equal(401);
+      const res = llmoSourceErrorResponse(e);
+      expect(res.status).to.equal(401);
+      expect(res.headers.get('x-error')).to.equal('External API returned 401');
     });
-    it('maps isConfigError -> 500', () => {
+    it('maps isConfigError -> 500 with x-error header', () => {
       const e = new Error('LLMO_HLX_API_KEY environment variable is not configured');
       e.isConfigError = true;
-      expect(llmoSourceErrorResponse(e).status).to.equal(500);
+      const res = llmoSourceErrorResponse(e);
+      expect(res.status).to.equal(500);
+      expect(res.headers.get('x-error')).to.equal('LLMO_HLX_API_KEY environment variable is not configured');
     });
     it('returns null for untagged errors (caller keeps its 400 fallback)', () => {
       expect(llmoSourceErrorResponse(new Error('Network error'))).to.equal(null);
