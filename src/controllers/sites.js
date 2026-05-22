@@ -1135,16 +1135,70 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  // RFC 7230 token characters for HTTP header names.
+  const HEADER_NAME_PATTERN = /^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/;
+  // Printable ASCII + tab; rejects CR, LF, NUL to block header injection.
+  const HEADER_VALUE_PATTERN = /^[\t\x20-\x7E]*$/;
+  // Header names that the scraper or its environment owns. Persisting these via
+  // site config would either get overwritten at scrape time or open a credential
+  // surface that is out of scope for this endpoint.
+  const RESERVED_HEADER_NAMES = new Set([
+    'authorization',
+    'cookie',
+    'proxy-authorization',
+    'host',
+    'content-length',
+    'transfer-encoding',
+    'user-agent',
+  ]);
+
+  const validateScraperHeaders = (customHeaders) => {
+    if (customHeaders === undefined) {
+      return null;
+    }
+    if (!isObject(customHeaders)) {
+      return 'customHeaders must be an object';
+    }
+    const entries = Object.entries(customHeaders);
+    if (entries.length > 32) {
+      return 'customHeaders has more than 32 entries';
+    }
+    for (const [key, value] of entries) {
+      if (typeof key !== 'string' || !HEADER_NAME_PATTERN.test(key) || key.length > 64) {
+        return `Invalid header name: ${key}`;
+      }
+      if (RESERVED_HEADER_NAMES.has(key.toLowerCase())) {
+        return `Header name is reserved and not allowed via this endpoint: ${key}`;
+      }
+      if (typeof value !== 'string' || !HEADER_VALUE_PATTERN.test(value) || value.length > 1024) {
+        return `Invalid header value for ${key}`;
+      }
+    }
+    return null;
+  };
+
+  /**
+   * PATCH /sites/:siteId/config/scraper
+   *
+   * Replaces the entire `scraperConfig` on the site. Passing
+   * `scraperConfig: {}` clears any previously stored configuration.
+   * To preserve unrelated fields, callers must merge client-side.
+   */
   const updateScraperConfig = async (context) => {
     const siteId = context.params?.siteId;
     const { scraperConfig } = context.data || {};
 
     if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
+      return badRequest('Invalid site ID');
     }
 
     if (!isObject(scraperConfig)) {
       return badRequest('Scraper config required');
+    }
+
+    const headerError = validateScraperHeaders(scraperConfig.customHeaders);
+    if (headerError) {
+      return badRequest(headerError);
     }
 
     const site = await Site.findById(siteId);
@@ -1156,6 +1210,7 @@ function SitesController(ctx, log, env) {
       return forbidden('Only users belonging to the organization can update its sites');
     }
 
+    let updatedSite;
     try {
       const siteConfig = site.getConfig();
       siteConfig.updateScraperConfig(scraperConfig);
@@ -1163,12 +1218,32 @@ function SitesController(ctx, log, env) {
       const configObj = Config.toDynamoItem(siteConfig);
       site.setConfig(configObj);
 
-      const updatedSite = await site.save();
-      return ok(SiteDto.toJSON(updatedSite));
+      updatedSite = await site.save();
     } catch (error) {
-      log.error(`Error updating scraper config for site ${siteId}: ${error.message}`);
-      return badRequest('Failed to update scraper config');
+      // Joi/shared rejection -> 400 (client can fix payload).
+      // Anything else -> propagate so the framework returns 5xx (transient/infra).
+      if (error?.message?.startsWith('Configuration validation error')) {
+        log.warn(`Scraper config validation failed for site ${siteId}: ${error.message}`);
+        return badRequest(error.message);
+      }
+      log.error(
+        `Error updating scraper config for site ${siteId} (headers=${
+          Object.keys(scraperConfig.customHeaders || {}).join(',')
+        }): ${error.message}`,
+        error,
+      );
+      throw error;
     }
+
+    log.info(
+      `Scraper config updated for site ${siteId} (headers=${
+        Object.keys(scraperConfig.customHeaders || {}).join(',')
+      })`,
+    );
+    // Narrow response: do not echo unrelated site config (which may contain
+    // secrets like tokowakaConfig.apiKey) back to a caller that only wrote
+    // scraperConfig.
+    return ok({ siteId: updatedSite.getId(), scraperConfig });
   };
 
   const CITABILITY_GROUP_BY_FIELDS = new Set(['updatedBy', 'url', 'updatedAt']);

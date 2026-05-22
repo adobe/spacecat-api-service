@@ -869,6 +869,25 @@ ScraperConfigUpdate:
       customHeaders:
         Accept-Language: 'en-US,en;q=0.9'
       injectDefaults: true
+ScraperConfigResponse:
+  type: object
+  description: |
+    Response body returned by `PATCH /sites/{siteId}/config/scraper`.
+    Intentionally narrow: returns only the affected site ID and the persisted
+    scraper configuration, not the rest of the site's configuration.
+  properties:
+    siteId:
+      description: The site ID
+      $ref: '#/Id'
+    scraperConfig:
+      description: The persisted scraper configuration
+      $ref: '#/ScraperConfig'
+  example:
+    siteId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    scraperConfig:
+      customHeaders:
+        Accept-Language: 'en-US,en;q=0.9'
+      injectDefaults: true
 UpdateHandlerTypeConfig:
   type: object
   properties:
