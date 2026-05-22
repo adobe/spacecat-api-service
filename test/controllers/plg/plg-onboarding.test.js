@@ -412,6 +412,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               CLOSED: 'CLOSED',
               REOPENED: 'REOPENED',
               OFFBOARDED: 'OFFBOARDED',
+              PENDING: 'PENDING',
             },
           },
         },
@@ -460,7 +461,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     };
   }
 
-  function buildContext(data = {}, { authInfo } = {}) {
+  function buildContext(data = {}, { authInfo, headers } = {}) {
     return {
       data,
       dataAccess: mockDataAccess,
@@ -470,6 +471,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       attributes: {
         authInfo: authInfo !== undefined ? authInfo : mockAuthInfo(),
       },
+      pathInfo: { headers: headers || {} },
     };
   }
 
@@ -636,6 +638,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 CLOSED: 'CLOSED',
                 REOPENED: 'REOPENED',
                 OFFBOARDED: 'OFFBOARDED',
+                PENDING: 'PENDING',
               },
             },
           },
@@ -1494,6 +1497,94 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('user@example.com');
     });
 
+    it('sets createdBy when request comes from ASO UI on an existing record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'IN_PROGRESS', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
+    });
+
+    it('does not set createdBy when request does not come from ASO UI', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'IN_PROGRESS', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('does not set createdBy when x-client-type is a different value', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'IN_PROGRESS', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { headers: { 'x-client-type': 'some-other-client' } },
+      );
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('sets createdBy when request comes from ASO UI on a WAITLISTED record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'WAITLISTED', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      await controller.onboard(context);
+
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
+    });
+
+    it('sets createdBy when request comes from ASO UI on an ERROR record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'ERROR', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      await controller.onboard(context);
+
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
+    });
+
+    it('sets createdBy when request comes from ASO UI on an OUTDATED record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'OUTDATED', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      await controller.onboard(context);
+
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
+    });
+
     it('resumes existing onboarding record for same imsOrgId+domain', async () => {
       const existingOnboarding = createMockOnboarding({ status: 'ERROR' });
       mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
@@ -2153,7 +2244,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2563,7 +2654,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2685,7 +2776,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2794,7 +2885,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -3359,27 +3450,51 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('stamps customer identity as createdBy when existing record is PRE_ONBOARDING', async () => {
+    it('stamps customer identity as createdBy when request comes from ASO UI', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('customer@example.com');
+    });
+
+    it('does not set createdBy when request is not from ASO UI', async () => {
       mockOnboarding.getStatus.returns('PRE_ONBOARDING');
       const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
       const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
       const res = await controller.onboard(context);
       expect(res.status).to.equal(200);
-      expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('customer@example.com');
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
     });
 
-    it('stamps customer identity as createdBy when existing record is INACTIVE', async () => {
-      mockOnboarding.getStatus.returns('INACTIVE');
+    it('does not set createdBy when x-client-type is a different value', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
       const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
-      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo, headers: { 'x-client-type': 'some-other-client' } });
       const res = await controller.onboard(context);
       expect(res.status).to.equal(200);
-      expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('customer@example.com');
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
     });
 
-    it('does not overwrite createdBy when status is not PRE_ONBOARDING or INACTIVE', async () => {
-      mockOnboarding.getStatus.returns('IN_PROGRESS');
-      const context = buildContext({ domain: TEST_DOMAIN });
+    it('does not set createdBy when pathInfo is absent', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      delete context.pathInfo;
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('does not set createdBy when headers are absent', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      context.pathInfo = {};
       const res = await controller.onboard(context);
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
@@ -5866,6 +5981,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 CLOSED: 'CLOSED',
                 REOPENED: 'REOPENED',
                 OFFBOARDED: 'OFFBOARDED',
+                PENDING: 'PENDING',
               },
             },
           },
@@ -6198,6 +6314,88 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setUpdatedBy).to.have.been.calledWith('admin');
         const reviews = record.setReviews.firstCall.args[0];
         expect(reviews[0].reviewedBy).to.equal('admin');
+      });
+
+      it('PENDING: records review without changing status', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain is not an AEM site',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Emailed customer, awaiting response' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setReviews).to.have.been.calledOnce;
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(1);
+        expect(reviews[0].decision).to.equal('PENDING');
+        expect(reviews[0].justification).to.equal('Emailed customer, awaiting response');
+        expect(reviews[0].reviewedBy).to.equal('ese@adobe.com');
+        expect(record.setStatus).to.not.have.been.called;
+        expect(record.setWaitlistReason).to.not.have.been.called;
+        expect(record.save).to.have.been.calledOnce;
+      });
+
+      it('PENDING: preserves existing reviews', async () => {
+        const existingReview = {
+          reason: 'Domain is not an AEM site',
+          decision: 'PENDING',
+          reviewedBy: 'other-ese@adobe.com',
+          reviewedAt: '2026-05-01T10:00:00.000Z',
+          justification: 'First contact attempt',
+        };
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain is not an AEM site',
+          reviews: [existingReview],
+        });
+        record.getReviews.returns([existingReview]);
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Second follow-up sent' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(2);
+        expect(reviews[0]).to.deep.equal(existingReview);
+        expect(reviews[1].decision).to.equal('PENDING');
+        expect(reviews[1].justification).to.equal('Second follow-up sent');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
+      it('PENDING: succeeds even when waitlistReason is absent (no checkKey needed)', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: null,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Emailed customer, awaiting response' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews[0].decision).to.equal('PENDING');
+        expect(record.setStatus).to.not.have.been.called;
+        expect(record.save).to.have.been.calledOnce;
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: replaces old domain and re-runs flow', async () => {
