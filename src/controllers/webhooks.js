@@ -36,7 +36,7 @@ const WORKSPACE_REPO_PATTERN = /^[^/\s]+\/[^/\s]+$/;
 function getWorkspaceRepos(env, log) {
   const raw = env.MYSTICAT_WORKSPACE_REPOS;
   if (!raw) {
-    log.warn('MYSTICAT_WORKSPACE_REPOS not set, using built-in defaults', {
+    log.debug('MYSTICAT_WORKSPACE_REPOS not set, using built-in defaults', {
       defaults: DEFAULT_WORKSPACE_REPOS,
     });
     return DEFAULT_WORKSPACE_REPOS;
@@ -67,7 +67,6 @@ function getWorkspaceRepos(env, log) {
 
 function WebhooksController(context) {
   const { sqs, log, env } = context;
-  const workspaceRepos = getWorkspaceRepos(env, log);
   const slackChannel = env.MYSTICAT_OBSERVABILITY_SLACK_CHANNEL;
   const slack = createObservabilitySlackClient({
     token: env.MYSTICAT_OBSERVABILITY_SLACK_TOKEN,
@@ -196,6 +195,10 @@ function WebhooksController(context) {
         ? { slack_channel: slackChannel, slack_thread_ts: threadTs }
         : { slack_channel: slackChannel };
     }
+
+    // Computed per webhook request (not per controller construction) so the
+    // env-var validation log fires only on genuine deliveries, not all traffic.
+    const workspaceRepos = getWorkspaceRepos(env, log);
 
     // Build and enqueue job payload
     const jobPayload = {

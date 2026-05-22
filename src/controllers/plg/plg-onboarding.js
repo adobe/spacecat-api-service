@@ -1699,6 +1699,8 @@ function PlgOnboardingController(ctx) {
    * - UPHELD: transition to REJECTED (terminal)
    * - CLOSED: retire the current domain to OUTDATED and onboard an alternate domain
    *           (requires siteConfig.alternateDomain for DOMAIN_ALREADY_ASSIGNED reason)
+   * - PENDING: record that an ESE is actively working on this (e.g. emailed customer)
+   *            without changing the status; reviewedBy identifies who is handling it
    * REOPENED and OFFBOARDED are handled by transitionStatus
    * (PATCH /plg/onboard/:onboardingId/status).
    */
@@ -1725,6 +1727,7 @@ function PlgOnboardingController(ctx) {
 
     const allowedDecisions = [
       REVIEW_DECISIONS.BYPASSED, REVIEW_DECISIONS.UPHELD, REVIEW_DECISIONS.CLOSED,
+      REVIEW_DECISIONS.PENDING,
     ];
     if (!hasText(decision) || !allowedDecisions.includes(decision)) {
       return badRequest(`decision must be one of: ${allowedDecisions.join(', ')}`);
@@ -1765,12 +1768,18 @@ function PlgOnboardingController(ctx) {
     const updatedReviews = [...existingReviews, reviewEntry];
     onboarding.setReviews(updatedReviews);
 
+    onboarding.setUpdatedBy(reviewedBy);
+
+    // PENDING: record ESE action without changing status (e.g. emailed customer)
+    if (decision === REVIEW_DECISIONS.PENDING) {
+      await onboarding.save();
+      return ok(PlgOnboardingDto.toAdminJSON(onboarding));
+    }
+
     const checkKey = deriveCheckKey(onboarding);
     if (!checkKey) {
       return badRequest('Unable to determine the review reason from the onboarding record');
     }
-
-    onboarding.setUpdatedBy(reviewedBy);
 
     // UPHOLD: reject the domain — transition to REJECTED (terminal)
     if (decision === REVIEW_DECISIONS.UPHELD) {
