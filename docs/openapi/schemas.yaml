@@ -388,6 +388,25 @@ CdnLogsConfig:
     bucketName: 'test-bucket'
     filters: [{ key: 'test-key', value: ['test-value'] }]
     outputLocation: 'test-output-location'
+ScraperConfig:
+  type: object
+  description: |
+    Per-site configuration consumed by the content scraper. Use customHeaders
+    to attach request headers (for example, Accept-Language) when fetching pages
+    for sites behind bot-protection rules.
+  properties:
+    customHeaders:
+      description: Map of HTTP header name to value. Forwarded by the scraper to the upstream request.
+      type: object
+      additionalProperties:
+        type: string
+    injectDefaults:
+      description: When true, the scraper may inject sensible defaults for missing headers.
+      type: boolean
+  example:
+    customHeaders:
+      Accept-Language: 'en-US,en;q=0.9'
+    injectDefaults: true
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -837,6 +856,19 @@ CdnLogsConfigUpdate:
       bucketName: 'test-bucket'
       outputLocation: 'test-output-location'
       filters: [{ key: 'test-key', value: ['test-value'] }]
+ScraperConfigUpdate:
+  type: object
+  required:
+    - scraperConfig
+  properties:
+    scraperConfig:
+      description: The scraper configuration to update
+      $ref: '#/ScraperConfig'
+  example:
+    scraperConfig:
+      customHeaders:
+        Accept-Language: 'en-US,en;q=0.9'
+      injectDefaults: true
 UpdateHandlerTypeConfig:
   type: object
   properties:

@@ -150,6 +150,43 @@ site-cdn-logs-config:
       '500':
         $ref: './responses.yaml#/500'
 
+site-scraper-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - site
+    summary: Update scraper configuration for a site
+    description: |
+      This endpoint allows updating the scraper configuration for a specific site.
+      The scraper configuration is used by the content scraper to apply per-site
+      custom request headers (for example, Accept-Language) when fetching pages.
+    operationId: updateSiteScraperConfig
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/ScraperConfigUpdate'
+    responses:
+      '200':
+        description: Scraper configuration updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+
 site-page-relationships-search:
   parameters:
     - $ref: './parameters.yaml#/siteId'

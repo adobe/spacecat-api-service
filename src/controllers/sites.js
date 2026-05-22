@@ -1135,6 +1135,42 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  const updateScraperConfig = async (context) => {
+    const siteId = context.params?.siteId;
+    const { scraperConfig } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isObject(scraperConfig)) {
+      return badRequest('Scraper config required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can update its sites');
+    }
+
+    try {
+      const siteConfig = site.getConfig();
+      siteConfig.updateScraperConfig(scraperConfig);
+
+      const configObj = Config.toDynamoItem(siteConfig);
+      site.setConfig(configObj);
+
+      const updatedSite = await site.save();
+      return ok(SiteDto.toJSON(updatedSite));
+    } catch (error) {
+      log.error(`Error updating scraper config for site ${siteId}: ${error.message}`);
+      return badRequest('Failed to update scraper config');
+    }
+  };
+
   const CITABILITY_GROUP_BY_FIELDS = new Set(['updatedBy', 'url', 'updatedAt']);
   const CITABILITY_PERIODS = new Set(['7d', '30d', '90d', '1y', 'all']);
   const CITABILITY_PERIOD_MS = {
@@ -1488,6 +1524,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    updateScraperConfig,
     getPageCitabilityCounts,
     getTopPages,
     resolveSite,

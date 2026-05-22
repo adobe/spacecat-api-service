@@ -134,6 +134,7 @@ describe('Sites Controller', () => {
     'removeSite',
     'updateSite',
     'updateCdnLogsConfig',
+    'updateScraperConfig',
     'getPageCitabilityCounts',
     'getTopPages',
     'getSiteMetricsBySource',
@@ -4319,6 +4320,107 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Failed to update CDN logs config');
+    });
+  });
+
+  describe('updateScraperConfig', () => {
+    const scraperConfig = {
+      customHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
+      injectDefaults: true,
+    };
+
+    it('updates scraper config successfully', async () => {
+      const site = sites[0];
+      let currentConfig = Config({});
+      site.getConfig = sandbox.stub().callsFake(() => currentConfig);
+      site.setConfig = sandbox.stub().callsFake((newConfig) => {
+        currentConfig = Config(newConfig);
+      });
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+      const updatedSite = await response.json();
+      expect(updatedSite.config).to.have.property('scraperConfig');
+      expect(updatedSite.config.scraperConfig).to.deep.equal(scraperConfig);
+    });
+
+    it('returns bad request when site ID is invalid', async () => {
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: 'not-a-uuid' },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Site ID required');
+    });
+
+    it('returns bad request when scraperConfig is not provided', async () => {
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Scraper config required');
+    });
+
+    it('returns bad request when scraperConfig is not an object', async () => {
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig: 'nope' },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Scraper config required');
+    });
+
+    it('returns not found when site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(404);
+      expect((await response.json()).message).to.equal('Site not found');
+    });
+
+    it('returns forbidden when user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('handles errors during config update', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().throws(new Error('boom'));
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Failed to update scraper config');
     });
   });
 
