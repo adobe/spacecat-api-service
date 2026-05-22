@@ -80,11 +80,34 @@ export const mochaHooks = {
       console.log('process.getActiveResourcesInfo():', JSON.stringify(handles));
       if (wirn) {
         try {
-          wirn(process.stderr);
+          // wirn() expects a logger object with .error(); default is console.
+          wirn();
         } catch (err) {
           console.error('wirn failed:', err);
         }
       }
+      // Extra context for diagnosing PipeWrap handles (stdio).
+      /* eslint-disable no-underscore-dangle */
+      const refed = (s) => !!s._handle?.hasRef?.();
+      const stdioInfo = {
+        stdin: {
+          isTTY: process.stdin.isTTY,
+          readable: process.stdin.readable,
+          refed: refed(process.stdin),
+        },
+        stdout: {
+          isTTY: process.stdout.isTTY,
+          writable: process.stdout.writable,
+          refed: refed(process.stdout),
+        },
+        stderr: {
+          isTTY: process.stderr.isTTY,
+          writable: process.stderr.writable,
+          refed: refed(process.stderr),
+        },
+      };
+      /* eslint-enable no-underscore-dangle */
+      console.log('stdio info:', JSON.stringify(stdioInfo));
       console.log(`=== end dump [${label}] ===`);
     };
 
