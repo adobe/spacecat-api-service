@@ -27,6 +27,44 @@ release-wide outage — diagnose that endpoint instead.
 
 ---
 
+## Prerequisites
+
+Check these *before* you need them — discovering missing access at the revert
+(Step 5) is the expensive failure mode.
+
+**Tooling.** `nvm` + node `>=24 <25` (`.nvmrc` pins `24.15.0`) and npm `>=10.9.0`;
+run `nvm use` in the repo to match.
+
+**Access** (read-only is enough for diagnosis):
+
+- **AWS** — an authenticated session for the spacecat **prod** account, region
+  `us-east-1` (your normal `aws sso login` / `AWS_PROFILE` / exported keys). Needs
+  CloudWatch Logs read (`npm run logs`) and `lambda:GetFunction` (deploy-time and
+  artifact checks). The `aws` commands authenticate via your shell's ambient
+  credentials — **nothing is baked into the npm scripts** — so with no active
+  session `npm run logs` just fails with a credentials error.
+- **Coralogix** — account access (Adobe SSO) for the error-stream queries; separate
+  from AWS.
+- **GitHub** — push to `main` with admin/bypass rights (branch protection) for the
+  Step 5 revert. Without bypass, open the revert as a PR and admin-merge (or ask
+  someone who can).
+
+**Build env vars (Step 3 local verify only).** `npm run build` resolves the `hlx`
+block in `package.json`, which interpolates four vars. **Dummy values are fine** —
+`--test-bundle` only builds and loads the artifact; real values matter only for an
+actual deploy (run by CI):
+
+| Env var | Feeds (`package.json` → `hlx`) |
+|---|---|
+| `VPC_SUBNET_1`, `VPC_SUBNET_2` | `awsVpcSubnetIds` |
+| `VPC_SG_ID` | `awsVpcSecurityGroupIds` |
+| `AWS_ACCOUNT_ID` | `awsRole!important` (role ARN) |
+
+You do **not** need a populated `.env` or `secrets/dev-secrets.json` — those are for
+the local dev server (`npm start`), which this flow never runs.
+
+---
+
 ## TL;DR fast path
 
 ```bash
@@ -69,6 +107,16 @@ inv.functionName:/spacecat-services/api-service/latest AND level:error
 
 Capture two facts: **what the error is** and **when it first occurred**. You need
 the first-occurrence timestamp for Step 2.
+
+You can also confirm the outage black-box, with **no credentials** — a load-time
+failure takes down even the unauthenticated health check (`helixStatus` runs before
+auth):
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://spacecat.experiencecloud.live/_status_check/healthcheck.json
+# broad outage: 5xx / error  ·  healthy: 200
+```
 
 ---
 
@@ -173,9 +221,10 @@ real fix and a regression test.
 
 ## Step 5 — Revert and push
 
-> **Communicate first.** Post in the incident channel _(TODO: name it, e.g.
-> `#spacecat-incidents`)_ that you're mitigating with a revert of `<sha>`, so
-> responders aren't duplicating work.
+> **Communicate first.** Post in
+> [`#aem-sites-optimizer-engineering`](https://adobe.enterprise.slack.com/archives/C05A45JBP9N)
+> that you're mitigating with a revert of `<sha>`, so responders aren't duplicating
+> work.
 
 Revert the **feature commit**, not the release commit:
 
@@ -240,6 +289,9 @@ cuts a new patch version, and the shared CI deploys it.
   job — https://github.com/adobe/spacecat-api-service/actions
 - **Lambda deploy time:** `aws lambda get-function --function-name
   spacecat-services--api-service --query 'Configuration.LastModified'` should update.
+- **Health check:** `curl -sS -o /dev/null -w '%{http_code}\n' https://spacecat.experiencecloud.live/_status_check/healthcheck.json`
+  returns `200` — the unauthenticated `helixStatus` endpoint fails too during a
+  load-time outage, so a `200` on the new deploy is a real recovery signal.
 
 Don't declare the incident over until you've seen the error rate drop on the *new*
 deploy, not just the revert merge.
@@ -250,16 +302,20 @@ deploy, not just the revert merge.
 
 Once recovery is confirmed (Step 6):
 
-- **Close the loop in the incident channel** _(TODO: name it)_ — post that the
-  revert deployed and the error rate is back to baseline, with the recovered-deploy
-  timestamp. Update the status page if one exists _(TODO: link)_.
-- **File the post-mortem** _(TODO: SLA, e.g. within 48h)_ using the team template
-  _(TODO: link to post-mortem template)_. Capture the timeline, the root cause, and
-  the **detection gap** — this class of failure is invisible until a cold-start
-  invocation, so note how the regression guard below would have caught it.
-- **File the real-fix ticket** to re-land the reverted change correctly: symptom,
-  root cause, chosen fix; link the revert commit and the original PR. Priority
-  `Critical` for a full outage; type `Bug`.
+- **Close the loop** in
+  [`#aem-sites-optimizer-engineering`](https://adobe.enterprise.slack.com/archives/C05A45JBP9N)
+  — post that the revert deployed and the error rate is back to baseline, with the
+  recovered-deploy timestamp. (No status page to update.)
+- **File the post-mortem.** Track it with a JIRA in project **SITES** (component
+  **ASO** or **LLMO**, as applicable); write the post-mortem itself as a wiki page
+  under [AEM Sites Optimizer Post Mortems](https://wiki.corp.adobe.com/spaces/AEMSites/pages/3484809541/AEM+Sites+Optimizer+Post+Mortems)
+  (no fixed template — follow the existing pages there). Capture the timeline, the
+  root cause, and the **detection gap** — this class of failure is invisible until a
+  cold-start invocation, so note how the regression guard below would have caught it.
+- **File the real-fix ticket** in JIRA project **SITES** (component **ASO** or
+  **LLMO**) to re-land the reverted change correctly: symptom, root cause, chosen
+  fix; link the revert commit and the original PR. Priority `Critical` for a full
+  outage; type `Bug`.
 - **Add a regression guard.** The repo already ships a bundle test —
   `npm run test:bundle` resolves the artifact path from `npm pkg get version`
   dynamically (no hard-coded version) and runs `test/index.test.js` against the

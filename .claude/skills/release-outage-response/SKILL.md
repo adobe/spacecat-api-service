@@ -44,6 +44,8 @@ what order*; the runbook tells you *how*.
 - Establish: is it **broad** (all/most requests) or scoped to one endpoint/tenant?
   If scoped, **stop** — this skill is for release-wide outages; diagnose that
   endpoint instead.
+- Optionally confirm black-box with the auth-free health check (runbook Step 1) — a
+  load-time failure fails even `/_status_check/healthcheck.json`.
 - Capture the **exact error** and the **first-occurrence timestamp**.
 
 ### Phase 2 — Correlate with the most recent release
@@ -103,11 +105,14 @@ Follow runbook Step 5 exactly. Key points the runbook details:
 - Watch the Coralogix error rate fall to zero **on the new deploy**, not just on
   the revert merge.
 - Confirm CI ran on the revert commit and the deploy job completed; check the
-  Lambda `LastModified` updated.
+  Lambda `LastModified` updated and the health check returns `200` (runbook Step 6).
 - Do not declare the incident resolved until errors stop on the redeployed code.
 
 ### Phase 7 — Follow-up
 
+- Close the loop in `#aem-sites-optimizer-engineering` and file the post-mortem
+  (JIRA project **SITES**, component **ASO**/**LLMO**; post-mortem as a wiki page) —
+  see runbook Step 7 for links.
 - File a ticket for the **real fix** (re-land the reverted change correctly):
   symptom, root cause, chosen fix; link the revert commit and the original PR;
   `Critical` priority for a full outage, type `Bug`.
