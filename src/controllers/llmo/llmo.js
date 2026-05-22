@@ -1421,6 +1421,20 @@ function LlmoController(ctx) {
       }
       // CDN routing — only when cdnType is provided
       if (cdnTypeNormalized) {
+        // Guard: the AEMCS Fastly routing API operates at domain level only.
+        // Enabling it for a subpath site would intercept all traffic on the host,
+        // not just the intended subpath. Reject until path-scoped routing lands (LLMO-4579).
+        try {
+          const siteUrlForGuard = baseURL.startsWith('http') ? baseURL : `https://${baseURL}`;
+          const siteUrlObj = new URL(siteUrlForGuard);
+          if (siteUrlObj.pathname && siteUrlObj.pathname !== '/') {
+            log.error(`[edge-optimize-routing-failed] ${baseURL} Subpath site cannot use host-level auto-routing`);
+            return badRequest('Automated CDN routing is not yet supported for subpath sites. Path-scoped routing requires a Fastly API update (LLMO-4579).');
+          }
+        } catch {
+          // Malformed URL — let the subsequent probe step surface the error
+        }
+
         // Exchange promise token from cookie for an IMS user token
         let imsUserToken;
         try {

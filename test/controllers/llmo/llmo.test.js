@@ -5811,6 +5811,24 @@ describe('LlmoController', () => {
         expect((await result.json()).message).to.include('not available in stage');
       });
 
+      it('returns 400 when site baseURL has a non-root path (subpath site)', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('subpath sites');
+        expect(mockLog.error).to.have.been.calledWith(
+          sinon.match(/Subpath site cannot use host-level auto-routing/),
+        );
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+      });
+
+      it('does not reject when site baseURL has a trailing slash only', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.not.equal(400);
+        expect(callCdnRoutingApiStub).to.have.been.called;
+      });
+
       it('returns 500 when EDGE_OPTIMIZE_ROUTING_CONFIG is invalid JSON', async () => {
         const result = await controller.createOrUpdateEdgeConfig(
           makeRoutingCtx({ env: { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: 'not-json' } }),
