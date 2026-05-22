@@ -810,6 +810,7 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(createMockResponse(null, false, 503, 'Service Unavailable'));
       const result = await controller.getLlmoSheetData(mockContext);
       expect(result.status).to.equal(502);
+      expect(mockLog.error).to.have.been.called;
     });
 
     it('maps timeout/abort to 504', async () => {
@@ -818,6 +819,7 @@ describe('LlmoController', () => {
       tracingFetchStub.rejects(abort);
       const result = await controller.getLlmoSheetData(mockContext);
       expect(result.status).to.equal(504);
+      expect(mockLog.error).to.have.been.called;
     });
 
     it('passes through a non-404 4xx (e.g. 401)', async () => {
@@ -1082,6 +1084,7 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(createMockResponse(null, false, 503, 'Service Unavailable'));
       const result = await controller.getLlmoGlobalSheetData(mockContext);
       expect(result.status).to.equal(502);
+      expect(mockLog.error).to.have.been.called;
     });
 
     it('maps timeout/abort to 504', async () => {
@@ -1090,12 +1093,23 @@ describe('LlmoController', () => {
       tracingFetchStub.rejects(abort);
       const result = await controller.getLlmoGlobalSheetData(mockContext);
       expect(result.status).to.equal(504);
+      expect(mockLog.error).to.have.been.called;
     });
 
     it('passes through a non-404 4xx (e.g. 401)', async () => {
       tracingFetchStub.resolves(createMockResponse(null, false, 401, 'Unauthorized'));
       const result = await controller.getLlmoGlobalSheetData(mockContext);
       expect(result.status).to.equal(401);
+    });
+
+    it('should handle network errors', async () => {
+      tracingFetchStub.rejects(new Error('Network error'));
+
+      const result = await controller.getLlmoGlobalSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Network error');
     });
 
     it('should handle undefined response headers', async () => {
@@ -1483,6 +1497,7 @@ describe('LlmoController', () => {
       const result = await controller.queryLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(502);
+      expect(mockLog.error).to.have.been.called;
     });
 
     it('should handle missing response headers in queryLlmoSheetData', async () => {
@@ -1523,6 +1538,7 @@ describe('LlmoController', () => {
       mockContext.data = null;
       const result = await controller.queryLlmoSheetData(mockContext);
       expect(result.status).to.equal(504);
+      expect(mockLog.error).to.have.been.called;
     });
 
     it('passes through a non-404 4xx (e.g. 401)', async () => {
@@ -1530,6 +1546,17 @@ describe('LlmoController', () => {
       mockContext.data = null;
       const result = await controller.queryLlmoSheetData(mockContext);
       expect(result.status).to.equal(401);
+    });
+
+    it('should handle network errors', async () => {
+      tracingFetchStub.rejects(new Error('Network error'));
+      mockContext.data = null;
+
+      const result = await controller.queryLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Network error');
     });
 
     it('should construct URL without sheetType when not provided', async () => {
