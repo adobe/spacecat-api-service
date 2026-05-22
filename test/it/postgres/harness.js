@@ -12,33 +12,29 @@
 
 /**
  * Mocha Root Hook Plugin for the PostgreSQL (v3) integration tests.
- *
- * Usage:
- *   npx mocha --require test/it/postgres/harness.js test/it/postgres/*.test.js
- *
- * Starts Docker Compose (Postgres + PostgREST) and the dev server once
- * before all test files, and tears both down after all test files complete.
  */
 
-// Proof PR: import wirn at module top so async_hooks captures all handles
-// created later by any module. Used after teardown to verify the leak is gone.
-import wirn from 'why-is-node-running';
-import { resetDataAccessConnections } from '@adobe/spacecat-shared-data-access';
+// PROOF PR — option (c) experiment: set HELIX_FETCH_FORCE_HTTP1=1 BEFORE any
+// module-level @adobe/fetch context is created, then dynamic-import everything
+// else. ES static imports hoist before code, so the env var would otherwise be
+// set too late. Each shared library reads the env at its own module-load time
+// and chooses h1() (no keep-alive on Node ≥19) vs h2() (keep-alive pool).
+console.log('[proof] HELIX_FETCH_FORCE_HTTP1 was:', JSON.stringify(process.env.HELIX_FETCH_FORCE_HTTP1));
+process.env.HELIX_FETCH_FORCE_HTTP1 = '1';
+console.log('[proof] HELIX_FETCH_FORCE_HTTP1 now:', JSON.stringify(process.env.HELIX_FETCH_FORCE_HTTP1));
 
-import { initAuth, createAllTokens } from '../shared/auth.js';
-import { buildEnv } from '../env.js';
-import { startServer, stopServer } from '../server.js';
-import { createHttpClient } from '../shared/http-client.js';
-import { startPostgres, stopPostgres } from './setup.js';
+// Import wirn first so its async_hooks listener captures every later handle.
+const wirn = (await import('why-is-node-running')).default;
+
+const { initAuth, createAllTokens } = await import('../shared/auth.js');
+const { buildEnv } = await import('../env.js');
+const { startServer, stopServer } = await import('../server.js');
+const { createHttpClient } = await import('../shared/http-client.js');
+const { startPostgres, stopPostgres } = await import('./setup.js');
 
 /** Shared state populated during beforeAll, consumed by test files. */
 export const ctx = {};
 
-// Extended timeout for the harness hooks: docker compose pull + container startup
-// + dbmate migrations + PostgREST readiness can routinely exceed mocha's default
-// 2s hook timeout (and the prior 30s ceiling that caused IT failures on heavier
-// data-service image versions). 180s gives enough headroom on cold CI runs without
-// masking real bugs.
 const HARNESS_HOOK_TIMEOUT_MS = 180_000;
 
 export const mochaHooks = {
@@ -62,16 +58,13 @@ export const mochaHooks = {
     this.timeout(HARNESS_HOOK_TIMEOUT_MS);
     await stopServer();
 
-    // BEFORE the fix: count the leaked handles.
     const before = process.getActiveResourcesInfo();
-    console.log(`\n[proof] handles BEFORE reset: ${before.length}`, before.slice(0, 10));
+    console.log(`\n[proof] handles BEFORE stopPostgres: ${before.length}`, before.slice(0, 12));
 
-    // THE FIX under test.
-    await resetDataAccessConnections();
+    await stopPostgres();
 
-    // AFTER the fix: count again and run wirn (will print refs holding the loop).
     const after = process.getActiveResourcesInfo();
-    console.log(`[proof] handles AFTER reset: ${after.length}`, after.slice(0, 10));
+    console.log(`[proof] handles AFTER stopPostgres: ${after.length}`, after.slice(0, 12));
     console.log('[proof] wirn — handles still keeping loop alive:');
     try {
       wirn();
@@ -79,13 +72,9 @@ export const mochaHooks = {
       console.error('wirn failed:', err);
     }
 
-    await stopPostgres();
-
-    // Backstop: if the fix didn't fully drain, exit anyway after 5s so the
-    // CI job doesn't sit at the 15-min timeout. Unref so the timer doesn't
-    // itself extend the loop.
+    // 5s backstop so CI doesn't sit at 15-min timeout if loop is still pinned.
     setTimeout(() => {
-      console.log('[proof] backstop force-exit fired — fix did not fully drain');
+      console.log('[proof] backstop force-exit fired — loop was still pinned');
       process.exit(0);
     }, 5000).unref();
   },
