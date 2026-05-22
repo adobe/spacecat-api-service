@@ -491,7 +491,9 @@ describe('getRouteHandlers', () => {
     getTopicsResearch: sinon.stub(),
     getTopicsStats: sinon.stub(),
     getV1TopicBrandTopics: sinon.stub(),
+    getV1TopicGapTopics: sinon.stub(),
     getV1PromptBrandPrompts: sinon.stub(),
+    getV1PromptGapPrompts: sinon.stub(),
     getV1PromptPromptResponse: sinon.stub(),
   };
 
@@ -629,7 +631,9 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/topics/research',
       'GET /llmo/ai-visibility/topics/stats',
       'GET /llmo/ai-visibility/v1/topic/brand-topics',
+      'GET /llmo/ai-visibility/v1/topic/gap-topics',
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts',
+      'GET /llmo/ai-visibility/v1/prompt/gap-prompts',
       'GET /llmo/ai-visibility/v1/prompt/prompt-response',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
@@ -687,7 +691,9 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research']).to.equal(mockAiVisibilityController.getTopicsResearch);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/stats']).to.equal(mockAiVisibilityController.getTopicsStats);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics']).to.equal(mockAiVisibilityController.getV1TopicBrandTopics);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics']).to.equal(mockAiVisibilityController.getV1TopicGapTopics);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts']).to.equal(mockAiVisibilityController.getV1PromptBrandPrompts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts']).to.equal(mockAiVisibilityController.getV1PromptGapPrompts);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompt-response']).to.equal(mockAiVisibilityController.getV1PromptPromptResponse);
     expect(staticRoutes['GET /v2/regions']).to.equal(mockLlmoMysticatController.getRegions);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
