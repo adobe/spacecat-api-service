@@ -780,6 +780,30 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(res.value).to.include('Invalid domain');
       });
     });
+
+    // Hex/octal/decimal IPv4 literals — WHATWG URL canonicalizes these to private
+    // IPs (e.g. 0xa9.254.169.254 → 169.254.169.254 AWS IMDS), bypassing raw-string
+    // denylists. Closed at the shared validator (alphabetic TLD requirement) and
+    // additionally at isSafeDomain (canonicalize-before-denylist + net.isIP check).
+    const hexIpAttacks = [
+      ['hex IMDS', '0xa9.254.169.254'],
+      ['hex loopback', '0x7f.0.0.1'],
+      ['hex RFC1918', '0xa.0.0.1'],
+      ['hex all-labels', '0xa9.0xfe.0xa9.0xfe'],
+      ['octal IPv4', '0177.0.0.1'],
+    ];
+
+    hexIpAttacks.forEach(([label, domain]) => {
+      it(`returns 400 for ${label} attack: ${domain}`, async () => {
+        const context = buildContext({ domain });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid domain');
+        // Lock that the request never reached the fetch path
+        expect(composeBaseURLStub).to.not.have.been.called;
+        expect(mockDataAccess.PlgOnboarding.create).to.not.have.been.called;
+      });
+    });
   });
 
   // --- Subpath domain support ---
@@ -808,6 +832,28 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(composeBaseURLStub).to.have.been.calledWith(domain);
         expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
           sinon.match({ domain }),
+        );
+      });
+    });
+
+    // Locks the prepareDomain canonicalization: mixed-case input must be lowercased
+    // BEFORE reaching composeBaseURL and PlgOnboarding.create, otherwise the model's
+    // schema validator (lowercase-only) would reject the write at the DB layer.
+    const mixedCaseCanonicalCases = [
+      { input: 'NBA.COM', expected: 'nba.com', desc: 'uppercase host' },
+      { input: 'NBA.COM/Kings', expected: 'nba.com/kings', desc: 'uppercase host + path' },
+      { input: 'nba.com/Kings', expected: 'nba.com/kings', desc: 'lowercase host, mixed-case path' },
+      { input: 'Https://NBA.COM/Kings', expected: 'nba.com/kings', desc: 'mixed-case scheme + host + path' },
+    ];
+
+    mixedCaseCanonicalCases.forEach(({ input, expected, desc }) => {
+      it(`canonicalizes mixed case: ${desc} (${input} → ${expected})`, async () => {
+        const context = buildContext({ domain: input });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(200);
+        expect(composeBaseURLStub).to.have.been.calledWith(expected);
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ domain: expected }),
         );
       });
     });

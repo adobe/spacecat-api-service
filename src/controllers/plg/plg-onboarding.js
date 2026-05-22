@@ -11,6 +11,7 @@
  */
 
 // TODO: re-export from @adobe/spacecat-shared-data-access package root
+import { isIP } from 'node:net';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
@@ -265,11 +266,29 @@ const isValidDomain = (domain) => PlgOnboardingModel.isValidDomain(domain);
  * private-IP blocklist is bypassed. isValidDomain() rejects any scheme-prefixed input, which
  * is what makes this contract safe.
  *
+ * Defense in depth: the raw input is first canonicalized via the WHATWG URL parser so that
+ * hex/decimal/octal IP forms (e.g. 0xa9.254.169.254 → 169.254.169.254 AWS IMDS) and
+ * IPv6 forms are normalized before denylist matching. The shared isValidDomain already
+ * rejects these via its alphabetic-TLD requirement, but canonicalizing here closes the
+ * gap if a future caller composes a bypass that survives validation.
+ *
  * @param {string} domain - The domain to validate (may include a path, e.g. "nba.com/kings").
  * @returns {boolean} true if safe, false if potentially dangerous.
  */
 function isSafeDomain(domain) {
-  const hostname = domain.split('/')[0];
+  const rawHostname = domain.split('/')[0];
+  let hostname = rawHostname;
+  try {
+    hostname = new URL(`https://${rawHostname}`).hostname;
+  } catch {
+    /* c8 ignore next 2 */
+    return false;
+  }
+  // net.isIP returns 4 (IPv4), 6 (IPv6), or 0 (not an IP). Any IP literal that survives
+  // isValidDomain is unexpected — reject it rather than rely on prefix matching alone.
+  if (isIP(hostname)) {
+    return false;
+  }
   const blocked = [
     /^localhost$/i,
     /\.localhost$/i,
