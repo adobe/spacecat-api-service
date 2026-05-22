@@ -810,6 +810,7 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(createMockResponse(null, false, 503, 'Service Unavailable'));
       const result = await controller.getLlmoSheetData(mockContext);
       expect(result.status).to.equal(502);
+      expect(result.headers.get('x-error')).to.exist;
       expect(mockLog.error).to.have.been.called;
     });
 
@@ -819,6 +820,7 @@ describe('LlmoController', () => {
       tracingFetchStub.rejects(abort);
       const result = await controller.getLlmoSheetData(mockContext);
       expect(result.status).to.equal(504);
+      expect(result.headers.get('x-error')).to.exist;
       expect(mockLog.error).to.have.been.called;
     });
 
@@ -1084,6 +1086,7 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(createMockResponse(null, false, 503, 'Service Unavailable'));
       const result = await controller.getLlmoGlobalSheetData(mockContext);
       expect(result.status).to.equal(502);
+      expect(result.headers.get('x-error')).to.exist;
       expect(mockLog.error).to.have.been.called;
     });
 
@@ -1093,6 +1096,7 @@ describe('LlmoController', () => {
       tracingFetchStub.rejects(abort);
       const result = await controller.getLlmoGlobalSheetData(mockContext);
       expect(result.status).to.equal(504);
+      expect(result.headers.get('x-error')).to.exist;
       expect(mockLog.error).to.have.been.called;
     });
 
@@ -1497,6 +1501,7 @@ describe('LlmoController', () => {
       const result = await controller.queryLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(502);
+      expect(result.headers.get('x-error')).to.exist;
       expect(mockLog.error).to.have.been.called;
     });
 
@@ -1538,6 +1543,7 @@ describe('LlmoController', () => {
       mockContext.data = null;
       const result = await controller.queryLlmoSheetData(mockContext);
       expect(result.status).to.equal(504);
+      expect(result.headers.get('x-error')).to.exist;
       expect(mockLog.error).to.have.been.called;
     });
 
@@ -3800,6 +3806,7 @@ describe('LlmoController', () => {
       });
       const result = await LlmoControllerWithCache(mockContext).queryFiles(mockContext);
       expect(result.status).to.equal(502);
+      expect(result.headers.get('x-error')).to.exist;
     });
 
     it('maps a cached-query timeout to 504', async () => {
@@ -3813,6 +3820,7 @@ describe('LlmoController', () => {
       });
       const result = await LlmoControllerWithCache(mockContext).queryFiles(mockContext);
       expect(result.status).to.equal(504);
+      expect(result.headers.get('x-error')).to.exist;
     });
 
     it('maps a cached-query missing-key config error to 500', async () => {

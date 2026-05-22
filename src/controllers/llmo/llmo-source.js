@@ -64,19 +64,25 @@ export const fetchLlmoSource = async (context, url) => {
       },
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
 
     if (response.status === 404) {
+      // Drain the unread body so the underlying connection can be reused; undici
+      // pins the socket until the body is consumed/cancelled, which matters on
+      // the high-frequency not-provisioned path.
+      await response.body?.cancel?.();
       return { status: 404, noData: true };
     }
 
     if (!response.ok) {
       log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+      await response.body?.cancel?.();
       const err = new Error(`External API returned ${response.status}: ${response.statusText}`);
       err.upstreamStatus = response.status;
       throw err;
     }
 
+    // Timer stays armed through the body read so TIMEOUT_MS bounds fetch+read
+    // end-to-end (an abort mid-read surfaces as AbortError below).
     const data = await response.json();
     return {
       status: response.status,
@@ -84,13 +90,14 @@ export const fetchLlmoSource = async (context, url) => {
       headers: response.headers ? Object.fromEntries(response.headers.entries()) : {},
     };
   } catch (error) {
-    clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
       const timeoutErr = new Error(`Request timeout after ${TIMEOUT_MS}ms`);
       timeoutErr.isTimeout = true;
       throw timeoutErr;
     }
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 };
 

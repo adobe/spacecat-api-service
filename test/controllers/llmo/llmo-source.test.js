@@ -79,6 +79,21 @@ describe('llmo-source', () => {
     expect(result).to.deep.equal({ status: 404, noData: true });
   });
 
+  it('drains the response body on a 404 so the connection can be reused', async () => {
+    const cancel = sinon.stub().resolves();
+    tracingFetchStub.resolves({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      json: sinon.stub(),
+      headers: new Map(),
+      body: { cancel },
+    });
+    const result = await fetchLlmoSource(context, TEST_URL);
+    expect(result).to.deep.equal({ status: 404, noData: true });
+    expect(cancel).to.have.been.calledOnce;
+  });
+
   it('sends Authorization/User-Agent/Accept-Encoding headers and an abort signal', async () => {
     tracingFetchStub.resolves(mockResponse({}));
     await fetchLlmoSource(context, TEST_URL);
