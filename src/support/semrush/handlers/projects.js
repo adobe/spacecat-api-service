@@ -113,11 +113,10 @@ const ENGLISH_LANGUAGE_NAMES = new Intl.DisplayNames(['en'], { type: 'language' 
  */
 function isoToEnglishName(languageTag) {
   // Strip region/script subtag — Semrush's catalog is keyed by primary
-  // language only (no `en-US` / `pt-BR` rows).
+  // language only (no `en-US` / `pt-BR` rows). Caller (handleCreateProject)
+  // already enforces LANGUAGE_TAG_REGEX, so `primary` is always a 2–3 letter
+  // string here — no need for an empty-input guard.
   const primary = String(languageTag).toLowerCase().split('-')[0];
-  if (!hasText(primary)) {
-    return null;
-  }
   const name = ENGLISH_LANGUAGE_NAMES.of(primary);
   // ICU echoes the input back when the code is unknown. Treat that as a
   // miss — the lookup against the catalog would fail anyway.
