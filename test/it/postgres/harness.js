@@ -57,5 +57,22 @@ export const mochaHooks = {
     this.timeout(HARNESS_HOOK_TIMEOUT_MS);
     await stopServer();
     await stopPostgres();
+
+    // DIAGNOSTIC (do not merge): if the Node event loop is still alive 5s after
+    // teardown completes, dump active handles via why-is-node-running and
+    // force-exit so the CI job ends quickly instead of hitting the 15-min
+    // step timeout. This is a temporary probe to identify the leaked handle
+    // that intermittently causes ci/it-postgres cancellations on main.
+    setTimeout(async () => {
+      console.log('\n=== why-is-node-running: handles still keeping the loop alive ===');
+      try {
+        const mod = await import('why-is-node-running');
+        (mod.default || mod)();
+      } catch (err) {
+        console.error('why-is-node-running failed to load:', err);
+      }
+      console.log('=== end handle dump — force-exiting ===');
+      process.exit(0);
+    }, 5000).unref();
   },
 };
