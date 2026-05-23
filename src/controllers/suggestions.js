@@ -191,7 +191,10 @@ function SuggestionsController(ctx, sqs, env) {
     return data?.isDomainWide === true;
   };
 
-  const isPathSuggestion = (suggestion) => !!suggestion.getData()?.pathType;
+  const isPathSuggestion = (suggestion) => {
+    const data = suggestion.getData();
+    return Array.isArray(data?.allowedRegexPatterns) && !data?.isDomainWide;
+  };
 
   const {
     Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
@@ -1689,6 +1692,7 @@ function SuggestionsController(ctx, sqs, env) {
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
     // Check each requested suggestion (basic validation only)
+    context.log.info(`[edge-deploy] Classifying ${suggestionIds.length} suggestion(s), allSuggestions pool: ${allSuggestions.length}`);
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
 
@@ -1701,6 +1705,7 @@ function SuggestionsController(ctx, sqs, env) {
           statusCode: 404,
         });
       } else if (isDomainWideSuggestion(suggestion)) {
+        context.log.info(`[edge-deploy] ${suggestionId} → DOMAIN-WIDE`);
         const data = suggestion.getData();
         if (isNonEmptyArray(data.allowedRegexPatterns)) {
           domainWideSuggestions.push({
@@ -1717,6 +1722,7 @@ function SuggestionsController(ctx, sqs, env) {
           });
         }
       } else if (isPathSuggestion(suggestion)) {
+        context.log.info(`[edge-deploy] ${suggestionId} → PATH (patterns=${JSON.stringify(suggestion.getData()?.allowedRegexPatterns)})`);
         const data = suggestion.getData();
         if (data?.edgeDeployed) {
           context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, path suggestion ${suggestionId} is already deployed`);
@@ -1999,6 +2005,7 @@ function SuggestionsController(ctx, sqs, env) {
       ...domainWideSuggestions.map(({ suggestion }) => suggestion),
       ...pathSuggestions.map(({ suggestion }) => suggestion),
     ];
+    context.log.info(`[edge-deploy] Summary: valid=${validSuggestions.length}, domainWide=${domainWideSuggestions.length}, path=${pathSuggestions.length}, failed=${failedSuggestions.length}, targets=${allTargetSuggestions.length}`);
 
     try {
       const tokowakaClient = TokowakaClient.createFrom(context);
@@ -2322,8 +2329,26 @@ function SuggestionsController(ctx, sqs, env) {
         }
       }
     });
-    context.log.info(`[edge-rollback] validSuggestions count: ${validSuggestions.length},
-      failedSuggestions count: ${failedSuggestions.length}`);
+    const validPatterns = validSuggestions.filter(
+      (s) => Array.isArray(s.getData()?.allowedRegexPatterns),
+    );
+    const validPerUrl = validSuggestions.filter(
+      (s) => !Array.isArray(s.getData()?.allowedRegexPatterns),
+    );
+    context.log.info(
+      `[edge-rollback] valid: ${validSuggestions.length}`
+      + ` (pattern=${validPatterns.length}, perUrl=${validPerUrl.length}),`
+      + ` failed: ${failedSuggestions.length},`
+      + ` allSuggestions: ${allSuggestions.length}`,
+    );
+    validPatterns.forEach((s) => {
+      const d = s.getData();
+      context.log.info(
+        `[edge-rollback] Pattern: ${s.getId()}`
+        + ` patterns=${JSON.stringify(d?.allowedRegexPatterns)}`
+        + ` isDomainWide=${d?.isDomainWide}`,
+      );
+    });
     let succeededSuggestions = [];
 
     // Delegate all rollback to the tokowaka client — domain-wide, path-level, and per-URL
