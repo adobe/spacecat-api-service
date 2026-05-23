@@ -8071,9 +8071,8 @@ describe('Suggestions Controller', () => {
         getRank: () => 1,
         getData: () => ({
           url: 'https://example.com/products',
-          pathType: 'prefix',
           pathPattern: '/products',
-          // allowedRegexPatterns intentionally omitted
+          allowedRegexPatterns: [],  // empty array — detected as path but fails non-empty check
         }),
         getKpiDeltas: () => ({}),
         getCreatedAt: () => '2025-01-15T10:00:00Z',
