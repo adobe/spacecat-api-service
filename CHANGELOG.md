@@ -1,3 +1,38 @@
+# [1.512.0](https://github.com/adobe/spacecat-api-service/compare/v1.511.0...v1.512.0) (2026-05-22)
+
+
+### Features
+
+* add sorting parameters for FTS topic research endpoints | LLMO-4963 ([#2471](https://github.com/adobe/spacecat-api-service/issues/2471)) ([c00dd5f](https://github.com/adobe/spacecat-api-service/commit/c00dd5f8c1c5206aa60e449e86241d54334b99b8))
+* ai vis gap methods and filters ([#2460](https://github.com/adobe/spacecat-api-service/issues/2460)) ([90c61ab](https://github.com/adobe/spacecat-api-service/commit/90c61abe330015622072b821b408aa0f4e50e4f4))
+
+# [1.511.0](https://github.com/adobe/spacecat-api-service/compare/v1.510.1...v1.511.0) (2026-05-22)
+
+
+### Features
+
+* **llmo:** align agentic-traffic export with s3-export-framework ADR ([#2441](https://github.com/adobe/spacecat-api-service/issues/2441)) ([68cf995](https://github.com/adobe/spacecat-api-service/commit/68cf995320e99309a0687e684bf7f6982b330124))
+
+## [1.510.1](https://github.com/adobe/spacecat-api-service/compare/v1.510.0...v1.510.1) (2026-05-22)
+
+
+### Bug Fixes
+
+* **semrush:** re-land AIO proxy with bundling fix + CI bundle gate + CLAUDE.md guidance ([#2466](https://github.com/adobe/spacecat-api-service/issues/2466)) ([ee7a48d](https://github.com/adobe/spacecat-api-service/commit/ee7a48d4363acae8ec88eea8fa09f36c06ccfcc6))
+
+# [1.510.0](https://github.com/adobe/spacecat-api-service/compare/v1.509.1...v1.510.0) (2026-05-22)
+
+
+### Bug Fixes
+
+* **fixes:** load suggestions in getAllForOpportunity without fixCreatedDate (SITES-45274) ([#2468](https://github.com/adobe/spacecat-api-service/issues/2468)) ([5c3fe08](https://github.com/adobe/spacecat-api-service/commit/5c3fe08321266b37814a5dea9004ec45cc5a6922))
+* **sites:** deep-merge config.llmo on PATCH to preserve siblings ([#2470](https://github.com/adobe/spacecat-api-service/issues/2470)) ([bca4b83](https://github.com/adobe/spacecat-api-service/commit/bca4b835c0c7da0cc8b799d781e258cda3e62e63))
+
+
+### Features
+
+* **scrape:** server-side per-site auth resolution on /tools/scrape/jobs (SITES-40597) ([#2455](https://github.com/adobe/spacecat-api-service/issues/2455)) ([153d135](https://github.com/adobe/spacecat-api-service/commit/153d135eac4b41351022756a7621d4f0a4dc241d)), closes [#1797](https://github.com/adobe/spacecat-api-service/issues/1797) [#2255](https://github.com/adobe/spacecat-api-service/issues/2255)
+
 ## [1.509.1](https://github.com/adobe/spacecat-api-service/compare/v1.509.0...v1.509.1) (2026-05-22)
 
 
