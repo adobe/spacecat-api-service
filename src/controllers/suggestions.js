@@ -2059,7 +2059,7 @@ function SuggestionsController(ctx, sqs, env) {
         failed: failedSuggestions.length,
         ...(coveredSuggestionsCount > 0 && {
           autoCovered: coveredSuggestionsCount,
-          message: `${coveredSuggestionsCount} additional suggestion(s) automatically marked as deployed (covered by domain-wide configuration)`,
+          message: `${coveredSuggestionsCount} additional suggestion(s) automatically marked as deployed (covered by ${domainWideSuggestions.length > 0 ? 'domain-wide' : 'path-level'} configuration)`,
         }),
       },
     };
