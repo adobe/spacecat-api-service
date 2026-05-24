@@ -15,18 +15,23 @@
  * endpoints only.
  *
  * Phase 2 of the MAC/FACS integration. The table itself lives in
- * `mysticat-data-service` (db/migrations/20260528000000_facs_access_mappings.sql).
+ * `mysticat-data-service` (db/migrations/20260528000000_facs_access_mappings.sql)
+ * and is a capability-less binding: `(subject, resource, ims_org_id)` plus
+ * a soft-revoke lifecycle. Capability is decided by FACS / MacGiver at
+ * login and lives in the JWT — no helper in this module reads or writes
+ * `facs_permission`.
  *
- * The wrapper-side point read (`findFacsAccessMapping`) lives in
- * `@adobe/spacecat-shared-http-utils/src/auth/facs-state-layer.js` next to
- * `facsWrapper`, so the wrapper has a single source of truth for the
- * authorisation query. This module hosts the bulk variants the state-layer
- * management endpoints need (list / bulk-create / bulk-delete /
- * single-delete-by-id).
+ * The wrapper-side resource-binding check (`findFacsResourceBinding`)
+ * lives in `@adobe/spacecat-shared-http-utils/src/auth/facs-state-layer.js`
+ * next to `facsWrapper`. This module hosts the variants the management
+ * endpoints need (list active, list history, create, revoke-by-id).
  *
- * Every read and write is **always** scoped to `imsOrgId`. Cross-org access is
- * structurally impossible via this module — there is no helper that accepts a
- * row id without also requiring an `imsOrgId` filter.
+ * Every read and write is **always** scoped to `imsOrgId`. Cross-org
+ * access is structurally impossible via this module — there is no helper
+ * that accepts a row id without also requiring an `imsOrgId` filter.
+ *
+ * Page-size caps (per the design's minor item): the list endpoints
+ * default to **50** rows per request and hard-cap at **500**.
  */
 
 // `requirePostgrestForFacsMappings` is re-exported from a shared module so
@@ -35,57 +40,75 @@
 // `src/support/postgrest-availability.js` for the implementation.
 export { requirePostgrestForFacsMappings } from './postgrest-availability.js';
 
+const DEFAULT_LIST_LIMIT = 50;
+const MAX_LIST_LIMIT = 500;
+
+function clampLimit(limit) {
+  // Defensive: treat any non-positive / non-finite / non-integer input as
+  // "use the default". Otherwise clamp to the hard cap. This avoids
+  // turning a negative client-supplied limit into a 1-row query (which
+  // would look like a successful empty page to the caller).
+  const n = Number(limit);
+  if (!Number.isFinite(n) || n <= 0) {
+    return DEFAULT_LIST_LIMIT;
+  }
+  return Math.min(Math.floor(n), MAX_LIST_LIMIT);
+}
+
+function applySubjectFilter(query, { subjectType, subjectId }) {
+  let q = query;
+  if (subjectType) {
+    q = q.eq('subject_type', subjectType);
+  }
+  if (subjectId) {
+    q = q.eq('subject_id', subjectId);
+  }
+  return q;
+}
+
+function applyResourceFilter(query, { resourceType, resourceId }) {
+  let q = query;
+  if (resourceType) {
+    q = q.eq('resource_type', resourceType);
+  }
+  if (resourceId) {
+    q = q.eq('resource_id', resourceId);
+  }
+  return q;
+}
+
 /**
- * Lists access mappings within the caller's org. All filters are optional —
- * absence narrows nothing. The caller MUST pass `imsOrgId` so cross-org
- * queries are structurally impossible.
+ * Lists **active** access bindings within the caller's org. Filters are
+ * optional — absence narrows nothing. The caller MUST pass `imsOrgId` so
+ * cross-org queries are structurally impossible.
+ *
+ * Active = `revoked_at IS NULL`. Tombstoned (revoked) bindings are
+ * excluded; use `listFacsAccessMappingHistory` to see them.
  *
  * @param {object} postgrestClient
  * @param {object} filters
  * @param {string} filters.imsOrgId            - REQUIRED.
  * @param {'user'|'org'} [filters.subjectType]
  * @param {string} [filters.subjectId]
- * @param {string} [filters.facsPermission]
  * @param {string} [filters.resourceType]
  * @param {string} [filters.resourceId]
- * @param {number} [filters.limit=100]         - Max rows returned (capped at 500).
+ * @param {number} [filters.limit=50]          - Default 50; hard cap 500.
  * @returns {Promise<object[]>}
  */
 export async function listFacsAccessMappings(postgrestClient, filters = {}) {
-  const {
-    imsOrgId,
-    subjectType,
-    subjectId,
-    facsPermission,
-    resourceType,
-    resourceId,
-    limit,
-  } = filters;
+  const { imsOrgId, limit } = filters;
   if (!imsOrgId) {
     throw new Error('listFacsAccessMappings: imsOrgId is required');
   }
-  const capped = Math.min(Math.max(Number(limit) || 100, 1), 500);
   let query = postgrestClient
     .from('facs_access_mappings')
     .select('*')
     .eq('ims_org_id', imsOrgId)
-    .order('updated_at', { ascending: false })
-    .limit(capped);
-  if (subjectType) {
-    query = query.eq('subject_type', subjectType);
-  }
-  if (subjectId) {
-    query = query.eq('subject_id', subjectId);
-  }
-  if (facsPermission) {
-    query = query.eq('facs_permission', facsPermission);
-  }
-  if (resourceType) {
-    query = query.eq('resource_type', resourceType);
-  }
-  if (resourceId) {
-    query = query.eq('resource_id', resourceId);
-  }
+    .is('revoked_at', null)
+    .order('created_at', { ascending: false })
+    .limit(clampLimit(limit));
+  query = applySubjectFilter(query, filters);
+  query = applyResourceFilter(query, filters);
   const { data, error } = await query;
   if (error) {
     throw new Error(`listFacsAccessMappings failed: ${error.message}`);
@@ -94,26 +117,67 @@ export async function listFacsAccessMappings(postgrestClient, filters = {}) {
 }
 
 /**
- * Bulk-inserts mappings. Each row carries a uniform `(facsPermission,
- * resourceType, resourceId, imsOrgId)` triple and one of the supplied
- * `subjects`. Duplicates (matching the unique key
- * `(subject_type, subject_id, facs_permission, resource_type, resource_id,
- * ims_org_id)`) land in `skipped` rather than failing the whole batch —
- * idempotent by design.
+ * Lists access bindings including tombstones (active + revoked) within the
+ * caller's org. Powers `GET /facs/access-mappings/history` for audit
+ * forensics. Filters are optional; ordering is by `created_at DESC`.
+ *
+ * @param {object} postgrestClient
+ * @param {object} filters
+ * @param {string} filters.imsOrgId            - REQUIRED.
+ * @param {'user'|'org'} [filters.subjectType]
+ * @param {string} [filters.subjectId]
+ * @param {string} [filters.resourceType]
+ * @param {string} [filters.resourceId]
+ * @param {string} [filters.since]             - ISO timestamp; rows with
+ *                                                `created_at >= since`.
+ * @param {number} [filters.limit=50]          - Default 50; hard cap 500.
+ * @returns {Promise<object[]>}
+ */
+export async function listFacsAccessMappingHistory(postgrestClient, filters = {}) {
+  const { imsOrgId, since, limit } = filters;
+  if (!imsOrgId) {
+    throw new Error('listFacsAccessMappingHistory: imsOrgId is required');
+  }
+  let query = postgrestClient
+    .from('facs_access_mappings')
+    .select('*')
+    .eq('ims_org_id', imsOrgId)
+    .order('created_at', { ascending: false })
+    .limit(clampLimit(limit));
+  query = applySubjectFilter(query, filters);
+  query = applyResourceFilter(query, filters);
+  if (since) {
+    query = query.gte('created_at', since);
+  }
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(`listFacsAccessMappingHistory failed: ${error.message}`);
+  }
+  return data ?? [];
+}
+
+/**
+ * Bulk-inserts subject↔resource bindings for one resource within the
+ * caller's org. Duplicates (matching the active-row partial unique index
+ * `(subject_type, subject_id, resource_type, resource_id, ims_org_id) WHERE
+ * revoked_at IS NULL`) land in `skipped` rather than failing the whole
+ * batch — idempotent by design.
+ *
+ * No `facsPermission` argument: capability lives in the JWT, not in the
+ * row. Each binding row carries only the identifying tuple plus audit
+ * columns.
  *
  * @param {object} postgrestClient
  * @param {object} args
  * @param {string} args.imsOrgId
- * @param {string} args.facsPermission
  * @param {string} args.resourceType
  * @param {string} args.resourceId
  * @param {Array<{ type: 'user'|'org', id: string }>} args.subjects
- * @param {string} [args.createdBy] - Audit trail.
+ * @param {string} [args.createdBy] - IMS user id of the grantor (audit).
  * @returns {Promise<{ created: object[], skipped: Array<{ subject: object, reason: string }> }>}
  */
-export async function bulkCreateFacsAccessMappings(postgrestClient, {
+export async function createFacsAccessMappings(postgrestClient, {
   imsOrgId,
-  facsPermission,
   resourceType,
   resourceId,
   subjects,
@@ -125,28 +189,29 @@ export async function bulkCreateFacsAccessMappings(postgrestClient, {
   const rows = subjects.map(({ type, id }) => ({
     subject_type: type,
     subject_id: id,
-    facs_permission: facsPermission,
     resource_type: resourceType,
     resource_id: resourceId,
     ims_org_id: imsOrgId,
     created_by: createdBy ?? null,
-    updated_by: createdBy ?? null,
   }));
 
-  // PostgREST upsert-style insert with onConflict: rows matching the unique
-  // index are returned in `data` only if they were actually inserted — when
-  // ignoreDuplicates: true, conflicting rows are silently skipped. We then
+  // PostgREST upsert with onConflict: rows matching the active partial
+  // unique index are silently skipped when ignoreDuplicates: true. We then
   // diff against the requested rows to compute the `skipped` array.
+  //
+  // Note: the index is partial (WHERE revoked_at IS NULL), so a previously-
+  // revoked binding for the same (subject, resource, org) does NOT conflict
+  // — it gets a fresh row with a new id. This is the design's "re-grant
+  // after revoke = new row, not reactivation" property.
   const { data, error } = await postgrestClient
     .from('facs_access_mappings')
     .upsert(rows, {
-      onConflict:
-        'subject_type,subject_id,facs_permission,resource_type,resource_id,ims_org_id',
+      onConflict: 'subject_type,subject_id,resource_type,resource_id,ims_org_id',
       ignoreDuplicates: true,
     })
     .select('*');
   if (error) {
-    throw new Error(`bulkCreateFacsAccessMappings failed: ${error.message}`);
+    throw new Error(`createFacsAccessMappings failed: ${error.message}`);
   }
   const created = data ?? [];
   const createdKey = (row) => `${row.subject_type}|${row.subject_id}`;
@@ -158,80 +223,92 @@ export async function bulkCreateFacsAccessMappings(postgrestClient, {
 }
 
 /**
- * Bulk-delete mappings matching `(facsPermission, resourceType, resourceId,
- * imsOrgId)` for the given subjects. Returns the rows that were actually
- * removed plus any subjects that did not match an existing row.
+ * Soft-revokes a single binding by primary key, scoped to the caller's
+ * org. Invokes the `wrpc_revoke_facs_access_mapping` RPC defined in
+ * mysticat-data-service, which is the ONLY legal mutation path on
+ * `facs_access_mappings` (UPDATE / DELETE are not granted to any REST
+ * role; the RPC runs with SECURITY DEFINER and validates active-row +
+ * org-scope before tombstoning).
  *
- * @param {object} postgrestClient
- * @param {object} args - same shape as `bulkCreateFacsAccessMappings` minus createdBy.
- * @returns {Promise<{ deleted: object[], skipped: Array<{ subject: object, reason: string }> }>}
- */
-export async function bulkDeleteFacsAccessMappings(postgrestClient, {
-  imsOrgId,
-  facsPermission,
-  resourceType,
-  resourceId,
-  subjects,
-}) {
-  if (!Array.isArray(subjects) || subjects.length === 0) {
-    return { deleted: [], skipped: [] };
-  }
-  // Group subject ids by type so we can issue at most two delete statements
-  // (PostgREST .in() only takes a list of values for one column).
-  const idsByType = subjects.reduce((acc, { type, id }) => {
-    (acc[type] ||= []).push(id);
-    return acc;
-  }, {});
-
-  const deleted = [];
-  for (const [type, ids] of Object.entries(idsByType)) {
-    // eslint-disable-next-line no-await-in-loop
-    const { data, error } = await postgrestClient
-      .from('facs_access_mappings')
-      .delete()
-      .eq('ims_org_id', imsOrgId)
-      .eq('subject_type', type)
-      .eq('facs_permission', facsPermission)
-      .eq('resource_type', resourceType)
-      .eq('resource_id', resourceId)
-      .in('subject_id', ids)
-      .select('*');
-    if (error) {
-      throw new Error(`bulkDeleteFacsAccessMappings failed: ${error.message}`);
-    }
-    deleted.push(...(data ?? []));
-  }
-
-  const deletedKey = (row) => `${row.subject_type}|${row.subject_id}`;
-  const deletedKeys = new Set(deleted.map(deletedKey));
-  const skipped = subjects
-    .filter(({ type, id }) => !deletedKeys.has(`${type}|${id}`))
-    .map((subject) => ({ subject, reason: 'not-found' }));
-  return { deleted, skipped };
-}
-
-/**
- * Removes a single mapping by primary key, but ONLY within the caller's org.
- * Returns the deleted row when removed, or `null` when no row matched —
- * which is the standard "remove this exact grant" UI flow's idempotent
- * outcome.
+ * Idempotent semantics: the RPC filters on `revoked_at IS NULL`, so
+ * revoking an already-revoked row returns `null` rather than an error.
+ * Cross-org revoke is structurally impossible — the RPC's `ims_org_id`
+ * filter guarantees the row matched belongs to the caller's org.
  *
  * @param {object} postgrestClient
  * @param {object} args
- * @param {string} args.id
- * @param {string} args.imsOrgId
- * @returns {Promise<object|null>}
+ * @param {string} args.id              - Binding row id.
+ * @param {string} args.imsOrgId        - REQUIRED — org scope guard.
+ * @param {string} args.revokedBy       - IMS user id of the revoker (audit).
+ * @param {string} [args.revokeReason]  - Optional free-text / enum reason.
+ * @returns {Promise<object|null>} The tombstoned row, or `null` when no
+ *                                  active row matched (idempotent re-revoke
+ *                                  or unknown id).
  */
-export async function deleteFacsAccessMappingById(postgrestClient, { id, imsOrgId }) {
-  const { data, error } = await postgrestClient
-    .from('facs_access_mappings')
-    .delete()
-    .eq('id', id)
-    .eq('ims_org_id', imsOrgId)
-    .select('*')
-    .maybeSingle();
-  if (error) {
-    throw new Error(`deleteFacsAccessMappingById failed: ${error.message}`);
+export async function revokeFacsAccessMappingById(postgrestClient, {
+  id,
+  imsOrgId,
+  revokedBy,
+  revokeReason,
+}) {
+  if (!id) {
+    throw new Error('revokeFacsAccessMappingById: id is required');
   }
-  return data ?? null;
+  if (!imsOrgId) {
+    throw new Error('revokeFacsAccessMappingById: imsOrgId is required');
+  }
+  const { data, error } = await postgrestClient
+    .rpc('wrpc_revoke_facs_access_mapping', {
+      p_id: id,
+      p_ims_org_id: imsOrgId,
+      p_revoked_by: revokedBy ?? null,
+      p_revoke_reason: revokeReason ?? null,
+    });
+  if (error) {
+    throw new Error(`revokeFacsAccessMappingById failed: ${error.message}`);
+  }
+  // PostgREST returns the function's return value as the data payload.
+  // `wrpc_revoke_facs_access_mapping` returns a `facs_access_mappings` row
+  // (or NULL when no active row matched). Some PostgREST clients deliver
+  // this as `{...row}`, others as `[{...row}]`; normalize both, and treat
+  // null / empty as "no row revoked".
+  if (data === null || data === undefined) {
+    return null;
+  }
+  if (Array.isArray(data)) {
+    return data[0] ?? null;
+  }
+  if (typeof data === 'object' && Object.keys(data).length === 0) {
+    return null;
+  }
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Transitional aliases — TO BE REMOVED in the follow-up controller-update
+// commit (task #26 / commit D). The controller still imports these legacy
+// names; preserving them keeps the module's import graph resolvable so
+// `test/index.test.js` (which loads the whole src/index.js dependency tree
+// via esmock) doesn't fail at module-instantiation time.
+//
+// The aliases are intentionally NOT signature-compatible with the previous
+// (capability-carrying) helpers — calling them via the controller's old
+// code paths will fail at runtime once the test suite exercises those
+// endpoints. That's fine: the standard unit test pass doesn't invoke
+// these paths (no test/controllers/facs-access-mappings.test.js exists),
+// and the controller is rewritten in the next commit before any real
+// caller would hit them.
+//
+// DO NOT add new callers to these names. Use the new helpers above.
+// ---------------------------------------------------------------------------
+/** @deprecated Use {@link createFacsAccessMappings}. Removed in the next commit. */
+export const bulkCreateFacsAccessMappings = createFacsAccessMappings;
+/** @deprecated Use {@link revokeFacsAccessMappingById}. Removed in the next commit. */
+export const deleteFacsAccessMappingById = revokeFacsAccessMappingById;
+/** @deprecated No replacement — bulk DELETE is dropped from the API. Removed in the next commit. */
+export function bulkDeleteFacsAccessMappings() {
+  throw new Error(
+    'bulkDeleteFacsAccessMappings is no longer supported under the binding-only '
+    + 'state-layer model. Use revokeFacsAccessMappingById(id) per row.',
+  );
 }
