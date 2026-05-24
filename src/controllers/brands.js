@@ -33,6 +33,7 @@ import {
   isSyncEnabledForSite,
 } from './llmo/llmo-config-sync-constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { requirePostgrestForV2Config } from '../support/postgrest-availability.js';
 import {
   listPrompts,
   getPromptById,
@@ -103,22 +104,6 @@ function BrandsController(ctx, log, env) {
       return notFound(`Organization not found: ${orgId}`);
     }
     return organization;
-  }
-
-  /**
-   * Returns 503 if PostgREST client is not available (v2 config requires Postgres).
-   * @param {object} context - Request context
-   * @returns {Response|null} 503 response or null if postgrestClient is available
-   */
-  function requirePostgrestForV2Config(context) {
-    const postgrestClient = context.dataAccess?.services?.postgrestClient;
-    if (!postgrestClient?.from) {
-      return createResponse(
-        { message: 'V2 customer config requires Postgres (DATA_SERVICE_PROVIDER=postgres)' },
-        503,
-      );
-    }
-    return null;
   }
 
   /**

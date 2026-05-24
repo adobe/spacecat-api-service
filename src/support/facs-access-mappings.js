@@ -29,31 +29,11 @@
  * row id without also requiring an `imsOrgId` filter.
  */
 
-/**
- * Returns a 503 Response when PostgREST is not wired into the request
- * context, or `null` when it is. Mirrors `requirePostgrestForV2Config` in
- * `controllers/brands.js`. Callers should `return guard;` when this is
- * non-null before issuing any PostgREST call.
- *
- * @param {object} context - Universal request context.
- * @returns {Response|null}
- */
-export function requirePostgrestForFacsMappings(context) {
-  const postgrestClient = context?.dataAccess?.services?.postgrestClient;
-  if (!postgrestClient?.from) {
-    return new Response(
-      JSON.stringify({
-        message: 'FACS state-layer endpoints require Postgres '
-          + '(DATA_SERVICE_PROVIDER=postgres)',
-      }),
-      {
-        status: 503,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      },
-    );
-  }
-  return null;
-}
+// `requirePostgrestForFacsMappings` is re-exported from a shared module so
+// the V2 brand controller and the FACS state-layer endpoints share one
+// availability check (with their own error messages). See
+// `src/support/postgrest-availability.js` for the implementation.
+export { requirePostgrestForFacsMappings } from './postgrest-availability.js';
 
 /**
  * Lists access mappings within the caller's org. All filters are optional —
