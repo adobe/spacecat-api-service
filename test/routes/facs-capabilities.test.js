@@ -64,6 +64,7 @@ describe('routeFacsCapabilities', () => {
       expect(routeFacsCapabilities).to.have.all.keys(
         'INTERNAL_ROUTES',
         'PRODUCTS_ROUTES',
+        'PRODUCTS_FACS_ADMIN_PERMISSIONS',
         'PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS',
         'PRODUCTS_FACS_RESOURCE_PARAM_ALIASES',
         'FACS_NON_RESOURCE_PARAMS',
@@ -231,6 +232,71 @@ describe('routeFacsCapabilities', () => {
             `${product} declares exempt permissions that no route requires: ${orphans.join(', ')}`,
           ).to.deep.equal([]);
         });
+    });
+
+    it('admin permissions are NOT also in the state-layer-exempt list (disjoint by design)', () => {
+      // The two lists are conceptually distinct:
+      //   - PRODUCTS_FACS_ADMIN_PERMISSIONS is the early-bypass list
+      //     (wrapper step 9): holders skip the route gate entirely.
+      //   - PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS is the late-bypass
+      //     list (wrapper step 11): a held permission in this set skips
+      //     the per-resource binding lookup but still passes through the
+      //     route gate and held-permission resolution.
+      // Listing an admin permission in both lists is redundant config —
+      // step 9 already short-circuits before step 11 fires.
+      const adminByProduct = routeFacsCapabilities.PRODUCTS_FACS_ADMIN_PERMISSIONS || {};
+      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS)
+        .forEach(([product, exemptPerms]) => {
+          const adminPerms = new Set(adminByProduct[product] || []);
+          const overlap = exemptPerms.filter((p) => adminPerms.has(p));
+          expect(
+            overlap,
+            `${product} lists admin permissions in both ADMIN and STATE_LAYER_EXEMPT: ${overlap.join(', ')}`,
+          ).to.deep.equal([]);
+        });
+    });
+  });
+
+  /**
+   * Phase 2 — Product-admin early bypass.
+   *
+   * Pins the structural contract for `PRODUCTS_FACS_ADMIN_PERMISSIONS`,
+   * which the wrapper consults BEFORE route lookup or held-permission
+   * resolution. Holders of a product-admin permission bypass FACS entirely
+   * for that product (see mac-state-layer.md §"Product-admin permissions").
+   */
+  describe('PRODUCTS_FACS_ADMIN_PERMISSIONS', () => {
+    it('keys are uppercase product codes that exist in PRODUCTS_ROUTES', () => {
+      const productKeys = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES);
+      Object.keys(routeFacsCapabilities.PRODUCTS_FACS_ADMIN_PERMISSIONS)
+        .forEach((p) => {
+          expect(p, `product '${p}' must be uppercase`).to.equal(p.toUpperCase());
+          expect(productKeys, `product '${p}' must also exist in PRODUCTS_ROUTES`).to.include(p);
+        });
+    });
+
+    it('each product value is an array of "<product>/<action>" strings scoped to that product', () => {
+      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_ADMIN_PERMISSIONS)
+        .forEach(([product, perms]) => {
+          expect(perms, `${product} admin permissions`).to.be.an('array');
+          perms.forEach((permission) => {
+            expect(permission, `${product} admin entry`)
+              .to.match(/^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/);
+            const [prefix] = permission.split('/');
+            expect(
+              prefix,
+              `admin permission '${permission}' for ${product} must be prefixed with the product code`,
+            ).to.equal(product.toLowerCase());
+          });
+        });
+    });
+
+    it('LLMO declares llmo/can_manage_user as the admin permission', () => {
+      // Regression guard: this is the migration anchor from the previous
+      // revision where can_manage_user lived in the state-layer-exempt list.
+      // Moving it here is what enables the early bypass.
+      expect(routeFacsCapabilities.PRODUCTS_FACS_ADMIN_PERMISSIONS.LLMO)
+        .to.include('llmo/can_manage_user');
     });
   });
 

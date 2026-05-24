@@ -27,8 +27,13 @@
  *     ACO:  { ... },
  *   },
  *   PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS: {
- *     LLMO: ['llmo/can_view_all', 'llmo/can_manage_user'],
+ *     LLMO: ['llmo/can_view_all'],
  *     ASO:  [],
+ *     ACO:  [],
+ *   },
+ *   PRODUCTS_FACS_ADMIN_PERMISSIONS: {
+ *     LLMO: ['llmo/can_manage_user'],
+ *     ASO:  ['aso/can_manage_owner'],
  *     ACO:  [],
  *   },
  *   PRODUCTS_FACS_RESOURCE_PARAM_ALIASES: { LLMO: { brand: ['brandId'] }, ... },
@@ -479,6 +484,13 @@ const routeFacsCapabilities = {
       // Also listed in required-capabilities.INTERNAL_ROUTES — never S2S.
       // Listing is gated the same as writes: viewing who has access to what
       // is itself a sensitive operation that only org admins should see.
+      //
+      // NOTE: the route surface here (bulk DELETE) is reshuffled in a later
+      // commit alongside the controller and helpers — adding GET /history,
+      // dropping the bulk DELETE, and renaming the by-id DELETE to a
+      // soft-revoke. Holders of `llmo/can_manage_user` bypass the route gate
+      // via PRODUCTS_FACS_ADMIN_PERMISSIONS above; listing the permission
+      // here is for the coverage invariant only.
       'GET /facs/access-mappings': ['llmo/can_manage_user'],
       'POST /facs/access-mappings': ['llmo/can_manage_user'],
       'DELETE /facs/access-mappings': ['llmo/can_manage_user'],
@@ -700,17 +712,43 @@ const routeFacsCapabilities = {
    * incorrectly forced through a brand-scoped state-layer row.
    *
    * For LLMO:
-   *   - `llmo/can_view_all`     — org-wide read; no per-brand row needed.
-   *   - `llmo/can_manage_user`  — gates the management endpoints
-   *                                 (`/facs/access-mappings*`); the state
-   *                                 layer cannot recurse into itself.
+   *   - `llmo/can_view_all` — org-wide read; no per-brand row needed.
+   *
+   * NOTE: `llmo/can_manage_user` is NOT in this list. It moved to
+   * `PRODUCTS_FACS_ADMIN_PERMISSIONS` below, which fires as an earlier
+   * bypass step (step 9 in the wrapper ladder) — *before* held-permission
+   * resolution and state-layer evaluation. The two lists are conceptually
+   * distinct: this one is "non-admin permission whose holders skip the
+   * state-layer step"; the admin list below is "you are a product admin,
+   * skip the route gate entirely".
    *
    * See mac-state-layer.md §"State-layer-exempt permissions" and
-   * §"Routes can require any-of multiple permissions".
+   * §"Product-admin permissions (early bypass)".
    */
   PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS: {
-    LLMO: ['llmo/can_view_all', 'llmo/can_manage_user'],
+    LLMO: ['llmo/can_view_all'],
     ASO: [],
+    ACO: [],
+  },
+
+  /**
+   * Per-product admin permissions. Holders bypass the wrapper's route gate
+   * and state-layer evaluation entirely — they have "fully privileged
+   * within this product" access by definition. Evaluated as an early
+   * bypass step (§"Product-admin permissions (early bypass)") so admins
+   * are never subjected to the route table, the held-permission resolver,
+   * or the state-layer binding lookup.
+   *
+   * Conceptually distinct from `PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS`:
+   * exempt is "this specific non-admin permission is org-wide and doesn't
+   * need a per-resource row"; admin is "this user is a product admin and
+   * skips all of the above". Mixing the two into one list conflates
+   * org-wide-read with admin role and makes the bypass order hard to
+   * reason about.
+   */
+  PRODUCTS_FACS_ADMIN_PERMISSIONS: {
+    LLMO: ['llmo/can_manage_user'],
+    ASO: ['aso/can_manage_owner'],
     ACO: [],
   },
 
