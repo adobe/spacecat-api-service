@@ -664,9 +664,9 @@ export default function getRouteHandlers(
     //  - required-capabilities.INTERNAL_ROUTES (S2S consumers excluded)
     // See platform/decisions/mac-state-layer.md "State Layer Management Endpoints".
     'GET /facs/access-mappings': facsAccessMappingsController.listMappings,
+    'GET /facs/access-mappings/history': facsAccessMappingsController.listHistory,
     'POST /facs/access-mappings': facsAccessMappingsController.createMappings,
-    'DELETE /facs/access-mappings': facsAccessMappingsController.deleteMappingsBulk,
-    'DELETE /facs/access-mappings/:id': facsAccessMappingsController.deleteMappingById,
+    'DELETE /facs/access-mappings/:id': facsAccessMappingsController.revokeMappingById,
   };
 
   // Initialization of static and dynamic routes

@@ -500,9 +500,9 @@ describe('getRouteHandlers', () => {
 
   const mockFacsAccessMappingsController = {
     listMappings: sinon.stub(),
+    listHistory: sinon.stub(),
     createMappings: sinon.stub(),
-    deleteMappingsBulk: sinon.stub(),
-    deleteMappingById: sinon.stub(),
+    revokeMappingById: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -632,8 +632,8 @@ describe('getRouteHandlers', () => {
       'POST /ephemeral-run/batch',
       'GET /v2/regions',
       'GET /facs/access-mappings',
+      'GET /facs/access-mappings/history',
       'POST /facs/access-mappings',
-      'DELETE /facs/access-mappings',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);

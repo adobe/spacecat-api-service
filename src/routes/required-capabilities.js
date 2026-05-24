@@ -198,12 +198,16 @@ export const INTERNAL_ROUTES = [
   'GET /monitoring/drs-bp-pg-audit',
 
   // FACS Phase 2 state-layer management endpoints. Customer-org admins
-  // manage their own ReBAC grants here, gated by llmo/can_manage_user
+  // manage their own ReBAC bindings here, gated by llmo/can_manage_user
   // in facs-capabilities.js. Never S2S — automated consumers must never
   // be able to grant themselves access to customer resources.
+  //
+  // No bulk DELETE: revoke is by-id only and performs a non-revertable
+  // soft-revoke via the wrpc_revoke_facs_access_mapping RPC. The history
+  // endpoint surfaces tombstoned bindings alongside active ones for audit.
   'GET /facs/access-mappings',
+  'GET /facs/access-mappings/history',
   'POST /facs/access-mappings',
-  'DELETE /facs/access-mappings',
   'DELETE /facs/access-mappings/:id',
 ];
 

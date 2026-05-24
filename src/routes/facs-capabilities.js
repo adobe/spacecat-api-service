@@ -480,20 +480,18 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/traffic/predominant-type/:channel': ['llmo/can_configure'],
 
       // ---- Manage user (Phase 2 state-layer management) -----------------
-      // Customer org admins assign / revoke ReBAC grants via these endpoints.
-      // Also listed in required-capabilities.INTERNAL_ROUTES — never S2S.
-      // Listing is gated the same as writes: viewing who has access to what
-      // is itself a sensitive operation that only org admins should see.
+      // Customer org admins assign / revoke ReBAC bindings via these
+      // endpoints. Four-endpoint surface (no bulk DELETE — revoke is
+      // by-id only and performs a non-revertable soft-revoke via the
+      // wrpc_revoke_facs_access_mapping RPC).
       //
-      // NOTE: the route surface here (bulk DELETE) is reshuffled in a later
-      // commit alongside the controller and helpers — adding GET /history,
-      // dropping the bulk DELETE, and renaming the by-id DELETE to a
-      // soft-revoke. Holders of `llmo/can_manage_user` bypass the route gate
-      // via PRODUCTS_FACS_ADMIN_PERMISSIONS above; listing the permission
-      // here is for the coverage invariant only.
+      // All four are also listed in required-capabilities.INTERNAL_ROUTES
+      // (S2S excluded). Holders of `llmo/can_manage_user` bypass the route
+      // gate via PRODUCTS_FACS_ADMIN_PERMISSIONS above; listing the
+      // permission here is for the coverage invariant only.
       'GET /facs/access-mappings': ['llmo/can_manage_user'],
+      'GET /facs/access-mappings/history': ['llmo/can_manage_user'],
       'POST /facs/access-mappings': ['llmo/can_manage_user'],
-      'DELETE /facs/access-mappings': ['llmo/can_manage_user'],
       'DELETE /facs/access-mappings/:id': ['llmo/can_manage_user'],
 
       // ---- View (read-only) ----------------------------------------------

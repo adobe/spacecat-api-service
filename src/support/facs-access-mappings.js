@@ -283,32 +283,3 @@ export async function revokeFacsAccessMappingById(postgrestClient, {
   }
   return data;
 }
-
-// ---------------------------------------------------------------------------
-// Transitional aliases — TO BE REMOVED in the follow-up controller-update
-// commit (task #26 / commit D). The controller still imports these legacy
-// names; preserving them keeps the module's import graph resolvable so
-// `test/index.test.js` (which loads the whole src/index.js dependency tree
-// via esmock) doesn't fail at module-instantiation time.
-//
-// The aliases are intentionally NOT signature-compatible with the previous
-// (capability-carrying) helpers — calling them via the controller's old
-// code paths will fail at runtime once the test suite exercises those
-// endpoints. That's fine: the standard unit test pass doesn't invoke
-// these paths (no test/controllers/facs-access-mappings.test.js exists),
-// and the controller is rewritten in the next commit before any real
-// caller would hit them.
-//
-// DO NOT add new callers to these names. Use the new helpers above.
-// ---------------------------------------------------------------------------
-/** @deprecated Use {@link createFacsAccessMappings}. Removed in the next commit. */
-export const bulkCreateFacsAccessMappings = createFacsAccessMappings;
-/** @deprecated Use {@link revokeFacsAccessMappingById}. Removed in the next commit. */
-export const deleteFacsAccessMappingById = revokeFacsAccessMappingById;
-/** @deprecated No replacement — bulk DELETE is dropped from the API. Removed in the next commit. */
-export function bulkDeleteFacsAccessMappings() {
-  throw new Error(
-    'bulkDeleteFacsAccessMappings is no longer supported under the binding-only '
-    + 'state-layer model. Use revokeFacsAccessMappingById(id) per row.',
-  );
-}
