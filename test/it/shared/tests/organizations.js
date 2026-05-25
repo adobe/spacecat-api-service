@@ -183,9 +183,17 @@ export default function organizationTests(getHttpClient, resetData) {
     });
 
     describe('GET /organizations/:organizationId/sites', () => {
-      it('user: returns sites for accessible org (empty — no site enrollments)', async () => {
+      it('user: x-product=ASO returns empty (no ASO enrollments for ORG_1)', async () => {
+        // Forced x-product: ASO — ORG_1 has no ASO site enrollments, so the
+        // controller filters everything out. (The http-client's URL-derived
+        // default would otherwise pick LLMO and return ORG_1's LLMO-enrolled
+        // site SITE_1; see the explicit-LLMO / explicit-ASO delegatedUser
+        // tests below for the contrast pair.)
         const http = getHttpClient();
-        const res = await http.user.get(`/organizations/${ORG_1_ID}/sites`);
+        const res = await http.user.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
