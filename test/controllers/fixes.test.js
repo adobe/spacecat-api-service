@@ -233,6 +233,66 @@ describe('Fixes Controller', () => {
       expect(result[0]).to.not.have.property('executedByUser');
     });
 
+    it('skips IMS lookup when no fix has executedBy', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'John',
+          last_name: 'Doe',
+          email: 'john.doe@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      // empty string bypasses fakeCreateFix's `??= 'test user'` default and is
+      // stripped by filter(Boolean) inside the controller, so userIds is empty.
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: '',
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.not.have.property('executedByUser');
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    it('logs a warning and omits executedByUser when IMS lookup throws synchronously', async () => {
+      const warnSpy = sandbox.spy();
+      const errorMessage = 'IMS client misconfigured';
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().throws(new Error(errorMessage)),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log: { ...log, warn: warnSpy }, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: testExternalUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.not.have.property('executedByUser');
+      expect(warnSpy).to.have.been.calledOnceWith(
+        `Could not enrich fixes with user names: ${errorMessage}`,
+      );
+    });
+
     it('responds 404 if the fix does not belong to the given opportunity', async () => {
       fixEntityCollection.allByOpportunityId.resolves([
         await fixEntityCollection.create({
