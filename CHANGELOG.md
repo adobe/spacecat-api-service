@@ -1,3 +1,10 @@
+## [1.512.1](https://github.com/adobe/spacecat-api-service/compare/v1.512.0...v1.512.1) (2026-05-25)
+
+
+### Bug Fixes
+
+* **plg:** allow subpath domains in ASO PLG onboarding validation ([#2363](https://github.com/adobe/spacecat-api-service/issues/2363)) ([88edf95](https://github.com/adobe/spacecat-api-service/commit/88edf95296a5cdd719f3819a1ec79840ece88f0f)), closes [#Local](https://github.com/adobe/spacecat-api-service/issues/Local)
+
 # [1.512.0](https://github.com/adobe/spacecat-api-service/compare/v1.511.0...v1.512.0) (2026-05-22)
 
 
