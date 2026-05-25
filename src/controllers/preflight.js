@@ -19,7 +19,7 @@ import {
 import { AsyncJob, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
 import { TierClient } from '@adobe/spacecat-shared-tier-client';
-import { getCookieValue, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import { getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
@@ -93,21 +93,6 @@ function PreflightController(ctx, log, env) {
   }
 
   /**
-   * Creates a new preflight job. For promise-based authoring types (CS, CS_CW, AMS),
-   * the promise token is resolved from the promiseToken cookie sent by the browser
-   * (set via /auth/promise endpoint), otherwise falls back to creating one from
-   * the Authorization header via IMS.
-   * @param {Object} context - The request context
-   * @param {Object} context.data - The request data
-   * @param {string[]} context.data.urls - Array of URLs to process
-   * @param {string} context.data.step - The audit step
-   * @param {string} context.data.siteId - The siteId, if it's an AMS site
-   * @param {Object} [context.pathInfo] - The path info object
-   * @param {Object} [context.pathInfo.headers] - Request headers; must include a
-   *   `cookie` header with `promiseToken=<token>` for CS/CS_CW/AMS authoring types
-   * @returns {Promise<Object>} The HTTP response object
-   */
-  /**
    * Checks if a handler type is enabled for a site, including product code
    * entitlement verification. Mirrors the audit worker's isAuditEnabledForSite.
    */
@@ -158,17 +143,56 @@ function PreflightController(ctx, log, env) {
     return headResponse.status === 401 || headResponse.status === 403;
   }
 
+  /**
+   * Reads `x-promise-token` from pathInfo.headers.
+   * @param {Object} context - Request context
+   * @returns {string|null} Trimmed token or null
+   */
+  function getPromiseTokenHeader(context) {
+    const headers = context.pathInfo?.headers;
+    if (!isNonEmptyObject(headers)) {
+      return null;
+    }
+    const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === 'x-promise-token');
+    if (!entry) {
+      return null;
+    }
+    const raw = entry[1];
+    if (!hasText(raw)) {
+      return null;
+    }
+    const trimmed = String(raw).trim();
+    try {
+      return decodeURIComponent(trimmed);
+    } catch {
+      return trimmed;
+    }
+  }
+
   async function resolvePromiseToken(site, context) {
     if (!PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
       return null;
     }
-    const cookieToken = getCookieValue(context, 'promiseToken');
-    if (hasText(cookieToken)) {
-      return { promise_token: cookieToken };
+    const promiseTokenHeader = getPromiseTokenHeader(context);
+    if (hasText(promiseTokenHeader)) {
+      return { promise_token: promiseTokenHeader };
     }
     return getIMSPromiseToken(context);
   }
 
+  /**
+   * Creates a new preflight job. For promise-based authoring types (CS, CS_CW, AMS),
+   * the promise token is resolved from the `x-promise-token` header,
+   * else created from the Authorization header via IMS.
+   * @param {Object} context - The request context
+   * @param {Object} context.data - The request data
+   * @param {string[]} context.data.urls - Array of URLs to process
+   * @param {string} context.data.step - The audit step
+   * @param {string} context.data.siteId - The siteId, if it's an AMS site
+   * @param {Object} [context.pathInfo] - The path info object
+   * @param {Object} [context.pathInfo.headers] - Request headers; must include `x-promise-token`
+   * @returns {Promise<Object>} The HTTP response object
+  */
   const createPreflightJob = async (context) => {
     log.debug('createPreflightJob started');
     const { data } = context;
@@ -359,8 +383,8 @@ function PreflightController(ctx, log, env) {
   /**
    * Creates a new beta preflight job by proxying to Mysticat's analyze endpoint.
    * For promise-based authoring types (CS, CS_CW, AMS), the promise token is resolved
-   * from the promiseToken cookie if present, otherwise falls back to IMS. The promise
-   * token is then exchanged for a full IMS access token via the promise_exchange grant.
+   * from the `x-promise-token` header if present, else falls back to IMS.
+   * The promise token is then exchanged for a full IMS access token via the promise_exchange grant.
    * For non-promise-based sites that require authentication, a static PAGE_AUTH_TOKEN
    * is retrieved from AWS Secrets Manager. The resolved token is forwarded to Mysticat
    * as an Authorization header (Bearer for AEM_CS with promise token, token otherwise).
@@ -370,8 +394,7 @@ function PreflightController(ctx, log, env) {
    * @param {string} context.data.step - The audit step (identify or suggest)
    * @param {string} [context.data.siteId] - Optional site ID
    * @param {Object} [context.pathInfo] - The path info object
-   * @param {Object} [context.pathInfo.headers] - Request headers; must include a
-   *   `cookie` header with `promiseToken=<token>` for CS/CS_CW/AMS authoring types
+   * @param {Object} [context.pathInfo.headers] - Request headers; must include `x-promise-token`
    * @returns {Promise<Object>} The HTTP response object
    */
   const createBetaPreflightJob = async (context) => {

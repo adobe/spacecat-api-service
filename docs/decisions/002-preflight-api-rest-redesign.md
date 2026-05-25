@@ -71,7 +71,7 @@ The controller validates that the `url` hostname matches one of the site's known
 different site returns `PREFLIGHT_INVALID_REQUEST`. This replaces the implicit validation
 previously provided by `findByPreviewURL`.
 
-`promiseToken` is passed via cookie for authenticated CMS pages (CS/CS_CW/AMS sites); it is not part of the request body.
+For authenticated CMS pages (CS, CS_CW, AMS), the promise token is sent on the `x-promise-token` request header (obtained from `POST /auth/v2/promise`); it is not part of the request body. If the header is absent, the service falls back to creating a promise token from the caller's `Authorization` bearer token via IMS.
 
 `createdBy` is derived server-side from the caller's IMS profile and is never supplied by the client. It is an object containing the IMS user email (`profile.email`) and a display name composed from `profile.first_name` and `profile.last_name` (falling back to `profile.name`). Both fields are stored in async job metadata at creation time. No additional IMS lookup is required — both are available on the authenticated profile.
 
@@ -221,7 +221,7 @@ Key changes:
   resource is communicated via the `Location` response header. Clients that need to poll for
   completion read `Location` rather than a body field.
 - **`step` is removed.** Mysticat's agent always performs both identify and suggest as a single
-  flow, making the field redundant. `promiseToken` (cookie) is retained unchanged. The existing
+  flow, making the field redundant. Promise-token auth via `x-promise-token` (with IMS fallback) is retained unchanged. The existing
   `step` branching in `src/preflight/links.js:102` and `src/preflight/metatags.js:103` is dead
   code that will be removed as part of this implementation.
 - **`createdBy`** is captured server-side as `{ email, displayName }` from the caller's IMS
