@@ -150,26 +150,26 @@ function PreflightController(ctx, log, env) {
    */
   function getPromiseTokenHeader(context) {
     const headers = context.pathInfo?.headers;
-    log.debug(`getPromiseTokenHeader headers: ${JSON.stringify(headers)}`);
+    log.info(`getPromiseTokenHeader headers: ${JSON.stringify(headers)}`);
     if (!isNonEmptyObject(headers)) {
       return null;
     }
     const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === 'x-promise-token');
-    log.debug(`getPromiseTokenHeader entry: ${JSON.stringify(entry)}`);
+    log.info(`getPromiseTokenHeader entry: ${JSON.stringify(entry)}`);
     if (!entry) {
       return null;
     }
     const raw = entry[1];
-    log.debug(`getPromiseTokenHeader raw: ${JSON.stringify(raw)}`);
+    log.info(`getPromiseTokenHeader raw: ${JSON.stringify(raw)}`);
     if (!hasText(raw)) {
       return null;
     }
     const trimmed = String(raw).trim();
-    log.debug(`getPromiseTokenHeader trimmed: ${JSON.stringify(trimmed)}`);
+    log.info(`getPromiseTokenHeader trimmed: ${JSON.stringify(trimmed)}`);
     try {
       return decodeURIComponent(trimmed);
     } catch {
-      log.debug(`getPromiseTokenHeader failed to decode: ${JSON.stringify(trimmed)}`);
+      log.info(`getPromiseTokenHeader failed to decode: ${JSON.stringify(trimmed)}`);
       return trimmed;
     }
   }
@@ -179,6 +179,7 @@ function PreflightController(ctx, log, env) {
       return null;
     }
     const promiseTokenHeader = getPromiseTokenHeader(context);
+    log.info(`resolvePromiseToken promiseTokenHeader: ${JSON.stringify(promiseTokenHeader)}`);
     if (hasText(promiseTokenHeader)) {
       return { promise_token: promiseTokenHeader };
     }
