@@ -90,7 +90,7 @@
     "@adobe/spacecat-shared-data-access-v2": "npm:@adobe/spacecat-shared-data-access@2.109.0",
     "@adobe/spacecat-shared-drs-client": "1.7.2",
     "@adobe/spacecat-shared-gpt-client": "1.6.23",
-    "@adobe/spacecat-shared-http-utils": "https://gist.github.com/ravverma/f48ea6bc8baae3d20c4f3812e34d8ae3/raw/d7c5733a3ff2293550cf8928d101b7abf28741eb/adobe-spacecat-shared-http-utils-1.27.2.tgz",
+    "@adobe/spacecat-shared-http-utils": "https://gist.github.com/ravverma/f48ea6bc8baae3d20c4f3812e34d8ae3/raw/8dda870be0206c793204d85045215b88ca001c16/adobe-spacecat-shared-http-utils-1.27.2.tgz",
     "@adobe/spacecat-shared-ims-client": "1.12.7",
     "@adobe/spacecat-shared-launchdarkly-client": "^1.1.0",
     "@adobe/spacecat-shared-rum-api-client": "2.40.13",
