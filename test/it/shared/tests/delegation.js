@@ -83,15 +83,13 @@ export default function delegationTests(getHttpClient, resetData) {
         expect(res.body.message).to.include('Only users belonging to the organization');
       });
 
-      it('user (ORG_1): SITE_1 with x-product=ASO on LLMO route → 403 (facsWrapper denies before controller)', async () => {
+      it('user (ORG_1): SITE_1 x-product=ASO → 403 unauthorized request (product mismatch)', async () => {
         const http = getHttpClient();
-        // x-product=ASO on an LLMO-claimed route: facsWrapper's strict
-        // fail-closed step denies with "x-product header required for
-        // FACS-governed routes" before the controller's own product check
-        // fires. The previous test asserted the controller-level message
-        // '[Error] Unauthorized request' — now caught one layer earlier.
+        // Forcing x-product: ASO; hasAccess called with productCode='LLMO'
+        // (extraHeaders override the http-client's URL-derived default).
         const res = await http.user.get(`/sites/${SITE_1_ID}/llmo/config`, { 'x-product': 'ASO' });
         expect(res.status).to.equal(403);
+        expect(res.body.message).to.include('[Error] Unauthorized request');
       });
     });
 
@@ -121,17 +119,17 @@ export default function delegationTests(getHttpClient, resetData) {
         expect(res.body.message).to.include('Only users belonging to the organization');
       });
 
-      it('delegatedUser: SITE_1 with wrong x-product (ASO) → 403 (facsWrapper denies before controller)', async () => {
+      it('delegatedUser: SITE_1 with wrong x-product (ASO) → 403 unauthorized request (product mismatch)', async () => {
         const http = getHttpClient();
-        // x-product=ASO on an LLMO-claimed route: facsWrapper denies at
-        // the strict fail-closed gate before the controller's hasAccess
-        // can perform the productCode='LLMO' vs xProductHeader='ASO'
-        // mismatch check. Same 403 outcome, caught one layer earlier.
+        // Forcing x-product: ASO → hasAccess receives productCode='LLMO',
+        // xProductHeader='ASO' → mismatch (extraHeaders override the
+        // http-client's URL-derived default).
         const res = await http.delegatedUser.get(
           `/sites/${SITE_1_ID}/llmo/config`,
           { 'x-product': 'ASO' },
         );
         expect(res.status).to.equal(403);
+        expect(res.body.message).to.include('[Error] Unauthorized request');
       });
 
       it('delegatedUser: non-existent site → 404', async () => {
@@ -190,16 +188,16 @@ export default function delegationTests(getHttpClient, resetData) {
         expect(res.body.message).to.include('Only users belonging to the organization');
       });
 
-      it('delegatedUserTruncated: wrong x-product (ASO) → 403 (facsWrapper denies before controller)', async () => {
+      it('delegatedUserTruncated: wrong x-product (ASO) → 403 unauthorized request', async () => {
         const http = getHttpClient();
-        // x-product=ASO on an LLMO-claimed route: facsWrapper denies at
-        // the strict fail-closed gate (same 403 outcome as the previous
-        // controller-level check, caught one layer earlier).
+        // Forcing x-product: ASO via extraHeaders (the http-client's
+        // URL-derived default would otherwise pick LLMO).
         const res = await http.delegatedUserTruncated.get(
           `/sites/${SITE_1_ID}/llmo/config`,
           { 'x-product': 'ASO' },
         );
         expect(res.status).to.equal(403);
+        expect(res.body.message).to.include('[Error] Unauthorized request');
       });
 
       it('delegatedUserTruncated: non-existent site → 404', async () => {

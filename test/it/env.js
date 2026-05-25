@@ -75,6 +75,22 @@ export function buildEnv(publicKeyB64) {
     // Consumers (S2S) — allow ORG_1 IMS org for seeding and IT tests
     S2S_ALLOWED_IMS_ORG_IDS: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
 
+    // facsWrapper bypass — IT tests don't configure LaunchDarkly, so without
+    // this list the wrapper's strict step 6 (LD ctor failure → 503) fires
+    // for every FACS-mapped route call from the user/delegatedUser personas.
+    // The test tenant idents (bare, as returned by authInfo.getTenantIds()[0])
+    // are routed through the wrapper's internal-org bypass (step 2),
+    // skipping FACS entirely. IT tests exercise controller-level auth /
+    // data access — FACS itself is verified by unit tests + dedicated
+    // FACS test files.
+    FACS_EXCEPTION_INTERNAL_ORGS: [
+      'AAAAAAAABBBBBBBBCCCCCCCC', // ORG_1
+      'DDDDDDDDEEEEEEEEFFFFFFFF', // ORG_2
+      'GGGGGGGGHHHHHHHHIIIIIIII', // ORG_3
+      'LEGACYLLLMOOOOOOOOOOOOOO', // ORG_LEGACY_LLMO
+      'NEWWWLLMOOOOOOOOOOOOOOOO', // ORG_NEW_LLMO
+    ].join(','),
+
     // PostgreSQL data service
     DATA_SERVICE_PROVIDER: 'postgres',
     POSTGREST_URL: `http://localhost:${process.env.IT_POSTGREST_PORT || '3300'}`,
