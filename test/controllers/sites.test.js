@@ -4329,13 +4329,20 @@ describe('Sites Controller', () => {
     };
 
     // Wrap a real Config so toDynamoItem still works against the published
-    // shared package, while attaching a sinon stub for updateScraperConfig
-    // (which may not exist on the installed version yet).
+    // shared package, while attaching sinon stubs for updateScraperConfig and
+    // getScraperConfig (neither exists on the installed version yet).
+    // The stubbed updateScraperConfig captures the persisted value so the
+    // matching getScraperConfig returns it — matching the contract the
+    // controller now relies on for the response payload.
     /* eslint-disable no-param-reassign */
     const stubSiteConfig = (site) => {
       const wrapped = Object.create(Config({}));
-      const updateStub = sandbox.stub();
+      let persisted;
+      const updateStub = sandbox.stub().callsFake((value) => {
+        persisted = value;
+      });
       wrapped.updateScraperConfig = updateStub;
+      wrapped.getScraperConfig = () => persisted;
       site.getConfig = sandbox.stub().returns(wrapped);
       site.setConfig = sandbox.stub();
       site.save = sandbox.stub().resolves(site);
@@ -4424,105 +4431,6 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.scraperConfig).to.deep.equal(partialUpdate);
-    });
-
-    it('rejects header values containing CRLF', async () => {
-      const response = await sitesController.updateScraperConfig({
-        params: { siteId: SITE_IDS[0] },
-        data: { scraperConfig: { headers: { 'X-Foo': 'a\r\nX-Bad: y' } } },
-        ...defaultAuthAttributes,
-      });
-
-      expect(response.status).to.equal(400);
-      expect((await response.json()).message).to.match(/Invalid header value/);
-    });
-
-    it('rejects invalid header names', async () => {
-      const response = await sitesController.updateScraperConfig({
-        params: { siteId: SITE_IDS[0] },
-        data: { scraperConfig: { headers: { 'X Bad Name': 'v' } } },
-        ...defaultAuthAttributes,
-      });
-
-      expect(response.status).to.equal(400);
-      expect((await response.json()).message).to.match(/Invalid header name/);
-    });
-
-    it('rejects reserved header names', async () => {
-      const response = await sitesController.updateScraperConfig({
-        params: { siteId: SITE_IDS[0] },
-        data: { scraperConfig: { headers: { Authorization: 'Bearer x' } } },
-        ...defaultAuthAttributes,
-      });
-
-      expect(response.status).to.equal(400);
-      expect((await response.json()).message).to.match(/reserved/);
-    });
-
-    it('rejects more than 32 headers', async () => {
-      const tooMany = {};
-      for (let i = 0; i < 33; i += 1) {
-        tooMany[`X-H${i}`] = String(i);
-      }
-      const response = await sitesController.updateScraperConfig({
-        params: { siteId: SITE_IDS[0] },
-        data: { scraperConfig: { headers: tooMany } },
-        ...defaultAuthAttributes,
-      });
-
-      expect(response.status).to.equal(400);
-      expect((await response.json()).message).to.match(/more than 32 entries/);
-    });
-
-    it('accepts exactly 32 headers (boundary)', async () => {
-      const site = sites[0];
-      stubSiteConfig(site);
-      const exact = {};
-      for (let i = 0; i < 32; i += 1) {
-        exact[`X-H${i}`] = String(i);
-      }
-      const response = await sitesController.updateScraperConfig({
-        params: { siteId: SITE_IDS[0] },
-        data: { scraperConfig: { headers: exact } },
-        ...defaultAuthAttributes,
-      });
-
-      expect(response.status).to.equal(200);
-    });
-
-    it('rejects header name longer than 64 chars (boundary)', async () => {
-      const tooLongName = 'X-'.padEnd(65, 'A');
-      const response = await sitesController.updateScraperConfig({
-        params: { siteId: SITE_IDS[0] },
-        data: { scraperConfig: { headers: { [tooLongName]: 'v' } } },
-        ...defaultAuthAttributes,
-      });
-
-      expect(response.status).to.equal(400);
-      expect((await response.json()).message).to.match(/Invalid header name/);
-    });
-
-    it('rejects header value longer than 1024 chars (boundary)', async () => {
-      const tooLongValue = 'a'.repeat(1025);
-      const response = await sitesController.updateScraperConfig({
-        params: { siteId: SITE_IDS[0] },
-        data: { scraperConfig: { headers: { 'X-Long': tooLongValue } } },
-        ...defaultAuthAttributes,
-      });
-
-      expect(response.status).to.equal(400);
-      expect((await response.json()).message).to.match(/Invalid header value/);
-    });
-
-    it('rejects non-object headers', async () => {
-      const response = await sitesController.updateScraperConfig({
-        params: { siteId: SITE_IDS[0] },
-        data: { scraperConfig: { headers: 'oops' } },
-        ...defaultAuthAttributes,
-      });
-
-      expect(response.status).to.equal(400);
-      expect((await response.json()).message).to.match(/headers must be an object/);
     });
 
     it('returns not found when site does not exist', async () => {

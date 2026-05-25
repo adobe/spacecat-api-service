@@ -1135,63 +1135,18 @@ function SitesController(ctx, log, env) {
     }
   };
 
-  // RFC 7230 token characters for HTTP header names.
-  const HEADER_NAME_PATTERN = /^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/;
-  // Printable ASCII + tab; rejects CR, LF, NUL to block header injection.
-  const HEADER_VALUE_PATTERN = /^[\t\x20-\x7E]*$/;
-  // Header names that the scraper or its environment owns. Persisting these via
-  // site config would either get overwritten at scrape time or open a credential
-  // surface that is out of scope for this endpoint.
-  const RESERVED_HEADER_NAMES = new Set([
-    // Credential / identity surface owned by the scraper or its environment.
-    'authorization',
-    'cookie',
-    'proxy-authorization',
-    'host',
-    'user-agent',
-    // Connection-management / hop-by-hop headers (RFC 7230 sec 6.1). These are
-    // managed by the HTTP client; persisting them as per-site overrides will
-    // either be stripped or break request framing.
-    'content-length',
-    'transfer-encoding',
-    'connection',
-    'keep-alive',
-    'upgrade',
-    'te',
-    'trailer',
-  ]);
-
-  const validateScraperHeaders = (headers) => {
-    if (headers === undefined) {
-      return null;
-    }
-    if (!isObject(headers)) {
-      return 'headers must be an object';
-    }
-    const entries = Object.entries(headers);
-    if (entries.length > 32) {
-      return 'headers has more than 32 entries';
-    }
-    for (const [key, value] of entries) {
-      if (typeof key !== 'string' || !HEADER_NAME_PATTERN.test(key) || key.length > 64) {
-        return `Invalid header name: ${key}`;
-      }
-      if (RESERVED_HEADER_NAMES.has(key.toLowerCase())) {
-        return `Header name is reserved and not allowed via this endpoint: ${key}`;
-      }
-      if (typeof value !== 'string' || !HEADER_VALUE_PATTERN.test(value) || value.length > 1024) {
-        return `Invalid header value for ${key}`;
-      }
-    }
-    return null;
-  };
-
   /**
    * PATCH /sites/:siteId/config/scraper
    *
    * Replaces the entire `scraperConfig` on the site. Passing
    * `scraperConfig: {}` clears any previously stored configuration.
    * To preserve unrelated fields, callers must merge client-side.
+   *
+   * Header shape validation (RFC 7230 token names, no CR/LF in values,
+   * length caps, reserved-name denylist) lives in the
+   * `@adobe/spacecat-shared-data-access` `scraperConfig` Joi schema.
+   * Bad payloads surface as a `Configuration validation error` thrown
+   * by `siteConfig.updateScraperConfig(...)`; we catch and return 400.
    */
   const updateScraperConfig = async (context) => {
     const siteId = context.params?.siteId;
@@ -1203,11 +1158,6 @@ function SitesController(ctx, log, env) {
 
     if (!isObject(scraperConfig)) {
       return badRequest('Scraper config required');
-    }
-
-    const headerError = validateScraperHeaders(scraperConfig.headers);
-    if (headerError) {
-      return badRequest(headerError);
     }
 
     const site = await Site.findById(siteId);
@@ -1251,8 +1201,13 @@ function SitesController(ctx, log, env) {
     );
     // Narrow response: do not echo unrelated site config (which may contain
     // secrets like tokowakaConfig.apiKey) back to a caller that only wrote
-    // scraperConfig.
-    return ok({ siteId: updatedSite.getId(), scraperConfig });
+    // scraperConfig. Read the persisted value back from the saved entity so
+    // any sanitization the shared Joi schema performs (defaults, trims,
+    // unknown-field stripping) is reflected in the response.
+    return ok({
+      siteId: updatedSite.getId(),
+      scraperConfig: updatedSite.getConfig().getScraperConfig(),
+    });
   };
 
   const CITABILITY_GROUP_BY_FIELDS = new Set(['updatedBy', 'url', 'updatedAt']);
