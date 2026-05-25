@@ -127,6 +127,13 @@ describe('AddOaeStageDomainCommand', () => {
       expect(slackContext.say).to.have.been.calledWithMatch(/Usage:/);
     });
 
+    it('warns when domains arg contains only commas or whitespace', async () => {
+      const command = AddOaeStageDomainCommand(context);
+      await command.handleExecution([PROD_SITE_INPUT, ',,,'], slackContext);
+      expect(slackContext.say).to.have.been.calledWithMatch(/Please provide at least one staging domain/);
+      expect(dataAccessStub.Site.findByBaseURL).to.not.have.been.called;
+    });
+
     it('warns and returns when extra space-separated args are present', async () => {
       const command = AddOaeStageDomainCommand(context);
       await command.handleExecution([PROD_SITE_INPUT, STAGE_DOMAIN, 'stage2.other.com'], slackContext);
@@ -317,6 +324,24 @@ describe('AddOaeStageDomainCommand', () => {
         'existing.example.com',
         STAGE_DOMAIN,
       ]);
+    });
+
+    it('handles null edgeOptimizeConfig gracefully', async () => {
+      mockConfig.getEdgeOptimizeConfig.returns(null);
+
+      dataAccessStub.Site.findByBaseURL.callsFake((url) => Promise.resolve(
+        url === PROD_SITE_URL ? mockProdSite : null,
+      ));
+      dataAccessStub.Site.create.resolves(mockStageSite);
+      tokowakaClientStub.fetchMetaconfig.resolves(null);
+      tokowakaClientStub.createMetaconfig.resolves({ apiKeys: ['key1'] });
+
+      const command = AddOaeStageDomainCommand(context);
+      await command.handleExecution([PROD_SITE_INPUT, STAGE_DOMAIN], slackContext);
+
+      const updateCall = mockConfig.updateEdgeOptimizeConfig.firstCall.args[0];
+      expect(updateCall.stagingDomains).to.have.lengthOf(1);
+      expect(slackContext.say).to.have.been.calledWithMatch(/Successfully onboarded 1 stage domain/);
     });
 
     it('looks up site by ID when input is not a valid URL', async () => {
