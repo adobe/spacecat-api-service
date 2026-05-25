@@ -73,4 +73,22 @@ describe('src/index.js authHandlers order contract', () => {
       'ApiKeyImsHandler must come before AdobeImsHandler',
     );
   });
+
+  it('places RouteScopedLegacyApiKeyHandler before LegacyApiKeyHandler', () => {
+    // The scoped handler explicitly owns POST /event/fulfillment and
+    // POST /slack/channels/invite-by-user-id. It must run before the catch-all
+    // LegacyApiKeyHandler so those routes are matched by the scoped handler
+    // rather than falling through to the parent. Both handlers remain in the
+    // chain until the follow-up cleanup removes LegacyApiKeyHandler.
+    const order = parseAuthHandlersOrder();
+    const scopedIdx = order.indexOf('RouteScopedLegacyApiKeyHandler');
+    const legacyIdx = order.indexOf('LegacyApiKeyHandler');
+
+    expect(scopedIdx).to.be.greaterThan(-1, 'RouteScopedLegacyApiKeyHandler must be in AUTH_HANDLERS');
+    expect(legacyIdx).to.be.greaterThan(-1, 'LegacyApiKeyHandler must be in AUTH_HANDLERS');
+    expect(scopedIdx).to.be.lessThan(
+      legacyIdx,
+      'RouteScopedLegacyApiKeyHandler must come before LegacyApiKeyHandler',
+    );
+  });
 });
