@@ -266,7 +266,10 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/topics/research': ['llmo/can_view', 'llmo/can_view_all'],
       'GET /llmo/ai-visibility/topics/stats': ['llmo/can_view', 'llmo/can_view_all'],
       'GET /llmo/ai-visibility/v1/topic/brand-topics': ['llmo/can_view', 'llmo/can_view_all'],
+      'GET /llmo/ai-visibility/v1/topic/gap-topics': ['llmo/can_view', 'llmo/can_view_all'],
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts': ['llmo/can_view', 'llmo/can_view_all'],
+      'GET /llmo/ai-visibility/v1/prompt/gap-prompts': ['llmo/can_view', 'llmo/can_view_all'],
+      'GET /llmo/ai-visibility/v1/prompt/prompt-response': ['llmo/can_view', 'llmo/can_view_all'],
 
       // Brand presence — org-scoped, includes "all" and per-brand variants
       'GET /org/:spaceCatId/brands/:brandId/fanout-report': ['llmo/can_view', 'llmo/can_view_all'],
@@ -443,6 +446,7 @@ const routeFacsCapabilities = {
       'PATCH /trial-users/email-preferences': ['llmo/can_configure'],
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId': ['llmo/can_configure'],
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': ['llmo/can_configure'],
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/:promptId': ['llmo/can_configure'],
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': ['llmo/can_configure'],
       'PATCH /v2/orgs/:spaceCatId/topics/:topicId': ['llmo/can_configure'],
       // POST (non-onboard, non-deploy, non-query)
@@ -472,6 +476,9 @@ const routeFacsCapabilities = {
       'POST /tools/scrape/jobs': ['llmo/can_configure'],
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': ['llmo/can_configure'],
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': ['llmo/can_configure'],
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts': ['llmo/can_configure'],
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/bulk-delete': ['llmo/can_configure'],
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects': ['llmo/can_configure'],
       'POST /v2/orgs/:spaceCatId/categories': ['llmo/can_configure'],
       'POST /v2/orgs/:spaceCatId/topics': ['llmo/can_configure'],
       // POSTs that S2S confirms are :write (not body-based queries).
@@ -657,6 +664,11 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId': ['llmo/can_view', 'llmo/can_view_all'],
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': ['llmo/can_view', 'llmo/can_view_all'],
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': ['llmo/can_view', 'llmo/can_view_all'],
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts': ['llmo/can_view', 'llmo/can_view_all'],
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects': ['llmo/can_view', 'llmo/can_view_all'],
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/tags': ['llmo/can_view', 'llmo/can_view_all'],
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/models': ['llmo/can_view', 'llmo/can_view_all'],
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/workspaces/:workspaceId/projects': ['llmo/can_view', 'llmo/can_view_all'],
       'GET /v2/orgs/:spaceCatId/categories': ['llmo/can_view', 'llmo/can_view_all'],
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': ['llmo/can_view', 'llmo/can_view_all'],
       'GET /v2/orgs/:spaceCatId/topics': ['llmo/can_view', 'llmo/can_view_all'],
@@ -789,6 +801,10 @@ const routeFacsCapabilities = {
     // External / shared identifiers:
     'accessId', 'batchId', 'clientId', 'consumerId', 'contactSalesLeadId',
     'externalUserId', 'imsOrgId', 'grantId', 'userId',
+    // Semrush AIO proxy — workspace identifier from the Semrush API,
+    // not a SpaceCat resource. The enclosing :brandId is the FACS
+    // resource for these routes.
+    'workspaceId',
     // Filter / pagination / format params (not entities):
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',
