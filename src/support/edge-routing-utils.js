@@ -38,6 +38,11 @@ export const SUPPORTED_EDGE_ROUTING_CDN_TYPES = Object.keys(EDGE_OPTIMIZE_CDN_ST
 // when Tokowaka confirms the site is serving edge-optimized content.
 export const OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE = 'optimize-at-edge-enabled-marking';
 
+// Import worker job type for async domain-wide covered marking.
+// Enqueued after a domain-wide edge deploy so the import worker marks all matching
+// URL-level suggestions as coveredByDomainWide without blocking the API response.
+export const DOMAIN_WIDE_COVERED_MARKING_TYPE = 'domain-wide-covered-marking';
+
 // Delay (seconds) before triggering the edge-optimize enabled marking job after CDN routing update.
 // Gives the CDN API time to propagate before Tokowaka detects the change.
 export const EDGE_OPTIMIZE_MARKING_DELAY_SECONDS = 300;

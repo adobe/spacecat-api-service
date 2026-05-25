@@ -49,6 +49,7 @@ import {
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import { DOMAIN_WIDE_COVERED_MARKING_TYPE } from '../support/edge-routing-utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -1996,6 +1997,30 @@ function SuggestionsController(ctx, sqs, env) {
       });
 
       context.log.info(`[edge-deploy] Successfully deployed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-deployment'}`);
+
+      // Enqueue async covered marking for deployed domain-wide suggestions.
+      // The sync Promise.all inside deployToEdge times out at 2-3k+ suggestions;
+      // the import worker job guarantees marking happens regardless.
+      const succeededDomainWideIds = domainWideSuggestions
+        .map(({ suggestion }) => suggestion.getId())
+        .filter((id) => succeededSuggestions.some((s) => s.getId() === id));
+
+      if (succeededDomainWideIds.length > 0) {
+        try {
+          await context.sqs.sendMessage(
+            context.env.IMPORT_WORKER_QUEUE_URL,
+            {
+              type: DOMAIN_WIDE_COVERED_MARKING_TYPE,
+              siteId,
+              opportunityId,
+              domainWideSuggestionIds: succeededDomainWideIds,
+            },
+          );
+          context.log.info(`[edge-deploy] Queued domain-wide covered marking for ${succeededDomainWideIds.length} domain-wide suggestion(s)`);
+        } catch (sqsError) {
+          context.log.warn(`[edge-deploy] Failed to queue domain-wide covered marking: ${sqsError.message}`);
+        }
+      }
     } catch (error) {
       context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error deploying to edge: ${error.message}`, error);
       allTargetSuggestions.forEach((suggestion) => {

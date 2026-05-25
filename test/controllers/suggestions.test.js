@@ -7615,6 +7615,101 @@ describe('Suggestions Controller', () => {
       expect(context.log.warn.calledWithMatch('Failed to mark covered suggestions')).to.equal(true);
     });
 
+    it('enqueues domain-wide-covered-marking job after successful domain-wide deploy', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/.*$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+
+      const sqsStub = { sendMessage: sandbox.stub().resolves() };
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      });
+
+      await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        sqs: sqsStub,
+        env: { IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker' },
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, payload] = sqsStub.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('https://sqs.example.com/import-worker');
+      expect(payload.type).to.equal('domain-wide-covered-marking');
+      expect(payload.siteId).to.equal(SITE_ID);
+      expect(payload.opportunityId).to.equal(OPPORTUNITY_ID);
+      expect(payload.domainWideSuggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
+    });
+
+    it('logs warning but still returns 207 when domain-wide-covered-marking SQS enqueue fails', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/.*$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+
+      const sqsStub = { sendMessage: sandbox.stub().rejects(new Error('SQS unavailable')) };
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        sqs: sqsStub,
+        env: { IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker' },
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(context.log.warn.calledWithMatch('Failed to queue domain-wide covered marking')).to.equal(true);
+    });
+
     it('skips non-domain suggestions without URL when evaluating domain-wide coverage', async () => {
       const domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],
