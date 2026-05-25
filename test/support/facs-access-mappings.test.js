@@ -282,6 +282,22 @@ describe('facs-access-mappings helpers', () => {
       }
     });
 
+    it('treats `data: null` from PostgREST as an empty created list', async () => {
+      const client = fakePostgrestClient({
+        upsertResult: { data: null, error: null },
+      });
+      const out = await createFacsAccessMappings(client, {
+        imsOrgId: 'org-1',
+        resourceType: 'brand',
+        resourceId: 'brand-x',
+        subjects: [{ type: 'user', id: 'A@AdobeID' }],
+      });
+      expect(out.created).to.deep.equal([]);
+      expect(out.skipped).to.deep.equal([
+        { subject: { type: 'user', id: 'A@AdobeID' }, reason: 'duplicate' },
+      ]);
+    });
+
     it('treats undefined createdBy as null in the row', async () => {
       const client = fakePostgrestClient({
         upsertResult: { data: [], error: null },

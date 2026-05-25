@@ -123,6 +123,14 @@ describe('FacsAccessMappingsController', () => {
   });
 
   describe('listHistory', () => {
+    it('returns 400 when subjectType filter is invalid', async () => {
+      const Controller = (await loadController()).default;
+      const ctx = makeContext({ queryParams: { subjectType: 'group' } });
+      const ctrl = Controller(ctx);
+      const res = await ctrl.listHistory(ctx);
+      expect(res.status).to.equal(400);
+    });
+
     it('passes the optional `since` filter through to the helper', async () => {
       const list = sinon.stub().resolves([]);
       const Controller = (await loadController({ listFacsAccessMappingHistory: list })).default;
@@ -554,6 +562,59 @@ describe('FacsAccessMappingsController', () => {
       const ctrl = Controller(ctx);
       const res = await ctrl.createMappings(ctx);
       expect(res.status).to.equal(503);
+    });
+
+    it('listHistory returns the guard response when postgrest is unavailable', async () => {
+      const Controller = (await loadController({
+        requirePostgrestForFacsMappings: () => ({ status: 503 }),
+      })).default;
+      const ctx = makeContext();
+      const ctrl = Controller(ctx);
+      const res = await ctrl.listHistory(ctx);
+      expect(res.status).to.equal(503);
+    });
+
+    it('revokeMappingById returns the guard response when postgrest is unavailable', async () => {
+      const Controller = (await loadController({
+        requirePostgrestForFacsMappings: () => ({ status: 503 }),
+      })).default;
+      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
+      const ctrl = Controller(ctx);
+      const res = await ctrl.revokeMappingById(ctx);
+      expect(res.status).to.equal(503);
+    });
+  });
+
+  describe('missing IMS org', () => {
+    it('listHistory returns 403 when caller has no IMS org', async () => {
+      const Controller = (await loadController()).default;
+      const ctx = makeContext({ imsOrgId: null });
+      const ctrl = Controller(ctx);
+      const res = await ctrl.listHistory(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('createMappings returns 403 when caller has no IMS org', async () => {
+      const Controller = (await loadController()).default;
+      const ctx = makeContext({
+        imsOrgId: null,
+        body: {
+          resourceType: 'brand',
+          resourceId: VALID_UUID_BRAND,
+          subjects: [{ type: 'user', id: 'A@AdobeID' }],
+        },
+      });
+      const ctrl = Controller(ctx);
+      const res = await ctrl.createMappings(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('revokeMappingById returns 403 when caller has no IMS org', async () => {
+      const Controller = (await loadController()).default;
+      const ctx = makeContext({ imsOrgId: null, pathParams: { id: VALID_UUID_MAPPING } });
+      const ctrl = Controller(ctx);
+      const res = await ctrl.revokeMappingById(ctx);
+      expect(res.status).to.equal(403);
     });
   });
 });
