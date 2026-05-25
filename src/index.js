@@ -107,6 +107,7 @@ import AiVisibilityController from './controllers/ai-visibility.js';
 import SemrushController from './controllers/semrush.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
+import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -397,10 +398,17 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 //    working without re-introducing a global IMS auth backdoor.
 //  - AdobeImsHandler: legacy global IMS path; kept for routes still on IMS auth
 //    (e.g. Auto-Fix). To be removed once all consumers are JWT-migrated.
-//  - ScopedApiKeyHandler / LegacyApiKeyHandler: standard API-key auth paths.
+//  - ScopedApiKeyHandler: scoped API-key auth for Import-as-a-Service.
+//  - RouteScopedLegacyApiKeyHandler: route-scoped legacy API key handler for
+//    POST /event/fulfillment and POST /slack/channels/invite-by-user-id — the two
+//    admin endpoints whose callers cannot migrate to S2S. Returns null for all
+//    other routes. Must run BEFORE LegacyApiKeyHandler so the scoped handler owns
+//    those two routes explicitly. LegacyApiKeyHandler is kept for now and will be
+//    removed in a follow-up once all other consumers are confirmed migrated.
+//  - LegacyApiKeyHandler: legacy catch-all; to be removed in follow-up.
 // When adding a new path-scoped handler, place it in the same position (after
 // SkipAuthHandler, before the path-agnostic handlers) to preserve early-bail.
-// AUTH_HANDLERS order is enforced by test/auth-handlers.test.js.
+// AUTH_HANDLERS order is enforced by test/auth-handlers-order.test.js.
 const AUTH_HANDLERS = [
   SkipAuthHandler,
   GitHubWebhookHmacHandler,
@@ -408,6 +416,7 @@ const AUTH_HANDLERS = [
   ApiKeyImsHandler,
   AdobeImsHandler,
   ScopedApiKeyHandler,
+  RouteScopedLegacyApiKeyHandler,
   LegacyApiKeyHandler,
 ];
 
