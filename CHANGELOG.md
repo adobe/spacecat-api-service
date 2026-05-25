@@ -1,3 +1,10 @@
+# [1.513.0](https://github.com/adobe/spacecat-api-service/compare/v1.512.2...v1.513.0) (2026-05-25)
+
+
+### Features
+
+* **auth:** add route-scoped legacy API key handler for S2S-exempt endpoints ([#2481](https://github.com/adobe/spacecat-api-service/issues/2481)) ([ac498ce](https://github.com/adobe/spacecat-api-service/commit/ac498cedd2cb4550eb9495d56f92a535b3fe9e2e))
+
 ## [1.512.2](https://github.com/adobe/spacecat-api-service/compare/v1.512.1...v1.512.2) (2026-05-25)
 
 
