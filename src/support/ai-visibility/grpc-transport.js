@@ -103,6 +103,7 @@ export function getGrpcClients(env) {
     voSourcesClient: createClient(VoSources, transport),
     prRelationsClient: createClient(Relations, transport),
   };
+
   return cachedClients;
 }
 

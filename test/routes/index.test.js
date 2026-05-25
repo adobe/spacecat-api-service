@@ -491,7 +491,10 @@ describe('getRouteHandlers', () => {
     getTopicsResearch: sinon.stub(),
     getTopicsStats: sinon.stub(),
     getV1TopicBrandTopics: sinon.stub(),
+    getV1TopicGapTopics: sinon.stub(),
     getV1PromptBrandPrompts: sinon.stub(),
+    getV1PromptGapPrompts: sinon.stub(),
+    getV1PromptPromptResponse: sinon.stub(),
   };
 
   const mockFanoutReportController = {
@@ -503,6 +506,18 @@ describe('getRouteHandlers', () => {
     listHistory: sinon.stub(),
     createMappings: sinon.stub(),
     revokeMappingById: sinon.stub(),
+  };
+
+  const mockSemrushController = {
+    listPrompts: sinon.stub(),
+    createPrompts: sinon.stub(),
+    updatePrompt: sinon.stub(),
+    bulkDeletePrompts: sinon.stub(),
+    listProjects: sinon.stub(),
+    createProject: sinon.stub(),
+    listProjectTags: sinon.stub(),
+    listProjectModels: sinon.stub(),
+    listWorkspaceProjects: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -562,6 +577,7 @@ describe('getRouteHandlers', () => {
       mockAiVisibilityController,
       mockFanoutReportController,
       mockFacsAccessMappingsController,
+      mockSemrushController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -623,7 +639,10 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/topics/research',
       'GET /llmo/ai-visibility/topics/stats',
       'GET /llmo/ai-visibility/v1/topic/brand-topics',
+      'GET /llmo/ai-visibility/v1/topic/gap-topics',
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts',
+      'GET /llmo/ai-visibility/v1/prompt/gap-prompts',
+      'GET /llmo/ai-visibility/v1/prompt/prompt-response',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
@@ -683,7 +702,10 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research']).to.equal(mockAiVisibilityController.getTopicsResearch);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/stats']).to.equal(mockAiVisibilityController.getTopicsStats);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics']).to.equal(mockAiVisibilityController.getV1TopicBrandTopics);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics']).to.equal(mockAiVisibilityController.getV1TopicGapTopics);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts']).to.equal(mockAiVisibilityController.getV1PromptBrandPrompts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts']).to.equal(mockAiVisibilityController.getV1PromptGapPrompts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompt-response']).to.equal(mockAiVisibilityController.getV1PromptPromptResponse);
     expect(staticRoutes['GET /v2/regions']).to.equal(mockLlmoMysticatController.getRegions);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
     expect(staticRoutes['GET /plg/sites']).to.equal(mockPlgOnboardingController.getAllOnboardings);
@@ -727,6 +749,15 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/bulk-delete',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/:promptId',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/tags',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/models',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/workspaces/:workspaceId/projects',
       'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',

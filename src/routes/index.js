@@ -101,6 +101,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
  * @param {Object} facsAccessMappingsController - FACS Phase 2 state-layer mappings controller.
+ * @param {Object} semrushController - Semrush AIO proxy controller (prompts + projects).
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -159,6 +160,7 @@ export default function getRouteHandlers(
   aiVisibilityController,
   fanoutReportController,
   facsAccessMappingsController,
+  semrushController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -203,6 +205,15 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/brands': brandsController.createBrandForOrg,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId': brandsController.updateBrandForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts': semrushController.listPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts': semrushController.createPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/bulk-delete': semrushController.bulkDeletePrompts,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/:promptId': semrushController.updatePrompt,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects': semrushController.listProjects,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects': semrushController.createProject,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/tags': semrushController.listProjectTags,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/models': semrushController.listProjectModels,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/workspaces/:workspaceId/projects': semrushController.listWorkspaceProjects,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.getPromptByBrandAndId,
@@ -656,6 +667,7 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/topics/research': aiVisibilityController.getTopicsResearch,
     'GET /llmo/ai-visibility/topics/stats': aiVisibilityController.getTopicsStats,
     'GET /llmo/ai-visibility/v1/topic/brand-topics': aiVisibilityController.getV1TopicBrandTopics,
+    'GET /llmo/ai-visibility/v1/topic/gap-topics': aiVisibilityController.getV1TopicGapTopics,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
 
     // FACS Phase 2 state-layer management endpoints. Gated by:
@@ -667,6 +679,10 @@ export default function getRouteHandlers(
     'GET /facs/access-mappings/history': facsAccessMappingsController.listHistory,
     'POST /facs/access-mappings': facsAccessMappingsController.createMappings,
     'DELETE /facs/access-mappings/:id': facsAccessMappingsController.revokeMappingById,
+
+    // AI Visibility (Semrush gRPC)
+    'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
+    'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
   };
 
   // Initialization of static and dynamic routes

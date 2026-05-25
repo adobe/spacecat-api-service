@@ -106,8 +106,10 @@ import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
 import AiVisibilityController from './controllers/ai-visibility.js';
+import SemrushController from './controllers/semrush.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import FacsAccessMappingsController from './controllers/facs-access-mappings.js';
+import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -264,6 +266,7 @@ async function run(request, context) {
     const webhooksController = WebhooksController(context);
     const aiVisibilityController = AiVisibilityController(context, log, context.env);
     const facsAccessMappingsController = FacsAccessMappingsController(context);
+    const semrushController = SemrushController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -321,6 +324,7 @@ async function run(request, context) {
       aiVisibilityController,
       fanoutReportController,
       facsAccessMappingsController,
+      semrushController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -349,6 +353,12 @@ async function run(request, context) {
       }
       if (params.executionId && !isValidUUID(params.executionId)) {
         return badRequest('Execution Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.jobId && !isValidUUIDV4(params.jobId)) {
+        return badRequest('Job Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.workspaceId && !isValidUUID(params.workspaceId)) {
+        return badRequest('Workspace Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;
@@ -384,8 +394,16 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 //    for any other path, so non-webhook requests fall through cheaply. Must run
 //    BEFORE path-agnostic handlers so a webhook request does not reach JwtHandler
 //    / AdobeImsHandler and fail with a misleading 401 on a missing JWT.
-//  - JwtHandler / AdobeImsHandler / ScopedApiKeyHandler / LegacyApiKeyHandler:
-//    standard auth paths for the rest of the API surface.
+//  - JwtHandler: tried first for token-bearing requests (JWT path is the target
+//    end-state for all consumers).
+//  - ApiKeyImsHandler: route-scoped IMS handler (/tools/api-keys/*) for IaaS-only
+//    orgs that cannot acquire a JWT session token. Returns null for other paths,
+//    falling through to AdobeImsHandler. Once Auto-Fix (ASO-607) migrates and
+//    AdobeImsHandler is removed, this scoped handler keeps IaaS key management
+//    working without re-introducing a global IMS auth backdoor.
+//  - AdobeImsHandler: legacy global IMS path; kept for routes still on IMS auth
+//    (e.g. Auto-Fix). To be removed once all consumers are JWT-migrated.
+//  - ScopedApiKeyHandler / LegacyApiKeyHandler: standard API-key auth paths.
 // When adding a new path-scoped handler, place it in the same position (after
 // SkipAuthHandler, before the path-agnostic handlers) to preserve early-bail.
 // AUTH_HANDLERS order is enforced by test/auth-handlers.test.js.
@@ -393,6 +411,7 @@ const AUTH_HANDLERS = [
   SkipAuthHandler,
   GitHubWebhookHmacHandler,
   JwtHandler,
+  ApiKeyImsHandler,
   AdobeImsHandler,
   ScopedApiKeyHandler,
   LegacyApiKeyHandler,
