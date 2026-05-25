@@ -3601,6 +3601,46 @@ describe('Sites Controller', () => {
     expect(mergedConfig.handlers).to.deep.equal({ 'meta-tags': { excludedURLs: [] } });
   });
 
+  it('deep-merges llmo sub-keys so a partial llmo patch preserves siblings like cdnBucketConfig', async () => {
+    const site = sites[0];
+    const existingConfig = Config({
+      llmo: {
+        dataFolder: '/data',
+        brand: 'Test',
+        detectedCdn: 'byocdn-akamai',
+        cdnBucketConfig: { cdnProvider: 'akamai', bucketName: 'tui-cdn-logs', region: 'us-east-1' },
+        tags: ['opportunitiesReviewed'],
+      },
+    });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            detectedCdn: 'byocdn-other',
+            tags: ['opportunitiesReviewed'],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.llmo.detectedCdn).to.equal('byocdn-other');
+    expect(mergedConfig.llmo.cdnBucketConfig).to.deep.equal({
+      cdnProvider: 'akamai',
+      bucketName: 'tui-cdn-logs',
+      region: 'us-east-1',
+    });
+  });
+
   describe('auditTargetURLs validation', () => {
     it('returns bad request when manual URL hostname does not match site base URL', async () => {
       const site = sites[0];

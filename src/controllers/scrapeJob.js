@@ -17,12 +17,27 @@ import {
   accepted,
   notFound,
   badRequest,
+  forbidden,
+  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isValidUrl,
+  isValidUUID,
+  isNonEmptyObject,
   hasText,
+  DELIVERY_TYPES,
 } from '@adobe/spacecat-shared-utils';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
+import AccessControlUtil from '../support/access-control-util.js';
+import { getCookieValue, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+
+const PROMISE_BASED_TYPES = [
+  SiteModel.AUTHORING_TYPES.CS,
+  SiteModel.AUTHORING_TYPES.CS_CW,
+  SiteModel.AUTHORING_TYPES.AMS,
+];
 
 /**
  * Scrape controller. Provides methods to create, read, and fetch the result of scrape jobs.
@@ -46,6 +61,70 @@ function ScrapeJobController(context) {
 
   const MAX_JOBS_BY_BASEURL = 100;
 
+  // Duplicated from preflight controller. Extraction tracked in SITES-45204
+  // (move checkEnableAuthentication / resolvePromiseToken / PROMISE_BASED_TYPES
+  // to src/support/auth.js, alongside getIMSPromiseToken).
+  //
+  // Hardened HEAD probe — 3 s timeout (under API Gateway's 29 s budget for an
+  // outbound to arbitrary customer infrastructure) and redirect: 'manual' so
+  // a customer baseURL cannot 30x-launder the probe toward an internal host.
+  // Returns one of:
+  //   'auth-required'  — 401 / 403, mint and inject the Authorization header
+  //   'no-auth'        — 2xx,        delegate without injecting a header
+  //   'ambiguous'      — 3xx / 5xx / network / timeout, caller asked for auth
+  //                     but we cannot prove the page wants it; fail closed at
+  //                     the caller instead of silently scraping a login page.
+  const HEAD_PROBE_TIMEOUT_MS = 3000;
+  async function checkEnableAuthentication(previewBaseURL) {
+    let headResponse;
+    try {
+      headResponse = await fetch(previewBaseURL, {
+        method: 'HEAD',
+        headers: { 'Content-Type': 'application/json' },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(HEAD_PROBE_TIMEOUT_MS),
+      });
+    } catch (e) {
+      log.warn(`HEAD probe failed for ${previewBaseURL}: ${e.name}: ${e.message}`);
+      return 'ambiguous';
+    }
+    const { status } = headResponse;
+    if (status === 401 || status === 403) {
+      return 'auth-required';
+    }
+    if (status >= 200 && status < 300) {
+      return 'no-auth';
+    }
+    log.warn(`HEAD probe for ${previewBaseURL} returned ambiguous status ${status}`);
+    return 'ambiguous';
+  }
+
+  // Mirrors `@adobe/spacecat-shared-ims-client/src/auth.js` (the promise-
+  // exchange gate inside `retrievePageAuthentication`): the ims-client gates
+  // promise-token exchange on `(promiseTypes.includes(authoringType) ||
+  // deliveryType === AEM_CS) && authOptions.promiseToken`. Keeping this
+  // predicate identical avoids the controller and the ims-client drifting on
+  // "is this a promise-path site?" — that asymmetry is silent today (the
+  // ims-client falls through to the Secrets Manager PAT branch when no
+  // promise token is provided) but would surface for a customer who adds
+  // AEM_CS delivery on a non-promise authoring type, or vice versa.
+  // Extraction to a shared util is tracked in SITES-45204.
+  function isPromisePathSite(site) {
+    return PROMISE_BASED_TYPES.includes(site.getAuthoringType())
+      || site.getDeliveryType() === DELIVERY_TYPES.AEM_CS;
+  }
+
+  async function resolvePromiseToken(site, requestContext) {
+    if (!isPromisePathSite(site)) {
+      return null;
+    }
+    const cookieToken = getCookieValue(requestContext, 'promiseToken');
+    if (hasText(cookieToken)) {
+      return { promise_token: cookieToken };
+    }
+    return getIMSPromiseToken(requestContext);
+  }
+
   function createErrorResponse(error) {
     // cleanupHeaderValue strips chars HTTP headers can't carry (CR/LF and non-ASCII
     // that would otherwise throw ERR_INVALID_CHAR). The `|| 'Internal server error'`
@@ -56,19 +135,200 @@ function ScrapeJobController(context) {
     });
   }
 
+  // Strip the server-minted Authorization header from the response — content-
+  // scraper still receives it via the SQS message body, but the credential
+  // must not be echoed back in the 202 body. At-rest exposure in DynamoDB /
+  // LIST endpoints is tracked in SITES-45205 (spacecat-shared ScrapeJobDto
+  // redaction).
+  function sanitizeJobResponse(job) {
+    if (!isNonEmptyObject(job) || !isNonEmptyObject(job.customHeaders)) {
+      return job;
+    }
+    const { Authorization: _, ...safeHeaders } = job.customHeaders;
+    return { ...job, customHeaders: safeHeaders };
+  }
+
   /**
    * Create and start a new scrape job.
+   *
+   * When `options.enableAuthentication === true`, the per-site `Authorization`
+   * header is resolved server-side in this Lambda (HEAD probe + optional IMS
+   * promise-token exchange + `retrievePageAuthentication`), merged into
+   * `customHeaders`, and `options.enableAuthentication` is stripped before
+   * delegation. This mirrors the `createBetaPreflightJob` pattern.
+   *
+   * Why bake the header here instead of letting content-scraper resolve it:
+   * content-scraper's SQS Event Source Mappings target the unqualified Lambda
+   * ARN, so helix-universal reports `ctx.func.version === '$LATEST'`, which
+   * AWS Secrets Manager rejects as an invalid name (`ValidationException`).
+   * The spacecat-api Lambda is API-Gateway-invoked (alias-qualified `:latest`),
+   * so `retrievePageAuthentication` works correctly here.
+   *
+   * Callers that do not set `enableAuthentication` get byte-identical legacy
+   * behavior — no Site lookup, no HEAD probe, no Secrets Manager call.
+   *
    * @param {UniversalContext} requestContext - The context of the universal serverless function.
    * @param {object} requestContext.data - Parsed json request data.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createScrapeJob(requestContext) {
-    const { data } = requestContext;
+    const { data, dataAccess } = requestContext;
+
+    // Legacy fast-path: no auth resolution requested, behave exactly as before.
+    if (!isNonEmptyObject(data) || data.options?.enableAuthentication !== true) {
+      try {
+        const job = await scrapeClient.createScrapeJob(data);
+        return accepted(job);
+      } catch (error) {
+        log.error(error.message);
+        if (error?.message?.includes('Invalid request')) {
+          return badRequest(error);
+        }
+        return createErrorResponse(error);
+      }
+    }
+
+    // Auth-resolution path. metaData.siteId required — fail loud at the API edge
+    // rather than silently demote to an anonymous scrape that returns a login page.
+    const siteId = data?.metaData?.siteId;
+    if (!isValidUUID(siteId)) {
+      return badRequest(
+        'Invalid request: metaData.siteId is required when options.enableAuthentication is true',
+      );
+    }
+
+    let site;
+    try {
+      site = await dataAccess.Site.findById(siteId);
+    } catch (error) {
+      log.error(`Failed to load site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to load site');
+    }
+    if (!site) {
+      return notFound(`Site not found: ${siteId}`);
+    }
+
+    const accessControlUtil = AccessControlUtil.fromContext(requestContext);
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const baseURL = site.getBaseURL();
+    let siteOrigin;
+    let previewBaseURL;
+    try {
+      const parsed = new URL(baseURL);
+      siteOrigin = parsed.origin;
+      previewBaseURL = `${parsed.protocol}//${parsed.hostname}`;
+    } catch {
+      log.error(`Site ${siteId} has invalid baseURL: ${baseURL}`);
+      return internalServerError('Site has invalid baseURL');
+    }
+
+    // Bind every caller URL to the site's *origin* before we mint a credential
+    // — otherwise a caller can submit a valid siteId with URLs pointing at an
+    // attacker host (or an adjacent service on a different port, or the HTTP
+    // counterpart of an HTTPS site) and harvest the resolved Authorization.
+    // Comparing `URL.origin` (scheme + host + port) closes all three vectors;
+    // `.hostname` alone misses cross-port and the http/https downgrade. Other
+    // subdomains are rejected — promote them to their own site if needed.
+    if (!Array.isArray(data.urls) || data.urls.length === 0) {
+      return badRequest('Invalid request: urls must be a non-empty array');
+    }
+    for (const u of data.urls) {
+      let urlOrigin;
+      try {
+        urlOrigin = new URL(u).origin;
+      } catch {
+        return badRequest(`Invalid request: malformed URL: ${u}`);
+      }
+      if (urlOrigin !== siteOrigin) {
+        log.warn(`Cross-origin URL rejected for site ${siteId}: ${u} (site origin: ${siteOrigin})`);
+        return badRequest(
+          `Invalid request: every URL must belong to the site origin (${siteOrigin})`,
+        );
+      }
+    }
+
+    // checkEnableAuthentication never throws — it returns 'auth-required',
+    // 'no-auth', or 'ambiguous'. We fail closed on 'ambiguous' because the
+    // caller explicitly asked for authenticated scraping; silently demoting
+    // would store a login page as "real content" — the exact SITES-40597
+    // failure class.
+    const probeResult = await checkEnableAuthentication(previewBaseURL);
+    if (probeResult === 'ambiguous') {
+      return createResponse({}, 502, {
+        [HEADER_ERROR]: cleanupHeaderValue(
+          `Could not verify authentication requirement for ${previewBaseURL}`,
+        ).slice(0, 500),
+      });
+    }
+
+    let authorizationHeader;
+    if (probeResult === 'auth-required') {
+      // Guard `(promise-authoring) × (non-AEM_CS delivery)`: IMS access tokens
+      // belong under `Bearer` (RFC 6750), AEM EDS endpoints expect `token <PAT>`
+      // for static-PAT auth. Minting `token <IMS-JWT>` is unverified and the
+      // E2E in PR #2455 didn't exercise it (HEAD 200/301 sites). Reject with
+      // 502 until a per-site auth-policy attribute drives scheme selection,
+      // rather than guess. Promise-authoring sites whose delivery is AEM_CS
+      // get `Bearer <IMS-token>` correctly below.
+      if (PROMISE_BASED_TYPES.includes(site.getAuthoringType())
+          && site.getDeliveryType() !== DELIVERY_TYPES.AEM_CS) {
+        log.warn(
+          `Refusing to mint Authorization for site ${siteId}: `
+          + `authoringType=${site.getAuthoringType()} × deliveryType=${site.getDeliveryType()} `
+          + 'is not a verified scheme combination',
+        );
+        return createResponse({}, 502, {
+          [HEADER_ERROR]: cleanupHeaderValue(
+            `Authentication scheme for site ${siteId} is not yet supported (`
+            + `${site.getAuthoringType()} × ${site.getDeliveryType()})`,
+          ).slice(0, 500),
+        });
+      }
+
+      let promiseTokenObj;
+      try {
+        promiseTokenObj = await resolvePromiseToken(site, requestContext);
+      } catch (e) {
+        log.error(`Failed to resolve promise token for site ${siteId}: ${e.message}`);
+        if (e instanceof ErrorWithStatusCode) {
+          return badRequest(e.message);
+        }
+        return internalServerError('Error getting promise token');
+      }
+      try {
+        const authOptions = promiseTokenObj ? { promiseToken: promiseTokenObj } : {};
+        const accessToken = await retrievePageAuthentication(site, requestContext, authOptions);
+        const isBearer = site.getDeliveryType() === DELIVERY_TYPES.AEM_CS && !!promiseTokenObj;
+        authorizationHeader = `${isBearer ? 'Bearer' : 'token'} ${accessToken}`;
+      } catch (e) {
+        log.error(`Failed to retrieve page authentication for site ${siteId}: ${e.message}`);
+        return internalServerError('Error retrieving page authentication');
+      }
+    }
+
+    // Always strip enableAuthentication before delegation — prevents content-scraper
+    // from re-resolving the token under its unqualified SQS ESM ARN (`$LATEST` bug).
+    // `data.options` is guaranteed non-null: we only reach this point when
+    // `data.options.enableAuthentication === true` was true above.
+    const { enableAuthentication: _, ...remainingOptions } = data.options;
+
+    const delegatedData = {
+      ...data,
+      options: remainingOptions,
+      ...(authorizationHeader && {
+        customHeaders: {
+          ...(data.customHeaders || {}),
+          Authorization: authorizationHeader,
+        },
+      }),
+    };
 
     try {
-      const job = await scrapeClient.createScrapeJob(data);
-
-      return accepted(job);
+      const job = await scrapeClient.createScrapeJob(delegatedData);
+      return accepted(sanitizeJobResponse(job));
     } catch (error) {
       log.error(error.message);
       if (error?.message?.includes('Invalid request')) {
