@@ -75,11 +75,13 @@ The controller creates the `AsyncJob` first, receives the `asyncJobId`, then imm
 the `Preflight` entity with `asyncJobId` as the FK. This ordering ensures the execution
 primitive exists before the domain record that references it.
 
-### TTL
+### Expiry
 
-The `Preflight` table uses the same 7-day TTL window as `AsyncJob`. Given the 1-to-1
-relationship, both records expire together. Verify the exact TTL column name in
-`mysticat-data-service` before writing the migration.
+Expiry is handled implicitly via `ON DELETE CASCADE` on `async_job_id`. When the backing
+`AsyncJob` is cleaned up, its associated `Preflight` row is deleted with it. There is no
+separate TTL column on `preflights` — the `withRecordExpiry` SchemaBuilder helper is a
+DynamoDB-era mechanism marked `postgrestIgnore` in the v3 PostgreSQL layer and does not write
+to the database.
 
 ### Dual-store boundary
 
