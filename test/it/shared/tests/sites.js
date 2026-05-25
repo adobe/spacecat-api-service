@@ -439,7 +439,7 @@ export default function siteTests(getHttpClient, resetData) {
       // TypeError, and the catch block re-throws it as 500. The other
       // cases below — 403, 404, missing-body, malformed-UUID — short-circuit
       // before reaching the shared method and pass on the current dep pin.
-      describe.skip('cases requiring @adobe/spacecat-shared-data-access #1618 release', () => {
+      describe('cases requiring @adobe/spacecat-shared-data-access >= 3.71.0', () => {
         it('user: persists scraperConfig.headers and returns the narrow shape', async () => {
           const http = getHttpClient();
           const payload = {

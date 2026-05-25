@@ -1193,7 +1193,16 @@ function SitesController(ctx, log, env) {
       // Anything else -> propagate so the framework returns 5xx (transient/infra).
       if (error?.message?.startsWith('Configuration validation error')) {
         log.warn(`Scraper config validation failed for site ${siteId}: ${error.message}`);
-        return badRequest(error.message);
+        // Joi echoes the offending value into the message; if a caller submits
+        // CR/LF (or other control chars) in a header value those would get
+        // copied into the `x-error` response header by `badRequest`, where
+        // Node's HTTP layer rejects them and the framework returns 500.
+        // Strip Unicode "Other, Control" chars so the rejection itself stays
+        // a clean 400. `\p{Cc}` covers C0 (0x00-0x1F) + DEL (0x7F) + C1
+        // (0x80-0x9F) without putting literal control chars in the source
+        // (which would trip the `no-control-regex` lint rule).
+        const safeMessage = error.message.replace(/\p{Cc}+/gu, ' ');
+        return badRequest(safeMessage);
       }
       log.error(
         `Error updating scraper config for site ${siteId} (headers=${

@@ -4381,8 +4381,14 @@ describe('Sites Controller', () => {
       const updateStub = sandbox.stub().callsFake((value) => {
         persisted = value;
       });
-      wrapped.updateScraperConfig = updateStub;
-      wrapped.getScraperConfig = () => persisted;
+      // Use defineProperty so we can override methods inherited from the
+      // frozen Config prototype (Object.freeze marks them non-writable).
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: updateStub, writable: true, configurable: true,
+      });
+      Object.defineProperty(wrapped, 'getScraperConfig', {
+        value: () => persisted, writable: true, configurable: true,
+      });
       site.getConfig = sandbox.stub().returns(wrapped);
       site.setConfig = sandbox.stub();
       site.save = sandbox.stub().resolves(site);
@@ -4501,9 +4507,13 @@ describe('Sites Controller', () => {
     it('returns 400 when the shared schema rejects the config', async () => {
       const site = sites[0];
       const wrapped = Object.create(Config({}));
-      wrapped.updateScraperConfig = sandbox.stub().throws(
-        new Error('Configuration validation error: bad'),
-      );
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: sandbox.stub().throws(
+          new Error('Configuration validation error: bad'),
+        ),
+        writable: true,
+        configurable: true,
+      });
       site.getConfig = sandbox.stub().returns(wrapped);
 
       const response = await sitesController.updateScraperConfig({
@@ -4519,7 +4529,9 @@ describe('Sites Controller', () => {
     it('propagates unexpected errors (e.g. save failures) as 5xx', async () => {
       const site = sites[0];
       const wrapped = Object.create(Config({}));
-      wrapped.updateScraperConfig = sandbox.stub();
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: sandbox.stub(), writable: true, configurable: true,
+      });
       site.getConfig = sandbox.stub().returns(wrapped);
       site.setConfig = sandbox.stub();
       site.save = sandbox.stub().rejects(new Error('DDB throttle'));
@@ -4908,6 +4920,7 @@ describe('Sites Controller', () => {
       getBrandConfig: () => undefined,
       getBrandProfile: () => undefined,
       getCdnLogsConfig: () => undefined,
+      getScraperConfig: () => undefined,
       getLlmoConfig: () => undefined,
       getTokowakaConfig: () => undefined,
       getEdgeOptimizeConfig: () => undefined,
