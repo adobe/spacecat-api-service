@@ -1334,6 +1334,11 @@ describe('Access Control Util', () => {
       await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
     });
 
+    // profile.email carries an IMS user GUID, not an RFC-5322 address.
+    // Use a real GUID-shaped value so the fixture matches what production tokens contain.
+    const TEST_IMS_GUID = '145D1F646365E9C70A495FC8@17481f256365e20f495cc2.e';
+    const EXISTING_IMS_GUID = '1BB32091680634E20A495CA8@17481f256365e20f495cc2.e';
+
     it('should backfill externalUserId for PAID-tier trial user that is missing it', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
@@ -1341,6 +1346,10 @@ describe('Access Control Util', () => {
         getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: TEST_IMS_GUID,
+      });
 
       const existingUser = {
         getExternalUserId: sinon.stub().returns(null),
@@ -1351,7 +1360,7 @@ describe('Access Control Util', () => {
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
-      expect(existingUser.setExternalUserId).to.have.been.calledWith('user@example.com');
+      expect(existingUser.setExternalUserId).to.have.been.calledWith(TEST_IMS_GUID);
       expect(existingUser.save).to.have.been.calledOnce;
     });
 
@@ -1364,7 +1373,7 @@ describe('Access Control Util', () => {
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       const existingUser = {
-        getExternalUserId: sinon.stub().returns('EXISTING_ID@17481f256365e20f495cc2.e'),
+        getExternalUserId: sinon.stub().returns(EXISTING_IMS_GUID),
         setExternalUserId: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -1393,13 +1402,73 @@ describe('Access Control Util', () => {
 
       mockAuthInfo.getProfile.returns({
         trial_email: 'trial@example.com',
-        // no email field
+        // no email field — findByEmailId should not be called
       });
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
+      expect(mockTrialUser.findByEmailId).to.not.have.been.called;
       expect(existingUser.setExternalUserId).to.not.have.been.called;
       expect(existingUser.save).to.not.have.been.called;
+    });
+
+    it('should skip externalUserId backfill for PAID-tier when findByEmailId returns null', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockTrialUser.findByEmailId.resolves(null);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.not.have.been.called;
+    });
+
+    it('should not backfill externalUserId for PAID-tier when caller is S2S consumer', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: TEST_IMS_GUID,
+      });
+      mockAuthInfo.isS2SConsumer = sinon.stub().returns(true);
+
+      const existingUser = {
+        getExternalUserId: sinon.stub().returns(null),
+        setExternalUserId: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockTrialUser.findByEmailId.resolves(existingUser);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.findByEmailId).to.not.have.been.called;
+      expect(existingUser.setExternalUserId).to.not.have.been.called;
+      expect(existingUser.save).to.not.have.been.called;
+    });
+
+    it('should not throw when PAID-tier backfill save fails', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      const existingUser = {
+        getExternalUserId: sinon.stub().returns(null),
+        setExternalUserId: sinon.stub(),
+        save: sinon.stub().rejects(new Error('DDB throttle')),
+      };
+      mockTrialUser.findByEmailId.resolves(existingUser);
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
     });
   });
 
