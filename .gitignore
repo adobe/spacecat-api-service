@@ -26,3 +26,7 @@ scripts/
 !scripts/backfill-rum-config.mjs
 docs/index.html
 mcp-server.log
+
+# Generated OpenAPI types (regenerated via `npm run gen:types:semrush`)
+# Not imported at runtime, so no need to keep ~30k lines in git.
+src/support/semrush/generated/
