@@ -146,16 +146,32 @@ function PreflightController(ctx, log, env) {
   /**
    * Reads `x-promise-token` from pathInfo.headers.
    * @param {Object} context - Request context
-   * @returns {string} The value of the `x-promise-token` header
+   * @returns {string|null} Trimmed decoded token, or null if absent / empty
    */
   function getPromiseTokenHeader(context) {
-    const { pathInfo } = context;
-    const promiseTokenHeader = pathInfo.headers['x-promise-token'];
-    if (!hasText(promiseTokenHeader)) {
-      throw new Error('Missing x-promise-token header in request headers');
+    const headers = context.pathInfo?.headers;
+    log.debug(`getPromiseTokenHeader headers: ${JSON.stringify(headers)}`);
+    if (!isNonEmptyObject(headers)) {
+      return null;
     }
-    log.debug(`getPromiseTokenHeader found x-promise-token header: ${promiseTokenHeader}`);
-    return promiseTokenHeader;
+    const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === 'x-promise-token');
+    log.debug(`getPromiseTokenHeader entry: ${JSON.stringify(entry)}`);
+    if (!entry) {
+      return null;
+    }
+    const raw = entry[1];
+    log.debug(`getPromiseTokenHeader raw: ${JSON.stringify(raw)}`);
+    if (!hasText(raw)) {
+      return null;
+    }
+    const trimmed = String(raw).trim();
+    log.debug(`getPromiseTokenHeader trimmed: ${JSON.stringify(trimmed)}`);
+    try {
+      return decodeURIComponent(trimmed);
+    } catch {
+      log.debug(`getPromiseTokenHeader failed to decode: ${JSON.stringify(trimmed)}`);
+      return trimmed;
+    }
   }
 
   async function resolvePromiseToken(site, context) {
