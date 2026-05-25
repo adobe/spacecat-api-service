@@ -220,6 +220,15 @@ export default class AccessControlUtil {
           lastSeenAt: new Date().toISOString(),
         });
       }
+    } else {
+      const profile = this.authInfo.getProfile?.();
+      if (profile?.email && profile?.trial_email) {
+        const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
+        if (trialUser && !trialUser.getExternalUserId()) {
+          trialUser.setExternalUserId(profile.email);
+          await trialUser.save();
+        }
+      }
     }
   }
 

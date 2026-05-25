@@ -37,12 +37,10 @@ describe('User Activity Controller', () => {
     getId: () => 'trial-user-123',
     getEmailId: () => 'test@example.com',
     getStatus: () => 'INVITED',
-    getExternalUserId: sandbox.stub().returns(null),
     setStatus: sandbox.stub(),
     setFirstName: sandbox.stub(),
     setLastName: sandbox.stub(),
     setLastSeenAt: sandbox.stub(),
-    setExternalUserId: sandbox.stub(),
     save: sandbox.stub().resolves(),
   };
 
@@ -723,12 +721,10 @@ describe('User Activity Controller', () => {
           getId: () => 'trial-user-123',
           getEmailId: () => 'test@example.com',
           getStatus: sandbox.stub(),
-          getExternalUserId: sandbox.stub().returns(null),
           setStatus: sandbox.stub(),
           setFirstName: sandbox.stub(),
           setLastName: sandbox.stub(),
           setLastSeenAt: sandbox.stub(),
-          setExternalUserId: sandbox.stub(),
           save: sandbox.stub().resolves(),
         };
       });
@@ -1158,90 +1154,6 @@ describe('User Activity Controller', () => {
         expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
         expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
         expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
-      });
-
-      it('should backfill externalUserId when it is not set and profile has email', async () => {
-        mockTrialUserWithStatus.getStatus.returns('REGISTERED');
-        mockTrialUserWithStatus.getExternalUserId.returns(null);
-
-        const context = {
-          params: { siteId },
-          data: { type: 'SIGN_IN', productCode: 'LLMO' },
-          dataAccess: mockDataAccess,
-          log: { error: sinon.stub() },
-          attributes: {
-            authInfo: new AuthInfo()
-              .withType('jwt')
-              .withProfile({
-                trial_email: 'test@example.com',
-                email: '145D1F646365E9C70A495FC8@17481f256365e20f495cc2.e',
-              })
-              .withAuthenticated(true),
-          },
-        };
-
-        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
-
-        const result = await userActivityController.createTrialUserActivity(context);
-
-        expect(result.status).to.equal(201);
-        expect(mockTrialUserWithStatus.setExternalUserId).to.have.been.calledWith(
-          '145D1F646365E9C70A495FC8@17481f256365e20f495cc2.e',
-        );
-        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
-      });
-
-      it('should not overwrite externalUserId when it is already set', async () => {
-        mockTrialUserWithStatus.getStatus.returns('REGISTERED');
-        mockTrialUserWithStatus.getExternalUserId.returns('EXISTING_ID@AdobeOrg');
-
-        const context = {
-          params: { siteId },
-          data: { type: 'SIGN_IN', productCode: 'LLMO' },
-          dataAccess: mockDataAccess,
-          log: { error: sinon.stub() },
-          attributes: {
-            authInfo: new AuthInfo()
-              .withType('jwt')
-              .withProfile({
-                trial_email: 'test@example.com',
-                email: 'NEW_ID@AdobeOrg',
-              })
-              .withAuthenticated(true),
-          },
-        };
-
-        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
-
-        const result = await userActivityController.createTrialUserActivity(context);
-
-        expect(result.status).to.equal(201);
-        expect(mockTrialUserWithStatus.setExternalUserId).to.not.have.been.called;
-      });
-
-      it('should not set externalUserId when profile has no email', async () => {
-        mockTrialUserWithStatus.getStatus.returns('REGISTERED');
-        mockTrialUserWithStatus.getExternalUserId.returns(null);
-
-        const context = {
-          params: { siteId },
-          data: { type: 'SIGN_IN', productCode: 'LLMO' },
-          dataAccess: mockDataAccess,
-          log: { error: sinon.stub() },
-          attributes: {
-            authInfo: new AuthInfo()
-              .withType('jwt')
-              .withProfile({ trial_email: 'test@example.com' })
-              .withAuthenticated(true),
-          },
-        };
-
-        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
-
-        const result = await userActivityController.createTrialUserActivity(context);
-
-        expect(result.status).to.equal(201);
-        expect(mockTrialUserWithStatus.setExternalUserId).to.not.have.been.called;
       });
     });
   });

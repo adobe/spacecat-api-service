@@ -61,13 +61,6 @@ function UserActivitiesController(ctx) {
     const now = new Date().toISOString();
     trialUser.setLastSeenAt(now);
 
-    // Backfill externalUserId for users created via invitation without IMS context (e.g. PAID-tier
-    // Brandalf customers). FREE_TRIAL users get this set at creation time in access-control-util,
-    // but PAID-tier users do not, so the first activity is the earliest opportunity to record it.
-    if (!trialUser.getExternalUserId() && profile?.email) {
-      trialUser.setExternalUserId(profile.email);
-    }
-
     // Handle status transition if user is INVITED
     if (trialUser.getStatus() === TrialUserModel.STATUSES.INVITED) {
       trialUser.setStatus(TrialUserModel.STATUSES.REGISTERED);
