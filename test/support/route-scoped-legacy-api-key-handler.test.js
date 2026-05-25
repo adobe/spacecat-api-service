@@ -86,7 +86,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
     superCheckAuthStub.resolves({ getType: () => 'legacyApiKey' });
     await handler.checkAuth({}, { pathInfo: { route: 'POST /event/fulfillment' } });
     expect(logStubs.info).to.have.been.calledOnceWithExactly(
-      '[legacyApiKey] request authenticated via route-scoped legacy API key handler',
+      '[legacyApiKey] request authenticated via route-scoped legacy API key handler [POST /event/fulfillment]',
     );
   });
 
@@ -94,7 +94,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
     superCheckAuthStub.resolves({ getType: () => 'legacyApiKey' });
     await handler.checkAuth({}, { pathInfo: { route: 'POST /slack/channels/invite-by-user-id' } });
     expect(logStubs.info).to.have.been.calledOnceWithExactly(
-      '[legacyApiKey] request authenticated via route-scoped legacy API key handler',
+      '[legacyApiKey] request authenticated via route-scoped legacy API key handler [POST /slack/channels/invite-by-user-id]',
     );
   });
 
@@ -167,5 +167,11 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
     const result = await handler.checkAuth({}, ctx);
     expect(result).to.equal(null);
     expect(superCheckAuthStub).to.not.have.been.called;
+  });
+
+  it('propagates exceptions from super.checkAuth without catching', async () => {
+    superCheckAuthStub.rejects(new Error('key validation failed'));
+    const ctx = { pathInfo: { route: 'POST /event/fulfillment' } };
+    await expect(handler.checkAuth({}, ctx)).to.be.rejectedWith('key validation failed');
   });
 });
