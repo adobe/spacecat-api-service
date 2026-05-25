@@ -388,6 +388,21 @@ CdnLogsConfig:
     bucketName: 'test-bucket'
     filters: [{ key: 'test-key', value: ['test-value'] }]
     outputLocation: 'test-output-location'
+ScraperConfig:
+  type: object
+  description: |
+    Per-site configuration consumed by the content scraper. Use `headers`
+    to attach request headers (for example, Accept-Language) when fetching pages
+    for sites behind bot-protection rules.
+  properties:
+    headers:
+      description: Map of HTTP header name to value. Forwarded by the scraper to the upstream request.
+      type: object
+      additionalProperties:
+        type: string
+  example:
+    headers:
+      Accept-Language: 'en-US,en;q=0.9'
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -837,6 +852,36 @@ CdnLogsConfigUpdate:
       bucketName: 'test-bucket'
       outputLocation: 'test-output-location'
       filters: [{ key: 'test-key', value: ['test-value'] }]
+ScraperConfigUpdate:
+  type: object
+  required:
+    - scraperConfig
+  properties:
+    scraperConfig:
+      description: The scraper configuration to update
+      $ref: '#/ScraperConfig'
+  example:
+    scraperConfig:
+      headers:
+        Accept-Language: 'en-US,en;q=0.9'
+ScraperConfigResponse:
+  type: object
+  description: |
+    Response body returned by `PATCH /sites/{siteId}/config/scraper`.
+    Intentionally narrow: returns only the affected site ID and the persisted
+    scraper configuration, not the rest of the site's configuration.
+  properties:
+    siteId:
+      description: The site ID
+      $ref: '#/Id'
+    scraperConfig:
+      description: The persisted scraper configuration
+      $ref: '#/ScraperConfig'
+  example:
+    siteId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    scraperConfig:
+      headers:
+        Accept-Language: 'en-US,en;q=0.9'
 UpdateHandlerTypeConfig:
   type: object
   properties:
