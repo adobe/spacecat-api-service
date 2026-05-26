@@ -798,3 +798,20 @@ export async function bulkDeletePrompts({
     failures,
   };
 }
+
+export async function checkPromptsExist({ brandUuid, prompts, postgrestClient }) {
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient.rpc('rpc_check_prompts_exist', {
+    p_brand_id: brandUuid,
+    p_prompts: prompts,
+  });
+
+  if (error) {
+    throw new Error(`checkPromptsExist RPC failed: ${error.message}`);
+  }
+
+  return data ?? [];
+}
