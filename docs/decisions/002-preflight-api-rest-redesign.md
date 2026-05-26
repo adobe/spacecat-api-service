@@ -138,7 +138,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
     "status": "COMPLETED",
     "url": "https://main--site--org.hlx.page/some-path",
     "createdAt": "2026-05-11T10:00:00.000Z",
-    "updatedAt": "2026-05-11T10:00:05.000Z",
     "createdBy": { "email": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
   },
   {
@@ -146,7 +145,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
     "status": "COMPLETED",
     "url": "https://main--site--org.hlx.page/some-path",
     "createdAt": "2026-05-11T10:05:00.000Z",
-    "updatedAt": "2026-05-11T10:05:04.000Z",
     "createdBy": { "email": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
   },
   {
@@ -154,7 +152,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
     "status": "IN_PROGRESS",
     "url": "https://main--site--org.hlx.page/another-path",
     "createdAt": "2026-05-11T10:10:00.000Z",
-    "updatedAt": "2026-05-11T10:10:00.000Z",
     "createdBy": { "email": "ABC123@techacct.adobe.com", "displayName": "John Doe" }
   }
 ]
@@ -166,7 +163,6 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `status` | enum: `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` | Current job status |
 | `url` | string | The page URL that was analyzed |
 | `createdAt` | ISO 8601 | When the preflight was created |
-| `updatedAt` | ISO 8601 | When the preflight was last updated |
 | `createdBy` | object | Caller identity — `{ email, displayName }` |
 | `createdBy.email` | string | IMS user email (`profile.email`) |
 | `createdBy.displayName` | string | Full name from IMS profile |
@@ -206,7 +202,7 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 | `updatedAt` | ISO 8601 | When the preflight was last updated |
 | `startedAt` | ISO 8601 | When processing began |
 | `endedAt` | ISO 8601 | When processing completed |
-| `result` | object \| null | Audit results; always stored inline in `async_jobs.result` — `null` when the job has not yet completed |
+| `result` | object \| null | Audit results; always stored inline in `async_jobs.result` — `null` when the job has not yet completed. Shape is loosely typed here; the exact structure will be defined and strongly typed during implementation. |
 | `error` | object \| null | `{ code, message }` if the job failed |
 
 **Ownership validation:** The handler loads the job by `preflightId` then verifies the stored `siteId` matches the path's `:siteId`. A mismatch returns `404 Not Found` — the same response as a non-existent `preflightId` — so callers cannot confirm a preflight exists by probing with a different site path.
@@ -275,9 +271,9 @@ creates several problems:
   small and the query clean with no cross-workflow contamination.
 
 The decision is to **introduce a dedicated `Preflight` entity in `spacecat-shared-data-access`**
-rather than extending `AsyncJob`. The `Preflight` entity owns the domain record; it may
-reference an `AsyncJob` internally for execution lifecycle tracking (status polling, result
-storage) without exposing that detail to API consumers.
+rather than extending `AsyncJob`. The `Preflight` entity owns the domain record and holds a
+1-to-1 FK reference to an `AsyncJob` via `asyncJobId` for execution lifecycle tracking (status
+polling, result storage). The `asyncJobId` is never exposed to API consumers.
 
 **`Preflight` entity — first-class fields:**
 
@@ -285,14 +281,15 @@ storage) without exposing that detail to API consumers.
 |-------|------|-------------|
 | `preflightId` | UUID | Primary key |
 | `siteId` | UUID (indexed) | The site this preflight belongs to |
-| `url` | string (indexed) | The page URL that was analyzed |
+| `url` | string | The page URL that was analyzed; `(site_id, url)` composite index deferred — `url` filter applied in-memory (see collection methods) |
+| `asyncJobId` | UUID (FK to `async_jobs`, 1-to-1) | Backing AsyncJob reference for execution lifecycle tracking; never exposed to API consumers |
 | `status` | enum | `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` |
 | `createdBy` | object | `{ email, displayName }` from IMS profile at creation time |
 | `createdAt` | ISO 8601 | Creation timestamp |
 | `updatedAt` | ISO 8601 | Last update timestamp |
 | `startedAt` | ISO 8601 | When processing began |
 | `endedAt` | ISO 8601 | When processing completed |
-| `result` | object \| null | Audit result payload; null until completed |
+| `result` | object \| null | Audit result payload; `null` until completed. Shape is loosely typed here; the exact structure will be defined and strongly typed during implementation. |
 | `error` | object \| null | `{ code, message }` on failure |
 
 **`PreflightCollection` — methods:**
@@ -301,22 +298,28 @@ storage) without exposing that detail to API consumers.
   `url` filter applied in-memory when `?url=` query parameter is present
 - `findById(preflightId)` — loads a single preflight; caller verifies `siteId` matches path
 
-**TTL** is configured on the `Preflight` table/collection at the same 7-day window as
-`AsyncJob`. No separate cleanup strategy is needed — the TTL attribute handles it identically.
+**Creation flow:** The controller creates the `AsyncJob` first, receives the `asyncJobId`, then
+immediately creates the `Preflight` entity with `asyncJobId` as the FK. This ordering ensures
+the execution primitive exists before the domain record that references it.
+
+**Expiry** is handled implicitly via the `ON DELETE CASCADE` on `async_job_id`. When the
+backing `AsyncJob` is cleaned up, its associated `Preflight` row is deleted with it. There
+is no separate TTL column on `preflights` — the `withRecordExpiry` SchemaBuilder helper is
+a DynamoDB-era mechanism marked `postgrestIgnore` in the v3 PostgreSQL layer and does not
+write to the database.
 
 `createdBy` is derived from the caller's IMS profile at job creation time: `email` is
 `profile.email` (the IMS user identifier); `displayName` is composed from
 `profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`). It is
 never supplied by the client.
 
-The legacy endpoints (`/preflight/jobs`, `/preflight/beta/jobs`) continue to write to
-`AsyncJob` unchanged until they are retired. The new `/sites/:siteId/preflights` endpoints
-write exclusively to the `Preflight` entity. The two backing stores operate in parallel
-without interference.
+`/preflight/beta/jobs` is removed outright as part of this work — it is replaced by the new
+endpoints, not deprecated. `/preflight/jobs` is the only legacy endpoint; it continues writing
+to `AsyncJob` unchanged until external consumers have migrated. The new
+`/sites/:siteId/preflights` endpoints write exclusively to the `Preflight` entity.
 
 **This change is scoped to `spacecat-shared-data-access` and is a prerequisite that must land
-before the controller work in this repo.** The design of the `Preflight` entity and its
-relationship to `AsyncJob` should be aligned with @ekdogan before implementation begins.
+before the controller work in this repo.** Alignment with @ekdogan is complete (SITES-44675).
 See SITES-44675 for the tracking ticket.
 
 ## Consequences

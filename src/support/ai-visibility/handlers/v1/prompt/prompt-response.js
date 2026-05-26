@@ -20,13 +20,9 @@ import {
   resolveCountry,
   engineToLlm,
   responseFromGrpcError,
+  PROTO_FROM_JSON,
+  PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
-
-/** @type {import('@bufbuild/protobuf').JsonReadOptions} */
-const FROM_JSON = { ignoreUnknownFields: true };
-
-/** @type {import('@bufbuild/protobuf').JsonWriteOptions} */
-const TO_JSON = { useProtoFieldName: false, alwaysEmitImplicit: true };
 
 /* c8 ignore start */
 export async function handlePromptResponse(sp, clients) {
@@ -47,7 +43,7 @@ export async function handlePromptResponse(sp, clients) {
         serp_id: serpId,
         topic_id: topicId,
       },
-      FROM_JSON,
+      PROTO_FROM_JSON,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid prompt request';
@@ -66,7 +62,7 @@ export async function handlePromptResponse(sp, clients) {
     const promptsResponseJson = toJson(
       PromptResponseSchema,
       promptsMessage,
-      TO_JSON,
+      PROTO_TO_JSON,
     );
 
     return {

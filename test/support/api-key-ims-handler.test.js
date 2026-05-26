@@ -69,7 +69,7 @@ describe('ApiKeyImsHandler', () => {
 
   it('delegates to AdobeImsHandler.checkAuth for /tools/api-keys', async () => {
     const req = {};
-    const ctx = { pathInfo: { suffix: '/tools/api-keys' } };
+    const ctx = { pathInfo: { suffix: '/tools/api-keys' }, log: logStubs };
     const result = await handler.checkAuth(req, ctx);
     expect(result).to.equal('SUPER_RESULT');
     expect(superCheckAuthStub).to.have.been.calledOnceWith(req, ctx);
@@ -77,7 +77,7 @@ describe('ApiKeyImsHandler', () => {
 
   it('delegates to AdobeImsHandler.checkAuth for /tools/api-keys/<id>', async () => {
     const req = {};
-    const ctx = { pathInfo: { suffix: '/tools/api-keys/abc-123' } };
+    const ctx = { pathInfo: { suffix: '/tools/api-keys/abc-123' }, log: logStubs };
     const result = await handler.checkAuth(req, ctx);
     expect(result).to.equal('SUPER_RESULT');
     expect(superCheckAuthStub).to.have.been.calledOnce;
@@ -85,7 +85,7 @@ describe('ApiKeyImsHandler', () => {
 
   it('emits an info log when the scoped IMS auth succeeds (migration signal)', async () => {
     superCheckAuthStub.resolves({ getProfile: () => null });
-    await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' } });
+    await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' }, log: logStubs });
     expect(logStubs.info).to.have.been.calledOnceWithExactly(
       '[ims] api-key request authenticated via scoped IMS handler - JWT migration pending',
     );
@@ -97,14 +97,14 @@ describe('ApiKeyImsHandler', () => {
     // never the real address — so we must not overwrite profile.email here.
     const profile = { email: 'ABC123@AdobeID', trial_email: 'real@adobe.com' };
     superCheckAuthStub.resolves({ getProfile: () => profile });
-    await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' } });
+    await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' }, log: logStubs });
     expect(profile.email).to.equal('ABC123@AdobeID');
   });
 
   it('leaves profile.email unchanged when trial_email is absent', async () => {
     const profile = { email: 'ABC123@AdobeID' };
     superCheckAuthStub.resolves({ getProfile: () => profile });
-    await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' } });
+    await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' }, log: logStubs });
     expect(profile.email).to.equal('ABC123@AdobeID');
   });
 
