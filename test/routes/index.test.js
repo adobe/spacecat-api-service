@@ -167,6 +167,7 @@ describe('getRouteHandlers', () => {
     updatePromptByBrandAndId: sinon.stub(),
     deletePromptByBrandAndId: sinon.stub(),
     bulkDeletePromptsByBrand: sinon.stub(),
+    checkPromptsByBrand: sinon.stub(),
     triggerConfigSync: sinon.stub(),
   };
 
@@ -739,6 +740,7 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete',

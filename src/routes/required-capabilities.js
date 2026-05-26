@@ -262,6 +262,7 @@ const routeRequiredCapabilities = {
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:promptId': 'organization:write',
