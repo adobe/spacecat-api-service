@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.516.0",
+  "version": "1.518.0",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -117,6 +117,7 @@
     "csv": "6.5.1",
     "csv-writer": "1.6.0",
     "date-fns": "4.1.0",
+    "exceljs": "^4.4.0",
     "fuse.js": "7.3.0",
     "iso-3166": "^4.4.0",
     "iso-639-3": "3.0.1",

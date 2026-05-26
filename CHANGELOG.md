@@ -1,3 +1,17 @@
+# [1.518.0](https://github.com/adobe/spacecat-api-service/compare/v1.517.0...v1.518.0) (2026-05-26)
+
+
+### Features
+
+* **llmo:** add PATCH endpoint to update a row in an LLMO XLSX data sheet ([#2473](https://github.com/adobe/spacecat-api-service/issues/2473)) ([e70a784](https://github.com/adobe/spacecat-api-service/commit/e70a7845677277951cdbc8d6112f145049e6e16b))
+
+# [1.517.0](https://github.com/adobe/spacecat-api-service/compare/v1.516.0...v1.517.0) (2026-05-26)
+
+
+### Features
+
+* **llmo:** detect AEM CS Fastly behind WAF simple proxy (Case 0) ([#2426](https://github.com/adobe/spacecat-api-service/issues/2426)) ([3b91905](https://github.com/adobe/spacecat-api-service/commit/3b919059528427b332f8563077abcac12cab5eca))
+
 # [1.516.0](https://github.com/adobe/spacecat-api-service/compare/v1.515.0...v1.516.0) (2026-05-26)
 
 
