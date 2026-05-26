@@ -18,6 +18,7 @@ import esmock from 'esmock';
 use(chaiAsPromised);
 
 const CALLER_ORG = 'CUST-ORG-001';
+const CALLER_ORG_CANONICAL = 'CUST-ORG-001@AdobeOrg';
 const OTHER_ORG = 'OTHER-ORG-XYZ';
 const VALID_UUID_BRAND = '11111111-2222-4333-9444-555555555555';
 const VALID_UUID_MAPPING = 'aaaaaaaa-bbbb-4ccc-9ddd-eeeeeeeeeeee';
@@ -107,7 +108,7 @@ describe('FacsAccessMappingsController', () => {
       const body = await res.json();
       expect(body).to.deep.equal({ mappings: [{ id: 'r1' }, { id: 'r2' }] });
       const filters = list.firstCall.args[1];
-      expect(filters.imsOrgId).to.equal(CALLER_ORG);
+      expect(filters.imsOrgId).to.equal(CALLER_ORG_CANONICAL);
       expect(filters.resourceType).to.equal('brand');
       expect(filters.resourceId).to.equal('brand-x');
     });
@@ -351,7 +352,7 @@ describe('FacsAccessMappingsController', () => {
     it('admits an org-typed subject only when it equals the caller IMS org', async () => {
       const { brandsStorageStubs } = ownedBrandStubs();
       const create = sinon.stub().resolves({
-        created: [{ subject_type: 'org', subject_id: CALLER_ORG }],
+        created: [{ subject_type: 'org', subject_id: CALLER_ORG_CANONICAL }],
         skipped: [],
       });
       const Controller = (await loadController(
@@ -363,7 +364,10 @@ describe('FacsAccessMappingsController', () => {
           resourceType: 'brand',
           resourceId: VALID_UUID_BRAND,
           subjects: [
-            { type: 'org', id: CALLER_ORG }, // accepted
+            // Org-type subject id is stored in canonical <ident>@<authSrc> form
+            // (matches stored subject_id column); accepted when it equals the
+            // caller's canonical org id.
+            { type: 'org', id: CALLER_ORG_CANONICAL }, // accepted
             { type: 'org', id: OTHER_ORG }, // rejected
           ],
         },
@@ -470,7 +474,7 @@ describe('FacsAccessMappingsController', () => {
       expect(body).to.deep.equal(tombstone);
       expect(revoke.firstCall.args[1]).to.include({
         id: VALID_UUID_MAPPING,
-        imsOrgId: CALLER_ORG,
+        imsOrgId: CALLER_ORG_CANONICAL,
         revokedBy: 'ADMIN@AdobeID',
       });
     });

@@ -18,6 +18,7 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
+
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import {
@@ -28,6 +29,19 @@ import {
   revokeFacsAccessMappingById,
 } from '../support/facs-access-mappings.js';
 import { getBrandById } from '../support/brands-storage.js';
+
+// TODO(deps): replace with `normalizeImsOrgId` imported from
+// `@adobe/spacecat-shared-http-utils` once the published package includes
+// the new export (it lives in `auth/facs-state-layer.js` on the
+// `feat/mac-facs-integration` branch). Inlined here to keep the controller
+// behaviour-correct without blocking on the dep bump — same logic as the
+// shared helper.
+function normalizeImsOrgId(orgIdent, authSrc = 'AdobeOrg') {
+  if (!orgIdent || typeof orgIdent !== 'string') {
+    return orgIdent;
+  }
+  return orgIdent.includes('@') ? orgIdent : `${orgIdent}@${authSrc}`;
+}
 
 const MAX_SUBJECTS_PER_REQUEST = 100;
 const ALLOWED_SUBJECT_TYPES = new Set(['user', 'org']);
@@ -66,12 +80,34 @@ function FacsAccessMappingsController(context) {
   const { log } = context;
 
   /**
-   * Resolve the caller's IMS org. Always returns a bare ident
-   * (no `@AdobeOrg` suffix) so it matches the `ims_org_id` column shape
-   * and what IMS returns in `orgRef.ident`.
+   * Resolve the caller's IMS org as the bare ident (what IMS returns in
+   * `orgRef.ident` and what `getTenantIds()` populates). Use this when
+   * comparing against IMS API responses — e.g. the membership walk in
+   * `isSubjectInOrg` calls `imsClient.getImsAdminOrganizations(subject.id)`
+   * which yields `[{ orgRef: { ident, ... } }]`; the equality is
+   * `orgRef.ident === bareIdent`.
    */
-  function resolveCallerImsOrgId(ctx) {
+  function resolveCallerImsOrgIdentBare(ctx) {
     return ctx.attributes?.authInfo?.getTenantIds?.()?.[0] ?? null;
+  }
+
+  /**
+   * Resolve the caller's IMS org as the canonical `<ident>@<authSrc>` form.
+   * Use this for:
+   *   - state-layer reads/writes (`ims_org_id` column on
+   *     `facs_access_mappings` stores the canonical form — see
+   *     `mac-state-layer.md` §"Org identifier"),
+   *   - `Organization.findByImsOrgId(...)` (the model lookup keys on the
+   *     canonical form),
+   *   - `org`-type subject ids (the binding's `subject_id` is the canonical
+   *     org id, matching the column).
+   *
+   * Wraps `normalizeImsOrgId` from `@adobe/spacecat-shared-http-utils` so
+   * the suffix convention matches the wrapper's state-layer lookups and the
+   * documented Org-identifier rule.
+   */
+  function resolveCallerImsOrgIdCanonical(ctx) {
+    return normalizeImsOrgId(resolveCallerImsOrgIdentBare(ctx));
   }
 
   /**
@@ -95,9 +131,9 @@ function FacsAccessMappingsController(context) {
    * has already validated FACS permission; this check stops a caller from
    * binding subjects to a brand owned by another IMS org.
    */
-  async function isBrandOwnedByCallerOrg(ctx, brandId, imsOrgId) {
+  async function isBrandOwnedByCallerOrg(ctx, brandId, imsOrgIdCanonical) {
     const { Organization } = ctx.dataAccess;
-    const org = await Organization.findByImsOrgId(imsOrgId);
+    const org = await Organization.findByImsOrgId(imsOrgIdCanonical);
     if (!org) {
       return false;
     }
@@ -115,6 +151,11 @@ function FacsAccessMappingsController(context) {
    * the response is an array of `{ orgRef: { ident, authSrc }, ... }`;
    * we compare `orgRef.ident` against the caller's bare-ident IMS org id.
    *
+   * Takes both the canonical (`<ident>@<authSrc>`) and the bare ident
+   * because the two comparisons are in different namespaces: org-type
+   * subjects are stored canonical (matching `subject_id` on the row),
+   * while IMS membership responses carry bare idents.
+   *
    * Fails closed on IMS-client errors: an outage or unknown user surfaces
    * as `false`, which lands the subject in the `rejected` bucket rather
    * than admitting it on the optimistic assumption that membership holds.
@@ -124,9 +165,12 @@ function FacsAccessMappingsController(context) {
    * at this volume (one call per subject per POST). If a bulk endpoint
    * becomes available, switch to it to bound POST latency.
    */
-  async function isSubjectInOrg(ctx, subject, imsOrgId) {
+  async function isSubjectInOrg(ctx, subject, imsOrgIdCanonical, imsOrgIdentBare) {
     if (subject.type === 'org') {
-      return subject.id === imsOrgId;
+      // Org-type subjects are stored on the row in canonical form, so the
+      // caller's only legal value for an org subject id is their own
+      // canonical org id.
+      return subject.id === imsOrgIdCanonical;
     }
     // type === 'user'
     const { imsClient } = ctx;
@@ -139,7 +183,7 @@ function FacsAccessMappingsController(context) {
     }
     try {
       const orgs = await imsClient.getImsAdminOrganizations(subject.id);
-      return Array.isArray(orgs) && orgs.some((o) => o?.orgRef?.ident === imsOrgId);
+      return Array.isArray(orgs) && orgs.some((o) => o?.orgRef?.ident === imsOrgIdentBare);
     } catch (err) {
       log.warn(
         { tag: 'facs-mappings', subject: subject.id, err: err.message },
@@ -202,12 +246,12 @@ function FacsAccessMappingsController(context) {
       return guard;
     }
 
-    const imsOrgId = resolveCallerImsOrgId(ctx);
-    if (!imsOrgId) {
+    const imsOrgIdCanonical = resolveCallerImsOrgIdCanonical(ctx);
+    if (!imsOrgIdCanonical) {
       return forbidden('Caller has no IMS org');
     }
 
-    const filters = buildListFilters(ctx, imsOrgId);
+    const filters = buildListFilters(ctx, imsOrgIdCanonical);
     if (filters.subjectType && !ALLOWED_SUBJECT_TYPES.has(filters.subjectType)) {
       return badRequest('subjectType filter must be \'user\' or \'org\'');
     }
@@ -233,12 +277,12 @@ function FacsAccessMappingsController(context) {
       return guard;
     }
 
-    const imsOrgId = resolveCallerImsOrgId(ctx);
-    if (!imsOrgId) {
+    const imsOrgIdCanonical = resolveCallerImsOrgIdCanonical(ctx);
+    if (!imsOrgIdCanonical) {
       return forbidden('Caller has no IMS org');
     }
 
-    const filters = buildListFilters(ctx, imsOrgId);
+    const filters = buildListFilters(ctx, imsOrgIdCanonical);
     if (filters.subjectType && !ALLOWED_SUBJECT_TYPES.has(filters.subjectType)) {
       return badRequest('subjectType filter must be \'user\' or \'org\'');
     }
@@ -279,8 +323,9 @@ function FacsAccessMappingsController(context) {
       return guard;
     }
 
-    const imsOrgId = resolveCallerImsOrgId(ctx);
-    if (!imsOrgId) {
+    const imsOrgIdentBare = resolveCallerImsOrgIdentBare(ctx);
+    const imsOrgIdCanonical = normalizeImsOrgId(imsOrgIdentBare);
+    if (!imsOrgIdCanonical) {
       return forbidden('Caller has no IMS org');
     }
 
@@ -295,7 +340,7 @@ function FacsAccessMappingsController(context) {
     // (1) Resource-ownership precondition — request-level, fail-closed 403.
     let owned;
     try {
-      owned = await isBrandOwnedByCallerOrg(ctx, resourceId, imsOrgId);
+      owned = await isBrandOwnedByCallerOrg(ctx, resourceId, imsOrgIdCanonical);
     } catch (error) {
       log.error(
         { tag: 'facs-mappings', err: error.message, resourceId },
@@ -305,7 +350,7 @@ function FacsAccessMappingsController(context) {
     }
     if (!owned) {
       log.warn(
-        { tag: 'facs-mappings', imsOrgId, resourceId },
+        { tag: 'facs-mappings', imsOrgId: imsOrgIdCanonical, resourceId },
         'Resource not owned by caller org — denying create',
       );
       return forbidden('Resource not owned by caller org');
@@ -313,12 +358,15 @@ function FacsAccessMappingsController(context) {
 
     // (2) Subject-membership precondition — per-subject, partition into
     //     `eligible` (proceed to insert) and `rejected` (skip with reason).
+    //     Both forms are passed: org-type subjects compare against the
+    //     canonical id (matches stored `subject_id`), while IMS membership
+    //     comparisons walk the bare ident.
     const eligible = [];
     const rejected = [];
     // eslint-disable-next-line no-restricted-syntax
     for (const subject of subjects) {
       // eslint-disable-next-line no-await-in-loop
-      const inOrg = await isSubjectInOrg(ctx, subject, imsOrgId);
+      const inOrg = await isSubjectInOrg(ctx, subject, imsOrgIdCanonical, imsOrgIdentBare);
       if (inOrg) {
         eligible.push(subject);
       } else {
@@ -335,7 +383,7 @@ function FacsAccessMappingsController(context) {
     try {
       const { postgrestClient } = ctx.dataAccess.services;
       const result = await createFacsAccessMappings(postgrestClient, {
-        imsOrgId,
+        imsOrgId: imsOrgIdCanonical,
         resourceType,
         resourceId,
         subjects: eligible,
@@ -367,8 +415,8 @@ function FacsAccessMappingsController(context) {
       return guard;
     }
 
-    const imsOrgId = resolveCallerImsOrgId(ctx);
-    if (!imsOrgId) {
+    const imsOrgIdCanonical = resolveCallerImsOrgIdCanonical(ctx);
+    if (!imsOrgIdCanonical) {
       return forbidden('Caller has no IMS org');
     }
 
@@ -385,7 +433,7 @@ function FacsAccessMappingsController(context) {
       const { postgrestClient } = ctx.dataAccess.services;
       const tombstone = await revokeFacsAccessMappingById(postgrestClient, {
         id,
-        imsOrgId,
+        imsOrgId: imsOrgIdCanonical,
         revokedBy: resolveCallerUserIdent(ctx),
         revokeReason,
       });
