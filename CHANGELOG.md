@@ -1,3 +1,10 @@
+# [1.519.0](https://github.com/adobe/spacecat-api-service/compare/v1.518.0...v1.519.0) (2026-05-26)
+
+
+### Features
+
+* add POST /prompts/check endpoint for batch existence check | LLMO-5156 ([#2489](https://github.com/adobe/spacecat-api-service/issues/2489)) ([c0ca916](https://github.com/adobe/spacecat-api-service/commit/c0ca916d680719a08e16bff11d11841ff4744036))
+
 # [1.518.0](https://github.com/adobe/spacecat-api-service/compare/v1.517.0...v1.518.0) (2026-05-26)
 
 
