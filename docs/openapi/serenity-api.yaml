@@ -7,12 +7,12 @@
 # mysticat-data-service. The workspace is reachable via
 # brands -> organizations.semrush_workspace_id.
 #
-# All operations are tagged `semrush` so the OpenAPI contract test suite can
-# enumerate them. See test/openapi-contract/semrush-api.test.js.
+# All operations are tagged `serenity` so the OpenAPI contract test suite can
+# enumerate them. See test/openapi-contract/serenity-api.test.js.
 
 # ─── Shared path parameters ───────────────────────────────────────────────────
 
-v2-semrush-prompts:
+v2-serenity-prompts:
   parameters:
     - name: spaceCatId
       in: path
@@ -28,13 +28,13 @@ v2-semrush-prompts:
       schema:
         type: string
   get:
-    tags: [semrush]
+    tags: [serenity]
     summary: List Semrush AIO prompts for a brand
     description: |
       Fans the request out across every Semrush project mapped to this brand
       in `brand_to_semrush_projects`, merges the results, and paginates.
       Optional filters narrow the fan-out before the upstream calls.
-    operationId: listSemrushPrompts
+    operationId: listSerenityPrompts
     security:
       - ims_key: []
     parameters:
@@ -77,14 +77,14 @@ v2-semrush-prompts:
             schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
   post:
-    tags: [semrush]
+    tags: [serenity]
     summary: Create Semrush AIO prompts (bulk)
     description: |
       Accepts a batch of prompts grouped by `(semrushLocationId, language)`,
       resolves the matching project via `brand_to_semrush_projects`, fans out
       to Semrush per project (`POST /v2/.../aio/prompts/tagged` + publish), and
       returns the per-prompt outcome.
-    operationId: createSemrushPrompts
+    operationId: createSerenityPrompts
     security:
       - ims_key: []
     requestBody:
@@ -108,7 +108,7 @@ v2-semrush-prompts:
             schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
-v2-semrush-prompt-by-id:
+v2-serenity-prompt-by-id:
   parameters:
     - name: spaceCatId
       in: path
@@ -131,12 +131,12 @@ v2-semrush-prompt-by-id:
         Stable across regions; api-service decodes it to resolve the project on PATCH.
       schema: { type: string }
   patch:
-    tags: [semrush]
+    tags: [serenity]
     summary: Update a Semrush AIO prompt
     description: |
       Decodes the logical id to find the owning project, then runs DELETE-old
       + POST-new + publish against Semrush. Returns the new logical id.
-    operationId: updateSemrushPrompt
+    operationId: updateSerenityPrompt
     security:
       - ims_key: []
     requestBody:
@@ -160,7 +160,7 @@ v2-semrush-prompt-by-id:
             schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
-v2-semrush-prompts-bulk-delete:
+v2-serenity-prompts-bulk-delete:
   parameters:
     - name: spaceCatId
       in: path
@@ -176,14 +176,14 @@ v2-semrush-prompts-bulk-delete:
       schema:
         type: string
   post:
-    tags: [semrush]
+    tags: [serenity]
     summary: Bulk-delete Semrush AIO prompts
     description: |
       Groups the Semrush prompt ids by project, calls `DELETE /v2/.../aio/prompts`
       per project, then publishes each touched project.
       Uses POST instead of DELETE because the body-data middleware does not
       parse DELETE request bodies (see ADR-001).
-    operationId: bulkDeleteSemrushPrompts
+    operationId: bulkDeleteSerenityPrompts
     security:
       - ims_key: []
     requestBody:
@@ -209,7 +209,7 @@ v2-semrush-prompts-bulk-delete:
 
 # ─── Projects ─────────────────────────────────────────────────────────────────
 
-v2-semrush-projects:
+v2-serenity-projects:
   parameters:
     - name: spaceCatId
       in: path
@@ -225,12 +225,12 @@ v2-semrush-projects:
       schema:
         type: string
   get:
-    tags: [semrush]
+    tags: [serenity]
     summary: List Semrush projects mapped to a brand
     description: |
       Returns every `brand_to_semrush_projects` row for the brand, enriched
       with live Semrush metadata via a single `listWorkspaceProjects` call.
-    operationId: listSemrushProjects
+    operationId: listSerenityProjects
     security:
       - ims_key: []
     parameters:
@@ -258,7 +258,7 @@ v2-semrush-projects:
             schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
   post:
-    tags: [semrush]
+    tags: [serenity]
     summary: Onboard a brand slice as a new Semrush AIO project
     description: |
       Resolves `semrush_workspace_id` from `organizations`, resolves
@@ -269,7 +269,7 @@ v2-semrush-projects:
       `brand_to_semrush_projects`. On any upstream failure no row is written
       and the Semrush error envelope is returned to the caller (callers retry
       with the same body).
-    operationId: createSemrushProject
+    operationId: createSerenityProject
     security:
       - ims_key: []
     requestBody:
@@ -296,7 +296,7 @@ v2-semrush-projects:
             schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
-v2-semrush-project-tags:
+v2-serenity-project-tags:
   parameters:
     - name: spaceCatId
       in: path
@@ -320,9 +320,9 @@ v2-semrush-project-tags:
       required: true
       schema: { type: string }
   get:
-    tags: [semrush]
+    tags: [serenity]
     summary: List Semrush project tags (pass-through)
-    operationId: listSemrushProjectTags
+    operationId: listSerenityProjectTags
     security:
       - ims_key: []
     responses:
@@ -341,7 +341,7 @@ v2-semrush-project-tags:
             schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
-v2-semrush-project-models:
+v2-serenity-project-models:
   parameters:
     - name: spaceCatId
       in: path
@@ -365,10 +365,10 @@ v2-semrush-project-models:
       required: true
       schema: { type: string }
   get:
-    tags: [semrush]
+    tags: [serenity]
     summary: List AI models configured for a Semrush AIO project
     description: Pass-through to `GET /v1/workspaces/{ws}/projects/{pid}/ai_models?limit=100`.
-    operationId: listSemrushProjectModels
+    operationId: listSerenityProjectModels
     security:
       - ims_key: []
     responses:
@@ -387,7 +387,7 @@ v2-semrush-project-models:
             schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
-v2-semrush-workspace-projects:
+v2-serenity-workspace-projects:
   parameters:
     - name: spaceCatId
       in: path
@@ -407,11 +407,11 @@ v2-semrush-workspace-projects:
       required: true
       schema: { type: string, format: uuid }
   get:
-    tags: [semrush]
+    tags: [serenity]
     summary: List published AIO projects in a Semrush workspace
     description: |
       Pass-through to `GET /v2/workspaces/{ws}/projects?type=AIO&publish_status=live,live_with_unpublished_updates&limit=100`.
-    operationId: listSemrushWorkspaceProjects
+    operationId: listSerenityWorkspaceProjects
     security:
       - ims_key: []
     responses:

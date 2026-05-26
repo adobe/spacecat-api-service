@@ -16,21 +16,21 @@ import {
 import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
-import { createSemrushTransport, SemrushTransportError } from '../support/semrush/rest-transport.js';
-import { resolveWorkspaceId } from '../support/semrush/workspace-resolver.js';
+import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
+import { resolveWorkspaceId } from '../support/serenity/workspace-resolver.js';
 import {
   handleListPrompts,
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
-} from '../support/semrush/handlers/prompts.js';
+} from '../support/serenity/handlers/prompts.js';
 import {
   handleListProjects,
   handleCreateProject,
   handleListProjectTags,
   handleListProjectModels,
   handleListWorkspaceProjects,
-} from '../support/semrush/handlers/projects.js';
+} from '../support/serenity/handlers/projects.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
@@ -88,13 +88,14 @@ function errorTokenForStatus(status) {
     case 403: return 'forbidden';
     case 404: return 'notFound';
     case 409: return 'conflict';
+    case 503: return 'configurationError';
     default: return 'invalidRequest';
   }
 }
 
 /**
  * Unified error envelope. All client-facing messages run through
- * `cleanupHeaderValue` and are length-capped. SemrushTransportError details
+ * `cleanupHeaderValue` and are length-capped. SerenityTransportError details
  * are deliberately NOT echoed — the upstream body may contain provider
  * internals; clients get a stable contract instead.
  */
@@ -106,7 +107,7 @@ function mapError(e, log) {
       status,
     );
   }
-  if (e instanceof SemrushTransportError) {
+  if (e instanceof SerenityTransportError) {
     // Log full upstream detail server-side, but do NOT leak the upstream body
     // to clients (it may contain provider internals).
     log.error('Semrush upstream error', e);
@@ -146,7 +147,7 @@ function requireImsBearer(ctx) {
   return header.substring(BEARER_PREFIX.length);
 }
 
-function SemrushController(context, log, env) {
+function SerenityController(context, log, env) {
   if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
   }
@@ -221,7 +222,7 @@ function SemrushController(context, log, env) {
   }
 
   function buildTransport(ctx, imsToken) {
-    return createSemrushTransport({ env: ctx.env || env, imsToken });
+    return createSerenityTransport({ env: ctx.env || env, imsToken });
   }
 
   const listPrompts = async (ctx) => {
@@ -429,4 +430,4 @@ function SemrushController(context, log, env) {
   };
 }
 
-export default SemrushController;
+export default SerenityController;

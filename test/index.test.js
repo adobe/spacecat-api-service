@@ -335,8 +335,8 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Execution Id is invalid. Please provide a valid UUID.');
   });
 
-  it('rejects /semrush/projects/:workspaceId/:projectId/... with an invalid workspaceId UUID', async () => {
-    const path = '/v2/orgs/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/e730ec12-4325-4bdd-ac71-0f4aa5b18ce0/semrush/projects/not-a-uuid/proj-1/tags';
+  it('rejects /serenity/projects/:workspaceId/:projectId/... with an invalid workspaceId UUID', async () => {
+    const path = '/v2/orgs/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/e730ec12-4325-4bdd-ac71-0f4aa5b18ce0/serenity/projects/not-a-uuid/proj-1/tags';
     context.pathInfo.suffix = path;
     request = new Request(`${baseUrl}${path}`, {
       method: 'GET',

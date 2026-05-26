@@ -11,11 +11,8 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { ErrorWithStatusCode } from '../utils.js';
 
-// FIXME(2026-05-22): move the base URL fully to env/vault; see follow-up
-// "Wire Semrush base URL via env/vault" — the hardcoded fallback remains
-// only so dev environments without the secret wired still resolve.
-const DEFAULT_BASE_URL = 'https://adobe-hackathon.semrush.com';
 const API_PREFIX = '/enterprise/projects/api';
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
@@ -28,33 +25,61 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  * JSON (or raw text when not valid JSON). The controller's `mapError` does
  * NOT leak `.body` to clients — it is kept here only for server-side logging.
  */
-export class SemrushTransportError extends Error {
+export class SerenityTransportError extends Error {
   constructor(status, message, body) {
     super(message);
-    this.name = 'SemrushTransportError';
+    this.name = 'SerenityTransportError';
     this.status = status;
     this.body = body;
   }
 }
 
 /**
- * Resolves and validates the upstream base URL. The default is the Adobe-
- * managed hackathon host; an env override is permitted but only if it parses
- * as a same-protocol https URL — refuses arbitrary schemes so a compromised
- * env can't redirect IMS bearers to an attacker host.
+ * Resolves and validates the upstream base URL. The URL is required and must
+ * arrive via `env.SEMRUSH_PROJECTS_BASE_URL` — sourced from Vault
+ * (`dx_mysticat/<env>/api-service`) and injected through AWS Secrets Manager.
+ * No source default: the upstream host is operational config that must be
+ * settable per-environment without a code change.
+ *
+ * Returns the canonical `protocol//host` origin — never the raw value. A
+ * misconfigured value like `https://host/path-prefix` or
+ * `https://user:pass@host` would otherwise silently bleed path/userinfo into
+ * every outbound request (and the userinfo form would leak credentials in
+ * each fetch's `Authorization`-adjacent metadata). Always returning the
+ * parsed origin closes both classes of injection.
+ *
+ * Failure mapping (controller `mapError`):
+ *   - Missing/invalid/non-https → throws ErrorWithStatusCode(503,
+ *     'configurationError'): operational failure, not a runtime bug.
  */
 function baseUrl(env) {
-  const candidate = (env?.SEMRUSH_PROJECTS_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
+  const raw = typeof env?.SEMRUSH_PROJECTS_BASE_URL === 'string'
+    ? env.SEMRUSH_PROJECTS_BASE_URL.trim()
+    : env?.SEMRUSH_PROJECTS_BASE_URL;
+  if (!hasText(raw)) {
+    throw new ErrorWithStatusCode(
+      'SEMRUSH_PROJECTS_BASE_URL is not set. Configure it via Vault '
+      + '(dx_mysticat/<env>/api-service) or .env for local dev.',
+      503,
+    );
+  }
+  const candidate = raw.replace(/\/$/, '');
   let parsed;
   try {
     parsed = new URL(candidate);
   } catch {
-    throw new Error(`SEMRUSH_PROJECTS_BASE_URL is not a valid URL: ${candidate}`);
+    throw new ErrorWithStatusCode(
+      `SEMRUSH_PROJECTS_BASE_URL is not a valid URL: ${candidate}`,
+      503,
+    );
   }
   if (parsed.protocol !== 'https:') {
-    throw new Error(`SEMRUSH_PROJECTS_BASE_URL must use https (got ${parsed.protocol})`);
+    throw new ErrorWithStatusCode(
+      `SEMRUSH_PROJECTS_BASE_URL must use https (got ${parsed.protocol})`,
+      503,
+    );
   }
-  return candidate;
+  return `${parsed.protocol}//${parsed.host}`;
 }
 
 /**
@@ -64,7 +89,7 @@ function baseUrl(env) {
  */
 function buildHeaders(imsToken) {
   if (!hasText(imsToken)) {
-    throw new SemrushTransportError(
+    throw new SerenityTransportError(
       401,
       'Missing IMS bearer token for Semrush transport',
     );
@@ -104,7 +129,7 @@ async function request(method, url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_
     response = await fetch(url, init);
   } catch (e) {
     if (e?.name === 'AbortError') {
-      throw new SemrushTransportError(
+      throw new SerenityTransportError(
         504,
         `Semrush ${method} ${url} timed out after ${timeoutMs}ms`,
       );
@@ -115,7 +140,7 @@ async function request(method, url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_
   }
   const parsed = await parseBody(response);
   if (!response.ok) {
-    throw new SemrushTransportError(
+    throw new SerenityTransportError(
       response.status,
       `Semrush ${method} ${url} failed: ${response.status}`,
       parsed,
@@ -145,7 +170,7 @@ function aioPromptsPath(workspaceId, projectId, suffix) {
  * @param {object} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL override).
  * @param {string} args.imsToken - IMS user bearer token (without 'Bearer ' prefix).
  */
-export function createSemrushTransport({ env, imsToken }) {
+export function createSerenityTransport({ env, imsToken }) {
   const root = baseUrl(env);
 
   return {
