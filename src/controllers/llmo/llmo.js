@@ -68,8 +68,8 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import {
-  patchSheetRow,
-  validateSheetRowPatch,
+  patchSheetRows,
+  parseSheetRowPatch,
   sharepointPathFor,
   publishPathFor,
   isSafePathSegment,
@@ -1165,33 +1165,39 @@ function LlmoController(ctx) {
         return badRequest('sheetType must contain only alphanumerics, hyphen, and underscore');
       }
 
-      const validationError = validateSheetRowPatch(data);
-      if (validationError) {
-        return badRequest(validationError);
+      const parsed = parseSheetRowPatch(data);
+      if (parsed.error) {
+        return badRequest(parsed.error);
       }
+      const { updates, isBatch } = parsed;
 
       const sharepointPath = sharepointPathFor(llmoConfig.dataFolder, sheetType, dataSource);
       const publishPath = publishPathFor(llmoConfig.dataFolder, sheetType, dataSource);
 
-      log.info(`Patching LLMO sheet row for site ${siteId} at ${sharepointPath} sheet=${data.sheet}`);
-      const result = await patchSheetRow(
-        {
-          sharepointPath,
-          publishPath,
-          sheet: data.sheet,
-          match: data.match,
-          values: data.values,
-        },
+      log.info(`Patching LLMO sheet rows for site ${siteId} at ${sharepointPath} (${updates.length} update(s))`);
+      const { results } = await patchSheetRows(
+        { sharepointPath, publishPath, updates },
         { env, log },
       );
 
+      // Preserve the single-row response shape for back-compat with callers that
+      // posted the single-update body; emit a batch shape for callers using `updates`.
+      if (!isBatch) {
+        const [single] = results;
+        return ok({
+          siteId,
+          sheetType: sheetType || null,
+          dataSource,
+          sheet: single.sheet,
+          rowNumber: single.rowNumber,
+          updated: single.updated,
+        });
+      }
       return ok({
         siteId,
         sheetType: sheetType || null,
         dataSource,
-        sheet: data.sheet,
-        rowNumber: result.rowNumber,
-        updated: result.updated,
+        updates: results,
       });
     } catch (error) {
       log.error(`Error patching LLMO sheet row for site ${siteId}: ${error.message}`);

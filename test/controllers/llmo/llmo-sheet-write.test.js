@@ -18,12 +18,15 @@ import ExcelJS from 'exceljs';
 
 import {
   patchSheetRow,
+  patchSheetRows,
   publishToHlx,
   validateSheetRowPatch,
+  parseSheetRowPatch,
   sharepointPathFor,
   publishPathFor,
   isSafePathSegment,
   cellValueAsString,
+  MAX_UPDATES_PER_REQUEST,
 } from '../../../src/controllers/llmo/llmo-sheet-write.js';
 
 use(sinonChai);
@@ -124,6 +127,56 @@ describe('llmo-sheet-write', () => {
       expect(validateSheetRowPatch({
         sheet: 'S', match: { topic_id: '1' }, values: { deleted: true },
       })).to.match(/values\.deleted must be a string/);
+    });
+  });
+
+  describe('parseSheetRowPatch', () => {
+    const okEntry = { sheet: 'S', match: { a: '1' }, values: { b: '2' } };
+
+    it('normalises a single-row body to a 1-element updates array', () => {
+      const r = parseSheetRowPatch(okEntry);
+      expect(r.error).to.equal(undefined);
+      expect(r.isBatch).to.equal(false);
+      expect(r.updates).to.deep.equal([okEntry]);
+    });
+
+    it('accepts a batch body with multiple entries', () => {
+      const r = parseSheetRowPatch({ updates: [okEntry, okEntry] });
+      expect(r.error).to.equal(undefined);
+      expect(r.isBatch).to.equal(true);
+      expect(r.updates).to.have.lengthOf(2);
+    });
+
+    it('rejects an empty updates array', () => {
+      const r = parseSheetRowPatch({ updates: [] });
+      expect(r.error).to.match(/updates must be a non-empty array/);
+    });
+
+    it('rejects an updates array over the cap', () => {
+      const big = Array.from({ length: MAX_UPDATES_PER_REQUEST + 1 }, () => okEntry);
+      const r = parseSheetRowPatch({ updates: big });
+      expect(r.error).to.match(/at most 100/);
+    });
+
+    it('rejects updates set to a non-array value', () => {
+      expect(parseSheetRowPatch({ updates: 'not-an-array' }).error)
+        .to.match(/updates must be an array/);
+    });
+
+    it('reports the index of an invalid entry in a batch', () => {
+      const r = parseSheetRowPatch({
+        updates: [okEntry, { sheet: 'S', match: {}, values: { x: 'y' } }],
+      });
+      expect(r.error).to.match(/updates\[1\]\.match must be a non-empty object/);
+    });
+
+    it('reports the index of a non-object entry in a batch', () => {
+      const r = parseSheetRowPatch({ updates: [okEntry, null] });
+      expect(r.error).to.match(/updates\[1\] must be an object/);
+    });
+
+    it('rejects non-object request body', () => {
+      expect(parseSheetRowPatch('foo').error).to.match(/must be an object/);
     });
   });
 
@@ -458,6 +511,146 @@ describe('llmo-sheet-write', () => {
       );
       expect(result.rowNumber).to.equal(2);
       expect(document.uploadRawDocument).to.have.been.calledOnce;
+    });
+  });
+
+  describe('patchSheetRows (batch)', () => {
+    const sheets = () => ({
+      Semrush: {
+        headers: ['topic_id', 'prompt', 'deleted'],
+        rows: [
+          ['111', 'first prompt', ''],
+          ['222', 'second prompt', ''],
+          ['333', 'third prompt', ''],
+        ],
+      },
+      'Citation Attempt': {
+        headers: ['source_url', 'prompt', 'deleted'],
+        rows: [
+          ['https://x.com', 'cite prompt', ''],
+        ],
+      },
+    });
+    const baseArgs = {
+      sharepointPath: '/sites/elmo-ui-data/customer/strategic-recommendations/strategic-recommendations-template.xlsx',
+      publishPath: 'customer/strategic-recommendations/strategic-recommendations-template.json',
+    };
+    const baseEnv = { env: { ADMIN_HLX_API_KEY: 'k' }, log };
+
+    it('applies multiple updates across worksheets in a single round-trip', async () => {
+      const initialBuffer = await buildWorkbookBuffer(sheets());
+      const { sharepointClient, document, uploaded } = buildStubClient({ initialBuffer });
+      const fetchStub = sinon.stub().resolves({ ok: true, status: 200 });
+
+      const { results } = await patchSheetRows(
+        {
+          ...baseArgs,
+          updates: [
+            { sheet: 'Semrush', match: { topic_id: '111', prompt: 'first prompt' }, values: { deleted: 'true' } },
+            { sheet: 'Semrush', match: { topic_id: '333', prompt: 'third prompt' }, values: { deleted: 'true' } },
+            { sheet: 'Citation Attempt', match: { source_url: 'https://x.com' }, values: { deleted: 'true' } },
+          ],
+        },
+        baseEnv,
+        { sharepointClient, fetch: fetchStub, adminKey: 'k' },
+      );
+
+      expect(results).to.have.lengthOf(3);
+      expect(results[0]).to.deep.equal({ sheet: 'Semrush', rowNumber: 2, updated: { deleted: 'true' } });
+      expect(results[1]).to.deep.equal({ sheet: 'Semrush', rowNumber: 4, updated: { deleted: 'true' } });
+      expect(results[2]).to.deep.equal({ sheet: 'Citation Attempt', rowNumber: 2, updated: { deleted: 'true' } });
+      // One download, one upload, one preview+live publish.
+      expect(document.getDocumentContent).to.have.been.calledOnce;
+      expect(document.uploadRawDocument).to.have.been.calledOnce;
+      expect(fetchStub).to.have.been.calledTwice;
+
+      // Verify all three target cells were written and the non-matching middle row was untouched.
+      const verifyWorkbook = new ExcelJS.Workbook();
+      await verifyWorkbook.xlsx.load(uploaded.buffer);
+      const semrush = verifyWorkbook.getWorksheet('Semrush');
+      // row 111 (rowNumber 2 — header is row 1)
+      expect(semrush.getRow(2).getCell(3).value).to.equal('true');
+      // row 222 untouched
+      expect(semrush.getRow(3).getCell(3).value)
+        .to.satisfy((v) => v === null || v === '' || v === undefined);
+      // row 333
+      expect(semrush.getRow(4).getCell(3).value).to.equal('true');
+      const citation = verifyWorkbook.getWorksheet('Citation Attempt');
+      expect(citation.getRow(2).getCell(3).value).to.equal('true');
+    });
+
+    it('is all-or-nothing: a single failing entry aborts the upload', async () => {
+      const initialBuffer = await buildWorkbookBuffer(sheets());
+      const { sharepointClient, document } = buildStubClient({ initialBuffer });
+
+      try {
+        await patchSheetRows(
+          {
+            ...baseArgs,
+            updates: [
+              { sheet: 'Semrush', match: { topic_id: '111' }, values: { deleted: 'true' } },
+              { sheet: 'Semrush', match: { topic_id: 'does-not-exist' }, values: { deleted: 'true' } },
+              { sheet: 'Semrush', match: { topic_id: '333' }, values: { deleted: 'true' } },
+            ],
+          },
+          baseEnv,
+          { sharepointClient, fetch: sinon.stub(), adminKey: 'k' },
+        );
+        expect.fail('Expected throw');
+      } catch (e) {
+        expect(e.statusCode).to.equal(404);
+        expect(e.message).to.match(/updates\[1\]/);
+      }
+      // Workbook download happened, but upload + publish did not.
+      expect(document.getDocumentContent).to.have.been.calledOnce;
+      expect(document.uploadRawDocument).to.not.have.been.called;
+    });
+
+    it('surfaces the offending index for unknown columns and ambiguous matches', async () => {
+      const initialBuffer = await buildWorkbookBuffer(sheets());
+      const { sharepointClient } = buildStubClient({ initialBuffer });
+
+      try {
+        await patchSheetRows(
+          {
+            ...baseArgs,
+            updates: [
+              { sheet: 'Semrush', match: { topic_id: '111' }, values: { unknown: 'col' } },
+            ],
+          },
+          baseEnv,
+          { sharepointClient, fetch: sinon.stub() },
+        );
+        expect.fail('Expected throw');
+      } catch (e) {
+        // Single-update batches drop the prefix for back-compat with the original wording.
+        expect(e.statusCode).to.equal(400);
+        expect(e.message).to.match(/Unknown column/);
+        expect(e.message).to.not.match(/updates\[0\]/);
+      }
+    });
+
+    it('worksheet-not-found reports the entry index', async () => {
+      const initialBuffer = await buildWorkbookBuffer(sheets());
+      const { sharepointClient } = buildStubClient({ initialBuffer });
+      try {
+        await patchSheetRows(
+          {
+            ...baseArgs,
+            updates: [
+              { sheet: 'Semrush', match: { topic_id: '111' }, values: { deleted: 'true' } },
+              { sheet: 'Nonexistent', match: { x: '1' }, values: { y: '2' } },
+            ],
+          },
+          baseEnv,
+          { sharepointClient, fetch: sinon.stub() },
+        );
+        expect.fail('Expected throw');
+      } catch (e) {
+        expect(e.statusCode).to.equal(404);
+        expect(e.message).to.match(/updates\[1\]/);
+        expect(e.message).to.match(/Nonexistent/);
+      }
     });
   });
 });

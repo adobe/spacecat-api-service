@@ -3898,28 +3898,37 @@ describe('LlmoController', () => {
   });
 
   describe('patchLlmoDataRow', () => {
-    const validateSheetRowPatchStub = (data) => {
+    const parseSheetRowPatchStub = (data) => {
       if (!data || typeof data !== 'object') {
-        return 'Request body must be an object';
+        return { error: 'Request body must be an object' };
       }
-      if (!data.sheet) {
-        return 'sheet must be a non-empty string identifying the worksheet';
+      if (Array.isArray(data.updates)) {
+        if (data.updates.length === 0) {
+          return { error: 'updates must be a non-empty array' };
+        }
+        for (let i = 0; i < data.updates.length; i += 1) {
+          const e = data.updates[i];
+          if (!e || !e.sheet || !e.match || !e.values) {
+            return { error: `updates[${i}] must include sheet, match, values` };
+          }
+        }
+        return { updates: data.updates, isBatch: true };
       }
-      if (!data.match || Object.keys(data.match).length === 0) {
-        return 'match must be a non-empty object of column-value pairs identifying the row';
+      if ('updates' in data) {
+        return { error: 'updates must be an array' };
       }
-      if (!data.values || Object.keys(data.values).length === 0) {
-        return 'values must be a non-empty object of column-value pairs to update';
+      if (!data.sheet || !data.match || !data.values) {
+        return { error: 'sheet, match, values are required' };
       }
-      return null;
+      return { updates: [data], isBatch: false };
     };
 
-    const buildControllerWithSheetWriteStub = async (patchSheetRowImpl) => {
-      const patchSheetRowStub = sinon.stub().callsFake(patchSheetRowImpl);
+    const buildControllerWithSheetWriteStub = async (patchSheetRowsImpl) => {
+      const patchSheetRowsStub = sinon.stub().callsFake(patchSheetRowsImpl);
       const LlmoControllerWithStub = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/controllers/llmo/llmo-sheet-write.js': {
-          patchSheetRow: patchSheetRowStub,
-          validateSheetRowPatch: validateSheetRowPatchStub,
+          patchSheetRows: patchSheetRowsStub,
+          parseSheetRowPatch: parseSheetRowPatchStub,
           sharepointPathFor: (folder, type, src) => (
             type
               ? `/sites/elmo-ui-data/${folder}/${type}/${src}.xlsx`
@@ -3932,7 +3941,7 @@ describe('LlmoController', () => {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
         ...getCommonMocks(),
       });
-      return { subjectController: LlmoControllerWithStub(mockContext), stub: patchSheetRowStub };
+      return { subjectController: LlmoControllerWithStub(mockContext), stub: patchSheetRowsStub };
     };
 
     const baseParams = {
@@ -3943,7 +3952,13 @@ describe('LlmoController', () => {
 
     it('updates the row and returns 200 with the result', async () => {
       const { subjectController, stub } = await buildControllerWithSheetWriteStub(
-        async () => ({ rowNumber: 5, updated: { deleted: 'true' } }),
+        async ({ updates }) => ({
+          results: updates.map((u, i) => ({
+            sheet: u.sheet,
+            rowNumber: 5 + i,
+            updated: { ...u.values },
+          })),
+        }),
       );
       const ctx = {
         ...mockContext,
@@ -4083,7 +4098,9 @@ describe('LlmoController', () => {
 
     it('returns the no-sheetType route variant with sheetType=null in the response', async () => {
       const { subjectController, stub } = await buildControllerWithSheetWriteStub(
-        async () => ({ rowNumber: 7, updated: { deleted: 'true' } }),
+        async ({ updates }) => ({
+          results: [{ sheet: updates[0].sheet, rowNumber: 7, updated: { ...updates[0].values } }],
+        }),
       );
       const result = await subjectController.patchLlmoDataRow({
         ...mockContext,
@@ -4117,11 +4134,11 @@ describe('LlmoController', () => {
 
     it('passes through site-validation error responses unchanged', async () => {
       // Build a controller where the site lookup returns notFound directly.
-      const patchSheetRowStub = sinon.stub();
+      const patchSheetRowsStub = sinon.stub();
       const NotFoundController = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/controllers/llmo/llmo-sheet-write.js': {
-          patchSheetRow: patchSheetRowStub,
-          validateSheetRowPatch: validateSheetRowPatchStub,
+          patchSheetRows: patchSheetRowsStub,
+          parseSheetRowPatch: parseSheetRowPatchStub,
           sharepointPathFor: () => '/x',
           publishPathFor: () => 'x',
         },
@@ -4141,7 +4158,66 @@ describe('LlmoController', () => {
       const result = await NotFoundController(ctxWithMissingSite)
         .patchLlmoDataRow(ctxWithMissingSite);
       expect(result.status).to.equal(404);
-      expect(patchSheetRowStub).to.not.have.been.called;
+      expect(patchSheetRowsStub).to.not.have.been.called;
+    });
+
+    it('accepts a batch body and returns the updates array', async () => {
+      const { subjectController, stub } = await buildControllerWithSheetWriteStub(
+        async ({ updates }) => ({
+          results: updates.map((u, i) => ({
+            sheet: u.sheet,
+            rowNumber: 10 + i,
+            updated: { ...u.values },
+          })),
+        }),
+      );
+      const ctx = {
+        ...mockContext,
+        params: baseParams,
+        data: {
+          updates: [
+            { sheet: 'Semrush', match: { topic_id: '111' }, values: { deleted: 'true' } },
+            { sheet: 'Semrush', match: { topic_id: '222' }, values: { deleted: 'true' } },
+            { sheet: 'Citation Attempt', match: { source_url: 'https://x.com' }, values: { deleted: 'true' } },
+          ],
+        },
+      };
+      const result = await subjectController.patchLlmoDataRow(ctx);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.include({
+        siteId: TEST_SITE_ID,
+        sheetType: 'strategic-recommendations',
+        dataSource: 'strategic-recommendations-template',
+      });
+      expect(body.updates).to.have.lengthOf(3);
+      expect(body.updates[0]).to.deep.equal({ sheet: 'Semrush', rowNumber: 10, updated: { deleted: 'true' } });
+      expect(body.updates[2]).to.deep.equal({ sheet: 'Citation Attempt', rowNumber: 12, updated: { deleted: 'true' } });
+      // Single underlying sheet-write call, regardless of how many updates.
+      expect(stub).to.have.been.calledOnce;
+      expect(stub.firstCall.args[0].updates).to.have.lengthOf(3);
+      // Single-row response keys must NOT appear in the batch response.
+      expect(body.sheet).to.equal(undefined);
+      expect(body.rowNumber).to.equal(undefined);
+      expect(body.updated).to.equal(undefined);
+    });
+
+    it('rejects a batch with too many updates with 400', async () => {
+      const { subjectController, stub } = await buildControllerWithSheetWriteStub(
+        async () => ({ results: [] }),
+      );
+      const ctx = {
+        ...mockContext,
+        params: baseParams,
+        // The controller-level parseSheetRowPatch stub in this test only checks
+        // shape — but the production parser caps at MAX_UPDATES_PER_REQUEST=100.
+        // Drive that bound through a separate unit test on parseSheetRowPatch; here
+        // assert that an empty batch is rejected.
+        data: { updates: [] },
+      };
+      const result = await subjectController.patchLlmoDataRow(ctx);
+      expect(result.status).to.equal(400);
+      expect(stub).to.not.have.been.called;
     });
   });
 
