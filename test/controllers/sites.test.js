@@ -134,6 +134,7 @@ describe('Sites Controller', () => {
     'removeSite',
     'updateSite',
     'updateCdnLogsConfig',
+    'updateScraperConfig',
     'getPageCitabilityCounts',
     'getTopPages',
     'getSiteMetricsBySource',
@@ -3600,6 +3601,46 @@ describe('Sites Controller', () => {
     expect(mergedConfig.handlers).to.deep.equal({ 'meta-tags': { excludedURLs: [] } });
   });
 
+  it('deep-merges llmo sub-keys so a partial llmo patch preserves siblings like cdnBucketConfig', async () => {
+    const site = sites[0];
+    const existingConfig = Config({
+      llmo: {
+        dataFolder: '/data',
+        brand: 'Test',
+        detectedCdn: 'byocdn-akamai',
+        cdnBucketConfig: { cdnProvider: 'akamai', bucketName: 'tui-cdn-logs', region: 'us-east-1' },
+        tags: ['opportunitiesReviewed'],
+      },
+    });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            detectedCdn: 'byocdn-other',
+            tags: ['opportunitiesReviewed'],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.llmo.detectedCdn).to.equal('byocdn-other');
+    expect(mergedConfig.llmo.cdnBucketConfig).to.deep.equal({
+      cdnProvider: 'akamai',
+      bucketName: 'tui-cdn-logs',
+      region: 'us-east-1',
+    });
+  });
+
   describe('auditTargetURLs validation', () => {
     it('returns bad request when manual URL hostname does not match site base URL', async () => {
       const site = sites[0];
@@ -4322,6 +4363,187 @@ describe('Sites Controller', () => {
     });
   });
 
+  describe('updateScraperConfig', () => {
+    const scraperConfig = {
+      headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+    };
+
+    // Wrap a real Config so toDynamoItem still works against the published
+    // shared package, while attaching sinon stubs for updateScraperConfig and
+    // getScraperConfig (neither exists on the installed version yet).
+    // The stubbed updateScraperConfig captures the persisted value so the
+    // matching getScraperConfig returns it — matching the contract the
+    // controller now relies on for the response payload.
+    /* eslint-disable no-param-reassign */
+    const stubSiteConfig = (site) => {
+      const wrapped = Object.create(Config({}));
+      let persisted;
+      const updateStub = sandbox.stub().callsFake((value) => {
+        persisted = value;
+      });
+      // Use defineProperty so we can override methods inherited from the
+      // frozen Config prototype (Object.freeze marks them non-writable).
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: updateStub, writable: true, configurable: true,
+      });
+      Object.defineProperty(wrapped, 'getScraperConfig', {
+        value: () => persisted, writable: true, configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+      return { updateScraperConfig: updateStub };
+    };
+    /* eslint-enable no-param-reassign */
+
+    it('updates scraper config successfully and returns a narrow response', async () => {
+      const site = sites[0];
+      const fakeSiteConfig = stubSiteConfig(site);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(fakeSiteConfig.updateScraperConfig).to.have.been.calledOnceWith(scraperConfig);
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({ siteId: SITE_IDS[0], scraperConfig });
+    });
+
+    it('returns bad request when site ID is invalid', async () => {
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: 'not-a-uuid' },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Invalid site ID');
+    });
+
+    it('returns bad request when scraperConfig is not provided', async () => {
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Scraper config required');
+    });
+
+    it('returns bad request when scraperConfig is not an object', async () => {
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig: 'nope' },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Scraper config required');
+    });
+
+    it('accepts empty scraperConfig to clear stored config', async () => {
+      const site = sites[0];
+      const fakeSiteConfig = stubSiteConfig(site);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig: {} },
+        ...defaultAuthAttributes,
+      });
+
+      expect(fakeSiteConfig.updateScraperConfig).to.have.been.calledOnceWith({});
+      expect(response.status).to.equal(200);
+    });
+
+    it('uses replace (not merge) semantics on the persisted config', async () => {
+      const site = sites[0];
+      const fakeSiteConfig = stubSiteConfig(site);
+
+      const partialUpdate = { headers: { 'X-New': 'value' } };
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig: partialUpdate },
+        ...defaultAuthAttributes,
+      });
+
+      // The setter is called with exactly the payload supplied by the caller -
+      // nothing is merged with a prior scraperConfig at this layer.
+      expect(fakeSiteConfig.updateScraperConfig).to.have.been.calledOnceWith(partialUpdate);
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.scraperConfig).to.deep.equal(partialUpdate);
+    });
+
+    it('returns not found when site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(404);
+      expect((await response.json()).message).to.equal('Site not found');
+    });
+
+    it('returns forbidden when user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 400 when the shared schema rejects the config', async () => {
+      const site = sites[0];
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: sandbox.stub().throws(
+          new Error('Configuration validation error: bad'),
+        ),
+        writable: true,
+        configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.match(/Configuration validation error/);
+    });
+
+    it('propagates unexpected errors (e.g. save failures) as 5xx', async () => {
+      const site = sites[0];
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: sandbox.stub(), writable: true, configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().rejects(new Error('DDB throttle'));
+
+      await expect(sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      })).to.be.rejectedWith('DDB throttle');
+    });
+  });
+
   describe('getPageCitabilityCounts', () => {
     it('returns bad request when site ID is missing', async () => {
       const result = await sitesController.getPageCitabilityCounts({
@@ -4698,6 +4920,7 @@ describe('Sites Controller', () => {
       getBrandConfig: () => undefined,
       getBrandProfile: () => undefined,
       getCdnLogsConfig: () => undefined,
+      getScraperConfig: () => undefined,
       getLlmoConfig: () => undefined,
       getTokowakaConfig: () => undefined,
       getEdgeOptimizeConfig: () => undefined,

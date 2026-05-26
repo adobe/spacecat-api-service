@@ -100,6 +100,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
+ * @param {Object} serenityController - Semrush AIO proxy controller (prompts + projects).
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -157,6 +158,7 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
+  serenityController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -201,6 +203,15 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/brands': brandsController.createBrandForOrg,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId': brandsController.updateBrandForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:promptId': serenityController.updatePrompt,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects': serenityController.listProjects,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects': serenityController.createProject,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/tags': serenityController.listProjectTags,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/models': serenityController.listProjectModels,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/workspaces/:workspaceId/projects': serenityController.listWorkspaceProjects,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.getPromptByBrandAndId,
@@ -233,6 +244,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId': sitesController.getByID,
     'PATCH /sites/:siteId': sitesController.updateSite,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
+    'PATCH /sites/:siteId/config/scraper': sitesController.updateScraperConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/bot-blocker': botBlockerController.checkBotBlocker,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
@@ -654,7 +666,9 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/topics/research': aiVisibilityController.getTopicsResearch,
     'GET /llmo/ai-visibility/topics/stats': aiVisibilityController.getTopicsStats,
     'GET /llmo/ai-visibility/v1/topic/brand-topics': aiVisibilityController.getV1TopicBrandTopics,
+    'GET /llmo/ai-visibility/v1/topic/gap-topics': aiVisibilityController.getV1TopicGapTopics,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
+    'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
   };
 

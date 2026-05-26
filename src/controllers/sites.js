@@ -734,6 +734,16 @@ function SitesController(ctx, log, env) {
           ...requestBody.config.auditTargetURLs,
         };
       }
+      // Deep-merge `llmo` so a partial llmo patch (e.g. { brand } from a lossy
+      // list-DTO round-trip) does not wipe sibling fields like cdnBucketConfig,
+      // questions, cdnlogsFilter, etc. Callers wanting to remove an llmo field
+      // must use the dedicated partial endpoints (e.g. /llmo/cdn-bucket-config).
+      if (requestBody.config?.llmo && existingConfig?.llmo) {
+        merged.llmo = {
+          ...existingConfig.llmo,
+          ...requestBody.config.llmo,
+        };
+      }
       const auditTargetURLsResult = auditTargetURLsPatchGuard(
         merged,
         site.getBaseURL(),
@@ -1135,6 +1145,90 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  /**
+   * PATCH /sites/:siteId/config/scraper
+   *
+   * Replaces the entire `scraperConfig` on the site. Passing
+   * `scraperConfig: {}` clears any previously stored configuration.
+   * To preserve unrelated fields, callers must merge client-side.
+   *
+   * Header shape validation (RFC 7230 token names, no CR/LF in values,
+   * length caps, reserved-name denylist) lives in the
+   * `@adobe/spacecat-shared-data-access` `scraperConfig` Joi schema.
+   * Bad payloads surface as a `Configuration validation error` thrown
+   * by `siteConfig.updateScraperConfig(...)`; we catch and return 400.
+   */
+  const updateScraperConfig = async (context) => {
+    const siteId = context.params?.siteId;
+    const { scraperConfig } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Invalid site ID');
+    }
+
+    if (!isObject(scraperConfig)) {
+      return badRequest('Scraper config required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can update its sites');
+    }
+
+    let updatedSite;
+    try {
+      const siteConfig = site.getConfig();
+      siteConfig.updateScraperConfig(scraperConfig);
+
+      const configObj = Config.toDynamoItem(siteConfig);
+      site.setConfig(configObj);
+
+      updatedSite = await site.save();
+    } catch (error) {
+      // Joi/shared rejection -> 400 (client can fix payload).
+      // Anything else -> propagate so the framework returns 5xx (transient/infra).
+      if (error?.message?.startsWith('Configuration validation error')) {
+        log.warn(`Scraper config validation failed for site ${siteId}: ${error.message}`);
+        // Joi echoes the offending value into the message; if a caller submits
+        // CR/LF (or other control chars) in a header value those would get
+        // copied into the `x-error` response header by `badRequest`, where
+        // Node's HTTP layer rejects them and the framework returns 500.
+        // Strip Unicode "Other, Control" chars so the rejection itself stays
+        // a clean 400. `\p{Cc}` covers C0 (0x00-0x1F) + DEL (0x7F) + C1
+        // (0x80-0x9F) without putting literal control chars in the source
+        // (which would trip the `no-control-regex` lint rule).
+        const safeMessage = error.message.replace(/\p{Cc}+/gu, ' ');
+        return badRequest(safeMessage);
+      }
+      log.error(
+        `Error updating scraper config for site ${siteId} (headers=${
+          Object.keys(scraperConfig.headers || {}).join(',')
+        }): ${error.message}`,
+        error,
+      );
+      throw error;
+    }
+
+    log.info(
+      `Scraper config updated for site ${siteId} (headers=${
+        Object.keys(scraperConfig.headers || {}).join(',')
+      })`,
+    );
+    // Narrow response: do not echo unrelated site config (which may contain
+    // secrets like tokowakaConfig.apiKey) back to a caller that only wrote
+    // scraperConfig. Read the persisted value back from the saved entity so
+    // any sanitization the shared Joi schema performs (defaults, trims,
+    // unknown-field stripping) is reflected in the response.
+    return ok({
+      siteId: updatedSite.getId(),
+      scraperConfig: updatedSite.getConfig().getScraperConfig(),
+    });
+  };
+
   const CITABILITY_GROUP_BY_FIELDS = new Set(['updatedBy', 'url', 'updatedAt']);
   const CITABILITY_PERIODS = new Set(['7d', '30d', '90d', '1y', 'all']);
   const CITABILITY_PERIOD_MS = {
@@ -1488,6 +1582,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    updateScraperConfig,
     getPageCitabilityCounts,
     getTopPages,
     resolveSite,
