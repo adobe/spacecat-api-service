@@ -99,6 +99,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
+ * @param {Object} aiVisibilityInsightsController - AI Visibility Insights (LLM synthesis).
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
  * @param {Object} serenityController - Semrush AIO proxy controller (prompts + projects).
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
@@ -157,6 +158,7 @@ export default function getRouteHandlers(
   drsBpPgAuditController,
   webhooksController,
   aiVisibilityController,
+  aiVisibilityInsightsController,
   fanoutReportController,
   serenityController,
 ) {
@@ -670,6 +672,7 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
+    'GET /llmo/ai-visibility/insights': aiVisibilityInsightsController.getInsights,
   };
 
   // Initialization of static and dynamic routes
