@@ -1,3 +1,10 @@
+# [1.516.0](https://github.com/adobe/spacecat-api-service/compare/v1.515.0...v1.516.0) (2026-05-26)
+
+
+### Features
+
+* **serenity:** rename /semrush → /serenity + post-launch hardening ([#2467](https://github.com/adobe/spacecat-api-service/issues/2467)) ([c9cdb42](https://github.com/adobe/spacecat-api-service/commit/c9cdb42fe64a94a9c0db1c839fb3db8fa6ed5eb3)), closes [#2466](https://github.com/adobe/spacecat-api-service/issues/2466)
+
 # [1.515.0](https://github.com/adobe/spacecat-api-service/compare/v1.514.1...v1.515.0) (2026-05-26)
 
 
