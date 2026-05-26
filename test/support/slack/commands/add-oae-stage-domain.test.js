@@ -25,7 +25,7 @@ describe('AddOaeStageDomainCommand', () => {
   let toDynamoItemStub;
   let tokowakaClientStub;
 
-  // extractURLFromSlackInput strips www. so 'www.example.com' → 'https://example.com'
+  // extractURLFromSlackInput strips www. and prepends https:// so 'www.example.com' → 'https://example.com'
   const PROD_SITE_INPUT = 'www.example.com';
   const PROD_SITE_URL = 'https://example.com';
   const PROD_SITE_ID = 'prod-site-id-123';
