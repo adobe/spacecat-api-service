@@ -186,7 +186,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         // eslint-disable-next-line no-await-in-loop
         const { data, error } = await withRetry(() => postgrestClient
           .from('projection_audit')
-          .select('scope_prefix,handler_name,projected_at,metadata')
+          .select('scope_prefix,handler_name,projected_at,output_count,metadata')
           .in('scope_prefix', chunk)
           .in('handler_name', expectedHandlers)
           .gte('projected_at', `${windowStart}T00:00:00Z`)
@@ -196,18 +196,37 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         if (error) {
           throw new Error(`projection_audit: ${error.message}`);
         }
+        // Raw audit rows for `wrpc_import_agentic_traffic` do not carry per-date
+        // metadata, so a row alone cannot prove that *the requested* dateStr was
+        // covered (the same row may correspond to an earlier date inside the
+        // lookup window). We infer raw coverage from two date-specific signals:
+        //   1. Daily refresh metadata: dailyRefreshDates includes dateStr.
+        //      Daily refresh is a post-success message from the raw import
+        //      (see projector agenticTrafficAnalyticsConfig), so a daily-for-X
+        //      row proves raw succeeded for X.
+        //   2. Fallback for "raw OK, daily not run yet": a raw row whose
+        //      `projected_at` lands on or after dateStr+1 day UTC (the raw
+        //      projector runs the day after the traffic day) with a positive
+        //      `output_count`.
+        const rawProjectableAt = `${formatUtcDate(addUtcDays(targetDate, 1))}T00:00:00Z`;
         for (const row of data ?? []) {
-          if (row.handler_name === HANDLERS.raw) {
-            ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
-          } else if (row.handler_name === HANDLERS.daily) {
+          if (row.handler_name === HANDLERS.daily) {
             const dates = row.metadata?.dailyRefreshDates ?? [];
             if (dates.includes(dateStr)) {
               ran.add(`${row.scope_prefix}:${HANDLERS.daily}`);
+              ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
             }
           } else if (row.handler_name === HANDLERS.weekly) {
             const weeks = row.metadata?.weeklyRefreshWeeks ?? [];
             if (weeks.includes(weekStartStr)) {
               ran.add(`${row.scope_prefix}:${HANDLERS.weekly}`);
+            }
+          } else if (row.handler_name === HANDLERS.raw) {
+            if (
+              row.projected_at >= rawProjectableAt
+              && Number(row.output_count ?? 0) > 0
+            ) {
+              ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
             }
           }
         }

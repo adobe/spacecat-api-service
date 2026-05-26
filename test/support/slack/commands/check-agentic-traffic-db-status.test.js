@@ -186,10 +186,13 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Missing raw projection: *2*');
   });
 
-  it('flags daily as missing when the audit row exists but its metadata does not cover the requested date', async () => {
-    // Daily refresh ran for a different date (e.g. yesterday's run processed
-    // 2026-05-18, not the requested 2026-05-19). The presence of an audit row
-    // alone is not enough - metadata must confirm the exact traffic date.
+  it('flags raw AND daily as missing when audit rows exist but lack per-date evidence for dateStr', async () => {
+    // Raw projection_audit rows carry no per-date metadata, so a raw row alone
+    // cannot prove that *dateStr* was covered (it could be for any other date
+    // in the lookup window). When daily refresh metadata also lacks dateStr,
+    // and the raw row has no positive output_count fallback, both must be
+    // reported missing. Regression for the bug where any raw row in the window
+    // was permissively credited as "raw OK for dateStr".
     const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
     context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://wknd.site')]);
     context.dataAccess.services.postgrestClient = makePostgrest([
@@ -197,6 +200,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
         scope_prefix: TARGET_SITE_ID,
         handler_name: HANDLERS.raw,
         projected_at: '2026-05-20T06:46:00Z',
+        output_count: 0,
         metadata: {},
         skipped: false,
       },
@@ -214,8 +218,70 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     clock.restore();
 
     const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing raw projection: *1*');
+    expect(output).to.include('Missing daily refresh: *1*');
+    expect(output).to.include('missing: raw, daily');
+  });
+
+  it('flags only daily as missing when raw ran post-day with positive output_count but daily metadata does not cover dateStr', async () => {
+    // The legitimate "raw OK, daily refresh failed" diagnostic: raw audit row
+    // has projected_at >= dateStr+1 day UTC and output_count > 0 (the raw
+    // projector runs the day after the traffic day), but the daily refresh
+    // did not record dateStr in its metadata. Raw should count, daily shouldn't.
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://raw-ok.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-20T06:46:00Z', // dateStr+1 day
+        output_count: 1234,
+        metadata: {},
+        skipped: false,
+      },
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.daily,
+        projected_at: '2026-05-20T06:54:00Z',
+        metadata: { dailyRefreshDates: ['2026-05-18'] }, // wrong date
+        skipped: false,
+      },
+    ]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing raw projection: *0*');
     expect(output).to.include('Missing daily refresh: *1*');
     expect(output).to.include('missing: daily');
+  });
+
+  it('does not credit raw when projected_at is before dateStr+1 day UTC even with positive output_count', async () => {
+    // A raw row whose projected_at falls on dateStr or earlier cannot have
+    // covered dateStr — the raw projector runs the day after the traffic day.
+    // Without daily refresh proof for dateStr, raw must be reported missing.
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://early-raw.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-19T06:46:00Z', // same day as dateStr
+        output_count: 5000,
+        metadata: {},
+        skipped: false,
+      },
+    ]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing raw projection: *1*');
+    expect(output).to.include('Missing daily refresh: *1*');
   });
 
   it('skips weekly check for traffic dates in the current (incomplete) ISO week', async () => {
