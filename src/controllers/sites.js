@@ -130,6 +130,8 @@ const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
+const DEFAULT_LIMIT = 100;
+const MAX_LIMIT = 1000; // lower to 500 if 6mb lambda limit is hit again
 
 /**
  * Filters Ahrefs top pages by site base URL
@@ -388,10 +390,10 @@ function SitesController(ctx, log, env) {
   };
 
   /**
-   * Gets all sites. Accessible to admin callers (legacy admin path) and to S2S
-   * consumers that hold the `site:readAll` capability - see
+   * Gets all sites with cursor-based pagination. Accessible to admin callers (legacy admin path)
+   * and to S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
-   * @returns {Promise<Response>} Array of sites response.
+   * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
     const requestId = context?.invocation?.id || 'unknown';
@@ -406,18 +408,36 @@ function SitesController(ctx, log, env) {
       return forbidden('Forbidden: admin access or site:readAll capability required');
     }
 
-    // TODO: implement proper pagination or filtering to stay under AWS Lambda
-    // response size limits (6MB). Currently excluding the two non customer facing orgs as
-    // a temporary workaround to avoid 413 responses.
-    const EXCLUDED_ORG_IDS = [
-      env.DEFAULT_ORGANIZATION_ID,
-      env.ORGANIZATION_ID_FRIENDS_FAMILY,
-    ];
+    const limitParam = context?.data?.limit;
+    const cursor = context?.data?.cursor || null;
+    const paginated = hasText(limitParam) || hasText(cursor);
 
+    if (paginated) {
+      const parsedLimit = parseInt(limitParam, 10);
+      const effectiveLimit = (Number.isInteger(parsedLimit) && parsedLimit > 0)
+        ? Math.min(parsedLimit, MAX_LIMIT)
+        : DEFAULT_LIMIT;
+
+      const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
+      const sites = (results.data || []).map((site) => SiteDto.toListJSON(site));
+
+      if (s2sResult.allowed) {
+        log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
+      }
+
+      return ok({
+        sites,
+        pagination: {
+          limit: effectiveLimit,
+          cursor: results.cursor ?? null,
+          hasMore: !!results.cursor,
+        },
+      });
+    }
+
+    // legacy: no limit/cursor params -> flat array for backwards comp.
     const all = await Site.all({}, { fetchAllPages: true });
-    const sites = all
-      .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
-      .map((site) => SiteDto.toListJSON(site));
+    const sites = all.map((site) => SiteDto.toListJSON(site));
 
     if (s2sResult.allowed) {
       log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
