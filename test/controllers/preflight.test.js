@@ -1032,6 +1032,26 @@ describe('Preflight Controller', () => {
       expect(result.message).to.include('url is missing or not a valid URI');
     });
 
+    it('returns 500 when MYSTIQUE_API_BASE_URL is not configured', async () => {
+      const controller = CreatePreflightController(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        { AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue', AWS_ENV: 'prod' },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+    });
+
     it('returns 404 when site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
       const response = await preflightController.createPreflight({
@@ -1415,13 +1435,24 @@ describe('Preflight Controller', () => {
       expect(result).to.be.an('array').with.lengthOf(0);
     });
 
-    it('passes url filter to allBySiteIdAndUrl', async () => {
+    it('passes url filter to allBySiteIdAndUrl via rawQueryString', async () => {
       await preflightController.getAllPreflights({
-        params: { siteId: 'test-site-123', url: 'https://main--example-site.aem.page/test.html' },
+        params: { siteId: 'test-site-123' },
+        invocation: { event: { rawQueryString: 'url=https%3A%2F%2Fmain--example-site.aem.page%2Ftest.html' } },
       });
       expect(mockDataAccess.Preflight.allBySiteIdAndUrl).to.have.been.calledWith(
         'test-site-123',
         'https://main--example-site.aem.page/test.html',
+      );
+    });
+
+    it('passes undefined url filter when no query string present', async () => {
+      await preflightController.getAllPreflights({
+        params: { siteId: 'test-site-123' },
+      });
+      expect(mockDataAccess.Preflight.allBySiteIdAndUrl).to.have.been.calledWith(
+        'test-site-123',
+        undefined,
       );
     });
 

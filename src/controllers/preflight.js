@@ -342,21 +342,29 @@ function PreflightController(ctx, log, env) {
     authorizationHeader,
     audits,
   ) {
-    const response = await fetch(`${mysticatBaseUrl}/v1/preflight/analyze`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
-      },
-      body: JSON.stringify({
-        site_id: siteId,
-        url,
-        mode: step,
-        scan_id: scanId,
-        persist: true,
-        ...(audits !== undefined && { audits }),
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+      response = await fetch(`${mysticatBaseUrl}/v1/preflight/analyze`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
+        },
+        body: JSON.stringify({
+          site_id: siteId,
+          url,
+          mode: step,
+          scan_id: scanId,
+          persist: true,
+          ...(audits !== undefined && { audits }),
+        }),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       const text = await response.text();
@@ -376,6 +384,10 @@ function PreflightController(ctx, log, env) {
 
     if (!isNonEmptyObject(data) || !hasText(data.url) || !isValidUrl(data.url)) {
       return preflightError('PREFLIGHT_INVALID_REQUEST', 'url is missing or not a valid URI', 400);
+    }
+
+    if (!hasText(env.MYSTIQUE_API_BASE_URL)) {
+      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Analyze service not configured', 500);
     }
 
     const { url } = data;
@@ -402,7 +414,7 @@ function PreflightController(ctx, log, env) {
     try {
       siteByUrl = await dataAccess.Site.findByPreviewURL(previewBaseURL);
     } catch (e) {
-      // URL doesn't match a known site — fall through to invalid request
+      log.debug(`findByPreviewURL failed for ${previewBaseURL}: ${e.message}`);
     }
     if (!siteByUrl || siteByUrl.getId() !== siteId) {
       return preflightError('PREFLIGHT_INVALID_REQUEST', 'URL does not belong to this site', 400);
@@ -484,13 +496,13 @@ function PreflightController(ctx, log, env) {
         siteId,
         asyncJobId: asyncJob.getId(),
         url,
-        status: 'IN_PROGRESS',
+        status: AsyncJob.Status.IN_PROGRESS,
         createdBy,
         startedAt: new Date().toISOString(),
       });
     } catch (e) {
       log.error(`Failed to create Preflight: ${e.message}`);
-      await asyncJob.remove().catch(() => {});
+      await asyncJob.remove().catch((re) => log.warn(`Failed to roll back AsyncJob ${asyncJob.getId()}: ${re.message}`));
       return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to create preflight record', 500);
     }
 
@@ -505,14 +517,14 @@ function PreflightController(ctx, log, env) {
         preflightAudits,
       );
     } catch (mysticatError) {
-      log.error(`Mysticat analyze failed: ${mysticatError.message}`);
-      preflight.setStatus('FAILED');
+      log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);
+      preflight.setStatus(AsyncJob.Status.FAILED);
       preflight.setError({ code: 'MYSTICAT_ERROR', message: mysticatError.message });
       preflight.setEndedAt(new Date().toISOString());
-      await preflight.save().catch(() => {});
+      await preflight.save().catch((e) => log.warn(`Failed to persist FAILED state on preflight ${preflight.getId()}: ${e.message}`));
       asyncJob.setStatus(AsyncJob.Status.FAILED);
-      await asyncJob.save().catch(() => {});
-      return preflightError('PREFLIGHT_UPSTREAM_ERROR', `Mysticat analyze failed: ${mysticatError.message}`, 502);
+      await asyncJob.save().catch((e) => log.warn(`Failed to persist FAILED state on AsyncJob ${asyncJob.getId()}: ${e.message}`));
+      return preflightError('PREFLIGHT_UPSTREAM_ERROR', 'Upstream analyze service failed', 502);
     }
 
     const isDev = env.AWS_ENV === 'dev';
@@ -529,7 +541,15 @@ function PreflightController(ctx, log, env) {
    */
   const getAllPreflights = async (context) => {
     const siteId = context.params?.siteId;
-    const urlFilter = context.params?.url;
+    const rawQueryString = context.invocation?.event?.rawQueryString;
+    const urlFilter = rawQueryString
+      ? Object.fromEntries(
+        rawQueryString.split('&').filter(Boolean).map((p) => {
+          const [k, v] = p.split('=');
+          return [decodeURIComponent(k), v !== undefined ? decodeURIComponent(v) : ''];
+        }),
+      ).url
+      : undefined;
 
     let site;
     try {
