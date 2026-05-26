@@ -717,6 +717,39 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals(FixDto.toJSON(fix));
     });
 
+    it('hydrates executedByUser when imsClient is configured', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'Jane',
+          last_name: 'Doe',
+          email: 'jane.doe@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fix = await fixEntityCollection.create({
+        fixEntityId: fixId,
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: testExternalUserId,
+      });
+      fixEntityCollection.findById.withArgs(fixId).resolves(fix);
+
+      const response = await fixesController.getByID(requestContext);
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result).to.have.property('executedByUser');
+      expect(result.executedByUser).to.deep.equal({
+        firstName: 'Jane',
+        lastName: 'Doe',
+        email: 'jane.doe@example.com',
+      });
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(testExternalUserId);
+    });
+
     it('responds 404 if the fix does not exist', async () => {
       fixEntityCollection.findById
         .withArgs(fixId)

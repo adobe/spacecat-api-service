@@ -217,8 +217,7 @@ export class FixesController {
       return res;
     }
 
-    // executedByUser enrichment is intentionally omitted here; call getAllForOpportunity
-    // when resolved user details are required.
+    await this.#enrichFixesWithUserNames([fix]);
     return ok(FixDto.toJSON(fix));
   }
 
