@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-disable max-len -- OpenAPI contract tests for /semrush/* endpoints */
+/* eslint-disable max-len -- OpenAPI contract tests for /serenity/* endpoints */
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -62,10 +62,10 @@ async function readJsonBody(response) {
  * controller, and validates the body against the OpenAPI response schema.
  *
  * Per-operation `expectedStatus` lets the bulk runner pick the right schema
- * (createSemrushProject is 201, everything else is 200).
+ * (createSerenityProject is 201, everything else is 200).
  */
 const FIXTURES = {
-  listSemrushPrompts: {
+  listSerenityPrompts: {
     expectedStatus: 200,
     controllerMethod: 'listPrompts',
     handlerName: 'handleListPrompts',
@@ -86,7 +86,7 @@ const FIXTURES = {
       limit: 50,
     },
   },
-  createSemrushPrompts: {
+  createSerenityPrompts: {
     expectedStatus: 200,
     controllerMethod: 'createPrompts',
     handlerName: 'handleCreatePrompts',
@@ -106,7 +106,7 @@ const FIXTURES = {
       }],
     },
   },
-  updateSemrushPrompt: {
+  updateSerenityPrompt: {
     expectedStatus: 200,
     controllerMethod: 'updatePrompt',
     handlerName: 'handleUpdatePrompt',
@@ -124,7 +124,7 @@ const FIXTURES = {
     },
     params: { promptId: 'eyJiIjoiYSIsImwiOjI4NDAsImxhbmciOiJlbiIsInQiOiJzYW1wbGUifQ' },
   },
-  bulkDeleteSemrushPrompts: {
+  bulkDeleteSerenityPrompts: {
     expectedStatus: 200,
     controllerMethod: 'bulkDeletePrompts',
     handlerName: 'handleBulkDeletePrompts',
@@ -135,7 +135,7 @@ const FIXTURES = {
       }],
     },
   },
-  listSemrushProjects: {
+  listSerenityProjects: {
     expectedStatus: 200,
     controllerMethod: 'listProjects',
     handlerName: 'handleListProjects',
@@ -151,7 +151,7 @@ const FIXTURES = {
       }],
     },
   },
-  createSemrushProject: {
+  createSerenityProject: {
     expectedStatus: 201,
     controllerMethod: 'createProject',
     handlerName: 'handleCreateProject',
@@ -166,14 +166,14 @@ const FIXTURES = {
       },
     },
   },
-  listSemrushProjectTags: {
+  listSerenityProjectTags: {
     expectedStatus: 200,
     controllerMethod: 'listProjectTags',
     handlerName: 'handleListProjectTags',
     handlerResult: { items: [{ id: 't1', name: 'Topic A' }] },
     params: { workspaceId: WORKSPACE, projectId: 'p' },
   },
-  listSemrushProjectModels: {
+  listSerenityProjectModels: {
     expectedStatus: 200,
     controllerMethod: 'listProjectModels',
     handlerName: 'handleListProjectModels',
@@ -184,7 +184,7 @@ const FIXTURES = {
     },
     params: { workspaceId: WORKSPACE, projectId: 'p' },
   },
-  listSemrushWorkspaceProjects: {
+  listSerenityWorkspaceProjects: {
     expectedStatus: 200,
     controllerMethod: 'listWorkspaceProjects',
     handlerName: 'handleListWorkspaceProjects',
@@ -204,12 +204,12 @@ function makeAjv() {
   return ajv;
 }
 
-describe('OpenAPI contract — /semrush/* endpoints', () => {
+describe('OpenAPI contract — /serenity/* endpoints', () => {
   const spec = loadBundledSpec();
-  const ops = operationsForTag(spec, 'semrush');
+  const ops = operationsForTag(spec, 'serenity');
   const opsByOperationId = new Map(ops.map((o) => [o.operationId, o]));
 
-  it('every operationId in semrush-api.yaml has a fixture in this test file', () => {
+  it('every operationId in serenity-api.yaml has a fixture in this test file', () => {
     const ids = ops.map((o) => o.operationId).sort();
     const fixtureKeys = Object.keys(FIXTURES).sort();
     expect(ids).to.deep.equal(fixtureKeys);
@@ -246,14 +246,14 @@ describe('OpenAPI contract — /semrush/* endpoints', () => {
       };
       handlerStubs[fx.handlerName].resolves(fx.handlerResult);
 
-      const SemrushController = (await esmock(
-        '../../src/controllers/semrush.js',
+      const SerenityController = (await esmock(
+        '../../src/controllers/serenity.js',
         {
-          '../../src/support/semrush/rest-transport.js': {
-            createSemrushTransport: () => ({}),
-            SemrushTransportError: class extends Error {},
+          '../../src/support/serenity/rest-transport.js': {
+            createSerenityTransport: () => ({}),
+            SerenityTransportError: class extends Error {},
           },
-          '../../src/support/semrush/workspace-resolver.js': {
+          '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
           },
           '../../src/support/access-control-util.js': {
@@ -262,13 +262,13 @@ describe('OpenAPI contract — /semrush/* endpoints', () => {
           '../../src/support/prompts-storage.js': {
             resolveBrandUuid: () => Promise.resolve(BRAND),
           },
-          '../../src/support/semrush/handlers/prompts.js': {
+          '../../src/support/serenity/handlers/prompts.js': {
             handleListPrompts: handlerStubs.handleListPrompts,
             handleCreatePrompts: handlerStubs.handleCreatePrompts,
             handleUpdatePrompt: handlerStubs.handleUpdatePrompt,
             handleBulkDeletePrompts: handlerStubs.handleBulkDeletePrompts,
           },
-          '../../src/support/semrush/handlers/projects.js': {
+          '../../src/support/serenity/handlers/projects.js': {
             handleListProjects: handlerStubs.handleListProjects,
             handleCreateProject: handlerStubs.handleCreateProject,
             handleListProjectTags: handlerStubs.handleListProjectTags,
@@ -279,7 +279,7 @@ describe('OpenAPI contract — /semrush/* endpoints', () => {
       )).default;
 
       const ctx = fakeContext({ params: fx.params || {}, data: fx.data });
-      const controller = SemrushController(ctx, fakeLog());
+      const controller = SerenityController(ctx, fakeLog());
       const response = await controller[fx.controllerMethod](ctx);
 
       expect(response.status).to.equal(fx.expectedStatus);

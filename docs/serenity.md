@@ -1,6 +1,6 @@
 # Semrush AIO proxy — operator guide
 
-This document is the runtime reference for the `/v2/orgs/:spaceCatId/brands/:brandId/semrush/*` endpoints. The OpenAPI contract is in [`docs/openapi/semrush-api.yaml`](./openapi/semrush-api.yaml); this file covers what an operator needs to verify a deploy and onboard a customer.
+This document is the runtime reference for the `/v2/orgs/:spaceCatId/brands/:brandId/serenity/*` endpoints. The OpenAPI contract is in [`docs/openapi/serenity-api.yaml`](./openapi/serenity-api.yaml); this file covers what an operator needs to verify a deploy and onboard a customer.
 
 ## Architecture in one paragraph
 
@@ -8,17 +8,41 @@ api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API a
 
 ## Environment configuration
 
-No new env vars. The proxy reads:
+The proxy is configured via a single env var that is **required at runtime** — Lambda fails at first request if it is unset.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `SEMRUSH_PROJECTS_BASE_URL` | `https://adobe-hackathon.semrush.com` | Override target host (used in tests; left default in dev/stage/prod) |
+| Variable | Required | Source | Purpose |
+|---|---|---|---|
+| `SEMRUSH_PROJECTS_BASE_URL` | yes (no source default) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Upstream host for the Semrush AIO REST API. Must be `https://…`. Trailing slashes are stripped. Per-environment value so the production target can differ from the hackathon host without a code change. |
+
+### Vault writes (dev / stage / prod)
+
+```bash
+export VAULT_ADDR=https://vault-amer.adobe.net
+vault login -method=oidc   # opens browser
+
+# value used for all three today; production target host may differ later
+vault kv patch dx_mysticat/dev/api-service \
+  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+vault kv patch dx_mysticat/stage/api-service \
+  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+vault kv patch dx_mysticat/prod/api-service \
+  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+
+# verify (must export VAULT_ADDR — the CLI default is 127.0.0.1:8200)
+export VAULT_ADDR=https://vault-amer.adobe.net
+for ENV in dev stage prod; do
+  echo "--- $ENV ---"
+  vault kv get -field=SEMRUSH_PROJECTS_BASE_URL dx_mysticat/$ENV/api-service
+done
+```
+
+The next `hedy --aws-update-secrets` deploy step ships the value through AWS Secrets Manager at `/helix-deploy/spacecat-services/api-service/latest`; the Lambda's `secrets` middleware then injects it into `context.env` on every cold start.
 
 The IMS forwarding pipeline:
 
-1. Caller hits `/v2/orgs/:spaceCatId/brands/:brandId/semrush/...` with `Authorization: Bearer <ims_user_token>`.
+1. Caller hits `/v2/orgs/:spaceCatId/brands/:brandId/serenity/...` with `Authorization: Bearer <ims_user_token>`.
 2. The existing `authWrapper` middleware in `src/index.js` validates the IMS token (caller identity, IMS org membership).
-3. `SemrushController` calls `getImsUserToken(context)` from `src/support/utils.js` to extract the raw token, then builds a per-request `createSemrushTransport({ env, imsToken })` instance from `src/support/semrush/rest-transport.js`.
+3. `SerenityController` calls `getImsUserToken(context)` from `src/support/utils.js` to extract the raw token, then builds a per-request `createSerenityTransport({ env, imsToken })` instance from `src/support/serenity/rest-transport.js`.
 4. Every outbound `fetch` to Semrush carries `Authorization: Bearer ${imsToken}` plus `Accept: application/json` and `Content-Type: application/json`. No cookies, no `Auth-Data-Jwt`, no `User-Agent`.
 
 If the caller omits the bearer, the controller returns `400 Missing Authorization header` before touching Semrush.
@@ -28,7 +52,7 @@ If the caller omits the bearer, the controller returns `400 Missing Authorizatio
 Each request resolves the Semrush workspace from `organizations.semrush_workspace_id` for the `spaceCatId` path param:
 
 ```
-src/support/semrush/workspace-resolver.js -> Organization.findById(spaceCatId).getSemrushWorkspaceId()
+src/support/serenity/workspace-resolver.js -> Organization.findById(spaceCatId).getSemrushWorkspaceId()
 ```
 
 The resolver has a 5-minute in-memory LRU keyed by `spaceCatId` (including null workspaces, so non-onboarded orgs don't pay a DB round-trip on every call). If the org has no workspace set, the controller returns `404 Organization has no semrush_workspace_id`.
@@ -52,21 +76,21 @@ All endpoints require `Authorization: Bearer <ims_user_token>` and `organization
 
 | Method | Path | Purpose | OperationId |
 |---|---|---|---|
-| GET | `/semrush/prompts` | List prompts across every project mapped to the brand | `listSemrushPrompts` |
-| POST | `/semrush/prompts` | Bulk create prompts grouped by (semrushLocationId, language) | `createSemrushPrompts` |
-| PATCH | `/semrush/prompts/:promptId` | Update a prompt by its logical id | `updateSemrushPrompt` |
-| POST | `/semrush/prompts/bulk-delete` | Delete prompts by Semrush ids | `bulkDeleteSemrushPrompts` |
-| GET | `/semrush/projects` | List `brand_to_semrush_projects` rows enriched with live metadata | `listSemrushProjects` |
-| POST | `/semrush/projects` | Onboard a new (brand, market, language) slice | `createSemrushProject` |
-| GET | `/semrush/projects/:workspaceId/:projectId/tags` | Unique tag names in a project | `listSemrushProjectTags` |
-| GET | `/semrush/projects/:workspaceId/:projectId/models` | AI models configured for a project | `listSemrushProjectModels` |
-| GET | `/semrush/workspaces/:workspaceId/projects` | All projects in a workspace | `listSemrushWorkspaceProjects` |
+| GET | `/serenity/prompts` | List prompts across every project mapped to the brand | `listSerenityPrompts` |
+| POST | `/serenity/prompts` | Bulk create prompts grouped by (semrushLocationId, language) | `createSerenityPrompts` |
+| PATCH | `/serenity/prompts/:promptId` | Update a prompt by its logical id | `updateSerenityPrompt` |
+| POST | `/serenity/prompts/bulk-delete` | Delete prompts by Semrush ids | `bulkDeleteSerenityPrompts` |
+| GET | `/serenity/projects` | List `brand_to_semrush_projects` rows enriched with live metadata | `listSerenityProjects` |
+| POST | `/serenity/projects` | Onboard a new (brand, market, language) slice | `createSerenityProject` |
+| GET | `/serenity/projects/:workspaceId/:projectId/tags` | Unique tag names in a project | `listSerenityProjectTags` |
+| GET | `/serenity/projects/:workspaceId/:projectId/models` | AI models configured for a project | `listSerenityProjectModels` |
+| GET | `/serenity/workspaces/:workspaceId/projects` | All projects in a workspace | `listSerenityWorkspaceProjects` |
 
 All paths are prefixed with `/v2/orgs/:spaceCatId/brands/:brandId`.
 
 ## The onboarding flow
 
-`POST /semrush/projects` writes a row to `brand_to_semrush_projects` **only after both Semrush calls succeed**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
+`POST /serenity/projects` writes a row to `brand_to_semrush_projects` **only after both Semrush calls succeed**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
 
 ```
 1. validate body                              -> 400 on missing/invalid fields
@@ -92,7 +116,7 @@ If step 5 or 6 fails, no row is written and the caller may safely retry with the
 | `lang` | lowercase BCP 47-shaped language tag |
 | `t` | prompt text |
 
-It is opaque to clients but `decodeLogicalId` in `src/support/semrush/handlers/prompts.js` reverses it. The id is stable across Semrush re-creates (re-creating the prompt yields the same logical id even when the underlying `semrushId` changes).
+It is opaque to clients but `decodeLogicalId` in `src/support/serenity/handlers/prompts.js` reverses it. The id is stable across Semrush re-creates (re-creating the prompt yields the same logical id even when the underlying `semrushId` changes).
 
 ## Error envelopes
 
@@ -104,7 +128,7 @@ It is opaque to clients but `decodeLogicalId` in `src/support/semrush/handlers/p
 | 502 | `{ error: "semrushUpstreamError", status, message, body }` | Semrush returned a non-2xx; `status` is the upstream HTTP status, `body` is its parsed JSON |
 | 500 | `{ message }` | Unexpected error; logged with stack via `log.error` |
 
-`SemrushTransportError` from `src/support/semrush/rest-transport.js` carries `status` and `body` so the 502 envelope reflects what Semrush actually said.
+`SerenityTransportError` from `src/support/serenity/rest-transport.js` carries `status` and `body` so the 502 envelope reflects what Semrush actually said.
 
 ## Observability (Coralogix)
 
@@ -142,7 +166,7 @@ Run these after the api-service feature branch deploys to dev. Each command show
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' \
-  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/projects"
+  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/projects"
 ```
 
 Expected: `400`. Confirms `authWrapper` doesn't admit anonymous requests for these paths.
@@ -154,7 +178,7 @@ Pick an org you know has no workspace bound (any non-onboarded dev org). With a 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' \
   -H "Authorization: Bearer ${IMS}" \
-  "${API_BASE}/v2/orgs/<org-without-workspace>/brands/${BRAND_ID}/semrush/projects"
+  "${API_BASE}/v2/orgs/<org-without-workspace>/brands/${BRAND_ID}/serenity/projects"
 ```
 
 Expected: `404`. Body shape:
@@ -166,7 +190,7 @@ Expected: `404`. Body shape:
 
 ```bash
 curl -s -H "Authorization: Bearer ${IMS}" \
-  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/projects" | jq .
+  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/projects" | jq .
 ```
 
 Expected: `200` with `{ "items": [] }` for a brand that has no Semrush projects yet. Validates the DB query path and the resolver cache without depending on any upstream success.
@@ -176,7 +200,7 @@ Expected: `200` with `{ "items": [] }` for a brand that has no Semrush projects 
 ```bash
 RESP=$(curl -s -H "Authorization: Bearer ${IMS}" \
   -H "Content-Type: application/json" \
-  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/projects" \
+  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/projects" \
   -d '{
     "name": "Smoke test — US/en",
     "market": "US",
@@ -209,7 +233,7 @@ Re-run test 4 verbatim:
 curl -s -o /tmp/resp.json -w '%{http_code}\n' \
   -H "Authorization: Bearer ${IMS}" \
   -H "Content-Type: application/json" \
-  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/projects" \
+  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/projects" \
   -d '{
     "name": "Smoke test — US/en",
     "market": "US",
@@ -227,7 +251,7 @@ Expected: `409` and `{"error":"sliceExists","semrushProjectId":"<same-id-as-test
 ```bash
 curl -s -H "Authorization: Bearer ${IMS}" \
   -H "Content-Type: application/json" \
-  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/prompts" \
+  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/prompts" \
   -d "$(jq -n --arg loc 2840 '{
     prompts: [
       { text: "What is Adobe Photoshop?", semrushLocationId: ($loc|tonumber), language: "en", tags: ["product"] },
@@ -241,7 +265,7 @@ Expected: `200`, `created_count = 3`, both `skipped_count` and `failed_count` = 
 
 ```bash
 curl -s -H "Authorization: Bearer ${IMS}" \
-  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/prompts?limit=10" \
+  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/prompts?limit=10" \
   | jq '{total, item_texts: (.items|map(.text))}'
 ```
 
@@ -249,15 +273,15 @@ curl -s -H "Authorization: Bearer ${IMS}" \
 
 ```bash
 curl -s -H "Authorization: Bearer ${IMS}" \
-  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/projects/${WORKSPACE_ID}/${PROJECT_ID}/tags" \
+  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/projects/${WORKSPACE_ID}/${PROJECT_ID}/tags" \
   | jq '{tag_count: (.items|length), tag_names: (.items|map(.name))}'
 
 curl -s -H "Authorization: Bearer ${IMS}" \
-  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/projects/${WORKSPACE_ID}/${PROJECT_ID}/models" \
+  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/projects/${WORKSPACE_ID}/${PROJECT_ID}/models" \
   | jq '{model_count: (.models|length), keys: (.models|map(.key))}'
 
 curl -s -H "Authorization: Bearer ${IMS}" \
-  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/workspaces/${WORKSPACE_ID}/projects" \
+  "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/workspaces/${WORKSPACE_ID}/projects" \
   | jq '{project_count: (.projects|length), names: (.projects|map(.name))}'
 ```
 
@@ -272,7 +296,7 @@ coralogix-query --from 15m \
   "source logs | filter \$l.applicationname == 'spacecat-services--api-service' && \$d.message ~ 'adobe-hackathon.semrush.com' | limit 30"
 ```
 
-Confirm outbound requests are going to the right host, the IMS sub matches the caller in the structured `actor` field, and there are no `SemrushTransportError` entries (other than the expected 404/409 from tests 2 and 5).
+Confirm outbound requests are going to the right host, the IMS sub matches the caller in the structured `actor` field, and there are no `SerenityTransportError` entries (other than the expected 404/409 from tests 2 and 5).
 
 ### Cleanup
 
@@ -283,7 +307,7 @@ Smoke tests provision **two** resources that need teardown: the prompts/project 
 #    from test 6's response)
 curl -s -H "Authorization: Bearer ${IMS}" \
   -H "Content-Type: application/json" \
-  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/semrush/prompts/bulk-delete" \
+  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/prompts/bulk-delete" \
   -d '{"semrushIds": [<list of {semrushProjectId, semrushPromptId} from test 6>]}'
 
 # 2. Delete the upstream Semrush project so it doesn't linger in the
@@ -295,7 +319,7 @@ curl -X DELETE "https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/w
 # 3. Delete the brand_to_semrush_projects row (PostgREST direct — no proxy
 #    endpoint deletes it today; coordinate with mysticat-data-service oncall).
 #    Use the same (brand_id, semrush_location_id, language) you onboarded.
-# (See follow-up: ticket TBD for a proxy DELETE /semrush/projects/:id.)
+# (See follow-up: ticket TBD for a proxy DELETE /serenity/projects/:id.)
 
 # 4. If you bound a temporary workspace to the org in step 1, unbind it:
 curl -X PATCH "${API_BASE}/organizations/${ORG_ID}" \
@@ -308,8 +332,10 @@ curl -X PATCH "${API_BASE}/organizations/${ORG_ID}" \
 
 | Symptom | Likely cause | Verification |
 |---|---|---|
+| All `/serenity/*` endpoints return `503 configurationError` with `SEMRUSH_PROJECTS_BASE_URL is not set` | The env var is missing from the deployed Lambda secrets (Vault write skipped, or a new env wasn't seeded) | `aws secretsmanager get-secret-value --secret-id /helix-deploy/spacecat-services/api-service/latest` should include `SEMRUSH_PROJECTS_BASE_URL`. Fix via `vault kv patch dx_mysticat/<env>/api-service SEMRUSH_PROJECTS_BASE_URL=https://…` then re-deploy. |
+| `createSerenityProject` 400s with `unknownMarket` for ISO codes the rest of the platform accepts (`XK`, certain reserved or user-assigned codes) | `resolveLocation` reads from `iso31661Alpha2ToNumeric`, which only carries codes with an official ISO 3166-1 numeric (`XK`/Kosovo, for instance, has none) — so the formula `2000 + numeric` can't be applied | Known limitation. Kosovo's real Google Ads Geo Target ID is `2061632` (not a country-prefix value); supporting it cleanly requires the sub-national geo path (Semrush location-search endpoint or the Google geotargets CSV — see the TODO in `resolveLocation`). |
 | Every endpoint 500s with `Cannot read property 'allByBrandId' of undefined` | api-service was deployed before `@adobe/spacecat-shared-data-access` published the `BrandSemrushProject` entity | `npm ls @adobe/spacecat-shared-data-access` on the lambda container; needs `>= 3.67.0` |
 | All endpoints 404 with `Organization has no semrush_workspace_id` | The org never had `semrushWorkspaceId` set; or the LRU cache is stale from before it was set | Wait 5 min for the cache TTL, or restart the lambda container; verify via `GET /organizations/:id` |
-| `createSemrushProject` returns 400 `unknownLanguage` | The language tag isn't in Semrush's `/v1/languages` catalog response | The cache is module-scoped and lives for 1 h; if a new language landed in Semrush, restart the lambda or wait for the TTL |
-| `listSemrushPrompts` returns `total: 0` immediately after create | Semrush publishes asynchronously; the prompt isn't queryable yet | Retry after ~5 s; if still empty, check the upstream Coralogix logs for a publish failure |
+| `createSerenityProject` returns 400 `unknownLanguage` | The language tag isn't in Semrush's `/v1/languages` catalog response | The cache is module-scoped and lives for 1 h; if a new language landed in Semrush, restart the lambda or wait for the TTL |
+| `listSerenityPrompts` returns `total: 0` immediately after create | Semrush publishes asynchronously; the prompt isn't queryable yet | Retry after ~5 s; if still empty, check the upstream Coralogix logs for a publish failure |
 | Coralogix shows `Auth-Data-Jwt` or `Cookie` in the outbound headers | Stale Lambda container running pre-PR #2456 code | Re-deploy; the Phase 4 transport explicitly drops both branches |

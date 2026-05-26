@@ -16,9 +16,9 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
 import {
-  createSemrushTransport,
-  SemrushTransportError,
-} from '../../../src/support/semrush/rest-transport.js';
+  createSerenityTransport,
+  SerenityTransportError,
+} from '../../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -26,6 +26,11 @@ use(sinonChai);
 const IMS = 'ims-bearer-test-token';
 const WORKSPACE_ID = '11111111-2222-3333-4444-555555555555';
 const PROJECT_ID = 'proj-xyz';
+
+// Strict mode: rest-transport now requires SEMRUSH_PROJECTS_BASE_URL to be
+// supplied via env (Vault-backed in dev/stage/prod). Tests inject a
+// deterministic value so the URL-based assertions below stay stable.
+const TEST_ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://adobe-hackathon.semrush.com' };
 
 function fetchOk(body) {
   return {
@@ -60,16 +65,16 @@ describe('Semrush REST transport', () => {
   });
 
   describe('auth + base URL', () => {
-    it('throws SemrushTransportError(401) when imsToken is missing on a call', async () => {
-      const transport = createSemrushTransport({ env: {}, imsToken: '' });
+    it('throws SerenityTransportError(401) when imsToken is missing on a call', async () => {
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: '' });
       const promise = transport.publishProject(WORKSPACE_ID, PROJECT_ID);
-      await expect(promise).to.be.rejectedWith(SemrushTransportError);
+      await expect(promise).to.be.rejectedWith(SerenityTransportError);
       await expect(promise).to.be.rejectedWith(/Missing IMS bearer token/);
     });
 
     it('sends Authorization: Bearer <ims> — no cookie, no Auth-Data-Jwt, no User-Agent', async () => {
       fetchStub.resolves(fetchOk({ id: PROJECT_ID }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
 
@@ -84,9 +89,9 @@ describe('Semrush REST transport', () => {
       expect(init.headers).to.not.have.property('User-Agent');
     });
 
-    it('defaults the host to adobe-hackathon.semrush.com', async () => {
+    it('uses the env-supplied base URL when constructing outbound URLs', async () => {
       fetchStub.resolves(fetchOk(null));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
 
@@ -94,9 +99,21 @@ describe('Semrush REST transport', () => {
       expect(url).to.match(/^https:\/\/adobe-hackathon\.semrush\.com\//);
     });
 
-    it('honours SEMRUSH_PROJECTS_BASE_URL env override and strips trailing slash', async () => {
+    it('throws if SEMRUSH_PROJECTS_BASE_URL is missing (no source default)', () => {
+      expect(() => createSerenityTransport({ env: {}, imsToken: IMS }))
+        .to.throw(/SEMRUSH_PROJECTS_BASE_URL is not set/);
+    });
+
+    it('throws if SEMRUSH_PROJECTS_BASE_URL is blank', () => {
+      expect(() => createSerenityTransport({
+        env: { SEMRUSH_PROJECTS_BASE_URL: '   ' },
+        imsToken: IMS,
+      })).to.throw(/SEMRUSH_PROJECTS_BASE_URL is not set/);
+    });
+
+    it('reads SEMRUSH_PROJECTS_BASE_URL from env and strips trailing slash', async () => {
       fetchStub.resolves(fetchOk(null));
-      const transport = createSemrushTransport({
+      const transport = createSerenityTransport({
         env: { SEMRUSH_PROJECTS_BASE_URL: 'https://override.semrush.com/' },
         imsToken: IMS,
       });
@@ -107,23 +124,78 @@ describe('Semrush REST transport', () => {
       expect(url).to.match(/^https:\/\/override\.semrush\.com\/enterprise\//);
     });
 
-    it('rejects a non-https SEMRUSH_PROJECTS_BASE_URL', () => {
-      expect(() => createSemrushTransport({
-        env: { SEMRUSH_PROJECTS_BASE_URL: 'http://attacker.example/' },
+    it('reduces a value with path/query/fragment to its bare origin', async () => {
+      // A misconfigured `https://host/path-prefix` would otherwise silently
+      // prepend the path to every outbound request. baseUrl() returns the
+      // origin only — no path, no query, no fragment.
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({
+        env: { SEMRUSH_PROJECTS_BASE_URL: 'https://override.semrush.com/some/path?x=1#frag' },
         imsToken: IMS,
-      })).to.throw(/must use https/);
+      });
+
+      await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+
+      const [url] = fetchStub.firstCall.args;
+      expect(url).to.match(/^https:\/\/override\.semrush\.com\/enterprise\/projects\/api\/v1\//);
+      expect(url).to.not.include('/some/path');
+      expect(url).to.not.include('x=1');
+      expect(url).to.not.include('#frag');
     });
 
-    it('rejects an unparseable SEMRUSH_PROJECTS_BASE_URL', () => {
-      expect(() => createSemrushTransport({
-        env: { SEMRUSH_PROJECTS_BASE_URL: 'not a url' },
+    it('strips userinfo from the base URL so credentials never leak outbound', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({
+        env: { SEMRUSH_PROJECTS_BASE_URL: 'https://user:pass@override.semrush.com/' },
         imsToken: IMS,
-      })).to.throw(/not a valid URL/);
+      });
+
+      await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+
+      const [url] = fetchStub.firstCall.args;
+      expect(url).to.not.include('user:pass@');
+      expect(url).to.match(/^https:\/\/override\.semrush\.com\//);
+    });
+
+    it('rejects a non-https SEMRUSH_PROJECTS_BASE_URL with 503 configuration error', () => {
+      try {
+        createSerenityTransport({
+          env: { SEMRUSH_PROJECTS_BASE_URL: 'http://attacker.example/' },
+          imsToken: IMS,
+        });
+        expect.fail('expected createSerenityTransport to throw');
+      } catch (e) {
+        expect(e.message).to.match(/must use https/);
+        expect(e.status).to.equal(503);
+      }
+    });
+
+    it('rejects an unparseable SEMRUSH_PROJECTS_BASE_URL with 503 configuration error', () => {
+      try {
+        createSerenityTransport({
+          env: { SEMRUSH_PROJECTS_BASE_URL: 'not a url' },
+          imsToken: IMS,
+        });
+        expect.fail('expected createSerenityTransport to throw');
+      } catch (e) {
+        expect(e.message).to.match(/not a valid URL/);
+        expect(e.status).to.equal(503);
+      }
+    });
+
+    it('attaches status 503 to the missing-env error so mapError returns configurationError', () => {
+      try {
+        createSerenityTransport({ env: {}, imsToken: IMS });
+        expect.fail('expected createSerenityTransport to throw');
+      } catch (e) {
+        expect(e.message).to.match(/SEMRUSH_PROJECTS_BASE_URL is not set/);
+        expect(e.status).to.equal(503);
+      }
     });
 
     it('encodes path segments so reserved chars stay inside the segment', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.listAiModels('ws/with/slashes', 'pid?with#hash');
 
@@ -137,12 +209,12 @@ describe('Semrush REST transport', () => {
     it('re-throws non-abort fetch errors verbatim (network error, not timeout)', async () => {
       const netErr = Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' });
       fetchStub.rejects(netErr);
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
       await expect(transport.publishProject(WORKSPACE_ID, PROJECT_ID))
         .to.be.rejectedWith(/ECONNRESET/);
     });
 
-    it('aborts with SemrushTransportError(504) on fetch timeout', async () => {
+    it('aborts with SerenityTransportError(504) on fetch timeout', async () => {
       // fetch never resolves; the transport's AbortController should fire.
       fetchStub.callsFake((_url, init) => new Promise((resolve, reject) => {
         init.signal.addEventListener('abort', () => {
@@ -151,7 +223,7 @@ describe('Semrush REST transport', () => {
           reject(e);
         });
       }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
       // Patch in a tiny "timeout" by stubbing setTimeout to immediately fire.
       const realSetTimeout = global.setTimeout;
       // Use sinon's fake timers narrowly so we don't break other things.
@@ -163,7 +235,7 @@ describe('Semrush REST transport', () => {
         const promise = transport.publishProject(WORKSPACE_ID, PROJECT_ID);
         clock.tick(20_000); // safely past the 15s default timeout
         const err = await promise.catch((e) => e);
-        expect(err).to.be.instanceOf(SemrushTransportError);
+        expect(err).to.be.instanceOf(SerenityTransportError);
         expect(err.status).to.equal(504);
       } finally {
         clock.restore();
@@ -173,15 +245,15 @@ describe('Semrush REST transport', () => {
   });
 
   describe('non-2xx upstream', () => {
-    it('throws SemrushTransportError carrying status and parsed body', async () => {
+    it('throws SerenityTransportError carrying status and parsed body', async () => {
       fetchStub.resolves(fetchFail(502, { code: 'gateway_timeout' }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       try {
         await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
         expect.fail('should have thrown');
       } catch (err) {
-        expect(err).to.be.instanceOf(SemrushTransportError);
+        expect(err).to.be.instanceOf(SerenityTransportError);
         expect(err.status).to.equal(502);
         expect(err.body).to.deep.equal({ code: 'gateway_timeout' });
       }
@@ -193,7 +265,7 @@ describe('Semrush REST transport', () => {
         status: 500,
         text: async () => 'plain text error',
       });
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       try {
         await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
@@ -209,7 +281,7 @@ describe('Semrush REST transport', () => {
         status: 204,
         text: async () => '',
       });
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       const result = await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
       expect(result).to.equal(null);
@@ -219,7 +291,7 @@ describe('Semrush REST transport', () => {
   describe('listPromptsByTags', () => {
     it('POSTs to /v2/.../aio/prompts/by_tags with the body shape', async () => {
       fetchStub.resolves(fetchOk({ items: [], page: 1, total: 0 }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, {
         page: 2,
@@ -242,7 +314,7 @@ describe('Semrush REST transport', () => {
 
     it('defaults page/limit and empty tag_ids when omitted', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, {});
 
@@ -254,7 +326,7 @@ describe('Semrush REST transport', () => {
 
     it('does not forward sort_field / sort_dir — Semrush rejects them on this endpoint', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, {
         sort_field: 'created_at',
@@ -272,7 +344,7 @@ describe('Semrush REST transport', () => {
   describe('createTaggedPrompts', () => {
     it('POSTs to /v2/.../aio/prompts/tagged with grouped prompts', async () => {
       fetchStub.resolves(fetchOk({ ids: ['p1', 'p2'], existing_count: 0 }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       const promptsByTag = { 'topic:acrobat': ['What is Acrobat?'] };
       await transport.createTaggedPrompts(WORKSPACE_ID, PROJECT_ID, promptsByTag);
@@ -287,7 +359,7 @@ describe('Semrush REST transport', () => {
   describe('deletePromptsByIds', () => {
     it('DELETEs /v2/.../aio/prompts with body { ids }', async () => {
       fetchStub.resolves(fetchOk(null));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.deletePromptsByIds(WORKSPACE_ID, PROJECT_ID, ['p1', 'p2']);
 
@@ -301,7 +373,7 @@ describe('Semrush REST transport', () => {
   describe('publishProject', () => {
     it('POSTs to /v1/workspaces/{ws}/projects/{pid}/publish with no body', async () => {
       fetchStub.resolves(fetchOk({ status: 'accepted' }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
 
@@ -317,7 +389,7 @@ describe('Semrush REST transport', () => {
   describe('listWorkspaceProjects', () => {
     it('GETs /v2/workspaces/{ws}/projects with type=AIO and publish_status filter', async () => {
       fetchStub.resolves(fetchOk({ items: [], total: 0 }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.listWorkspaceProjects(WORKSPACE_ID);
 
@@ -334,7 +406,7 @@ describe('Semrush REST transport', () => {
 
     it('honours explicit page/limit for pagination', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.listWorkspaceProjects(WORKSPACE_ID, { page: 4, limit: 50 });
 
@@ -347,7 +419,7 @@ describe('Semrush REST transport', () => {
   describe('listAiModels', () => {
     it('GETs /v1/.../ai_models with page=1&limit=100 by default', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.listAiModels(WORKSPACE_ID, PROJECT_ID);
 
@@ -360,7 +432,7 @@ describe('Semrush REST transport', () => {
 
     it('honours explicit page/limit for pagination', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await transport.listAiModels(WORKSPACE_ID, PROJECT_ID, { page: 3, limit: 25 });
 
@@ -373,11 +445,11 @@ describe('Semrush REST transport', () => {
   describe('createProject (new in this PR)', () => {
     it('POSTs to /v1/workspaces/{ws}/projects with the full ProjectRequest body', async () => {
       fetchStub.resolves(fetchOk({ id: 'new-project-uuid' }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       const body = {
         name: 'adobe.com · US · en',
-        type: 'aio',
+        type: 'ai',
         brand_name_display: 'Adobe',
         brand_names: ['Adobe', 'Adobe Inc.'],
         domain: 'adobe.com',
@@ -398,7 +470,7 @@ describe('Semrush REST transport', () => {
   describe('listLanguages (new in this PR)', () => {
     it('GETs /v1/languages', async () => {
       fetchStub.resolves(fetchOk({ items: [{ id: 'lang-en', name: 'English' }] }));
-      const transport = createSemrushTransport({ env: {}, imsToken: IMS });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       const result = await transport.listLanguages();
 
