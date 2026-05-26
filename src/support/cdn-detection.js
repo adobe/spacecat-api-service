@@ -163,11 +163,128 @@ async function detectAdobeManagedCdn(domain, log) {
     return bareResult;
   }
 
-  if (wwwResult === null || bareResult === null) {
+  if (wwwResult === null && bareResult === null) {
     return null;
   }
 
   return 'byocdn-other';
+}
+
+/* ============================================================================
+ * Phase 1.5 — Case 0: AEM CS WAF Simple Proxy HTTP probe.
+ *
+ * When Phase 1 DNS resolves cleanly to non-Adobe IPs ('byocdn-other'), a WAF
+ * may sit in front of AEM CS Fastly. Four signals confirm this topology:
+ *   1. x-correlation-id echoed unchanged in every response
+ *   2. x-edgeoptimize-request-id present in every response
+ *   3. x-request-id unique across all AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT responses (no caching)
+ *   4. x-aem-debug response header contains host=<probed-domain>
+ *
+ * AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT sequential probes (default 3). All four signals must hold
+ * across every response; any failure returns null.
+ * ========================================================================== */
+
+export const EDGE_OPTIMIZE_USER_AGENT = 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0';
+export const UA_ROUTING_HEADER = 'x-edgeoptimize-request-id';
+
+const AEMCS_WAF_SIMPLE_PROXY_PROBE_TIMEOUT_MS = 3000;
+const TEST_CORRELATION_ID = 'adobeedgetest';
+const AEM_DEBUG_VALUE = 'edge=true';
+const HEADER_AEM_DEBUG = 'x-aem-debug';
+const HEADER_CORRELATION_ID = 'x-correlation-id';
+const HEADER_REQUEST_ID = 'x-request-id';
+
+// Number of sequential probes sent to verify all Case 0: WAF Simple Proxy signals.
+// Increase to raise the false-positive bar; decrease to reduce latency.
+export const AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT = 3;
+
+async function makeAemCsWafSimpleProxyProbe(domain, log) {
+  const url = `https://${domain}/`;
+  // Disable only the local @adobe/fetch response cache so repeated probes
+  // always hit the network from this process. This Request.cache option is not an
+  // outbound Cache-Control header, so it does not bypass or alter customer CDN caching.
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'manual',
+      cache: 'no-store',
+      timeout: AEMCS_WAF_SIMPLE_PROXY_PROBE_TIMEOUT_MS,
+      headers: {
+        [HEADER_CORRELATION_ID]: TEST_CORRELATION_ID,
+        [HEADER_AEM_DEBUG]: AEM_DEBUG_VALUE,
+        'User-Agent': EDGE_OPTIMIZE_USER_AGENT,
+      },
+    });
+    const responseHeaders = {};
+    response.headers.forEach((value, key) => {
+      responseHeaders[key.toLowerCase()] = value;
+    });
+    if (response.body && typeof response.body.cancel === 'function') {
+      response.body.cancel();
+    }
+    return responseHeaders;
+  } catch (err) {
+    log?.warn?.('[cdn-detection] Phase 1.5 probe failed', { domain, message: err?.message });
+    return null;
+  }
+}
+
+function checkCachingAtProxy(responses, log, domain) {
+  if (!responses.every((r) => r[HEADER_CORRELATION_ID] === TEST_CORRELATION_ID)) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 1 absent — x-correlation-id not echoed', { domain });
+    return false;
+  }
+  if (!responses.every((r) => r[UA_ROUTING_HEADER])) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 2 absent — no edgeoptimize request-id header', { domain });
+    return false;
+  }
+  const requestIds = responses.map((r) => r[HEADER_REQUEST_ID]);
+  if (requestIds.some((rid) => !rid) || new Set(requestIds).size < responses.length) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 3 absent — x-request-id not unique or missing', { domain });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Phase 1.5: Detect AEM CS Fastly behind a WAF simple proxy (Case 0).
+ *
+ * Sends AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT sequential HTTP probes and verifies four signals
+ * that uniquely identify AEM CS Fastly responses. Returns 'aem-cs-fastly'
+ * when all signals are confirmed, null otherwise.
+ */
+export async function detectAemCsFastlyWafSimpleProxy(domain, log) {
+  const allResponses = [];
+  /* eslint-disable no-await-in-loop -- sequential probes; each must see a unique x-request-id */
+  for (let i = 0; i < AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT; i += 1) {
+    const resp = await makeAemCsWafSimpleProxyProbe(domain, log);
+    if (!resp) {
+      return null;
+    }
+    allResponses.push(resp);
+  }
+  /* eslint-enable no-await-in-loop */
+
+  if (!checkCachingAtProxy(allResponses, log, domain)) {
+    return null;
+  }
+
+  // Signal 4: x-aem-debug host= field equals the probed domain.
+  // Must match the host= field exactly, not x-forwarded-host= (Case 1 sites have the AEM
+  // origin in host= but the public domain in x-forwarded-host=, so substring includes()
+  // would produce a false positive for Case 1). The host token can appear anywhere
+  // in the debug header, separated by spaces, semicolons, commas, or other text.
+  const signal4 = allResponses.every((r) => {
+    const hostField = (r[HEADER_AEM_DEBUG] || '').match(/(?:^|[^\w-])host=([^,\s;]+)/)?.[1] ?? '';
+    return hostField === domain;
+  });
+  if (!signal4) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 4 absent — x-aem-debug host mismatch', { domain });
+    return null;
+  }
+
+  log?.info?.('[cdn-detection] Phase 1.5: all signals confirmed — AEM CS Fastly WAF simple proxy', { domain });
+  return 'aem-cs-fastly';
 }
 
 /* ============================================================================
@@ -611,13 +728,17 @@ async function detectGenericCdnToken(url, log) {
 /**
  * Detects the CDN for a given hostname or URL.
  *
- * Two-phase detection:
- *   Phase 1 — DNS-only check for Adobe-managed CDNs (AEM CS Fastly,
- *             Adobe Commerce Cloud Fastly). Cheap and authoritative when matched.
- *   Phase 2 — When Phase 1 doesn't match, runs a multi-signal probe ported from
- *             spacecat-audit-worker (HTTP headers → CNAME chain → PTR keywords).
- *             Result is mapped from a descriptive label to the LLMO byocdn-X
- *             token via LABEL_TO_LLMO_TOKEN.
+ * Three-phase detection:
+ *   Phase 1   — DNS-only check for Adobe-managed CDNs (AEM CS Fastly,
+ *               Adobe Commerce Cloud Fastly). Cheap and authoritative when matched.
+ *   Phase 1.5 — Case 0 (WAF Simple Proxy): when Phase 1 DNS resolves cleanly to
+ *               non-Adobe IPs, an HTTP probe with four signals (correlation echo,
+ *               request-id header, unique x-request-id, x-aem-debug host)
+ *               distinguishes AEM CS Fastly behind a WAF from a genuine third-party CDN.
+ *   Phase 2   — When Phase 1 doesn't match, runs a multi-signal probe ported from
+ *               spacecat-audit-worker (HTTP headers → CNAME chain → PTR keywords).
+ *               Result is mapped from a descriptive label to the LLMO byocdn-X
+ *               token via LABEL_TO_LLMO_TOKEN.
  *
  * Returns:
  *   - 'aem-cs-fastly' | 'commerce-fastly'  — Phase 1 hit
@@ -672,6 +793,19 @@ export async function detectCdnForDomain(input, log) {
     const phase1 = await detectAdobeManagedCdn(bareDomain, log);
     if (phase1 === 'aem-cs-fastly' || phase1 === 'commerce-fastly') {
       return phase1;
+    }
+
+    // Phase 1.5: Case 0 — AEM CS WAF Simple Proxy.
+    // DNS resolved cleanly to non-Adobe IPs; an HTTP probe with four signals
+    // distinguishes WAF-proxied AEM CS from a genuine third-party CDN.
+    if (phase1 === 'byocdn-other') {
+      let aemcsWafSimpleProxyResult = await detectAemCsFastlyWafSimpleProxy(`www.${bareDomain}`, log);
+      if (!aemcsWafSimpleProxyResult) {
+        aemcsWafSimpleProxyResult = await detectAemCsFastlyWafSimpleProxy(bareDomain, log);
+      }
+      if (aemcsWafSimpleProxyResult === 'aem-cs-fastly') {
+        return aemcsWafSimpleProxyResult;
+      }
     }
 
     const { token: phase2Token, probeSucceeded } = await detectGenericCdnToken(url, log);
