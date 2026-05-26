@@ -24,6 +24,7 @@ import {
   updatePromptById,
   deletePromptById,
   bulkDeletePrompts,
+  checkPromptsExist,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -2017,6 +2018,59 @@ describe('prompts-storage', () => {
       expect(result.metadata.total).to.equal(2);
       expect(result.metadata.success).to.equal(1);
       expect(result.metadata.failure).to.equal(1);
+    });
+  });
+
+  describe('checkPromptsExist', () => {
+    const PROMPTS = [
+      { text: 'What are generative credits?', region: 'gb' },
+      { text: 'should not exist', region: 'tw' },
+    ];
+
+    it('throws when postgrestClient has no rpc', async () => {
+      await expect(
+        checkPromptsExist({
+          brandUuid: BRAND_UUID,
+          prompts: PROMPTS,
+          postgrestClient: null,
+        }),
+      ).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('returns empty array when RPC returns null data', async () => {
+      const client = { rpc: sandbox.stub().resolves({ data: null, error: null }) };
+      const result = await checkPromptsExist({
+        brandUuid: BRAND_UUID,
+        prompts: PROMPTS,
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal([]);
+    });
+
+    it('returns matching pairs on success', async () => {
+      const expected = [{ text: 'What are generative credits?', region: 'gb' }];
+      const client = { rpc: sandbox.stub().resolves({ data: expected, error: null }) };
+      const result = await checkPromptsExist({
+        brandUuid: BRAND_UUID,
+        prompts: PROMPTS,
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal(expected);
+      const [rpcName, rpcArgs] = client.rpc.firstCall.args;
+      expect(rpcName).to.equal('rpc_check_prompts_exist');
+      expect(rpcArgs.p_brand_id).to.equal(BRAND_UUID);
+      expect(rpcArgs.p_prompts).to.deep.equal(PROMPTS);
+    });
+
+    it('throws when RPC returns an error', async () => {
+      const client = { rpc: sandbox.stub().resolves({ data: null, error: { message: 'DB error' } }) };
+      await expect(
+        checkPromptsExist({
+          brandUuid: BRAND_UUID,
+          prompts: PROMPTS,
+          postgrestClient: client,
+        }),
+      ).to.be.rejectedWith('checkPromptsExist RPC failed: DB error');
     });
   });
 });
