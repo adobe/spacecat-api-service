@@ -20,6 +20,14 @@ const HLX_ORG = 'adobe';
 const HLX_SITE = 'project-elmo-ui-data';
 const HLX_REF = 'main';
 
+// dataSource / sheetType path segments must not contain '/', '\', '.' or any other
+// character that could escape the per-tenant dataFolder when concatenated into the
+// SharePoint file path or the admin.hlx.page publish URL. Allowed: alphanumerics,
+// hyphen, underscore — matches every real-world LLMO sheet name in use today.
+const SAFE_PATH_SEGMENT_RE = /^[A-Za-z0-9_-]+$/;
+export const isSafePathSegment = (value) => typeof value === 'string'
+  && value.length > 0 && SAFE_PATH_SEGMENT_RE.test(value);
+
 const buildSharePointPath = (dataFolder, sheetType, dataSource) => {
   const segments = [SHAREPOINT_FILE_PREFIX, dataFolder];
   if (sheetType) {
@@ -38,6 +46,29 @@ const buildPublishPath = (dataFolder, sheetType, dataSource) => {
   return segments.join('/');
 };
 
+// ExcelJS represents rich-text and formula cells as objects. Coerce them back to the
+// plain-string projection the Helix CDN will emit, so a `match` value of e.g.
+// "first prompt" still hits a row whose cell happens to be stored as rich text.
+// Exported for direct unit testing — ExcelJS often normalises rich text on a write/load
+// round-trip, so indirect coverage through patchSheetRow is incomplete.
+export const cellValueAsString = (value) => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'object') {
+    if (Array.isArray(value.richText)) {
+      return value.richText.map((r) => (r && r.text) || '').join('');
+    }
+    if (value.formula !== undefined) {
+      return value.result === null || value.result === undefined ? '' : String(value.result);
+    }
+    if (typeof value.text === 'string') {
+      return value.text; // hyperlink-like
+    }
+  }
+  return String(value);
+};
+
 const findRowMatching = (worksheet, headerMap, match) => {
   const matchedRows = [];
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
@@ -48,8 +79,7 @@ const findRowMatching = (worksheet, headerMap, match) => {
     // so headerMap.get(column) is always defined.
     const isMatch = Object.entries(match).every(([column, expected]) => {
       const cell = row.getCell(headerMap.get(column));
-      const actual = cell.value === null || cell.value === undefined ? '' : String(cell.value);
-      return actual === String(expected);
+      return cellValueAsString(cell.value) === String(expected);
     });
     if (isMatch) {
       matchedRows.push(rowNumber);
@@ -115,6 +145,17 @@ export const validateSheetRowPatch = (data) => {
   }
   if (!isObject(data.values) || Object.keys(data.values).length === 0) {
     return 'values must be a non-empty object of column-value pairs to update';
+  }
+  // Enforce the OpenAPI contract (additionalProperties: { type: string }) at runtime so
+  // a caller that sends `{ deleted: true }` instead of `{ deleted: "true" }` gets a 400
+  // rather than writing a boolean cell that diverges from the JSON projection contract.
+  const nonStringMatch = Object.entries(data.match).find(([, v]) => typeof v !== 'string');
+  if (nonStringMatch) {
+    return `match.${nonStringMatch[0]} must be a string`;
+  }
+  const nonStringValue = Object.entries(data.values).find(([, v]) => typeof v !== 'string');
+  if (nonStringValue) {
+    return `values.${nonStringValue[0]} must be a string`;
   }
   return null;
 };

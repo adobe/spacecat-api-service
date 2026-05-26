@@ -72,6 +72,7 @@ import {
   validateSheetRowPatch,
   sharepointPathFor,
   publishPathFor,
+  isSafePathSegment,
 } from './llmo-sheet-write.js';
 import {
   fetchLlmoSource,
@@ -1156,6 +1157,13 @@ function LlmoController(ctx) {
       if (!hasText(dataSource)) {
         return badRequest('dataSource path parameter is required');
       }
+      // Reject path-traversal attempts before concatenating into SharePoint or admin.hlx.page URLs.
+      if (!isSafePathSegment(dataSource)) {
+        return badRequest('dataSource must contain only alphanumerics, hyphen, and underscore');
+      }
+      if (sheetType !== undefined && !isSafePathSegment(sheetType)) {
+        return badRequest('sheetType must contain only alphanumerics, hyphen, and underscore');
+      }
 
       const validationError = validateSheetRowPatch(data);
       if (validationError) {
@@ -1200,7 +1208,9 @@ function LlmoController(ctx) {
       if (status === 400) {
         return badRequest(cleanupHeaderValue(error.message));
       }
-      return internalServerError(cleanupHeaderValue(error.message));
+      // Unexpected errors (SDK failures, missing env, network) — full detail goes to
+      // the logs above; respond with a generic message so internals are not leaked.
+      return internalServerError('Failed to patch sheet row');
     }
   };
 

@@ -22,6 +22,8 @@ import {
   validateSheetRowPatch,
   sharepointPathFor,
   publishPathFor,
+  isSafePathSegment,
+  cellValueAsString,
 } from '../../../src/controllers/llmo/llmo-sheet-write.js';
 
 use(sinonChai);
@@ -110,6 +112,78 @@ describe('llmo-sheet-write', () => {
     it('rejects empty values', () => {
       expect(validateSheetRowPatch({ sheet: 'S', match: { a: '1' }, values: {} }))
         .to.match(/values must be a non-empty object/);
+    });
+
+    it('rejects non-string entries in match', () => {
+      expect(validateSheetRowPatch({
+        sheet: 'S', match: { topic_id: 123 }, values: { deleted: 'true' },
+      })).to.match(/match\.topic_id must be a string/);
+    });
+
+    it('rejects non-string entries in values', () => {
+      expect(validateSheetRowPatch({
+        sheet: 'S', match: { topic_id: '1' }, values: { deleted: true },
+      })).to.match(/values\.deleted must be a string/);
+    });
+  });
+
+  describe('cellValueAsString', () => {
+    it('returns empty string for null and undefined', () => {
+      expect(cellValueAsString(null)).to.equal('');
+      expect(cellValueAsString(undefined)).to.equal('');
+    });
+
+    it('passes through plain strings and stringifies numbers/booleans', () => {
+      expect(cellValueAsString('hello')).to.equal('hello');
+      expect(cellValueAsString(42)).to.equal('42');
+      expect(cellValueAsString(true)).to.equal('true');
+    });
+
+    it('joins rich-text runs', () => {
+      expect(cellValueAsString({
+        richText: [{ text: 'first ' }, { text: 'prompt' }],
+      })).to.equal('first prompt');
+      // Handles missing/falsy run entries.
+      expect(cellValueAsString({
+        richText: [null, { text: 'a' }, {}, { text: 'b' }],
+      })).to.equal('ab');
+    });
+
+    it('uses the formula result, or empty when the result is null/undefined', () => {
+      expect(cellValueAsString({ formula: 'A1', result: 'computed' })).to.equal('computed');
+      expect(cellValueAsString({ formula: 'A1', result: 42 })).to.equal('42');
+      expect(cellValueAsString({ formula: 'A1', result: null })).to.equal('');
+      expect(cellValueAsString({ formula: 'A1' })).to.equal('');
+    });
+
+    it('extracts the text field from hyperlink-like objects', () => {
+      expect(cellValueAsString({ text: 'click me', hyperlink: 'https://example.com' }))
+        .to.equal('click me');
+    });
+
+    it('falls back to String() for unknown object shapes', () => {
+      expect(cellValueAsString({ unknown: 'shape' })).to.equal('[object Object]');
+    });
+  });
+
+  describe('isSafePathSegment', () => {
+    it('accepts alphanumerics, hyphen, and underscore', () => {
+      expect(isSafePathSegment('strategic-recommendations-template')).to.equal(true);
+      expect(isSafePathSegment('questions')).to.equal(true);
+      expect(isSafePathSegment('snake_case_99')).to.equal(true);
+      expect(isSafePathSegment('MixedCase')).to.equal(true);
+    });
+
+    it('rejects empty, traversal, slashes, dots, and non-strings', () => {
+      expect(isSafePathSegment('')).to.equal(false);
+      expect(isSafePathSegment('..')).to.equal(false);
+      expect(isSafePathSegment('a/b')).to.equal(false);
+      expect(isSafePathSegment('a\\b')).to.equal(false);
+      expect(isSafePathSegment('a.json')).to.equal(false);
+      expect(isSafePathSegment('with space')).to.equal(false);
+      expect(isSafePathSegment(null)).to.equal(false);
+      expect(isSafePathSegment(undefined)).to.equal(false);
+      expect(isSafePathSegment(123)).to.equal(false);
     });
   });
 
@@ -205,6 +279,34 @@ describe('llmo-sheet-write', () => {
       const semrush = verifyWorkbook.getWorksheet('Semrush');
       expect(semrush.getRow(2).getCell(3).value).to.equal('true'); // deleted column for first row
       expect(semrush.getRow(3).getCell(3).value).to.satisfy((v) => v === null || v === '' || v === undefined);
+    });
+
+    it('matches rows whose cells are stored as rich text or formula objects', async () => {
+      // Build a workbook by hand so we can plant non-plain-string cell values.
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Semrush');
+      worksheet.addRow(['topic_id', 'prompt', 'deleted']);
+      const richTextRow = worksheet.addRow(['111', null, '']);
+      richTextRow.getCell(2).value = {
+        richText: [{ text: 'first ' }, { text: 'prompt' }],
+      };
+      const formulaRow = worksheet.addRow(['222', null, '']);
+      formulaRow.getCell(2).value = { formula: 'A1', result: 'second prompt' };
+      const initialBuffer = await workbook.xlsx.writeBuffer();
+
+      const { sharepointClient, document } = buildStubClient({ initialBuffer });
+      const result = await patchSheetRow(
+        {
+          ...baseArgs,
+          sheet: 'Semrush',
+          match: { topic_id: '222', prompt: 'second prompt' },
+          values: { deleted: 'true' },
+        },
+        baseEnv,
+        { sharepointClient, fetch: sinon.stub().resolves({ ok: true, status: 200 }), adminKey: 'k' },
+      );
+      expect(result.rowNumber).to.equal(3);
+      expect(document.uploadRawDocument).to.have.been.calledOnce;
     });
 
     it('returns 404 when the workbook does not exist on SharePoint', async () => {

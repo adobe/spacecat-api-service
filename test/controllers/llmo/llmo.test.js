@@ -4047,6 +4047,74 @@ describe('LlmoController', () => {
       expect(body.message).to.match(/dataSource/);
     });
 
+    it('rejects path-traversal dataSource values with 400', async () => {
+      const { subjectController, stub } = await buildControllerWithSheetWriteStub(async () => ({}));
+      const result = await subjectController.patchLlmoDataRow({
+        ...mockContext,
+        params: {
+          siteId: TEST_SITE_ID,
+          sheetType: 'strategic-recommendations',
+          dataSource: '../../other-tenant/secrets',
+        },
+        data: { sheet: 'Semrush', match: { topic_id: 'x' }, values: { deleted: 'true' } },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.match(/dataSource/);
+      expect(stub).to.not.have.been.called;
+    });
+
+    it('rejects path-traversal sheetType values with 400', async () => {
+      const { subjectController, stub } = await buildControllerWithSheetWriteStub(async () => ({}));
+      const result = await subjectController.patchLlmoDataRow({
+        ...mockContext,
+        params: {
+          siteId: TEST_SITE_ID,
+          sheetType: '../escape',
+          dataSource: 'strategic-recommendations-template',
+        },
+        data: { sheet: 'Semrush', match: { topic_id: 'x' }, values: { deleted: 'true' } },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.match(/sheetType/);
+      expect(stub).to.not.have.been.called;
+    });
+
+    it('returns the no-sheetType route variant with sheetType=null in the response', async () => {
+      const { subjectController, stub } = await buildControllerWithSheetWriteStub(
+        async () => ({ rowNumber: 7, updated: { deleted: 'true' } }),
+      );
+      const result = await subjectController.patchLlmoDataRow({
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID, dataSource: 'questions' }, // no sheetType
+        data: { sheet: 'Human', match: { key: 'q1' }, values: { deleted: 'true' } },
+      });
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.sheetType).to.equal(null);
+      expect(body.dataSource).to.equal('questions');
+      const callArg = stub.firstCall.args[0];
+      // Path stubs in this test build paths without a sheetType segment.
+      expect(callArg.sharepointPath).to.equal('/sites/elmo-ui-data/test-folder/questions.xlsx');
+      expect(callArg.publishPath).to.equal('test-folder/questions.json');
+    });
+
+    it('returns a generic 500 message without leaking the underlying error detail', async () => {
+      const { subjectController } = await buildControllerWithSheetWriteStub(async () => {
+        throw new Error('SHAREPOINT_CLIENT_SECRET not configured in env');
+      });
+      const result = await subjectController.patchLlmoDataRow({
+        ...mockContext,
+        params: baseParams,
+        data: { sheet: 'Semrush', match: { topic_id: 'x' }, values: { deleted: 'true' } },
+      });
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Failed to patch sheet row');
+      expect(body.message).to.not.include('SHAREPOINT_CLIENT_SECRET');
+    });
+
     it('passes through site-validation error responses unchanged', async () => {
       // Build a controller where the site lookup returns notFound directly.
       const patchSheetRowStub = sinon.stub();
