@@ -858,6 +858,41 @@ describe('Fixes Controller', () => {
       expect(fixes[0].fix.executedBy).to.equal(testExternalUserId);
     });
 
+    it('strips client-supplied executedBy when caller identity cannot be resolved', async () => {
+      // No authInfo on context - callerUserId is unresolvable.
+      requestContext.attributes = {};
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        executedBy: 'attacker@evil.org',
+        changeDetails: { arbitrary: 'value' },
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 207 });
+
+      const { fixes } = await response.json();
+      expect(fixes[0].fix.executedBy).to.not.equal('attacker@evil.org');
+    });
+
+    it('falls back to sub claim when user_id is absent', async () => {
+      const testSub = 'sub-value@AdobeOrg';
+      requestContext.attributes = {
+        authInfo: { getProfile: () => ({ sub: testSub }) },
+      };
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        changeDetails: { arbitrary: 'value' },
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 207 });
+
+      const { fixes } = await response.json();
+      expect(fixes[0].fix.executedBy).to.equal(testSub);
+    });
+
     it('reflects failures of creating a single fix', async () => {
       sandbox.stub(log, 'error'); // silence error logging
       electroService.entities.fixEntity.create
@@ -1804,6 +1839,28 @@ describe('Fixes Controller', () => {
       expect(fix.getPublishedAt()).equals(publishedAt);
       expect(fix.getChangeDetails()).deep.equals(changeDetails);
       expect(new Set(await fix.getSuggestions())).deep.equals(new Set(suggestions));
+    });
+
+    it('falls back to sub claim when user_id is absent', async () => {
+      const testSub = 'sub-value@AdobeOrg';
+      requestContext.attributes = {
+        authInfo: { getProfile: () => ({ sub: testSub }) },
+      };
+      requestContext.data = { executedBy: 'me' };
+
+      const response = await fixesController.patchFix(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(fix.getExecutedBy()).equals(testSub);
+    });
+
+    it('returns 400 when executedBy is sent but caller identity cannot be resolved', async () => {
+      requestContext.attributes = {};
+      requestContext.data = { executedBy: 'me' };
+
+      const response = await fixesController.patchFix(requestContext);
+      expect(response).includes({ status: 400 });
+      const { message } = await response.json();
+      expect(message).to.include('resolvable user identity');
     });
 
     it('can patch a fix origin field', async () => {

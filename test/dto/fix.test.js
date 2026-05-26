@@ -187,16 +187,16 @@ describe('Fix DTO', () => {
       expect(json).to.not.have.property('executedByUser');
     });
 
-    it('passes through placeholder dash values without modification', () => {
+    it('passes through null name fields when IMS profile has no name data', () => {
       const fix = createMockFix({
-        _executedByUser: { firstName: '-', lastName: '-', email: 'unknown@example.com' },
+        _executedByUser: { firstName: null, lastName: null, email: 'unknown@example.com' },
       });
 
       const json = FixDto.toJSON(fix);
 
       expect(json.executedByUser).to.deep.equal({
-        firstName: '-',
-        lastName: '-',
+        firstName: null,
+        lastName: null,
         email: 'unknown@example.com',
       });
     });

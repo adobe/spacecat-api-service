@@ -177,6 +177,8 @@ export class FixesController {
       return res;
     }
 
+    // executedByUser enrichment is intentionally omitted here; call getAllForOpportunity
+    // when resolved user details are required.
     return ok(fixEntities.map((fix) => FixDto.toJSON(fix)));
   }
 
@@ -203,6 +205,8 @@ export class FixesController {
       return res;
     }
 
+    // executedByUser enrichment is intentionally omitted here; call getAllForOpportunity
+    // when resolved user details are required.
     return ok(FixDto.toJSON(fix));
   }
 
@@ -262,8 +266,7 @@ export class FixesController {
 
     const log = this.#ctx.log || console;
 
-    const profile = context.attributes?.authInfo?.getProfile?.();
-    const callerUserId = profile?.user_id ?? profile?.sub;
+    const callerUserId = FixesController.#resolveCallerId(context);
 
     // Pre-fetch site and opportunity info for documentPath enrichment of manual fixes
     const enrichmentCtx = await this.#prepareDocumentPathEnrichment(
@@ -281,11 +284,14 @@ export class FixesController {
           log,
         );
 
+        // Strip any client-supplied executedBy unconditionally so it cannot pass through
+        // when callerUserId is unresolvable. When identity is known, callerUserId wins.
+        const safeFixData = { ...enrichedFixData };
+        delete safeFixData.executedBy;
+
         const fixEntity = await FixEntity.create({
-          ...enrichedFixData,
+          ...safeFixData,
           opportunityId,
-          // Override any client-supplied executedBy with the authenticated caller's identity
-          // so the IMS admin profile API is never called for an arbitrary user ID.
           ...(hasText(callerUserId) && { executedBy: callerUserId }),
         });
         if (fixData.suggestionIds) {
@@ -535,11 +541,13 @@ export class FixesController {
       }
 
       if (hasText(executedBy)) {
-        // Client signals intent to record the executor; always resolve from the authenticated
-        // caller's identity so the IMS admin API is never called for an arbitrary user ID.
-        const profile = context.attributes?.authInfo?.getProfile?.();
-        const callerUserId = profile?.user_id ?? profile?.sub;
-        if (hasText(callerUserId) && callerUserId !== fix.getExecutedBy()) {
+        // Client signals intent to record the executor. Always resolve the actual value
+        // from the authenticated caller's identity; the client-supplied string is ignored.
+        const callerUserId = FixesController.#resolveCallerId(context);
+        if (!hasText(callerUserId)) {
+          return badRequest('executedBy requires an authenticated session with a resolvable user identity');
+        }
+        if (callerUserId !== fix.getExecutedBy()) {
           fix.setExecutedBy(callerUserId);
           hasUpdates = true;
         }
@@ -701,7 +709,11 @@ export class FixesController {
 
   /**
    * Attaches `_executedByUser` to each fix by resolving `executedBy` IMS user IDs
-   * via the IMS admin profile API. Fails silently so callers always get a response.
+   * via the IMS admin profile API. Only called from `getAllForOpportunity`; other read
+   * endpoints (`getByStatus`, `getByID`) skip enrichment intentionally to keep those
+   * responses fast and enrichment opt-in per caller.
+   *
+   * Fails silently so callers always get a response even when IMS is unavailable.
    * @param {FixEntity[]} fixes
    */
   async #enrichFixesWithUserNames(fixes) {
@@ -709,7 +721,13 @@ export class FixesController {
       return;
     }
 
-    const userIds = [...new Set(fixes.map((f) => f.getExecutedBy()).filter(Boolean))];
+    // Only pass IMS-format IDs to the admin profile API. Rejects legacy or malformed
+    // values that could have been stored before the server-side derivation fix, closing
+    // the residual PII exfiltration path for pre-fix data.
+    const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices)$/;
+    const userIds = [
+      ...new Set(fixes.map((f) => f.getExecutedBy()).filter((id) => id && IMS_ID_RE.test(id))),
+    ];
     if (!userIds.length) {
       return;
     }
@@ -724,12 +742,12 @@ export class FixesController {
         if (result.status === 'fulfilled') {
           const { first_name: firstName, last_name: lastName, email } = result.value;
           userMap.set(userIds[i], {
-            firstName: firstName || '-',
-            lastName: lastName || '-',
-            email: email || '',
+            firstName: firstName || null,
+            lastName: lastName || null,
+            email: email || null,
           });
         } else {
-          this.#ctx.log?.warn?.(`Failed to resolve IMS profile for user ${userIds[i]}: ${result.reason?.message}`);
+          this.#ctx.log?.warn?.(`Failed to resolve IMS profile for user [redacted]: ${result.reason?.message}`);
         }
       });
 
@@ -743,6 +761,18 @@ export class FixesController {
     } catch (e) {
       this.#ctx.log?.warn?.(`Could not enrich fixes with user names: ${e.message}`);
     }
+  }
+
+  /**
+   * Resolves the authenticated caller's IMS user ID from the request context.
+   * Tries `user_id` first (S2S JWT), then `sub` (OIDC), then `email` (IMS handler fallback).
+   * Returns undefined when none of the claims are present.
+   * @param {RequestContext} context
+   * @returns {string | undefined}
+   */
+  static #resolveCallerId(context) {
+    const profile = context.attributes?.authInfo?.getProfile?.();
+    return profile?.user_id ?? profile?.sub ?? profile?.email;
   }
 
   /**
