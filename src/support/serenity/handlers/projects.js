@@ -11,8 +11,7 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-
-import { LOCATIONS } from '../data/locations.js';
+import { iso31661Alpha2ToNumeric } from 'iso-3166';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 const LANGUAGE_TAG_REGEX = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
@@ -32,35 +31,56 @@ const MAX_AI_MODELS_PAGES = 5;
 const TAG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const TAG_CACHE_MAX_ENTRIES = 512;
 
-/**
- * Map ISO-2 country code (uppercase) -> { locationId, locationName }. Lazy
- * normalised on first access so we don't pay the work on cold start.
- */
-let normalizedLocations = null;
-function getLocations() {
-  if (!normalizedLocations) {
-    normalizedLocations = new Map();
-    for (const [iso, value] of Object.entries(LOCATIONS)) {
-      if (value && Number.isInteger(value.locationId)) {
-        normalizedLocations.set(String(iso).toUpperCase(), {
-          locationId: value.locationId,
-          locationName: value.locationName,
-        });
-      }
-    }
-  }
-  return normalizedLocations;
-}
+// Reusable English region-name formatter (ICU-backed, built into Node). Used
+// for the `location_name` we send upstream — matches the form Semrush already
+// stores on existing projects (`United States`, `Germany`, `Türkiye`).
+const ENGLISH_REGION_NAMES = new Intl.DisplayNames(['en'], { type: 'region' });
 
 /**
- * Resolves an ISO-2 market code to Semrush's location_id (= Google Ads
- * Geo Target ID). Returns null on unknown markets; controllers map to 400.
+ * Resolves an ISO 3166-1 alpha-2 country code to Semrush's `location_id`
+ * (= Google Ads "Geo Target ID") plus an English display name suitable for
+ * `location_name` on the upstream create-project body. Returns null on
+ * unknown / unassigned codes; the controller maps that to 400.
+ *
+ * Why `2000 + ISO numeric` works
+ * ─────────────────────────────────────────────────────────────────────────
+ * Google Ads Geo Targets use a multi-digit `criterion_id` whose first digit
+ * encodes the target *type*:
+ *   - 1xxx: region / metro / state
+ *   - 2xxx: country
+ *   - 5xxx, 9xxx, …: airport, postal code, neighbourhood, university, …
+ * For countries, the remaining digits are the country's ISO 3166-1 numeric
+ * code, so `criterion_id = 2000 + ISO numeric`. Verified 2026-05-22 against
+ * every project in the Adobe LLMO-Dev Semrush workspace
+ * (US→2840, DE→2276, FR→2250, AU→2036, …). Semrush echoes the same
+ * `location.id` back on read, so this stays consistent over time.
+ *
+ * Canonical Google Ads dataset (countries + cities + ZIPs + airports + …) is
+ * downloadable as CSV from:
+ *   https://developers.google.com/google-ads/api/data/geotargets
+ *
+ * TODO(LLMO-XXXX): cities / regions / postal codes do NOT follow this
+ * formula — their `criterion_id`s come from the Google CSV above and aren't
+ * derivable from ISO codes. When sub-national geo lands in the UX, either
+ * (a) proxy a Semrush-side location-search endpoint if/when they expose one
+ * (verified absent 2026-05-22 — they accept the integer but don't expose a
+ * `/v1/locations/search`), or (b) lazy-load the Google geotargets CSV from
+ * S3 on first use and search in-memory. Whichever path, only this function
+ * needs to change — `semrush_location_id` is already the slice key.
  */
 export function resolveLocation(market) {
   if (!hasText(market)) {
     return null;
   }
-  return getLocations().get(String(market).toUpperCase()) || null;
+  const alpha2 = String(market).toUpperCase();
+  const numeric = iso31661Alpha2ToNumeric[alpha2];
+  if (!numeric) {
+    return null;
+  }
+  return {
+    locationId: 2000 + Number(numeric),
+    locationName: ENGLISH_REGION_NAMES.of(alpha2),
+  };
 }
 
 /**
@@ -78,6 +98,31 @@ export function clearLanguageCache() {
   languageCache.byTag.clear();
 }
 
+// Semrush's /v1/languages returns `{ id: <uuid>, name: <english name> }` per
+// entry — no ISO/BCP-47 code field (verified 2026-05-22 against
+// adobe-hackathon.semrush.com). Map the caller-supplied tag to the catalog's
+// English name via the ECMAScript `Intl.DisplayNames` API (ICU-backed, built
+// into Node, no dep). The constructor is reusable, so we cache one instance.
+const ENGLISH_LANGUAGE_NAMES = new Intl.DisplayNames(['en'], { type: 'language' });
+
+/**
+ * Maps a BCP-47 primary-subtag (`en`, `de`, `zh`, `zho`, ...) to the English
+ * language name Semrush uses in its catalog (`English`, `German`, `Chinese`).
+ * Returns null when the ICU table doesn't recognise the code (`.of()` echoes
+ * the input back in that case, which we treat as "no name available").
+ */
+function isoToEnglishName(languageTag) {
+  // Strip region/script subtag — Semrush's catalog is keyed by primary
+  // language only (no `en-US` / `pt-BR` rows). Caller (handleCreateProject)
+  // already enforces LANGUAGE_TAG_REGEX, so `primary` is always a 2–3 letter
+  // string here — no need for an empty-input guard.
+  const primary = String(languageTag).toLowerCase().split('-')[0];
+  const name = ENGLISH_LANGUAGE_NAMES.of(primary);
+  // ICU echoes the input back when the code is unknown. Treat that as a
+  // miss — the lookup against the catalog would fail anyway.
+  return name && name.toLowerCase() !== primary ? name : null;
+}
+
 async function resolveLanguageId(transport, languageTag, log) {
   const now = Date.now();
   if (languageCache.expiresAt <= now) {
@@ -85,25 +130,23 @@ async function resolveLanguageId(transport, languageTag, log) {
     const items = Array.isArray(resp?.items) ? resp.items : [];
     languageCache.byTag.clear();
     for (const item of items) {
-      // Semrush's documented field for the BCP-47 tag is `code`. We tolerate
-      // `iso`/`tag` as historical aliases but warn-log if the catalog comes
-      // back without any recognizable tag field — that means the upstream
-      // shape has drifted and POST /projects will start failing with
-      // unknownLanguage until we adapt.
-      const code = item?.code || item?.iso || item?.tag;
-      if (hasText(code) && hasText(item?.id)) {
-        languageCache.byTag.set(String(code).toLowerCase(), String(item.id));
+      if (hasText(item?.name) && hasText(item?.id)) {
+        languageCache.byTag.set(String(item.name).toLowerCase(), String(item.id));
       }
     }
     if (languageCache.byTag.size === 0 && items.length > 0) {
       log?.warn?.(
-        'resolveLanguageId: language catalog returned no usable tags — Semrush field shape may have changed',
+        'resolveLanguageId: language catalog returned no usable names — Semrush field shape may have changed',
         { receivedKeys: Object.keys(items[0] || {}) },
       );
     }
     languageCache.expiresAt = now + LANGUAGE_CACHE_TTL_MS;
   }
-  return languageCache.byTag.get(String(languageTag).toLowerCase()) || null;
+  const englishName = isoToEnglishName(languageTag);
+  if (!englishName) {
+    return null;
+  }
+  return languageCache.byTag.get(englishName.toLowerCase()) || null;
 }
 
 /**
@@ -155,7 +198,7 @@ async function fetchAllAiModels(transport, workspaceId, projectId) {
 }
 
 /**
- * GET /semrush/projects — DB rows enriched with live Semrush metadata
+ * GET /serenity/projects — DB rows enriched with live Semrush metadata
  * (name, domain) via `listWorkspaceProjects` (paginated).
  *
  * Enrichment failures are surfaced as `enrichment: 'failed'` in the response
@@ -196,7 +239,7 @@ export async function handleListProjects(transport, dataAccess, brandId, workspa
   } catch (e) {
     // Only swallow upstream transport failures — let TypeErrors etc. bubble
     // so a real bug isn't hidden as "enrichment unavailable".
-    if (e?.name !== 'SemrushTransportError') {
+    if (e?.name !== 'SerenityTransportError') {
       throw e;
     }
     enrichmentFailed = true;
@@ -246,14 +289,19 @@ function validateCreateBody(body) {
       || !body.brandNames.every(hasText)) {
     errors.push('brandNames must be a non-empty array of strings');
   }
-  if (body?.projectType !== undefined && body.projectType !== 'aio') {
-    errors.push("projectType, when provided, must be 'aio'");
+  // Only 'ai' is meaningful here — that's the value Semrush expects upstream
+  // and the only project type this proxy creates. Pre-launch revisions of
+  // this validator accepted 'aio' (the value the GET listing endpoint uses
+  // as a *collection filter*, not a project type) — Semrush rejects that on
+  // the create path with a `ProjectRequest.Type ... oneof` validation error.
+  if (body?.projectType !== undefined && body.projectType !== 'ai') {
+    errors.push("projectType, when provided, must be 'ai'");
   }
   return errors;
 }
 
 /**
- * POST /semrush/projects — onboard a new (brand, location, language) slice.
+ * POST /serenity/projects — onboard a new (brand, location, language) slice.
  *
  * Strict ordering: upstream create -> upstream publish -> DB row.
  * A row is written **only** when both upstream calls succeed. Callers may
@@ -326,7 +374,12 @@ export async function handleCreateProject(
 
   const upstreamBody = {
     name: String(body.name),
-    type: 'aio',
+    // Semrush's POST /v1/workspaces/{ws}/projects expects type='ai' (the value
+    // the existing projects on /v2/workspaces/{ws}/projects come back with).
+    // The 'AIO' value used as a query filter on the GET endpoint is a
+    // distinct collection-level view, NOT a project type — using it on
+    // the POST yields `ProjectRequest.Type ... 'oneof'` validation error.
+    type: 'ai',
     brand_name_display: body.brandNames[0],
     brand_names: body.brandNames,
     domain: body.brandDomain,
@@ -336,7 +389,7 @@ export async function handleCreateProject(
     language_id: languageId,
   };
 
-  // Upstream create. SemrushTransportError propagates to the controller, which
+  // Upstream create. SerenityTransportError propagates to the controller, which
   // maps it to a 502 envelope. No row written when this throws.
   const createResp = await transport.createProject(workspaceId, upstreamBody);
   const semrushProjectId = String(createResp?.id || '');
@@ -443,7 +496,7 @@ function evictTagCacheIfNeeded() {
 }
 
 /**
- * GET /semrush/projects/:workspaceId/:projectId/tags — unique tag names across
+ * GET /serenity/projects/:workspaceId/:projectId/tags — unique tag names across
  * the project's prompts. Paginated, with a short-TTL cache to keep this
  * cheap when called from dashboard polling.
  *
@@ -500,7 +553,7 @@ export async function handleListProjectTags(transport, workspaceId, projectId) {
 }
 
 /**
- * GET /semrush/projects/:workspaceId/:projectId/models — AI models configured
+ * GET /serenity/projects/:workspaceId/:projectId/models — AI models configured
  * for the project. `key` is what the Semrush Reporting API expects in
  * `CBF_model` filter clauses.
  */
@@ -519,7 +572,7 @@ export async function handleListProjectModels(transport, workspaceId, projectId)
 }
 
 /**
- * GET /semrush/workspaces/:workspaceId/projects — all projects in a workspace.
+ * GET /serenity/workspaces/:workspaceId/projects — all projects in a workspace.
  * Used by the Brand Presence dashboard's Category filter.
  */
 export async function handleListWorkspaceProjects(transport, workspaceId) {

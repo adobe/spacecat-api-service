@@ -21,7 +21,7 @@ import {
   CACHE_TTL_MS,
   NEG_TTL_MS,
   MAX_ENTRIES,
-} from '../../../src/support/semrush/workspace-resolver.js';
+} from '../../../src/support/serenity/workspace-resolver.js';
 
 use(chaiAsPromised);
 use(sinonChai);

@@ -26,7 +26,7 @@ import {
   handleListProjectTags,
   handleListProjectModels,
   handleListWorkspaceProjects,
-} from '../../../../src/support/semrush/handlers/projects.js';
+} from '../../../../src/support/serenity/handlers/projects.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -120,8 +120,8 @@ describe('semrush projects handler', () => {
           semrushProjectId: 'proj-1', semrushLocationId: 2840, language: 'en',
         }),
       ];
-      // Use a SemrushTransportError shape so the handler's narrow catch picks it up.
-      const upstreamErr = Object.assign(new Error('upstream-down'), { name: 'SemrushTransportError' });
+      // Use a SerenityTransportError shape so the handler's narrow catch picks it up.
+      const upstreamErr = Object.assign(new Error('upstream-down'), { name: 'SerenityTransportError' });
       const transport = {
         listWorkspaceProjects: sinon.stub().rejects(upstreamErr),
       };
@@ -138,7 +138,7 @@ describe('semrush projects handler', () => {
         }),
       ];
       const transport = {
-        // Plain Error (no name='SemrushTransportError') — represents a TypeError
+        // Plain Error (no name='SerenityTransportError') — represents a TypeError
         // / programming bug, not an upstream outage.
         listWorkspaceProjects: sinon.stub().rejects(new TypeError('boom')),
       };
@@ -259,7 +259,7 @@ describe('semrush projects handler', () => {
     it('400s on language not in Semrush catalog', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
       };
       const dataAccess = makeDataAccess();
@@ -271,7 +271,7 @@ describe('semrush projects handler', () => {
     it('happy path: upstream create+publish+row written, returns 201', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({ id: 'new-proj-1' }),
         publishProject: sinon.stub().resolves({}),
@@ -298,7 +298,7 @@ describe('semrush projects handler', () => {
       // Upstream body shape is what Semrush expects.
       const upstreamBody = transport.createProject.firstCall.args[1];
       expect(upstreamBody).to.deep.include({
-        type: 'aio',
+        type: 'ai',
         country_code: 'us',
         location_id: 2840,
         language_id: 'lang-en-uuid',
@@ -310,7 +310,7 @@ describe('semrush projects handler', () => {
     it('502 envelope when create returns no id; no row written', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({}),
         publishProject: sinon.stub(),
@@ -325,7 +325,7 @@ describe('semrush projects handler', () => {
     it('propagates upstream error from createProject; no row written', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().rejects(new Error('upstream-down')),
         publishProject: sinon.stub(),
@@ -339,7 +339,7 @@ describe('semrush projects handler', () => {
     it('propagates upstream error from publishProject + logs orphan; no row written', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({ id: 'new-1' }),
         publishProject: sinon.stub().rejects(new Error('publish-down')),
@@ -361,7 +361,7 @@ describe('semrush projects handler', () => {
     it('TOCTOU race: row INSERT fails -> log orphan + return 409 with winner id', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({ id: 'loser-pid' }),
         publishProject: sinon.stub().resolves({}),
@@ -391,7 +391,7 @@ describe('semrush projects handler', () => {
     it('TOCTOU race with no winner found returns 409 with empty semrushProjectId', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({ id: 'loser-pid' }),
         publishProject: sinon.stub().resolves({}),
@@ -408,14 +408,54 @@ describe('semrush projects handler', () => {
       expect(result.body.semrushProjectId).to.equal('');
     });
 
-    it('400s on projectType !== "aio"', async () => {
-      const result = await handleCreateProject({}, makeDataAccess(), BRAND, WORKSPACE, validBody({ projectType: 'something-else' }));
-      expect(result.status).to.equal(400);
-      expect(result.body.messages.join(' ')).to.include('projectType');
+    it("400s on projectType !== 'ai'", async () => {
+      // The Semrush GET-projects endpoint uses `?type=AIO` as a collection
+      // filter, which is what made an earlier draft of this validator accept
+      // 'aio'. The CREATE endpoint rejects 'aio' with a `ProjectRequest.Type
+      // ... oneof` error, so we hard-require 'ai' on the way in too. Each
+      // call is independent of the others — no need for serial awaits.
+      const bads = ['aio', 'something-else', '', 0, false];
+      const results = await Promise.all(bads.map((bad) => handleCreateProject(
+        {},
+        makeDataAccess(),
+        BRAND,
+        WORKSPACE,
+        validBody({ projectType: bad }),
+      )));
+      for (let i = 0; i < bads.length; i += 1) {
+        const result = results[i];
+        expect(result.status, `projectType=${JSON.stringify(bads[i])}`).to.equal(400);
+        expect(result.body.messages.join(' ')).to.include('projectType');
+      }
     });
 
-    it('warn-logs when the language catalog returns no usable tags', async () => {
-      // Items have neither `code`/`iso`/`tag` — cache stays empty → unknownLanguage.
+    it("accepts projectType 'ai' and forwards type:'ai' on the upstream create body", async () => {
+      // Locks the validator-to-upstream contract: the only accepted client
+      // value is 'ai', and the handler sends exactly that to Semrush. Catches
+      // regressions where someone reintroduces the GET-collection 'aio' value
+      // on the create path.
+      const transport = {
+        listLanguages: sinon.stub().resolves({
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
+        }),
+        createProject: sinon.stub().resolves({ id: 'p1' }),
+        publishProject: sinon.stub().resolves({}),
+      };
+      const result = await handleCreateProject(
+        transport,
+        makeDataAccess(),
+        BRAND,
+        WORKSPACE,
+        validBody({ projectType: 'ai' }),
+      );
+      expect(result.status).to.equal(201);
+      expect(transport.createProject).to.have.been.calledOnce;
+      const [, upstreamBody] = transport.createProject.firstCall.args;
+      expect(upstreamBody.type).to.equal('ai');
+    });
+
+    it('warn-logs when the language catalog returns no usable names', async () => {
+      // Items are missing the `name` field — cache stays empty → unknownLanguage.
       const transport = {
         listLanguages: sinon.stub().resolves({
           items: [{ id: 'lang-en-uuid', label: 'English' }],
@@ -427,13 +467,13 @@ describe('semrush projects handler', () => {
       expect(result.body.error).to.equal('unknownLanguage');
       expect(log.warn).to.have.been.called;
       const [msg] = log.warn.firstCall.args;
-      expect(msg).to.match(/no usable tags/);
+      expect(msg).to.match(/no usable names/);
     });
 
     it('caches the language catalog across calls within TTL', async () => {
       const transport = {
         listLanguages: sinon.stub().resolves({
-          items: [{ id: 'lang-en-uuid', code: 'en' }],
+          items: [{ id: 'lang-en-uuid', name: 'English' }],
         }),
         createProject: sinon.stub().resolves({ id: 'p1' }),
         publishProject: sinon.stub().resolves({}),
@@ -447,6 +487,44 @@ describe('semrush projects handler', () => {
         language: 'en',
       }));
       expect(transport.listLanguages).to.have.been.calledOnce;
+    });
+
+    it('refreshes the language catalog after the 1h TTL expires', async () => {
+      // Pin Date.now() across the test so we can advance past TTL deterministically.
+      // Without this test, a bug that pinned `expiresAt` permanently (e.g. dropping
+      // the `now + TTL` assignment) would pass CI silently — the cache would never
+      // refetch and new languages added to the upstream catalog would be invisible
+      // until a Lambda cold start.
+      const clock = sinon.useFakeTimers({ now: 1_700_000_000_000, toFake: ['Date'] });
+      try {
+        clearLanguageCache();
+        const transport = {
+          listLanguages: sinon.stub().resolves({
+            items: [{ id: 'lang-en-uuid', name: 'English' }],
+          }),
+          createProject: sinon.stub().resolves({ id: 'p1' }),
+          publishProject: sinon.stub().resolves({}),
+        };
+        const dataAccess = makeDataAccess();
+
+        // 1st call → upstream listLanguages fires.
+        await handleCreateProject(transport, dataAccess, BRAND, WORKSPACE, validBody());
+        expect(transport.listLanguages).to.have.been.calledOnce;
+
+        // Within TTL → no refetch.
+        clock.tick(59 * 60 * 1000); // 59 min
+        dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+        await handleCreateProject(transport, dataAccess, BRAND, WORKSPACE, validBody({ market: 'DE' }));
+        expect(transport.listLanguages).to.have.been.calledOnce;
+
+        // Past 1h TTL → cache refreshes; expect a 2nd upstream call.
+        clock.tick(2 * 60 * 1000); // +2 min → 61 min total
+        dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+        await handleCreateProject(transport, dataAccess, BRAND, WORKSPACE, validBody({ market: 'FR' }));
+        expect(transport.listLanguages).to.have.been.calledTwice;
+      } finally {
+        clock.restore();
+      }
     });
   });
 
