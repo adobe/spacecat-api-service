@@ -1,3 +1,17 @@
+## [1.514.1](https://github.com/adobe/spacecat-api-service/compare/v1.514.0...v1.514.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **auth:** use context.log in auth handler subclasses for per-request logging ([#2485](https://github.com/adobe/spacecat-api-service/issues/2485)) ([a115abb](https://github.com/adobe/spacecat-api-service/commit/a115abb795914688e197431c50deb5fed6e43e04))
+
+# [1.514.0](https://github.com/adobe/spacecat-api-service/compare/v1.513.0...v1.514.0) (2026-05-25)
+
+
+### Features
+
+* add PATCH /sites/:siteId/config/scraper ([#2469](https://github.com/adobe/spacecat-api-service/issues/2469)) ([7ca40ac](https://github.com/adobe/spacecat-api-service/commit/7ca40ac079fceb1130673f01e08d5a47ad72b9c3))
+
 # [1.513.0](https://github.com/adobe/spacecat-api-service/compare/v1.512.2...v1.513.0) (2026-05-25)
 
 

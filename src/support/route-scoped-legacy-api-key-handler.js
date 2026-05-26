@@ -45,7 +45,7 @@ export default class RouteScopedLegacyApiKeyHandler extends LegacyApiKeyHandler 
     }
     const result = await super.checkAuth(request, context);
     if (result) {
-      this.log(`request authenticated via route-scoped legacy API key handler [${context.pathInfo.route}]`, 'info');
+      context.log.info(`[legacyApiKey] request authenticated via route-scoped legacy API key handler [${context.pathInfo.route}]`);
     }
     return result;
   }

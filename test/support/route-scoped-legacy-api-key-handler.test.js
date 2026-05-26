@@ -66,7 +66,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
 
   it('delegates to LegacyApiKeyHandler.checkAuth for POST /event/fulfillment', async () => {
     const req = {};
-    const ctx = { pathInfo: { route: 'POST /event/fulfillment' } };
+    const ctx = { pathInfo: { route: 'POST /event/fulfillment' }, log: logStubs };
     const result = await handler.checkAuth(req, ctx);
     expect(result).to.equal('SUPER_RESULT');
     expect(superCheckAuthStub).to.have.been.calledOnceWith(req, ctx);
@@ -74,7 +74,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
 
   it('delegates to LegacyApiKeyHandler.checkAuth for POST /slack/channels/invite-by-user-id', async () => {
     const req = {};
-    const ctx = { pathInfo: { route: 'POST /slack/channels/invite-by-user-id' } };
+    const ctx = { pathInfo: { route: 'POST /slack/channels/invite-by-user-id' }, log: logStubs };
     const result = await handler.checkAuth(req, ctx);
     expect(result).to.equal('SUPER_RESULT');
     expect(superCheckAuthStub).to.have.been.calledOnceWith(req, ctx);
@@ -84,7 +84,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
 
   it('emits an info log when auth succeeds on POST /event/fulfillment', async () => {
     superCheckAuthStub.resolves({ getType: () => 'legacyApiKey' });
-    await handler.checkAuth({}, { pathInfo: { route: 'POST /event/fulfillment' } });
+    await handler.checkAuth({}, { pathInfo: { route: 'POST /event/fulfillment' }, log: logStubs });
     expect(logStubs.info).to.have.been.calledOnceWithExactly(
       '[legacyApiKey] request authenticated via route-scoped legacy API key handler [POST /event/fulfillment]',
     );
@@ -92,7 +92,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
 
   it('emits an info log when auth succeeds on POST /slack/channels/invite-by-user-id', async () => {
     superCheckAuthStub.resolves({ getType: () => 'legacyApiKey' });
-    await handler.checkAuth({}, { pathInfo: { route: 'POST /slack/channels/invite-by-user-id' } });
+    await handler.checkAuth({}, { pathInfo: { route: 'POST /slack/channels/invite-by-user-id' }, log: logStubs });
     expect(logStubs.info).to.have.been.calledOnceWithExactly(
       '[legacyApiKey] request authenticated via route-scoped legacy API key handler [POST /slack/channels/invite-by-user-id]',
     );

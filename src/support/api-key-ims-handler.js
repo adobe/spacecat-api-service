@@ -77,7 +77,7 @@ export default class ApiKeyImsHandler extends AdobeImsHandler {
       // claim for exactly this reason). Normalising to trial_email (the real
       // address) would create a format mismatch that makes existing keys
       // invisible on GET and breaks cross-path consistency (ASO-607).
-      this.log('api-key request authenticated via scoped IMS handler - JWT migration pending', 'info');
+      context.log.info('[ims] api-key request authenticated via scoped IMS handler - JWT migration pending');
     }
     return result;
   }
