@@ -425,9 +425,14 @@ function FacsAccessMappingsController(context) {
       return badRequest('id must be a valid UUID');
     }
 
-    const queryParams = ctx.pathInfo?.queryParams || {};
-    const reasonFromBody = ctx.data && typeof ctx.data === 'object' ? ctx.data.reason : undefined;
-    const revokeReason = reasonFromBody || queryParams.reason || null;
+    // `revoke_reason` is sourced from the request body ONLY. A `?reason=` query-string
+    // fallback is intentionally NOT supported — see mac-state-layer.md §"Revoke reason
+    // vocabulary" (query-string values land in access logs / CloudWatch / the audit
+    // store, defeating the PII-clean intent of the enum constraint). When the body is
+    // stripped in transit (CDN / API gateway), the revoke proceeds with reason = null.
+    const revokeReason = ctx.data && typeof ctx.data === 'object' && ctx.data.reason
+      ? ctx.data.reason
+      : null;
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;

@@ -504,7 +504,10 @@ describe('FacsAccessMappingsController', () => {
       expect(revoke.firstCall.args[1].revokeReason).to.equal('role change');
     });
 
-    it('falls back to ?reason= query param when the body has no reason (CDN-strip-tolerant)', async () => {
+    it('ignores ?reason= query param — body is the only supported source (PII-clean)', async () => {
+      // mac-state-layer.md §"Revoke reason vocabulary": a ?reason= fallback would
+      // leak free-text into access logs / CloudWatch / the audit store, defeating
+      // the enum constraint. CDN-strip-on-DELETE callers get reason=null silently.
       const revoke = sinon.stub().resolves({ id: VALID_UUID_MAPPING });
       const Controller = (await loadController({
         revokeFacsAccessMappingById: revoke,
@@ -515,7 +518,7 @@ describe('FacsAccessMappingsController', () => {
       });
       const ctrl = Controller(ctx);
       await ctrl.revokeMappingById(ctx);
-      expect(revoke.firstCall.args[1].revokeReason).to.equal('role change (via query)');
+      expect(revoke.firstCall.args[1].revokeReason).to.equal(null);
     });
 
     it('passes revokeReason as null when neither body nor query supplied one', async () => {
