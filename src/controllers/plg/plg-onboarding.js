@@ -54,6 +54,7 @@ import { updateRumConfig } from '../../support/rum-config-service.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { cleanupPlgSiteSuggestionsAndFixes } from './plg-onboarding-cleanup.js';
+import { PLG_OPPORTUNITY_TYPES } from './plg-constants.js';
 
 function isFromAsoUI(context) {
   return context?.pathInfo?.headers?.['x-client-type'] === 'sites-optimizer-ui';
@@ -606,10 +607,6 @@ async function updateLaunchDarklyFlags(site, organization, context) {
     }
   });
 }
-
-// The PLG opportunity types that are relevant for the displacement check.
-// Must stay in sync with LD_AUTO_FIX_FLAGS above, which enables auto-fix for the same types.
-const PLG_OPPORTUNITY_TYPES = ['cwv', 'alt-text', 'broken-backlinks'];
 
 /**
  * Returns true if the given site has suggestions that should block displacement.
