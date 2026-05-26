@@ -526,6 +526,8 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource': 'site:read',
+  'PATCH /sites/:siteId/llmo/data/:dataSource/row': 'site:write',
+  'PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row': 'site:write',
   'GET /sites/:siteId/llmo/config': 'site:read',
   'PATCH /sites/:siteId/llmo/config': 'site:write',
   'POST /sites/:siteId/llmo/config': 'site:write',
