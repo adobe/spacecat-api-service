@@ -996,6 +996,10 @@ export async function createOrFindSite(baseURL, organizationId, context, deliver
   const site = await Site.findByBaseURL(baseURL);
   if (site) {
     if (site.getOrganizationId() !== organizationId) {
+      const enrollments = await site.getSiteEnrollments();
+      if (enrollments?.length > 0) {
+        throw new Error(`Site ${baseURL} is already associated with another org that has active products and cannot be moved.`);
+      }
       site.setOrganizationId(organizationId);
       // Persist the re-parent immediately. resolveLlmoOnboardingMode (called
       // right after this in performLlmoOnboarding) reads sites by org_id, so
