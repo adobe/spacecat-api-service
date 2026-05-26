@@ -629,7 +629,7 @@ function BrandsController(ctx, log, env) {
       if (prompts.length > 500) {
         return badRequest('Maximum 500 prompt pairs per request');
       }
-      if (prompts.some((p) => !p || typeof p !== 'object' || !p.text || !p.region || p.text.length > 2000)) {
+      if (prompts.some((p) => !p || typeof p !== 'object' || !p.text?.trim() || !p.region?.trim() || p.text.length > 2000)) {
         return badRequest('Each prompt must have "text" (max 2000 chars) and "region"');
       }
 

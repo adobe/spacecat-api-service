@@ -1896,6 +1896,26 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 400 when prompt text is whitespace only', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [{ text: '   ', region: 'us' }] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when prompt region is whitespace only', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [{ text: 'some prompt', region: '   ' }] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 400 when prompt text exceeds 2000 chars', async () => {
       const response = await brandsController.checkPromptsByBrand({
         ...context,
@@ -1904,6 +1924,26 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
+    });
+
+    it('accepts exactly 500 prompts', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: Array.from({ length: 500 }, (_, i) => ({ text: `p${i}`, region: 'us' })) },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('accepts prompt text of exactly 2000 chars', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [{ text: 'x'.repeat(2000), region: 'us' }] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
     });
 
     it('returns 404 when organization is not found', async () => {
@@ -2002,8 +2042,9 @@ describe('Brands Controller', () => {
       expect(body.results).to.deep.equal([VALID_PROMPTS[0]]);
     });
 
-    it('returns 500 when storage throws', async () => {
-      mockDataAccess.services.postgrestClient.rpc = sandbox.stub().rejects(new Error('DB error'));
+    it('returns 500 when storage throws and logs structured error', async () => {
+      const dbError = new Error('DB error');
+      mockDataAccess.services.postgrestClient.rpc = sandbox.stub().rejects(dbError);
 
       const response = await brandsController.checkPromptsByBrand({
         ...context,
@@ -2012,6 +2053,10 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+      expect(loggerStub.error).to.have.been.calledWith('Error checking prompts existence', {
+        brandId: BRAND_UUID,
+        error: dbError,
+      });
     });
   });
 
