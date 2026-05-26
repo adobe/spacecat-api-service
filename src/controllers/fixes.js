@@ -724,7 +724,7 @@ export class FixesController {
     // Only pass IMS-format IDs to the admin profile API. Rejects legacy or malformed
     // values that could have been stored before the server-side derivation fix, closing
     // the residual PII exfiltration path for pre-fix data.
-    const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices)$/;
+    const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{24})$/;
     const userIds = [
       ...new Set(fixes.map((f) => f.getExecutedBy()).filter((id) => id && IMS_ID_RE.test(id))),
     ];

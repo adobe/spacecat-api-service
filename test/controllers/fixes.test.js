@@ -233,6 +233,70 @@ describe('Fixes Controller', () => {
       expect(result[0]).to.not.have.property('executedByUser');
     });
 
+    it('hydrates executedByUser when executedBy is a hex org ID (HEXID@HEXORGID format)', async () => {
+      const hexOrgUserId = 'B90A1E07680B608F0A494028@9bcd5ee55f43b6f30a494212';
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'Jane',
+          last_name: 'Smith',
+          email: 'jane.smith@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: hexOrgUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.have.property('executedByUser');
+      expect(result[0].executedByUser).to.deep.equal({
+        firstName: 'Jane',
+        lastName: 'Smith',
+        email: 'jane.smith@example.com',
+      });
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(hexOrgUserId);
+    });
+
+    it('skips IMS lookup when executedBy is a plain email address', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'John',
+          last_name: 'Doe',
+          email: 'john.doe@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: 'rpapani@adobe.com',
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.not.have.property('executedByUser');
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
     it('skips IMS lookup when no fix has executedBy', async () => {
       const mockImsClient = {
         getImsAdminProfile: sandbox.stub().resolves({
