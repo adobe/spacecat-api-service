@@ -205,6 +205,38 @@ describe('Preflight Controller', () => {
       );
     });
 
+    it('includes traceId on SQS message when controller ctx includes traceId', async () => {
+      const traceId = '1-6a141a79-44f2b03900247bc15c013d2e';
+      const ctrlWithTrace = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs, traceId },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://main--example-site.aem.page/test.html'],
+          step: 'identify',
+        },
+      };
+
+      const response = await ctrlWithTrace.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          type: 'preflight',
+          siteId: 'test-site-123',
+          traceId,
+        },
+      );
+    });
+
     it('creates a preflight job successfully for AMS', async () => {
       const context = {
         data: {
@@ -607,7 +639,7 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(400);
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Invalid request: missing x-promise-token header.',
+        message: 'Invalid request: missing required header: x-promise-token',
       });
     });
 
@@ -650,8 +682,225 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(400);
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Invalid request: missing x-promise-token header.',
+        message: 'Invalid request: missing required header: x-promise-token',
       });
+    });
+
+    it('returns 400 when headers are present but x-promise-token key is missing', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+        pathInfo: {
+          headers: {
+            'content-type': 'application/json',
+            accept: '*/*',
+          },
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: missing required header: x-promise-token',
+      });
+    });
+
+    it('returns 400 when x-promise-token header value is empty string', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+        pathInfo: {
+          headers: {
+            'x-promise-token': '',
+          },
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: missing required header: x-promise-token',
+      });
+    });
+
+    it('returns 400 when x-promise-token header value is not a string', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+        pathInfo: {
+          headers: {
+            'x-promise-token': 12345,
+          },
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: missing required header: x-promise-token',
+      });
+    });
+
+    it('creates a preflight job when x-promise-token decodeURIComponent fails and uses trimmed literal', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const malformedPercentToken = 'abc::def%';
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+        pathInfo: {
+          headers: {
+            'x-promise-token': malformedPercentToken,
+          },
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          siteId: mockSite.getId(),
+          type: 'preflight',
+          promiseToken: { promise_token: malformedPercentToken },
+        },
+      );
+    });
+
+    it('returns 500 when promise token resolution throws a non-ErrorWithStatusCode error', async () => {
+      const siteWithBrokenAuthoring = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => {
+          throw new Error('authoring type lookup failed');
+        },
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(siteWithBrokenAuthoring);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: 'Error getting promise token' });
     });
 
     it('preserves full x-promise-token header value when token contains = characters (base64)', async () => {
@@ -737,7 +986,7 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(400);
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Invalid request: missing x-promise-token header.',
+        message: 'Invalid request: missing required header: x-promise-token',
       });
     });
   });
@@ -1261,7 +1510,7 @@ describe('Preflight Controller', () => {
         expect(response.status).to.equal(400);
         const result = await response.json();
         expect(result).to.deep.equal({
-          message: 'Invalid request: missing x-promise-token header.',
+          message: 'Invalid request: missing required header: x-promise-token',
         });
       },
     );
@@ -1303,6 +1552,46 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(500);
       const result = await response.json();
       expect(result).to.deep.equal({ message: 'Error retrieving page authentication' });
+    });
+
+    it('returns 500 when beta promise token resolution throws a non-ErrorWithStatusCode error', async () => {
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+
+      const siteWithBrokenAuthoring = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => {
+          throw new Error('authoring type lookup failed');
+        },
+        getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(siteWithBrokenAuthoring);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+        '@adobe/spacecat-shared-ims-client': { retrievePageAuthentication: async () => 'unused' },
+        '@adobe/spacecat-shared-tier-client': { TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+      });
+
+      const ctrl = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await ctrl.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+        pathInfo: { headers: { 'x-promise-token': 'any-token' } },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: 'Error getting promise token' });
     });
 
     it('returns 500 when retrievePageAuthentication fails', async () => {

@@ -30,7 +30,7 @@ const PROMISE_BASED_TYPES = [
 ];
 
 /** Thrown when job is created on authenticated CMS pages without `x-promise-token` header. */
-const MISSING_X_PROMISE_TOKEN_MESSAGE = 'Invalid request: missing x-promise-token header.';
+const MISSING_X_PROMISE_TOKEN_MESSAGE = 'Invalid request: missing required header: x-promise-token';
 
 /**
  * Creates a preflight controller instance
