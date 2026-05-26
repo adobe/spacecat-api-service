@@ -40,6 +40,7 @@ import {
   updatePromptById,
   deletePromptById,
   bulkDeletePrompts,
+  checkPromptsExist,
   resolveBrandUuid,
 } from '../support/prompts-storage.js';
 import {
@@ -600,6 +601,62 @@ function BrandsController(ctx, log, env) {
       return ok(result);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  // ── Prompt existence check (v2) ──
+
+  const checkPromptsByBrand = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const body = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+
+      const { prompts } = body;
+      if (!Array.isArray(prompts) || prompts.length === 0) {
+        return badRequest('"prompts" array required (min 1)');
+      }
+      if (prompts.length > 500) {
+        return badRequest('Maximum 500 prompt pairs per request');
+      }
+      if (prompts.some((p) => !p.text || !p.region)) {
+        return badRequest('Each prompt must have "text" and "region"');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      const results = await checkPromptsExist({ brandUuid, prompts, postgrestClient });
+      return ok({ results });
+    } catch (error) {
+      log.error(`Error checking prompts existence for brand ${brandId}:`, error);
       return createErrorResponse(error);
     }
   };
@@ -1392,6 +1449,7 @@ function BrandsController(ctx, log, env) {
     updatePromptByBrandAndId,
     deletePromptByBrandAndId,
     bulkDeletePromptsByBrand,
+    checkPromptsByBrand,
     triggerConfigSync,
   };
 }
