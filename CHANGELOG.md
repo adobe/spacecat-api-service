@@ -1,3 +1,10 @@
+# [1.517.0](https://github.com/adobe/spacecat-api-service/compare/v1.516.0...v1.517.0) (2026-05-26)
+
+
+### Features
+
+* **llmo:** detect AEM CS Fastly behind WAF simple proxy (Case 0) ([#2426](https://github.com/adobe/spacecat-api-service/issues/2426)) ([3b91905](https://github.com/adobe/spacecat-api-service/commit/3b919059528427b332f8563077abcac12cab5eca))
+
 # [1.516.0](https://github.com/adobe/spacecat-api-service/compare/v1.515.0...v1.516.0) (2026-05-26)
 
 
