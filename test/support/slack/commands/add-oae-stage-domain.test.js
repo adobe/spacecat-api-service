@@ -73,7 +73,7 @@ describe('AddOaeStageDomainCommand', () => {
 
     context = {
       dataAccess: dataAccessStub,
-      log: { error: sinon.stub() },
+      log: { error: sinon.stub(), info: sinon.stub() },
       env: {},
     };
 
@@ -171,6 +171,19 @@ describe('AddOaeStageDomainCommand', () => {
       expect(mockProdSite.save).to.not.have.been.called;
     });
 
+    it('warns and returns when stage domain equals prod domain', async () => {
+      dataAccessStub.Site.findByBaseURL.callsFake((url) => Promise.resolve(
+        url === PROD_SITE_URL ? mockProdSite : null,
+      ));
+
+      const command = AddOaeStageDomainCommand(context);
+      await command.handleExecution([PROD_SITE_INPUT, PROD_SITE_INPUT], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWithMatch(/same as the prod domain/);
+      expect(dataAccessStub.Site.create).to.not.have.been.called;
+      expect(mockProdSite.save).to.not.have.been.called;
+    });
+
     it('reports site not found when prod site does not exist', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(null);
 
@@ -253,6 +266,31 @@ describe('AddOaeStageDomainCommand', () => {
         { lastModifiedBy: 'slack-add-oae-stage-domain', isStageDomain: true },
       );
       expect(slackContext.say).to.have.been.calledWithMatch(/Successfully onboarded 1 stage domain/);
+    });
+
+    it('throws and reports error when fetchMetaconfig returns no API keys after update', async () => {
+      const existingMetaconfig = { apiKeys: ['existing-key'] };
+
+      dataAccessStub.Site.findByBaseURL.callsFake((url) => {
+        if (url === PROD_SITE_URL) {
+          return Promise.resolve(mockProdSite);
+        }
+        if (url === STAGE_BASE_URL) {
+          return Promise.resolve(mockStageSite);
+        }
+        return Promise.resolve(null);
+      });
+      tokowakaClientStub.fetchMetaconfig
+        .onFirstCall().resolves(existingMetaconfig)
+        .onSecondCall().resolves({ apiKeys: [] });
+      tokowakaClientStub.updateMetaconfig.resolves();
+
+      const command = AddOaeStageDomainCommand(context);
+      await command.handleExecution([PROD_SITE_INPUT, STAGE_DOMAIN], slackContext);
+
+      expect(context.log.error).to.have.been.called;
+      expect(slackContext.say).to.have.been.calledWithMatch(/Failed to provision API key/);
+      expect(mockProdSite.save).to.not.have.been.called;
     });
 
     it('allows stage domain with a different registered domain than prod (no base-domain check)', async () => {

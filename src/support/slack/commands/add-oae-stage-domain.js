@@ -95,7 +95,24 @@ function AddOaeStageDomainCommand(context) {
 
       const tokowakaClient = TokowakaClient.createFrom(context);
       const organizationId = site.getOrganizationId();
+      const prodBaseURL = site.getBaseURL();
       const lastModifiedBy = 'slack-add-oae-stage-domain';
+
+      // Pre-flight: validate no stage domain equals the prod domain and no org conflicts,
+      // before any DB writes, to avoid partial provisioning state.
+      /* eslint-disable no-await-in-loop */
+      for (const { domain, stageBaseURL } of domainEntries) {
+        if (stageBaseURL === prodBaseURL) {
+          await say(`:warning: Stage domain \`${domain}\` is the same as the prod domain. Please provide a different staging domain.`);
+          return;
+        }
+        const existing = await Site.findByBaseURL(stageBaseURL);
+        if (existing && existing.getOrganizationId() !== organizationId) {
+          throw new Error(`Stage domain \`${domain}\` already belongs to a different organization.`);
+        }
+      }
+      /* eslint-enable no-await-in-loop */
+
       const newEntries = [];
       const stageConfigs = [];
 
@@ -107,8 +124,6 @@ function AddOaeStageDomainCommand(context) {
             baseURL: stageBaseURL,
             organizationId,
           });
-        } else if (stageSite.getOrganizationId() !== organizationId) {
-          throw new Error(`Stage domain \`${domain}\` already belongs to a different organization.`);
         }
 
         let metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
@@ -130,6 +145,9 @@ function AddOaeStageDomainCommand(context) {
             { lastModifiedBy, isStageDomain: true },
           );
           metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
+          if (!metaconfig?.apiKeys?.length) {
+            throw new Error(`Failed to provision API key for stage domain \`${domain}\`: fetchMetaconfig returned no API keys after update.`);
+          }
         }
 
         newEntries.push({ domain, id: stageSite.getId() });
