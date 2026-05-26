@@ -143,6 +143,20 @@ paths:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-and-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/{promptId}:
+    $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/projects:
+    $ref: './serenity-api.yaml#/v2-serenity-projects'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/projects/{workspaceId}/{projectId}/tags:
+    $ref: './serenity-api.yaml#/v2-serenity-project-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/projects/{workspaceId}/{projectId}/models:
+    $ref: './serenity-api.yaml#/v2-serenity-project-models'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/workspaces/{workspaceId}/projects:
+    $ref: './serenity-api.yaml#/v2-serenity-workspace-projects'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -238,6 +252,8 @@ paths:
     $ref: './sites-api.yaml#/site-brand-profile'
   /sites/{siteId}/config/cdn-logs:
     $ref: './site-api.yaml#/site-cdn-logs-config'
+  /sites/{siteId}/config/scraper:
+    $ref: './site-api.yaml#/site-scraper-config'
   /sites/{siteId}/page-relationships/search:
     $ref: './site-api.yaml#/site-page-relationships-search'
   /sites/{siteId}/opportunities:
@@ -468,6 +484,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-data-with-type'
   /sites/{siteId}/llmo/data/{sheetType}/{week}/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-data-with-type-and-week'
+  /sites/{siteId}/llmo/data/{dataSource}/row:
+    $ref: './llmo-api.yaml#/llmo-data-row-with-datasource'
+  /sites/{siteId}/llmo/data/{sheetType}/{dataSource}/row:
+    $ref: './llmo-api.yaml#/llmo-data-row-with-type'
   /sites/{siteId}/llmo/sheet-data/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
   /sites/{siteId}/llmo/sheet-data/{sheetType}/{dataSource}:
@@ -636,8 +656,12 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
   /llmo/ai-visibility/v1/topic/brand-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
+  /llmo/ai-visibility/v1/topic/gap-topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics'
   /llmo/ai-visibility/v1/prompt/brand-prompts:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts'
+  /llmo/ai-visibility/v1/prompt/gap-prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
 
