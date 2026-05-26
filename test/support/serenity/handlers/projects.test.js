@@ -114,6 +114,27 @@ describe('semrush projects handler', () => {
       });
     });
 
+    it('denormalizes semrushLocationName from semrushLocationId for known countries', async () => {
+      // Three rows covering: 2-digit ISO numeric needing zero-pad (AU=036 → 2036),
+      // 3-digit numeric (US=840 → 2840 / FR=250 → 2250), and one numeric that
+      // doesn't map to a country at all (unknown id → null, never raw integer).
+      const projects = [
+        makeProject({ semrushProjectId: 'p-au', semrushLocationId: 2036, language: 'en' }),
+        makeProject({ semrushProjectId: 'p-us', semrushLocationId: 2840, language: 'en' }),
+        makeProject({ semrushProjectId: 'p-fr', semrushLocationId: 2250, language: 'fr' }),
+        makeProject({ semrushProjectId: 'p-x', semrushLocationId: 2999, language: 'en' }),
+      ];
+      const transport = { listWorkspaceProjects: sinon.stub().resolves({ items: [] }) };
+      const result = await handleListProjects(transport, makeDataAccess({ projects }), BRAND, WORKSPACE, {});
+      const byId = Object.fromEntries(result.items.map((p) => [p.semrushProjectId, p.semrushLocationName]));
+      expect(byId).to.deep.equal({
+        'p-au': 'Australia',
+        'p-us': 'United States',
+        'p-fr': 'France',
+        'p-x': null,
+      });
+    });
+
     it('returns rows without enrichment when upstream transport fails — marks enrichment:failed', async () => {
       const projects = [
         makeProject({

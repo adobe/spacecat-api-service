@@ -11,7 +11,7 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-import { iso31661Alpha2ToNumeric } from 'iso-3166';
+import { iso31661Alpha2ToNumeric, iso31661NumericToAlpha2 } from 'iso-3166';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 const LANGUAGE_TAG_REGEX = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
@@ -81,6 +81,27 @@ export function resolveLocation(market) {
     locationId: 2000 + Number(numeric),
     locationName: ENGLISH_REGION_NAMES.of(alpha2),
   };
+}
+
+/**
+ * Reverse of `resolveLocation`: maps a Semrush `location_id` back to an
+ * English country name (e.g. 2840 → "United States"). Returns null for
+ * unknown / non-country location ids. Used by `handleListProjects` to
+ * denormalize a human-readable market label onto each row so the elmo UI
+ * doesn't have to keep a numeric → ISO → name table client-side.
+ */
+function locationNameFromId(locationId) {
+  if (!Number.isInteger(locationId) || locationId < 2000 || locationId >= 3000) {
+    return null;
+  }
+  // Pad to 3 digits with leading zeros — iso-3166's numeric keys are strings
+  // like '004', '036', '840'. Without padding, '36' (AU) and '4' (AF) miss.
+  const numeric = String(locationId - 2000).padStart(3, '0');
+  const alpha2 = iso31661NumericToAlpha2[numeric];
+  if (!alpha2) {
+    return null;
+  }
+  return ENGLISH_REGION_NAMES.of(alpha2) || null;
 }
 
 /**
@@ -252,10 +273,12 @@ export async function handleListProjects(transport, dataAccess, brandId, workspa
     items: filtered.map((row) => {
       const projectId = row.getSemrushProjectId();
       const live = liveByProjectId.get(projectId) || {};
+      const locationId = row.getSemrushLocationId();
       return {
         brandId,
         semrushProjectId: projectId,
-        semrushLocationId: row.getSemrushLocationId(),
+        semrushLocationId: locationId,
+        semrushLocationName: locationNameFromId(locationId),
         language: row.getLanguage(),
         name: live.name ?? null,
         domain: live.domain ?? null,
