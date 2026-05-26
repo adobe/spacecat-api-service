@@ -373,6 +373,7 @@ v2-prompts-by-brand-check:
                   properties:
                     text:
                       type: string
+                      maxLength: 2000
                       description: Prompt text to look up
                     region:
                       type: string

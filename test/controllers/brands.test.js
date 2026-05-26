@@ -1886,6 +1886,26 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 400 when a prompt item is null', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [null] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when prompt text exceeds 2000 chars', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [{ text: 'x'.repeat(2001), region: 'us' }] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 404 when organization is not found', async () => {
       mockDataAccess.Organization.findById.resolves(null);
       brandsController = BrandsController(context, loggerStub, mockEnv);

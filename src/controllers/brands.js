@@ -629,8 +629,8 @@ function BrandsController(ctx, log, env) {
       if (prompts.length > 500) {
         return badRequest('Maximum 500 prompt pairs per request');
       }
-      if (prompts.some((p) => !p.text || !p.region)) {
-        return badRequest('Each prompt must have "text" and "region"');
+      if (prompts.some((p) => !p || typeof p !== 'object' || !p.text || !p.region || p.text.length > 2000)) {
+        return badRequest('Each prompt must have "text" (max 2000 chars) and "region"');
       }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
@@ -656,7 +656,7 @@ function BrandsController(ctx, log, env) {
       const results = await checkPromptsExist({ brandUuid, prompts, postgrestClient });
       return ok({ results });
     } catch (error) {
-      log.error(`Error checking prompts existence for brand ${brandId}:`, error);
+      log.error('Error checking prompts existence', { brandId, error });
       return createErrorResponse(error);
     }
   };
