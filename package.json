@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.514.0",
+  "version": "1.516.0",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -28,8 +28,6 @@
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
     "docs:lint": "npx @redocly/cli lint --config docs/openapi/redocly-config.yaml",
     "docs:serve": "npx @redocly/cli preview --project-dir docs/openapi --product redoc",
-    "gen:types:semrush": "npx openapi-typescript docs/openapi/api.yaml -o src/support/semrush/generated/api.d.ts --root-types",
-    "gen:types:semrush:upstream": "npx openapi-typescript \"${SEMRUSH_OPENAPI_URL:-https://adobe-hackathon.semrush.com/enterprise/projects/api/public_swagger.json}\" -o src/support/semrush/generated/semrush-upstream.d.ts --root-types",
     "prepare": "husky"
   },
   "hlx": {
@@ -120,6 +118,7 @@
     "csv-writer": "1.6.0",
     "date-fns": "4.1.0",
     "fuse.js": "7.3.0",
+    "iso-3166": "^4.4.0",
     "iso-639-3": "3.0.1",
     "js-yaml": "4.1.1",
     "node-html-parser": "7.1.0",
@@ -166,7 +165,6 @@
     "mocha-suppress-logs": "0.6.0",
     "nock": "14.0.15",
     "nodemon": "3.1.14",
-    "openapi-typescript": "^7.13.0",
     "semantic-release": "^25.0.3",
     "sinon": "22.0.0",
     "sinon-chai": "4.0.1",

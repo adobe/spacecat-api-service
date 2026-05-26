@@ -23,7 +23,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
  *
  * The shorter negative TTL keeps newly-onboarded orgs from being stuck in a
  * 404 loop for the full 5-minute positive cache window: once an operator
- * sets `semrushWorkspaceId`, the next /semrush/* call within ~30s starts
+ * sets `semrushWorkspaceId`, the next /serenity/* call within ~30s starts
  * succeeding.
  *
  * The cap (MAX_ENTRIES) is a defense-in-depth bound on memory growth — Lambda

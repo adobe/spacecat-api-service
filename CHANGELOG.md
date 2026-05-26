@@ -1,3 +1,24 @@
+# [1.516.0](https://github.com/adobe/spacecat-api-service/compare/v1.515.0...v1.516.0) (2026-05-26)
+
+
+### Features
+
+* **serenity:** rename /semrush → /serenity + post-launch hardening ([#2467](https://github.com/adobe/spacecat-api-service/issues/2467)) ([c9cdb42](https://github.com/adobe/spacecat-api-service/commit/c9cdb42fe64a94a9c0db1c839fb3db8fa6ed5eb3)), closes [#2466](https://github.com/adobe/spacecat-api-service/issues/2466)
+
+# [1.515.0](https://github.com/adobe/spacecat-api-service/compare/v1.514.1...v1.515.0) (2026-05-26)
+
+
+### Features
+
+* auto-create Atomic strategy on async edge-deploy | LLMO-4695 ([#2324](https://github.com/adobe/spacecat-api-service/issues/2324)) ([e2879a0](https://github.com/adobe/spacecat-api-service/commit/e2879a0365a2cf509af70ef26f2c05f6a660be59))
+
+## [1.514.1](https://github.com/adobe/spacecat-api-service/compare/v1.514.0...v1.514.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **auth:** use context.log in auth handler subclasses for per-request logging ([#2485](https://github.com/adobe/spacecat-api-service/issues/2485)) ([a115abb](https://github.com/adobe/spacecat-api-service/commit/a115abb795914688e197431c50deb5fed6e43e04))
+
 # [1.514.0](https://github.com/adobe/spacecat-api-service/compare/v1.513.0...v1.514.0) (2026-05-25)
 
 

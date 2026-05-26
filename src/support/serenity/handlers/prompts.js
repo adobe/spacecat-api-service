@@ -127,7 +127,7 @@ function filterProjects(projects, query) {
 }
 
 /**
- * GET /semrush/prompts — fan out across every BrandSemrushProject mapped to
+ * GET /serenity/prompts — fan out across every BrandSemrushProject mapped to
  * the brand, merge results, paginate.
  *
  * Per-project upstream failures are reported via `errors[]` rather than
@@ -236,7 +236,7 @@ async function mapLimit(items, limit, mapper) {
 }
 
 /**
- * POST /semrush/prompts — bulk create.
+ * POST /serenity/prompts — bulk create.
  * Each input is grouped by (semrushLocationId, language); the matching
  * BrandSemrushProject row resolves the upstream project; publish runs once
  * per affected project at the end.
@@ -365,7 +365,7 @@ async function findSemrushPromptByText(transport, workspaceId, semrushProjectId,
 }
 
 /**
- * PATCH /semrush/prompts/:promptId — partial update. Decodes the logical id
+ * PATCH /serenity/prompts/:promptId — partial update. Decodes the logical id
  * to find the owning slice, looks up the current Semrush prompt by text,
  * then DELETE-old + POST-new + publish.
  *
@@ -473,7 +473,7 @@ export async function handleUpdatePrompt(
 }
 
 /**
- * POST /semrush/prompts/bulk-delete — body is
+ * POST /serenity/prompts/bulk-delete — body is
  * `{ semrushIds: [{semrushProjectId, semrushPromptId}] }`.
  * Validates each projectId is in the brand's mapped projects, deletes per
  * project in one upstream call each, publishes affected projects.
