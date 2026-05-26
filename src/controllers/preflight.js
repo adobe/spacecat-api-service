@@ -19,7 +19,8 @@ import {
 import { AsyncJob, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
 import { TierClient } from '@adobe/spacecat-shared-tier-client';
-import { getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import { ErrorWithStatusCode } from '../support/utils.js';
+import { STATUS_BAD_REQUEST } from '../utils/constants.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
@@ -27,6 +28,9 @@ export const AUDIT_STEP_SUGGEST = 'suggest';
 const PROMISE_BASED_TYPES = [
   SiteModel.AUTHORING_TYPES.CS, SiteModel.AUTHORING_TYPES.CS_CW, SiteModel.AUTHORING_TYPES.AMS,
 ];
+
+/** Thrown when job is created on authenticated CMS pages without `x-promise-token` header. */
+const MISSING_X_PROMISE_TOKEN_MESSAGE = 'Invalid request: missing x-promise-token header.';
 
 /**
  * Creates a preflight controller instance
@@ -150,26 +154,21 @@ function PreflightController(ctx, log, env) {
    */
   function getPromiseTokenHeader(context) {
     const headers = context.pathInfo?.headers;
-    log.info(`getPromiseTokenHeader headers: ${JSON.stringify(headers)}`);
     if (!isNonEmptyObject(headers)) {
       return null;
     }
     const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === 'x-promise-token');
-    log.info(`getPromiseTokenHeader entry: ${JSON.stringify(entry)}`);
     if (!entry) {
       return null;
     }
     const raw = entry[1];
-    log.info(`getPromiseTokenHeader raw: ${JSON.stringify(raw)}`);
     if (!hasText(raw)) {
       return null;
     }
     const trimmed = String(raw).trim();
-    log.info(`getPromiseTokenHeader trimmed: ${JSON.stringify(trimmed)}`);
     try {
       return decodeURIComponent(trimmed);
     } catch {
-      log.info(`getPromiseTokenHeader failed to decode: ${JSON.stringify(trimmed)}`);
       return trimmed;
     }
   }
@@ -179,17 +178,15 @@ function PreflightController(ctx, log, env) {
       return null;
     }
     const promiseTokenHeader = getPromiseTokenHeader(context);
-    log.info(`resolvePromiseToken promiseTokenHeader: ${JSON.stringify(promiseTokenHeader)}`);
     if (hasText(promiseTokenHeader)) {
       return { promise_token: promiseTokenHeader };
     }
-    return getIMSPromiseToken(context);
+    throw new ErrorWithStatusCode(MISSING_X_PROMISE_TOKEN_MESSAGE, STATUS_BAD_REQUEST);
   }
 
   /**
    * Creates a new preflight job. For promise-based authoring types (CS, CS_CW, AMS),
-   * the promise token is resolved from the `x-promise-token` header,
-   * else created from the Authorization header via IMS.
+   * the promise token must be sent on the `x-promise-token` header (from POST /auth/v2/promise).
    * @param {Object} context - The request context
    * @param {Object} context.data - The request data
    * @param {string[]} context.data.urls - Array of URLs to process
@@ -388,8 +385,8 @@ function PreflightController(ctx, log, env) {
 
   /**
    * Creates a new beta preflight job by proxying to Mysticat's analyze endpoint.
-   * For promise-based authoring types (CS, CS_CW, AMS), the promise token is resolved
-   * from the `x-promise-token` header if present, else falls back to IMS.
+   * For promise-based authoring types (CS, CS_CW, AMS), the promise token must be sent
+   * on the `x-promise-token` header (from POST /auth/v2/promise).
    * The promise token is then exchanged for a full IMS access token via the promise_exchange grant.
    * For non-promise-based sites that require authentication, a static PAGE_AUTH_TOKEN
    * is retrieved from AWS Secrets Manager. The resolved token is forwarded to Mysticat

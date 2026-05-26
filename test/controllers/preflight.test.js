@@ -532,11 +532,9 @@ describe('Preflight Controller', () => {
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
-      const getIMSPromiseTokenStub = sandbox.stub();
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getIMSPromiseToken: getIMSPromiseTokenStub,
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -564,7 +562,6 @@ describe('Preflight Controller', () => {
 
       const response = await preflightControllerWithMock.createPreflightJob(context);
       expect(response.status).to.equal(202);
-      expect(getIMSPromiseTokenStub).to.not.have.been.called;
       expect(mockSqs.sendMessage).to.have.been.calledWith(
         'https://sqs.test.amazonaws.com/audit-queue',
         {
@@ -576,7 +573,7 @@ describe('Preflight Controller', () => {
       );
     });
 
-    it('handles promise token error for AEM_CS site', async () => {
+    it('returns 400 when x-promise-token header is absent for AEM_CS site', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
@@ -586,9 +583,6 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getIMSPromiseToken: async () => {
-            throw new utils.ErrorWithStatusCode('Missing Authorization header', 400);
-          },
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -613,11 +607,11 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(400);
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Missing Authorization header',
+        message: 'Invalid request: missing x-promise-token header.',
       });
     });
 
-    it('handles promise token error for AEM_CS site with generic error', async () => {
+    it('returns 400 when x-promise-token header is empty or whitespace for AEM_CS site', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
@@ -627,7 +621,6 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getIMSPromiseToken: async () => { throw new Error('Generic error'); },
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -646,13 +639,18 @@ describe('Preflight Controller', () => {
           urls: ['https://example.com/test.html'],
           step: 'identify',
         },
+        pathInfo: {
+          headers: {
+            'x-promise-token': '   ',
+          },
+        },
       };
 
       const response = await preflightControllerWithMock.createPreflightJob(context);
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(400);
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Error getting promise token',
+        message: 'Invalid request: missing x-promise-token header.',
       });
     });
 
@@ -664,11 +662,9 @@ describe('Preflight Controller', () => {
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
       const base64Token = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dGVzdHNpZw==';
-      const getIMSPromiseTokenStub = sandbox.stub();
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getIMSPromiseToken: getIMSPromiseTokenStub,
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -696,7 +692,6 @@ describe('Preflight Controller', () => {
 
       const response = await preflightControllerWithMock.createPreflightJob(context);
       expect(response.status).to.equal(202);
-      expect(getIMSPromiseTokenStub).to.not.have.been.called;
       expect(mockSqs.sendMessage).to.have.been.calledWith(
         'https://sqs.test.amazonaws.com/audit-queue',
         {
@@ -708,18 +703,16 @@ describe('Preflight Controller', () => {
       );
     });
 
-    it('falls back to IMS when x-promise-token header is absent', async () => {
+    it('returns 400 when x-promise-token header is absent for CS_CW site', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
-      const mockPromiseToken = { promise_token: 'ims-token', expires_in: 3600, token_type: 'Bearer' };
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getIMSPromiseToken: async () => mockPromiseToken,
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -741,16 +734,11 @@ describe('Preflight Controller', () => {
       };
 
       const response = await preflightControllerWithMock.createPreflightJob(context);
-      expect(response.status).to.equal(202);
-      expect(mockSqs.sendMessage).to.have.been.calledWith(
-        'https://sqs.test.amazonaws.com/audit-queue',
-        {
-          jobId,
-          siteId: aemCsSite.getId(),
-          type: 'preflight',
-          promiseToken: mockPromiseToken,
-        },
-      );
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: missing x-promise-token header.',
+      });
     });
   });
 
@@ -1131,11 +1119,9 @@ describe('Preflight Controller', () => {
       };
       mockDataAccess.Site.findByPreviewURL.resolves(amsSite);
 
-      const mockPromiseToken = { promise_token: 'ams-promise-token' };
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getIMSPromiseToken: async () => mockPromiseToken,
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
         '@adobe/spacecat-shared-ims-client': { retrievePageAuthentication: async () => 'exchanged-access-token' },
@@ -1154,6 +1140,7 @@ describe('Preflight Controller', () => {
 
       const response = await ctrl.createBetaPreflightJob({
         data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+        pathInfo: { headers: { 'x-promise-token': 'ams-promise-token' } },
       });
       expect(response.status).to.equal(202);
 
@@ -1161,7 +1148,7 @@ describe('Preflight Controller', () => {
       expect(calledOptions.headers.Authorization).to.equal('token exchanged-access-token');
     });
 
-    it('falls back to IMS when x-promise-token header is absent for CS_CW site, then exchanges for access token', async () => {
+    it('exchanges x-promise-token for CS_CW site (AEM_CS delivery) and sends Bearer Authorization', async () => {
       fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
       fetchStub.onSecondCall().resolves({ ok: true });
 
@@ -1172,11 +1159,9 @@ describe('Preflight Controller', () => {
       };
       mockDataAccess.Site.findByPreviewURL.resolves(cwSite);
 
-      const mockPromiseToken = { promise_token: 'ims-promise-token-456' };
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getIMSPromiseToken: async () => mockPromiseToken,
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
         '@adobe/spacecat-shared-ims-client': { retrievePageAuthentication: async () => 'exchanged-access-token' },
@@ -1195,6 +1180,7 @@ describe('Preflight Controller', () => {
 
       const response = await ctrl.createBetaPreflightJob({
         data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+        pathInfo: { headers: { 'x-promise-token': 'ims-promise-token-456' } },
       });
       expect(response.status).to.equal(202);
 
@@ -1240,7 +1226,7 @@ describe('Preflight Controller', () => {
     });
 
     it(
-      'returns 400 when IMS promise token fetch fails with ErrorWithStatusCode for AMS site',
+      'returns 400 when x-promise-token header is absent for AMS site',
       async () => {
         fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
 
@@ -1253,9 +1239,6 @@ describe('Preflight Controller', () => {
         const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
           '../../src/support/utils.js': {
             ...utils,
-            getIMSPromiseToken: async () => {
-              throw new utils.ErrorWithStatusCode('Missing Authorization header', 400);
-            },
             ErrorWithStatusCode: utils.ErrorWithStatusCode,
           },
           '@adobe/spacecat-shared-ims-client': { retrievePageAuthentication: async () => 'exchanged-access-token' },
@@ -1277,11 +1260,13 @@ describe('Preflight Controller', () => {
         });
         expect(response.status).to.equal(400);
         const result = await response.json();
-        expect(result).to.deep.equal({ message: 'Missing Authorization header' });
+        expect(result).to.deep.equal({
+          message: 'Invalid request: missing x-promise-token header.',
+        });
       },
     );
 
-    it('returns 500 when IMS promise token fetch fails with generic error', async () => {
+    it('returns 500 when retrievePageAuthentication fails after valid x-promise-token for AMS site', async () => {
       fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
 
       const amsSite = {
@@ -1293,10 +1278,11 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getIMSPromiseToken: async () => { throw new Error('IMS unavailable'); },
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
-        '@adobe/spacecat-shared-ims-client': { retrievePageAuthentication: async () => 'exchanged-access-token' },
+        '@adobe/spacecat-shared-ims-client': {
+          retrievePageAuthentication: async () => { throw new Error('IMS unavailable'); },
+        },
         '@adobe/spacecat-shared-tier-client': { TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) } },
       });
 
@@ -1312,10 +1298,11 @@ describe('Preflight Controller', () => {
 
       const response = await ctrl.createBetaPreflightJob({
         data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+        pathInfo: { headers: { 'x-promise-token': 'ams-promise-token' } },
       });
       expect(response.status).to.equal(500);
       const result = await response.json();
-      expect(result).to.deep.equal({ message: 'Error getting promise token' });
+      expect(result).to.deep.equal({ message: 'Error retrieving page authentication' });
     });
 
     it('returns 500 when retrievePageAuthentication fails', async () => {
