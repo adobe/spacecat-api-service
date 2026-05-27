@@ -18,7 +18,7 @@ import {
 
 describe('observability-messages', () => {
   describe('enqueuedParentText', () => {
-    it('formats the enqueued parent message', () => {
+    it('formats the enqueued parent message with a linked PR ref', () => {
       const text = enqueuedParentText({
         owner: 'adobe',
         repo: 'spacecat-api-service',
@@ -27,8 +27,53 @@ describe('observability-messages', () => {
         jobType: 'pr-review',
       });
       expect(text).to.equal(
-        ':inbox_tray: *Review enqueued* `adobe/spacecat-api-service` #456\nreview_requested → pr-review',
+        ':inbox_tray: *Review enqueued* '
+        + '<https://github.com/adobe/spacecat-api-service/pull/456|adobe/spacecat-api-service #456>'
+        + '\nreview_requested → pr-review',
       );
+    });
+
+    it('adds a requester/author line when both are known', () => {
+      const text = enqueuedParentText({
+        owner: 'adobe',
+        repo: 'spacecat-api-service',
+        prNumber: 456,
+        action: 'review_requested',
+        jobType: 'pr-review',
+        requestedBy: 'alice',
+        author: 'bob',
+      });
+      expect(text).to.include(
+        '<https://github.com/adobe/spacecat-api-service/pull/456|adobe/spacecat-api-service #456>',
+      );
+      expect(text).to.include('requested by <https://github.com/alice|alice>');
+      expect(text).to.include('author <https://github.com/bob|bob>');
+    });
+
+    it('omits the people line when neither requester nor author is known', () => {
+      const text = enqueuedParentText({
+        owner: 'adobe',
+        repo: 'foo',
+        prNumber: 1,
+        action: 'review_requested',
+        jobType: 'pr-review',
+      });
+      expect(text).to.not.include('requested by');
+      expect(text).to.not.include('author');
+    });
+
+    it('escapes Slack-special characters in a login', () => {
+      const text = enqueuedParentText({
+        owner: 'adobe',
+        repo: 'foo',
+        prNumber: 1,
+        action: 'review_requested',
+        jobType: 'pr-review',
+        requestedBy: 'a<b>c',
+        author: 'bob',
+      });
+      expect(text).to.include('a&lt;b&gt;c'); // label escaped
+      expect(text).to.not.include('|a<b>c>');
     });
   });
 
