@@ -1,3 +1,10 @@
+## [1.520.1](https://github.com/adobe/spacecat-api-service/compare/v1.520.0...v1.520.1) (2026-05-27)
+
+
+### Bug Fixes
+
+* bump spacecat shared data access ([#2492](https://github.com/adobe/spacecat-api-service/issues/2492)) ([ac02ea2](https://github.com/adobe/spacecat-api-service/commit/ac02ea2f2be5cf1be40740d6e8d11e67c24cab88)), closes [#FixEntity](https://github.com/adobe/spacecat-api-service/issues/FixEntity) [#1619](https://github.com/adobe/spacecat-api-service/issues/1619)
+
 # [1.520.0](https://github.com/adobe/spacecat-api-service/compare/v1.519.0...v1.520.0) (2026-05-26)
 
 
