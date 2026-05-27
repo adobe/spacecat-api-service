@@ -1,3 +1,10 @@
+## [1.522.1](https://github.com/adobe/spacecat-api-service/compare/v1.522.0...v1.522.1) (2026-05-27)
+
+
+### Bug Fixes
+
+* **fixes:** filter by executedAt date instead of junction table in date query ([#2501](https://github.com/adobe/spacecat-api-service/issues/2501)) ([45809e0](https://github.com/adobe/spacecat-api-service/commit/45809e0cc56db979fa079dd41a16ddd3cf3eab53))
+
 # [1.522.0](https://github.com/adobe/spacecat-api-service/compare/v1.521.0...v1.522.0) (2026-05-27)
 
 
