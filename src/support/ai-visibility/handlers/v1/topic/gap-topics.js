@@ -71,6 +71,15 @@ function buildGapTopicsMetricFilterQl(sp) {
 
 export async function handleGapTopics(sp, clients) {
   const domain = sp.get('domain');
+  if (!domain) {
+    return {
+      status: 400,
+      body: {
+        error: 'invalid_request',
+        message: 'domain is required',
+      },
+    };
+  }
   const competitorDomains = parseCompetitorDomainsList(sp);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
