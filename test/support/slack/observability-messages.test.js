@@ -50,6 +50,19 @@ describe('observability-messages', () => {
       expect(text).to.include('author <https://github.com/bob|bob>');
     });
 
+    it('adds only the requester when the author is absent', () => {
+      const text = enqueuedParentText({
+        owner: 'adobe',
+        repo: 'foo',
+        prNumber: 1,
+        action: 'review_requested',
+        jobType: 'pr-review',
+        requestedBy: 'alice',
+      });
+      expect(text).to.include('requested by <https://github.com/alice|alice>');
+      expect(text).to.not.include('author <');
+    });
+
     it('omits the people line when neither requester nor author is known', () => {
       const text = enqueuedParentText({
         owner: 'adobe',

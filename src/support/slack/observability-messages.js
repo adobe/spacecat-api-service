@@ -44,7 +44,7 @@ function escapeSlack(text) {
 export function enqueuedParentText({
   owner, repo, prNumber, action, jobType, requestedBy, author,
 }) {
-  const prUrl = `https://github.com/${owner}/${repo}/pull/${prNumber}`;
+  const prUrl = `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull/${prNumber}`;
   const lines = [
     `:inbox_tray: *Review enqueued* <${prUrl}|${escapeSlack(owner)}/${escapeSlack(repo)} #${prNumber}>`,
     `${escapeSlack(action)} → ${escapeSlack(jobType)}`,
