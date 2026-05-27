@@ -1108,6 +1108,17 @@ describe('Preflight Controller', () => {
       expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
     });
 
+    it('returns 500 when Site.findByPreviewURL throws', async () => {
+      mockDataAccess.Site.findByPreviewURL.rejects(new Error('DB error'));
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+    });
+
     it('returns 500 when Configuration.findLatest throws', async () => {
       mockDataAccess.Configuration.findLatest = sandbox.stub().rejects(new Error('DB error'));
       const response = await preflightController.createPreflight({
@@ -1274,6 +1285,78 @@ describe('Preflight Controller', () => {
         url: 'https://main--example-site.aem.page/test.html',
         status: 'IN_PROGRESS',
       });
+    });
+
+    it('returns 400 for CS site when x-promise-token header is missing and authentication is required', async () => {
+      const csSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+      };
+      mockDataAccess.Site.findById.resolves(csSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        pathInfo: { headers: {} },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.include('x-promise-token');
+    });
+
+    it('passes x-promise-token header to retrievePageAuthentication for CS site', async () => {
+      const csSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+        getDeliveryType: () => 'aem_cs',
+      };
+      mockDataAccess.Site.findById.resolves(csSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+      fetchStub.onSecondCall().resolves({ ok: true });
+
+      const mockRetrievePageAuth = sandbox.stub().resolves('page-access-token');
+      const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          retrievePageAuthentication: mockRetrievePageAuth,
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
+        },
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
+        },
+      });
+
+      const controllerWithIms = ControllerWithIms(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await controllerWithIms.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        pathInfo: { headers: { 'x-promise-token': 'my-promise-token' } },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      expect(mockRetrievePageAuth).to.have.been.calledWithMatch(
+        csSite,
+        sinon.match.any,
+        { promiseToken: { promise_token: 'my-promise-token' } },
+      );
     });
   });
 
@@ -1531,6 +1614,8 @@ describe('Preflight Controller', () => {
         params: { siteId: 'test-site-123', preflightId },
       });
       expect(response.status).to.equal(404);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_NOT_FOUND');
     });
 
     it('returns 404 when preflight belongs to a different site', async () => {
@@ -1540,6 +1625,8 @@ describe('Preflight Controller', () => {
         params: { siteId: 'test-site-123', preflightId },
       });
       expect(response.status).to.equal(404);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_NOT_FOUND');
     });
 
     it('returns 200 with preflight detail for valid request', async () => {

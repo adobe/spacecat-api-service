@@ -50,7 +50,7 @@ is never exposed to API consumers.
 | `createdBy` | object | `{ email, displayName }` from IMS profile at creation time |
 | `createdAt` | ISO 8601 | Creation timestamp |
 | `updatedAt` | ISO 8601 | Last update timestamp |
-| `startedAt` | ISO 8601 | When processing began |
+| `startedAt` | ISO 8601 | When the request was dispatched to the analyze service (set at record creation, before the upstream call completes) |
 | `endedAt` | ISO 8601 | When processing completed |
 | `result` | object \| null | Audit result payload; `null` until completed. Exact shape to be strongly typed during implementation. |
 | `error` | object \| null | `{ code, message }` on failure |

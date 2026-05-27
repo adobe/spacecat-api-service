@@ -391,7 +391,8 @@ function PreflightController(ctx, log, env) {
     }
 
     const { url } = data;
-    const previewBaseURL = `${new URL(url).protocol}//${new URL(url).hostname}`;
+    const { protocol, hostname } = new URL(url);
+    const previewBaseURL = `${protocol}//${hostname}`;
 
     let site;
     try {
@@ -414,7 +415,8 @@ function PreflightController(ctx, log, env) {
     try {
       siteByUrl = await dataAccess.Site.findByPreviewURL(previewBaseURL);
     } catch (e) {
-      log.debug(`findByPreviewURL failed for ${previewBaseURL}: ${e.message}`);
+      log.error(`findByPreviewURL failed for ${previewBaseURL}: ${e.message}`);
+      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Internal error', 500);
     }
     if (!siteByUrl || siteByUrl.getId() !== siteId) {
       return preflightError('PREFLIGHT_INVALID_REQUEST', 'URL does not belong to this site', 400);
@@ -542,14 +544,7 @@ function PreflightController(ctx, log, env) {
   const getAllPreflights = async (context) => {
     const siteId = context.params?.siteId;
     const rawQueryString = context.invocation?.event?.rawQueryString;
-    const urlFilter = rawQueryString
-      ? Object.fromEntries(
-        rawQueryString.split('&').filter(Boolean).map((p) => {
-          const [k, v] = p.split('=');
-          return [decodeURIComponent(k), v !== undefined ? decodeURIComponent(v) : ''];
-        }),
-      ).url
-      : undefined;
+    const urlFilter = new URLSearchParams(rawQueryString ?? '').get('url') ?? undefined;
 
     let site;
     try {
@@ -606,7 +601,7 @@ function PreflightController(ctx, log, env) {
 
       // Treat a siteId mismatch identically to not found — no cross-site probing
       if (!preflight || preflight.getSiteId() !== siteId) {
-        return notFound(`Preflight with ID ${preflightId} not found`);
+        return preflightError('PREFLIGHT_NOT_FOUND', `Preflight with ID ${preflightId} not found`, 404);
       }
 
       return ok(PreflightDto.toDetailJSON(preflight));
