@@ -56,6 +56,6 @@ export const fixEntitySuggestions = [
     fix_entity_id: 'cc222222-2222-4222-a222-222222222222',
     suggestion_id: 'bb222222-2222-4222-a222-222222222222',
     opportunity_id: 'aa111111-1111-4111-b111-111111111111',
-    fix_entity_created_at: '2025-01-20T12:00:00.000Z',
+    fix_entity_created_at: '2025-02-15T10:00:00.000Z',
   },
 ];
