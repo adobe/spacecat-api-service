@@ -251,8 +251,9 @@ describe('Index Tests', () => {
     // Mystique-side site / opportunity / suggestion IDs are progressively
     // moving to UUID v7 (sortable). The route gate used to v4-restrict the
     // siteId, returning 400 "Site Id is invalid" on a syntactically valid v7
-    // UUID. The gateway must accept any UUID variant and let the controller
-    // decide whether the row exists.
+    // UUID. The gateway must accept any UUID version and let the controller
+    // decide whether the row exists. (Variant nibble is independently clamped
+    // to `[89ab]` in the gate regex; that's still enforced.)
     const v7SiteId = '019cde0c-fe79-76b2-bc50-a40e1b1b1c36';
     context.pathInfo.suffix = `/sites/${v7SiteId}`;
 
