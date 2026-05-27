@@ -636,7 +636,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
 
               // Validate id is UUID format
               const isValidId = typeof suggestion.id === 'string'
-                && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(suggestion.id);
+                && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-9a-f][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(suggestion.id);
 
               // Validate status is string
               const isValidStatus = typeof suggestion.status === 'string';

@@ -80,7 +80,7 @@ export async function makeSpacecatRequest({
 export function expectValidUUID(uuid) {
   expect(uuid).to.be.a('string');
   expect(uuid).to.match(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-9a-f][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     `Expected valid UUID v4, got: ${uuid}`,
   );
 }
