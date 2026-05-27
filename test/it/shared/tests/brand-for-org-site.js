@@ -191,7 +191,7 @@ export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgr
         await bindBrandToSite(BRAND_1_ID, SITE_1_ID);
       });
 
-      it('returns 403 when site does not belong to the organization (matches triggerConfigSync)', async () => {
+      it('returns 403 when site does not belong to the organization', async () => {
         const http = getHttpClient();
         // SITE_3 belongs to ORG_2, not ORG_1
         const res = await http.admin.get(

@@ -168,7 +168,6 @@ describe('getRouteHandlers', () => {
     deletePromptByBrandAndId: sinon.stub(),
     bulkDeletePromptsByBrand: sinon.stub(),
     checkPromptsByBrand: sinon.stub(),
-    triggerConfigSync: sinon.stub(),
   };
 
   const mockPreflightController = {
@@ -750,7 +749,6 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/tags',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/models',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/workspaces/:workspaceId/projects',
-      'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
