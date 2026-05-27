@@ -623,6 +623,122 @@ describe('Sites Controller', () => {
     expect(body).to.be.an('array').with.lengthOf(2);
   });
 
+  describe('GET /sites - cursor-based pagination', () => {
+    it('returns paginated envelope when limit is provided', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '100' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.have.all.keys('sites', 'pagination');
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(body.pagination).to.deep.equal({
+        limit: 100,
+        cursor: null,
+        hasMore: false,
+      });
+    });
+
+    it('returns paginated envelope when only cursor is provided', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: 'some-cursor' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.have.all.keys('sites', 'pagination');
+      expect(body.pagination.limit).to.equal(100); // DEFAULT_LIMIT
+    });
+
+    it('returns flat array when no limit or cursor is provided (legacy)', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll(context);
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('uses provided limit and returns cursor when more pages exist', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: 'next-page-cursor' });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '1' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.deep.equal({
+        limit: 1,
+        cursor: 'next-page-cursor',
+        hasMore: true,
+      });
+    });
+
+    it('clamps limit to MAX_LIMIT (1000)', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '9999' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination.limit).to.equal(1000);
+    });
+
+    it('falls back to DEFAULT_LIMIT when limit is invalid (non-numeric)', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: 'abc' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination.limit).to.equal(100);
+    });
+
+    it('falls back to DEFAULT_LIMIT when limit is zero or negative', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '0' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination.limit).to.equal(100);
+    });
+
+    it('passes limit, cursor, and returnCursor to data access', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      await sitesController.getAll({ ...context, data: { limit: '10', cursor: 'some-cursor' } });
+
+      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+        {},
+        sinon.match({ limit: 10, cursor: 'some-cursor', returnCursor: true }),
+      );
+    });
+
+    it('returns sites with slim DTO shape in paginated response', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '100' } });
+      const body = await result.json();
+
+      expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
+      expect(body.sites[0]).to.have.property('baseURL', 'https://site1.com');
+      expect(body.sites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
+    });
+
+    it('denies non-admin caller in paginated path', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '10' } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+  });
+
   describe('GET /sites - S2S readAll capability', () => {
     function makeS2SConsumer({ clientId = 'svc-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
       return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
