@@ -189,6 +189,8 @@ function WebhooksController(context) {
           prNumber: pr.number,
           action,
           jobType,
+          requestedBy: data.sender?.login,
+          author: pr.user?.login,
         }),
       });
       observability = threadTs
