@@ -638,10 +638,13 @@ export function classifyGapKind(entry, targetDomain) {
   }
 
   const allCompetitorsZero = competitorMentions.every((m) => m === 0);
-  const everyCompetitorPositive = competitorMentions.every((m) => m > 0);
+  const anyCompetitorPositive = competitorMentions.some((m) => m > 0);
 
   if (targetMentions === 0) {
-    return everyCompetitorPositive ? 'MISSING' : 'SHARED';
+    // Empirically the upstream gRPC service treats MISSING as "target = 0 AND at
+    // least one competitor > 0" — the strict reading ("every competitor > 0")
+    // would produce a far smaller bucket than the totals returned by the service.
+    return anyCompetitorPositive ? 'MISSING' : 'SHARED';
   }
 
   if (allCompetitorsZero) {
