@@ -55,6 +55,7 @@ import {
   voTotalCountForSourceCategory,
   parseCompetitorDomainsList,
   parseGapKindEnumList,
+  classifyGapKind,
   coerceProtoCommonGapKind,
   aggregateGapPromptsTotalFromTotals,
   resolveTopicIdsDimensionFilter,
@@ -1192,6 +1193,147 @@ describe('grpc-utils', () => {
       ]);
       expect(result.brands[0].brandName).to.equal('a b');
       expect(result.brands[0].count).to.equal(10);
+    });
+  });
+
+  describe('classifyGapKind', () => {
+    const target = 'example.com';
+
+    function entry(targetMentions, competitorMentionsList) {
+      return {
+        mentions: targetMentions,
+        gapMentions: competitorMentionsList.map((m) => ({
+          brand: { domain: m.domain },
+          mentions: m.mentions,
+        })),
+      };
+    }
+
+    it('returns SHARED when no competitor entries', () => {
+      expect(classifyGapKind({ mentions: 5, gapMentions: [] }, target)).to.equal('SHARED');
+    });
+
+    it('returns SHARED when gapMentions is absent', () => {
+      expect(classifyGapKind({ mentions: 5 }, target)).to.equal('SHARED');
+    });
+
+    it('returns SHARED when entry is nullish', () => {
+      expect(classifyGapKind(null, target)).to.equal('SHARED');
+    });
+
+    it('returns MISSING when target=0 and at least one competitor>0', () => {
+      const e = entry(0, [
+        { domain: 'comp1.com', mentions: 10 },
+        { domain: 'comp2.com', mentions: 0 },
+      ]);
+      expect(classifyGapKind(e, target)).to.equal('MISSING');
+    });
+
+    it('returns SHARED when target=0 and all competitors=0', () => {
+      const e = entry(0, [
+        { domain: 'comp1.com', mentions: 0 },
+        { domain: 'comp2.com', mentions: 0 },
+      ]);
+      expect(classifyGapKind(e, target)).to.equal('SHARED');
+    });
+
+    it('returns UNIQUE when target>0 and all competitors=0', () => {
+      const e = entry(5, [
+        { domain: 'comp1.com', mentions: 0 },
+        { domain: 'comp2.com', mentions: 0 },
+      ]);
+      expect(classifyGapKind(e, target)).to.equal('UNIQUE');
+    });
+
+    it('returns WEAK when target < min(competitor mentions)', () => {
+      const e = entry(2, [
+        { domain: 'comp1.com', mentions: 5 },
+        { domain: 'comp2.com', mentions: 8 },
+      ]);
+      expect(classifyGapKind(e, target)).to.equal('WEAK');
+    });
+
+    it('returns STRONG when target > max(competitor mentions)', () => {
+      const e = entry(20, [
+        { domain: 'comp1.com', mentions: 5 },
+        { domain: 'comp2.com', mentions: 8 },
+      ]);
+      expect(classifyGapKind(e, target)).to.equal('STRONG');
+    });
+
+    it('returns SHARED when target is between min and max competitor mentions', () => {
+      const e = entry(6, [
+        { domain: 'comp1.com', mentions: 5 },
+        { domain: 'comp2.com', mentions: 8 },
+      ]);
+      expect(classifyGapKind(e, target)).to.equal('SHARED');
+    });
+
+    it('returns SHARED when target equals min competitor mentions', () => {
+      const e = entry(5, [
+        { domain: 'comp1.com', mentions: 5 },
+        { domain: 'comp2.com', mentions: 8 },
+      ]);
+      expect(classifyGapKind(e, target)).to.equal('SHARED');
+    });
+
+    it('returns SHARED when target equals max competitor mentions', () => {
+      const e = entry(8, [
+        { domain: 'comp1.com', mentions: 5 },
+        { domain: 'comp2.com', mentions: 8 },
+      ]);
+      expect(classifyGapKind(e, target)).to.equal('SHARED');
+    });
+
+    it('excludes the target brand domain from competitor list', () => {
+      // target is in gapMentions but should be excluded from competitor calc
+      const e = {
+        mentions: 3,
+        gapMentions: [
+          { brand: { domain: 'example.com' }, mentions: 3 },
+          { brand: { domain: 'comp.com' }, mentions: 10 },
+        ],
+      };
+      // target(3) < min(comp)(10) → WEAK
+      expect(classifyGapKind(e, target)).to.equal('WEAK');
+    });
+
+    it('is case-insensitive for domain matching', () => {
+      const e = {
+        mentions: 3,
+        gapMentions: [
+          { brand: { domain: 'EXAMPLE.COM' }, mentions: 3 },
+          { brand: { domain: 'comp.com' }, mentions: 10 },
+        ],
+      };
+      expect(classifyGapKind(e, 'example.com')).to.equal('WEAK');
+    });
+
+    it('falls back to gapMentions lookup when entry.mentions is absent', () => {
+      // No top-level mentions field; target domain is in gapMentions
+      const e = {
+        gapMentions: [
+          { brand: { domain: 'example.com' }, mentions: 3 },
+          { brand: { domain: 'comp.com' }, mentions: 10 },
+        ],
+      };
+      // target found in gapMentions with 3; comp has 10 → WEAK
+      expect(classifyGapKind(e, target)).to.equal('WEAK');
+    });
+
+    it('treats missing target in gapMentions as 0 mentions when no top-level field', () => {
+      const e = {
+        gapMentions: [
+          { brand: { domain: 'comp.com' }, mentions: 10 },
+        ],
+      };
+      // target not found → 0 mentions; comp > 0 → MISSING
+      expect(classifyGapKind(e, target)).to.equal('MISSING');
+    });
+
+    it('returns SHARED when only one competitor and target equals it', () => {
+      const e = entry(5, [{ domain: 'comp.com', mentions: 5 }]);
+      expect(classifyGapKind(e, target)).to.equal('SHARED');
     });
   });
 });
