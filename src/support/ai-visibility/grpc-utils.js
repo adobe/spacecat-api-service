@@ -603,7 +603,7 @@ export function parseGapKindEnumList(sp) {
  * its competitors. Returns one of GAP_KIND enum names (string): 'MISSING' | 'WEAK'
  * | 'SHARED' | 'STRONG' | 'UNIQUE'. Mirrors the proto enum semantics defined in
  * `semrush.services.ai_seo.common.v1.GAP_KIND.ENUM`:
- *   - MISSING : target has 0 mentions AND every competitor has > 0
+ *   - MISSING : target has 0 mentions AND at least one competitor has > 0
  *   - UNIQUE  : target has > 0 mentions AND every competitor has 0
  *   - WEAK    : target < min(competitor mentions)
  *   - STRONG  : target > max(competitor mentions)
@@ -637,17 +637,14 @@ export function classifyGapKind(entry, targetDomain) {
     return 'SHARED';
   }
 
-  const allCompetitorsZero = competitorMentions.every((m) => m === 0);
-  const anyCompetitorPositive = competitorMentions.some((m) => m > 0);
-
   if (targetMentions === 0) {
     // Empirically the upstream gRPC service treats MISSING as "target = 0 AND at
     // least one competitor > 0" — the strict reading ("every competitor > 0")
     // would produce a far smaller bucket than the totals returned by the service.
-    return anyCompetitorPositive ? 'MISSING' : 'SHARED';
+    return competitorMentions.some((m) => m > 0) ? 'MISSING' : 'SHARED';
   }
 
-  if (allCompetitorsZero) {
+  if (competitorMentions.every((m) => m === 0)) {
     return 'UNIQUE';
   }
 
