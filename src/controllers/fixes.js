@@ -120,7 +120,7 @@ export class FixesController {
         .getAllFixesWithSuggestionsByOpportunityId(opportunityId);
 
       const fixEntitiesWithSuggestions = allFixesWithSuggestions.filter(({ fixEntity }) => {
-        const ts = fixEntity.getExecutedAt() || fixEntity.getCreatedAt();
+        const ts = fixEntity.getExecutedAt() ?? fixEntity.getCreatedAt();
         return ts && new Date(ts).toISOString().split('T')[0] === fixCreatedDate;
       });
 

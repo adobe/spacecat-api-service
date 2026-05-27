@@ -93,7 +93,6 @@ describe('Fixes Controller', () => {
     sandbox.stub(fixEntityCollection, 'allByOpportunityIdAndStatus');
     sandbox.stub(fixEntityCollection, 'findById');
     sandbox.stub(fixEntityCollection, 'setSuggestionsForFixEntity');
-    sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionByCreatedAt');
     sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionsByOpportunityId');
     sandbox.stub(fixEntityCollection, 'updateByKeys');
     sandbox.stub(fixEntityCollection, 'getSuggestionsByFixEntityId');
@@ -408,6 +407,50 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
         });
         expect(result[0].suggestions).to.have.lengthOf(0);
+      });
+
+      // Regression guard: the original bug manifested when executedAt is null
+      // at fix-creation time. The junction table was populated with createdAt,
+      // but once executedAt was set the key no longer matched. The filter must
+      // use executedAt ?? createdAt so newly-created fixes (executedAt=null)
+      // still match on createdAt.
+      it('returns fix when executedAt is null but createdAt matches the requested date', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+        });
+        // Simulate executedAt=null (not yet deployed) with createdAt on target date
+        sandbox.stub(fixEntity, 'getExecutedAt').returns(null);
+        sandbox.stub(fixEntity, 'getCreatedAt').returns(executedAtOnDate);
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.have.lengthOf(1);
+        expect(result[0].id).to.equal(fixEntity.getId());
+      });
+
+      it('filters out fix when executedAt is null and createdAt does not match the requested date', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+        });
+        // Simulate executedAt=null with createdAt on a DIFFERENT date
+        sandbox.stub(fixEntity, 'getExecutedAt').returns(null);
+        sandbox.stub(fixEntity, 'getCreatedAt').returns(executedAtOtherDate);
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.deep.equal([]);
       });
     });
   });
