@@ -452,6 +452,25 @@ describe('Fixes Controller', () => {
         const result = await response.json();
         expect(result).to.deep.equal([]);
       });
+
+      it('skips fix with malformed timestamp instead of throwing', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+        });
+        sandbox.stub(fixEntity, 'getExecutedAt').returns('not-a-valid-date');
+        sandbox.stub(fixEntity, 'getCreatedAt').returns('also-garbage');
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        // Should return 200 and skip the malformed fix rather than 500
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.deep.equal([]);
+      });
     });
   });
 

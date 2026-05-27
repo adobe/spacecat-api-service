@@ -121,7 +121,8 @@ export class FixesController {
 
       const fixEntitiesWithSuggestions = allFixesWithSuggestions.filter(({ fixEntity }) => {
         const ts = fixEntity.getExecutedAt() ?? fixEntity.getCreatedAt();
-        return ts && new Date(ts).toISOString().split('T')[0] === fixCreatedDate;
+        const d = ts ? new Date(ts) : null;
+        return d && !Number.isNaN(d.getTime()) && d.toISOString().split('T')[0] === fixCreatedDate;
       });
 
       if (fixEntitiesWithSuggestions.length === 0) {
