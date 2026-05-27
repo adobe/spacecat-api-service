@@ -136,30 +136,26 @@ export class FixesController {
       return ok(fixes);
     }
 
-    const [allFixEntities, fixEntitiesWithSuggestions] = await Promise.all([
-      this.#FixEntity.allByOpportunityId(opportunityId),
-      this.#FixEntity.getAllFixesWithSuggestionsByOpportunityId(opportunityId),
-    ]);
+    const fixEntitiesWithSuggestions = await this.#FixEntity
+      .getAllFixesWithSuggestionsByOpportunityId(opportunityId);
 
-    if (allFixEntities.length === 0) {
+    if (fixEntitiesWithSuggestions.length === 0) {
       return ok([]);
     }
 
-    res = await checkOwnership(allFixEntities[0], opportunityId, siteId, this.#Opportunity);
+    fixEntities = fixEntitiesWithSuggestions.map((item) => {
+      const { fixEntity } = item;
+      // eslint-disable-next-line no-underscore-dangle
+      fixEntity._suggestions = item.suggestions;
+      return fixEntity;
+    });
+
+    res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
     if (res) {
       return res;
     }
 
-    const suggestionsMap = new Map(
-      fixEntitiesWithSuggestions.map((item) => [item.fixEntity.getId(), item.suggestions]),
-    );
-
-    for (const fixEntity of allFixEntities) {
-      // eslint-disable-next-line no-underscore-dangle
-      fixEntity._suggestions = suggestionsMap.get(fixEntity.getId()) || [];
-    }
-
-    fixes = allFixEntities.map((fix) => FixDto.toJSON(fix));
+    fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);
   }
 
