@@ -109,9 +109,20 @@ import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
 
-const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Accept any RFC 4122 / 9562-defined UUID version (v1..v8) instead of
+// v4-only. Version nibble `[1-8]` covers all allocated versions; v0/nil
+// (reserved) and v9..vF (unallocated) are still rejected. The clock-seq
+// variant nibble is independently clamped to `[89ab]` (the `10xx` RFC
+// variant) so genuinely malformed strings still fail. Version and variant
+// are distinct UUID concepts — keeping that separation explicit in the regex.
+//
+// Why widen: producer-side IDs are progressively migrating to UUID v7 for
+// sortable keys (Mystique-allocated site/opportunity IDs already use v7),
+// and rejecting them at the API gateway breaks otherwise-valid routes
+// (e.g. GET /sites/{siteId}/opportunities returns 400 "Site Id is invalid").
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
+const isValidUUIDAnyVersion = (uuid) => uuidRegex.test(uuid);
 
 /**
  * LOCAL DEVELOPMENT ONLY - CORS middleware wrapper
@@ -328,11 +339,11 @@ async function run(request, context) {
     if (routeMatch) {
       const { handler, params } = routeMatch;
 
-      if (params.siteId && !isValidUUIDV4(params.siteId)) {
+      if (params.siteId && !isValidUUIDAnyVersion(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
       if (params.organizationId
-        && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
+        && (!isValidUUIDAnyVersion(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
       if (params.spaceCatId && !isValidUUID(params.spaceCatId)) {
@@ -341,16 +352,16 @@ async function run(request, context) {
       if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
         return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
       }
-      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
+      if (params.plgOnboardingId && !isValidUUIDAnyVersion(params.plgOnboardingId)) {
         return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
-      if (params.onboardingId && !isValidUUIDV4(params.onboardingId)) {
+      if (params.onboardingId && !isValidUUIDAnyVersion(params.onboardingId)) {
         return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
       if (params.executionId && !isValidUUID(params.executionId)) {
         return badRequest('Execution Id is invalid. Please provide a valid UUID.');
       }
-      if (params.jobId && !isValidUUIDV4(params.jobId)) {
+      if (params.jobId && !isValidUUIDAnyVersion(params.jobId)) {
         return badRequest('Job Id is invalid. Please provide a valid UUID.');
       }
       if (params.preflightId && !isValidUUID(params.preflightId)) {
