@@ -1,3 +1,10 @@
+## [1.520.2](https://github.com/adobe/spacecat-api-service/compare/v1.520.1...v1.520.2) (2026-05-27)
+
+
+### Bug Fixes
+
+* **auth:** use method+suffix for route matching in RouteScopedLegacyApiKeyHandler ([#2493](https://github.com/adobe/spacecat-api-service/issues/2493)) ([ec71d24](https://github.com/adobe/spacecat-api-service/commit/ec71d245b245e33eb3cdcc5499dfd457fa3d9fd0))
+
 ## [1.520.1](https://github.com/adobe/spacecat-api-service/compare/v1.520.0...v1.520.1) (2026-05-27)
 
 
