@@ -109,17 +109,18 @@ import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
 
-// Accept any non-zero UUID version nibble (v1/v4/v6/v7/v8 etc.) instead of
-// v4-only. The clock-seq variant nibble is independently clamped to `[89ab]`
-// (the RFC 4122 / 9562 `10xx` variant) so genuinely malformed strings still
-// fail. Version and variant are distinct UUID concepts — keeping that
-// separation explicit in the regex.
+// Accept any RFC 4122 / 9562-defined UUID version (v1..v8) instead of
+// v4-only. Version nibble `[1-8]` covers all allocated versions; v0/nil
+// (reserved) and v9..vF (unallocated) are still rejected. The clock-seq
+// variant nibble is independently clamped to `[89ab]` (the `10xx` RFC
+// variant) so genuinely malformed strings still fail. Version and variant
+// are distinct UUID concepts — keeping that separation explicit in the regex.
 //
 // Why widen: producer-side IDs are progressively migrating to UUID v7 for
 // sortable keys (Mystique-allocated site/opportunity IDs already use v7),
 // and rejecting them at the API gateway breaks otherwise-valid routes
 // (e.g. GET /sites/{siteId}/opportunities returns 400 "Site Id is invalid").
-const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-9a-f][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isValidUUIDAnyVersion = (uuid) => uuidRegex.test(uuid);
 
