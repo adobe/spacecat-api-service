@@ -34,6 +34,7 @@ import {
   buildRangeExpr,
   escapeQlString,
   isValidVolume,
+  classifyGapKind,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
@@ -141,10 +142,18 @@ export async function handleGapTopics(sp, clients) {
       toJson(GapTopicsTotalsResponseSchema, totalsMessage, PROTO_TO_JSON)
     );
 
+    // The gRPC response shape does not surface per-topic gapKind, so classify
+    // each row here using the proto-defined GAP_KIND semantics. This keeps the
+    // server-side filter and the UI badges in sync.
+    const enrichedTopics = (topicsJson.topics ?? []).map((topic) => ({
+      ...topic,
+      gapKind: classifyGapKind(topic, domain),
+    }));
+
     return {
       status: 200,
       body: {
-        data: topicsJson.topics ?? [],
+        data: enrichedTopics,
         totals: totalsJson.totals ?? [],
       },
     };

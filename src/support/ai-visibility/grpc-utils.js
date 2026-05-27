@@ -598,6 +598,69 @@ export function parseGapKindEnumList(sp) {
   return result.length ? result : [1];
 }
 
+/**
+ * Classify a topic or prompt entry by its mention gap between the target brand and
+ * its competitors. Returns one of GAP_KIND enum names (string): 'MISSING' | 'WEAK'
+ * | 'SHARED' | 'STRONG' | 'UNIQUE'. Mirrors the proto enum semantics defined in
+ * `semrush.services.ai_seo.common.v1.GAP_KIND.ENUM`:
+ *   - MISSING : target has 0 mentions AND every competitor has > 0
+ *   - UNIQUE  : target has > 0 mentions AND every competitor has 0
+ *   - WEAK    : target < min(competitor mentions)
+ *   - STRONG  : target > max(competitor mentions)
+ *   - SHARED  : otherwise (between the two extremes, or mixed-zero edge cases)
+ *
+ * `entry.gapMentions` is expected to be `[{ brand: { domain }, mentions }, ...]`
+ * and typically includes the target brand itself — we exclude it by domain match.
+ * If no competitor entries are found, returns 'SHARED' as a neutral fallback.
+ */
+export function classifyGapKind(entry, targetDomain) {
+  const target = typeof targetDomain === 'string' ? targetDomain.trim().toLowerCase() : '';
+  const gapMentions = Array.isArray(entry?.gapMentions) ? entry.gapMentions : [];
+
+  // Topics expose `mentions` at the top level; prompts don't and require lookup
+  // inside `gapMentions` by brand domain. Prefer the explicit field when present.
+  const targetMentions = entry?.mentions != null
+    ? num(entry.mentions)
+    : num(gapMentions.find((m) => {
+      const d = m?.brand?.domain;
+      return typeof d === 'string' && d.toLowerCase() === target;
+    })?.mentions);
+
+  const competitorMentions = gapMentions
+    .filter((m) => {
+      const d = m?.brand?.domain;
+      return typeof d === 'string' && d.toLowerCase() !== target;
+    })
+    .map((m) => num(m?.mentions));
+
+  if (competitorMentions.length === 0) {
+    return 'SHARED';
+  }
+
+  const allCompetitorsZero = competitorMentions.every((m) => m === 0);
+  const everyCompetitorPositive = competitorMentions.every((m) => m > 0);
+
+  if (targetMentions === 0) {
+    return everyCompetitorPositive ? 'MISSING' : 'SHARED';
+  }
+
+  if (allCompetitorsZero) {
+    return 'UNIQUE';
+  }
+
+  const minCompetitor = Math.min(...competitorMentions);
+  if (targetMentions < minCompetitor) {
+    return 'WEAK';
+  }
+
+  const maxCompetitor = Math.max(...competitorMentions);
+  if (targetMentions > maxCompetitor) {
+    return 'STRONG';
+  }
+
+  return 'SHARED';
+}
+
 export function coerceProtoCommonGapKind(kind) {
   if (kind == null) {
     return null;

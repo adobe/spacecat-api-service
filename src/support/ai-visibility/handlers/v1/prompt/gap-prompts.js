@@ -31,6 +31,7 @@ import {
   brandTarget,
   parseCompetitorDomainsList,
   responseFromGrpcError,
+  classifyGapKind,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
@@ -108,10 +109,17 @@ export async function handleGapPrompts(sp, clients) {
       toJson(GapPromptsTotalsResponseSchema, totalsMessage, PROTO_TO_JSON)
     );
 
+    // Same rationale as the gap-topics handler: the proto response does not
+    // include per-prompt gapKind, so classify here from `gapMentions`.
+    const enrichedPrompts = (promptsJson.prompts ?? []).map((prompt) => ({
+      ...prompt,
+      gapKind: classifyGapKind(prompt, domain),
+    }));
+
     return {
       status: 200,
       body: {
-        data: promptsJson.prompts ?? [],
+        data: enrichedPrompts,
         totals: totalsJson.totals ?? [],
       },
     };
