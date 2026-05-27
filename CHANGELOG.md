@@ -1,3 +1,10 @@
+# [1.521.0](https://github.com/adobe/spacecat-api-service/compare/v1.520.3...v1.521.0) (2026-05-27)
+
+
+### Features
+
+* **api:** accept non-v4 UUIDs (RFC 9562) at the route gate ([#2496](https://github.com/adobe/spacecat-api-service/issues/2496)) ([00050a9](https://github.com/adobe/spacecat-api-service/commit/00050a9cecafae5ae717025faa49ab2f39f60b62))
+
 ## [1.520.3](https://github.com/adobe/spacecat-api-service/compare/v1.520.2...v1.520.3) (2026-05-27)
 
 
