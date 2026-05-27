@@ -1,3 +1,10 @@
+# [1.522.0](https://github.com/adobe/spacecat-api-service/compare/v1.521.0...v1.522.0) (2026-05-27)
+
+
+### Features
+
+* **webhooks:** link PR and name requester/author in the enqueued Slack parent ([#2500](https://github.com/adobe/spacecat-api-service/issues/2500)) ([bd7065f](https://github.com/adobe/spacecat-api-service/commit/bd7065fff227182bdfca9d416d1370b603c9e744)), closes [#71](https://github.com/adobe/spacecat-api-service/issues/71)
+
 # [1.521.0](https://github.com/adobe/spacecat-api-service/compare/v1.520.3...v1.521.0) (2026-05-27)
 
 
