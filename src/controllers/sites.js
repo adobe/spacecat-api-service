@@ -412,6 +412,9 @@ function SitesController(ctx, log, env) {
     const cursor = context?.data?.cursor || null;
     const paginated = hasText(limitParam) || hasText(cursor);
 
+    let sites;
+    let responseBody;
+
     if (paginated) {
       const parsedLimit = parseInt(limitParam, 10);
       const effectiveLimit = (Number.isInteger(parsedLimit) && parsedLimit > 0)
@@ -419,31 +422,27 @@ function SitesController(ctx, log, env) {
         : DEFAULT_LIMIT;
 
       const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
-      const sites = (results.data || []).map((site) => SiteDto.toListJSON(site));
-
-      if (s2sResult.allowed) {
-        log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
-      }
-
-      return ok({
+      sites = (results.data || []).map((site) => SiteDto.toListJSON(site));
+      responseBody = {
         sites,
         pagination: {
           limit: effectiveLimit,
           cursor: results.cursor ?? null,
           hasMore: !!results.cursor,
         },
-      });
+      };
+    } else {
+      // legacy: no limit/cursor params -> flat array for backwards comp.
+      const all = await Site.all({}, { fetchAllPages: true });
+      sites = all.map((site) => SiteDto.toListJSON(site));
+      responseBody = sites;
     }
-
-    // legacy: no limit/cursor params -> flat array for backwards comp.
-    const all = await Site.all({}, { fetchAllPages: true });
-    const sites = all.map((site) => SiteDto.toListJSON(site));
 
     if (s2sResult.allowed) {
       log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
     }
 
-    return ok(sites);
+    return ok(responseBody);
   };
 
   /**
