@@ -433,8 +433,16 @@ function SitesController(ctx, log, env) {
       };
     } else {
       // legacy: no limit/cursor params -> flat array for backwards comp.
+      // keep the default + friends-and-family exclusion on this path to stay
+      // under the 6MB Lambda response limit until consumers migrate to pagination.
+      const excludedOrgIds = [
+        env.DEFAULT_ORGANIZATION_ID,
+        env.ORGANIZATION_ID_FRIENDS_FAMILY,
+      ];
       const all = await Site.all({}, { fetchAllPages: true });
-      sites = all.map((site) => SiteDto.toListJSON(site));
+      sites = all
+        .filter((site) => !excludedOrgIds.includes(site.getOrganizationId()))
+        .map((site) => SiteDto.toListJSON(site));
       responseBody = sites;
     }
 

@@ -86,14 +86,15 @@ export default function siteTests(getHttpClient, resetData) {
     // ── Read-only assertions on baseline seed ──
 
     describe('GET /sites', () => {
-      it('admin: returns all sites (legacy flat array, no pagination params)', async () => {
+      it('admin: returns all sites (excluding default org)', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
-        // Legacy path (no limit/cursor params) returns a flat array of all sites.
-        // Returns SITE_1 + SITE_2 (ORG_1) + SITE_3 (ORG_2) + SITE_4 (ORG_3) +
-        // SITE_LEGACY_LLMO + SITE_NEW_LLMO (LLMO-4176 mode-resolution fixtures).
-        expect(res.body).to.be.an('array').with.lengthOf(6);
+        // Legacy path (no limit/cursor params) excludes DEFAULT_ORGANIZATION_ID (ORG_1)
+        // and ORGANIZATION_ID_FRIENDS_FAMILY sites to stay under 6MB Lambda limit.
+        // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3) + SITE_LEGACY_LLMO + SITE_NEW_LLMO
+        // (LLMO-4176 mode-resolution test fixtures, neither under ORG_1).
+        expect(res.body).to.be.an('array').with.lengthOf(4);
         // Skip the LLMO fixtures in the DTO check — they have intentional
         // historical/future createdAt values that fail the "recent" assertion.
         res.body
@@ -117,9 +118,9 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.s2sConsumerReadAll.get('/sites');
         expect(res.status).to.equal(200);
-        // Legacy path returns all 6 sites: SITE_1, SITE_2, SITE_3, SITE_4,
-        // SITE_LEGACY_LLMO, SITE_NEW_LLMO.
-        expect(res.body).to.be.an('array').with.lengthOf(6);
+        // Same exclusions as the admin path apply (DEFAULT_ORGANIZATION_ID excluded).
+        // Admin baseline returns 4: SITE_3, SITE_4, SITE_LEGACY_LLMO, SITE_NEW_LLMO.
+        expect(res.body).to.be.an('array').with.lengthOf(4);
         const ids = res.body.map((s) => s.id);
         expect(ids).to.include(SITE_3_ID);
         expect(ids).to.include(SITE_4_ID);
