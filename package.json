@@ -68,6 +68,7 @@
   "mocha": {
     "require": "test/setup-env.js",
     "recursive": "true",
+    "exit": true,
     "reporter": "mocha-multi-reporters",
     "reporter-options": "configFile=.mocha-multi.json"
   },
