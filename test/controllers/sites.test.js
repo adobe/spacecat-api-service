@@ -26,7 +26,7 @@ import nock from 'nock';
 import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
 
-import SitesController from '../../src/controllers/sites.js';
+import SitesController, { resolveOrgDefaultSite } from '../../src/controllers/sites.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
@@ -134,6 +134,7 @@ describe('Sites Controller', () => {
     'removeSite',
     'updateSite',
     'updateCdnLogsConfig',
+    'updateScraperConfig',
     'getPageCitabilityCounts',
     'getTopPages',
     'getSiteMetricsBySource',
@@ -3743,6 +3744,46 @@ describe('Sites Controller', () => {
     expect(mergedConfig.handlers).to.deep.equal({ 'meta-tags': { excludedURLs: [] } });
   });
 
+  it('deep-merges llmo sub-keys so a partial llmo patch preserves siblings like cdnBucketConfig', async () => {
+    const site = sites[0];
+    const existingConfig = Config({
+      llmo: {
+        dataFolder: '/data',
+        brand: 'Test',
+        detectedCdn: 'byocdn-akamai',
+        cdnBucketConfig: { cdnProvider: 'akamai', bucketName: 'tui-cdn-logs', region: 'us-east-1' },
+        tags: ['opportunitiesReviewed'],
+      },
+    });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            detectedCdn: 'byocdn-other',
+            tags: ['opportunitiesReviewed'],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.llmo.detectedCdn).to.equal('byocdn-other');
+    expect(mergedConfig.llmo.cdnBucketConfig).to.deep.equal({
+      cdnProvider: 'akamai',
+      bucketName: 'tui-cdn-logs',
+      region: 'us-east-1',
+    });
+  });
+
   describe('auditTargetURLs validation', () => {
     it('returns bad request when manual URL hostname does not match site base URL', async () => {
       const site = sites[0];
@@ -4465,6 +4506,187 @@ describe('Sites Controller', () => {
     });
   });
 
+  describe('updateScraperConfig', () => {
+    const scraperConfig = {
+      headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+    };
+
+    // Wrap a real Config so toDynamoItem still works against the published
+    // shared package, while attaching sinon stubs for updateScraperConfig and
+    // getScraperConfig (neither exists on the installed version yet).
+    // The stubbed updateScraperConfig captures the persisted value so the
+    // matching getScraperConfig returns it — matching the contract the
+    // controller now relies on for the response payload.
+    /* eslint-disable no-param-reassign */
+    const stubSiteConfig = (site) => {
+      const wrapped = Object.create(Config({}));
+      let persisted;
+      const updateStub = sandbox.stub().callsFake((value) => {
+        persisted = value;
+      });
+      // Use defineProperty so we can override methods inherited from the
+      // frozen Config prototype (Object.freeze marks them non-writable).
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: updateStub, writable: true, configurable: true,
+      });
+      Object.defineProperty(wrapped, 'getScraperConfig', {
+        value: () => persisted, writable: true, configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+      return { updateScraperConfig: updateStub };
+    };
+    /* eslint-enable no-param-reassign */
+
+    it('updates scraper config successfully and returns a narrow response', async () => {
+      const site = sites[0];
+      const fakeSiteConfig = stubSiteConfig(site);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(fakeSiteConfig.updateScraperConfig).to.have.been.calledOnceWith(scraperConfig);
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({ siteId: SITE_IDS[0], scraperConfig });
+    });
+
+    it('returns bad request when site ID is invalid', async () => {
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: 'not-a-uuid' },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Invalid site ID');
+    });
+
+    it('returns bad request when scraperConfig is not provided', async () => {
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Scraper config required');
+    });
+
+    it('returns bad request when scraperConfig is not an object', async () => {
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig: 'nope' },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Scraper config required');
+    });
+
+    it('accepts empty scraperConfig to clear stored config', async () => {
+      const site = sites[0];
+      const fakeSiteConfig = stubSiteConfig(site);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig: {} },
+        ...defaultAuthAttributes,
+      });
+
+      expect(fakeSiteConfig.updateScraperConfig).to.have.been.calledOnceWith({});
+      expect(response.status).to.equal(200);
+    });
+
+    it('uses replace (not merge) semantics on the persisted config', async () => {
+      const site = sites[0];
+      const fakeSiteConfig = stubSiteConfig(site);
+
+      const partialUpdate = { headers: { 'X-New': 'value' } };
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig: partialUpdate },
+        ...defaultAuthAttributes,
+      });
+
+      // The setter is called with exactly the payload supplied by the caller -
+      // nothing is merged with a prior scraperConfig at this layer.
+      expect(fakeSiteConfig.updateScraperConfig).to.have.been.calledOnceWith(partialUpdate);
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.scraperConfig).to.deep.equal(partialUpdate);
+    });
+
+    it('returns not found when site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(404);
+      expect((await response.json()).message).to.equal('Site not found');
+    });
+
+    it('returns forbidden when user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 400 when the shared schema rejects the config', async () => {
+      const site = sites[0];
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: sandbox.stub().throws(
+          new Error('Configuration validation error: bad'),
+        ),
+        writable: true,
+        configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.match(/Configuration validation error/);
+    });
+
+    it('propagates unexpected errors (e.g. save failures) as 5xx', async () => {
+      const site = sites[0];
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: sandbox.stub(), writable: true, configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().rejects(new Error('DDB throttle'));
+
+      await expect(sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig },
+        ...defaultAuthAttributes,
+      })).to.be.rejectedWith('DDB throttle');
+    });
+  });
+
   describe('getPageCitabilityCounts', () => {
     it('returns bad request when site ID is missing', async () => {
       const result = await sitesController.getPageCitabilityCounts({
@@ -4829,6 +5051,23 @@ describe('Sites Controller', () => {
     let accessControlStub;
     let testOrganizations;
     let testSites;
+
+    // Must include Config methods because OrganizationDto.toJSON calls Config.toDynamoItem.
+    const makeConfigWithDefault = (siteId) => ({
+      getDefaults: () => ({ abcd: { siteId } }),
+      getSlackConfig: () => undefined,
+      getHandlers: () => undefined,
+      getContentAiConfig: () => undefined,
+      getImports: () => undefined,
+      getFetchConfig: () => undefined,
+      getBrandConfig: () => undefined,
+      getBrandProfile: () => undefined,
+      getCdnLogsConfig: () => undefined,
+      getScraperConfig: () => undefined,
+      getLlmoConfig: () => undefined,
+      getTokowakaConfig: () => undefined,
+      getEdgeOptimizeConfig: () => undefined,
+    });
 
     beforeEach(() => {
       accessControlStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
@@ -5509,6 +5748,153 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    describe('config.defaults resolution', () => {
+      it('uses config.defaults site when organizationId is provided', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+        expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
+      });
+
+      it('uses config.defaults site when imsOrg is provided', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        context.data = { imsOrg: testOrganizations[0].getImsOrgId() };
+        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+        expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
+      });
+
+      it('falls back to first-enrolled site when config.defaults has no entry for the product', async () => {
+        sandbox.stub(testOrganizations[0], 'getConfig').returns(Config({}));
+        context.data = { organizationId: testOrganizations[0].getId() };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+      });
+    });
+
+    describe('resolveOrgDefaultSite', () => {
+      const productCode = 'abcd';
+      let mockCtx;
+      let org;
+      let mockAccessControlUtil;
+
+      let resolveDefault;
+
+      beforeEach(() => {
+        [org] = testOrganizations;
+        mockCtx = { dataAccess: mockDataAccess, log: { warn: sandbox.stub() } };
+        mockAccessControlUtil = { hasAdminAccess: sandbox.stub().returns(false) };
+        sandbox.stub(org, 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+        const args = [org, productCode, context, mockCtx, mockAccessControlUtil];
+        resolveDefault = () => resolveOrgDefaultSite(...args);
+      });
+
+      it('returns null when org has no default configured for the product', async () => {
+        org.getConfig.returns({ getDefaults: () => ({}) });
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+        expect(mockDataAccess.Site.findById).to.not.have.been.called;
+      });
+
+      it('returns null and warns when the configured site no longer exists', async () => {
+        mockDataAccess.Site.findById.resolves(null);
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+        expect(mockCtx.log.warn).to.have.been.called;
+      });
+
+      it('returns null and warns when the configured site belongs to a different org', async () => {
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+        expect(mockCtx.log.warn).to.have.been.called;
+      });
+
+      it('returns null when the configured site has no active enrollments', async () => {
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [],
+        });
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+      });
+
+      it('returns null when the configured site is on a non-customer-visible tier for non-admin', async () => {
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+      });
+
+      it('returns data when the configured site is on a non-customer-visible tier for admin', async () => {
+        mockAccessControlUtil.hasAdminAccess.returns(true);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enrollment-1' }],
+        });
+
+        const result = await resolveDefault();
+
+        expect(result).to.not.be.null;
+      });
+
+      it('returns null gracefully when TierClient throws', async () => {
+        TierClient.createForSite.throws(new Error('tier service unavailable'));
+
+        const result = await resolveDefault();
+
+        expect(result).to.be.null;
+        expect(mockCtx.log.warn).to.have.been.called;
+      });
     });
 
     it('should return 404 with no_entitlement_for_product for non-existent organizationId (external caller)', async () => {

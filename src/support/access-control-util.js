@@ -220,6 +220,34 @@ export default class AccessControlUtil {
           lastSeenAt: new Date().toISOString(),
         });
       }
+    // Lazy one-time backfill of externalUserId for PAID-tier (Brandalf) users onboarded via
+    // invitation. These users are created without externalUserId; we record it here on the
+    // first authenticated request so the userDetails lookup can resolve their display name.
+    // NOTE: profile.email is an IMS user GUID (e.g. GUID@hexOrgId.e), not an RFC-5322 address.
+    // profile.trial_email is the human-readable email used as the DB row selector.
+    // Both claims refer to the same identity and are attested by IMS on the same token.
+    // findByEmailId runs on every non-FREE_TRIAL request (same as the FREE_TRIAL branch above),
+    // so this adds no new per-request overhead relative to existing behaviour.
+    } else if (!this.authInfo?.isS2SConsumer?.()) {
+      const profile = this.authInfo.getProfile?.();
+      if (profile?.email && profile?.trial_email) {
+        try {
+          const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
+          if (trialUser && !trialUser.getExternalUserId()) {
+            trialUser.setExternalUserId(profile.email);
+            await trialUser.save();
+            this.log?.info('[AccessControl] Backfilled externalUserId for PAID-tier user', {
+              trialEmail: profile.trial_email,
+              organizationId: org.getId(),
+            });
+          }
+        } catch (err) {
+          this.log?.warn('[AccessControl] externalUserId backfill failed; continuing', {
+            trialEmail: profile.trial_email,
+            error: err.message,
+          });
+        }
+      }
     }
   }
 

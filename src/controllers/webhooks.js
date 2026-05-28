@@ -19,7 +19,10 @@ import {
   accepted, noContent, badRequest, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import wrap from '@adobe/helix-shared-wrap';
-import { getSkipReason, EVENT_JOB_MAP } from '../utils/github-trigger-rules.js';
+import { getSkipReason, EVENT_JOB_MAP, isMysticatTargetedSkip } from '../utils/github-trigger-rules.js';
+import { createObservabilitySlackClient } from '../support/slack/observability-client.js';
+import { enqueuedParentText, skippedStandaloneText } from '../support/slack/observability-messages.js';
+import { shouldRateLimitSlackPost } from '../support/slack/observability-rate-limit.js';
 
 const DEFAULT_WORKSPACE_REPOS = [
   'adobe/mysticat-architecture',
@@ -33,7 +36,7 @@ const WORKSPACE_REPO_PATTERN = /^[^/\s]+\/[^/\s]+$/;
 function getWorkspaceRepos(env, log) {
   const raw = env.MYSTICAT_WORKSPACE_REPOS;
   if (!raw) {
-    log.warn('MYSTICAT_WORKSPACE_REPOS not set, using built-in defaults', {
+    log.debug('MYSTICAT_WORKSPACE_REPOS not set, using built-in defaults', {
       defaults: DEFAULT_WORKSPACE_REPOS,
     });
     return DEFAULT_WORKSPACE_REPOS;
@@ -64,7 +67,12 @@ function getWorkspaceRepos(env, log) {
 
 function WebhooksController(context) {
   const { sqs, log, env } = context;
-  const workspaceRepos = getWorkspaceRepos(env, log);
+  const slackChannel = env.MYSTICAT_OBSERVABILITY_SLACK_CHANNEL;
+  const slack = createObservabilitySlackClient({
+    token: env.MYSTICAT_OBSERVABILITY_SLACK_TOKEN,
+    channel: slackChannel,
+    log,
+  });
 
   function errorHandler(fn) {
     return async (ctx) => {
@@ -143,8 +151,56 @@ function WebhooksController(context) {
         repo: data.repository.name,
         prNumber: pr.number,
       });
+      // Post a standalone Slack note only when Mysticat WAS the requested
+      // reviewer (draft / bot / non-default branch). Foreign-reviewer and
+      // unsupported-action skips stay silent. Best-effort + rate-limited per PR;
+      // postMessage never throws.
+      if (
+        slack.enabled
+        && isMysticatTargetedSkip(skipReason)
+        && !shouldRateLimitSlackPost(`${data.repository.owner.login}/${data.repository.name}#${pr.number}`)
+      ) {
+        await slack.postMessage({
+          text: skippedStandaloneText({
+            owner: data.repository.owner.login,
+            repo: data.repository.name,
+            prNumber: pr.number,
+            reason: skipReason,
+          }),
+        });
+      }
       return noContent();
     }
+
+    // Post the Slack thread root BEFORE enqueue (ordering invariant: parent
+    // before enqueue, never after). Best-effort - a Slack failure must never
+    // block the review, so we still enqueue. On parent-post failure we send
+    // slack_channel only (no thread_ts); the worker degrades to a standalone.
+    // When Slack is disabled or rate-limited we omit observability entirely.
+    let observability;
+    if (
+      slack.enabled
+      && !shouldRateLimitSlackPost(`${data.repository.owner.login}/${data.repository.name}#${pr.number}`)
+    ) {
+      const threadTs = await slack.postMessage({
+        text: enqueuedParentText({
+          owner: data.repository.owner.login,
+          repo: data.repository.name,
+          prNumber: pr.number,
+          action,
+          jobType,
+          requestedBy: data.sender?.login,
+          author: pr.user?.login,
+        }),
+      });
+      observability = threadTs
+        ? { slack_channel: slackChannel, slack_thread_ts: threadTs }
+        : { slack_channel: slackChannel };
+    }
+
+    // Computed per webhook request (not per controller construction) so the
+    // env-var validation log fires only on genuine deliveries, not all traffic.
+    const workspaceRepos = getWorkspaceRepos(env, log);
 
     // Build and enqueue job payload
     const jobPayload = {
@@ -158,6 +214,7 @@ function WebhooksController(context) {
       job_type: jobType,
       workspace_repos: workspaceRepos,
       retry_count: 0,
+      ...(observability ? { observability } : {}),
     };
 
     const queueUrl = env.MYSTICAT_GITHUB_JOBS_QUEUE_URL;

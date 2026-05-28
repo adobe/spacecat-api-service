@@ -11,10 +11,20 @@
  */
 
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+// Import real PlgOnboarding model statics for esmock stubs: normalizeDomain and
+// isValidDomain are pure utilities that the controller now delegates to. Stubbing
+// them out would silently disable validation — use the real implementations.
+import RealPlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { isSafeDomain } from '../../../src/controllers/plg/plg-onboarding.js';
+
+const PLG_MODEL_DOMAIN_HELPERS = {
+  normalizeDomain: RealPlgOnboardingModel.normalizeDomain,
+  isValidDomain: RealPlgOnboardingModel.isValidDomain,
+};
 
 use(sinonChai);
 
@@ -379,6 +389,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         },
         '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
           default: {
+            ...PLG_MODEL_DOMAIN_HELPERS,
             STATUSES: {
               IN_PROGRESS: 'IN_PROGRESS',
               ONBOARDED: 'ONBOARDED',
@@ -402,6 +413,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               CLOSED: 'CLOSED',
               REOPENED: 'REOPENED',
               OFFBOARDED: 'OFFBOARDED',
+              PENDING: 'PENDING',
             },
           },
         },
@@ -450,7 +462,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     };
   }
 
-  function buildContext(data = {}, { authInfo } = {}) {
+  function buildContext(data = {}, { authInfo, headers } = {}) {
     return {
       data,
       dataAccess: mockDataAccess,
@@ -460,6 +472,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       attributes: {
         authInfo: authInfo !== undefined ? authInfo : mockAuthInfo(),
       },
+      pathInfo: { headers: headers || {} },
     };
   }
 
@@ -602,6 +615,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -625,6 +639,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 CLOSED: 'CLOSED',
                 REOPENED: 'REOPENED',
                 OFFBOARDED: 'OFFBOARDED',
+                PENDING: 'PENDING',
               },
             },
           },
@@ -695,17 +710,27 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    const invalidHostnames = [
+    const invalidDomains = [
       '../../etc/passwd',
       'domain.com:8080',
-      'http://domain.com',
       '-invalid.com',
       `${'a'.repeat(254)}.com`,
       'domain..com',
+      'nba.com?q=1',
+      'nba.com#section',
+      'nba.com/kings?q=1',
+      'nba.com/kings#section',
+      'nba.com/..',
+      'nba.com/../etc/passwd',
+      'nba.com//kings',
+      'nba.com/',
+      'nba.com/.hidden',
+      'nba.com/v1..0',
+      'nba.com/v1.0.',
     ];
 
-    invalidHostnames.forEach((invalidDomain) => {
-      it(`returns 400 for invalid hostname: ${invalidDomain}`, async () => {
+    invalidDomains.forEach((invalidDomain) => {
+      it(`returns 400 for invalid domain: ${invalidDomain}`, async () => {
         const context = buildContext({ domain: invalidDomain });
 
         const res = await controller.onboard(context);
@@ -720,6 +745,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       'myhost.local',
       'service.internal',
       'foo.private.adobe.io',
+      'myhost.local/path',
+      'service.internal/api',
+      'foo.localhost',
+      'foo.localhost/api',
     ];
 
     unsafeDomains.forEach((unsafeDomain) => {
@@ -733,8 +762,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
     });
 
-    // These fail hostname validation before reaching SSRF check
-    const invalidAsHostnames = [
+    // These fail domain validation before reaching SSRF check
+    const invalidAsDomains = [
       'localhost',
       '127.0.0.1',
       '10.0.0.1',
@@ -745,7 +774,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       '[::1]',
     ];
 
-    invalidAsHostnames.forEach((domain) => {
+    invalidAsDomains.forEach((domain) => {
       it(`returns 400 for invalid/unsafe domain: ${domain}`, async () => {
         const context = buildContext({ domain });
 
@@ -753,6 +782,124 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
         expect(res.status).to.equal(400);
         expect(res.value).to.include('Invalid domain');
+      });
+    });
+
+    // Hex/octal/decimal IPv4 literals — WHATWG URL canonicalizes these to private
+    // IPs (e.g. 0xa9.254.169.254 → 169.254.169.254 AWS IMDS), bypassing raw-string
+    // denylists. Closed at the shared validator (alphabetic TLD requirement) and
+    // additionally at isSafeDomain (canonicalize-before-denylist + net.isIP check).
+    const hexIpAttacks = [
+      ['hex IMDS', '0xa9.254.169.254'],
+      ['hex loopback', '0x7f.0.0.1'],
+      ['hex RFC1918', '0xa.0.0.1'],
+      ['hex all-labels', '0xa9.0xfe.0xa9.0xfe'],
+      ['octal IPv4', '0177.0.0.1'],
+    ];
+
+    hexIpAttacks.forEach(([label, domain]) => {
+      it(`returns 400 for ${label} attack: ${domain}`, async () => {
+        const context = buildContext({ domain });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid domain');
+        // Lock that the request never reached the fetch path
+        expect(composeBaseURLStub).to.not.have.been.called;
+        expect(mockDataAccess.PlgOnboarding.create).to.not.have.been.called;
+      });
+    });
+  });
+
+  // --- Subpath domain support ---
+
+  describe('onboard - subpath domain support', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    const validSubpathDomains = [
+      'nba.com/kings',
+      'nba.com/us/kings',
+      'www.example.com/blog',
+      'nba.com/v1.0',
+      'nba.com/kings.html',
+    ];
+
+    validSubpathDomains.forEach((domain) => {
+      it(`accepts subpath domain: ${domain}`, async () => {
+        const context = buildContext({ domain });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(200);
+
+        // Lock in that the full subpath flows through end-to-end (no silent path-stripping)
+        expect(composeBaseURLStub).to.have.been.calledWith(domain);
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ domain }),
+        );
+      });
+    });
+
+    // Locks the prepareDomain canonicalization: mixed-case input must be lowercased
+    // BEFORE reaching composeBaseURL and PlgOnboarding.create, otherwise the model's
+    // schema validator (lowercase-only) would reject the write at the DB layer.
+    const mixedCaseCanonicalCases = [
+      { input: 'NBA.COM', expected: 'nba.com', desc: 'uppercase host' },
+      { input: 'NBA.COM/Kings', expected: 'nba.com/kings', desc: 'uppercase host + path' },
+      { input: 'nba.com/Kings', expected: 'nba.com/kings', desc: 'lowercase host, mixed-case path' },
+      { input: 'Https://NBA.COM/Kings', expected: 'nba.com/kings', desc: 'mixed-case scheme + host + path' },
+    ];
+
+    mixedCaseCanonicalCases.forEach(({ input, expected, desc }) => {
+      it(`canonicalizes mixed case: ${desc} (${input} → ${expected})`, async () => {
+        const context = buildContext({ domain: input });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(200);
+        expect(composeBaseURLStub).to.have.been.calledWith(expected);
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ domain: expected }),
+        );
+      });
+    });
+
+    it('accepts scheme-prefixed subpath input (strips https://)', async () => {
+      const context = buildContext({ domain: 'https://nba.com/kings' });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(composeBaseURLStub).to.have.been.calledWith('nba.com/kings');
+      expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+        sinon.match({ domain: 'nba.com/kings' }),
+      );
+    });
+
+    // Pins stripScheme behavior via the controller boundary (the helper itself is not exported).
+    const stripSchemeCases = [
+      { input: 'http://nba.com/kings', expected: 'nba.com/kings', desc: 'lowercase http://' },
+      { input: 'HTTP://nba.com/kings', expected: 'nba.com/kings', desc: 'uppercase HTTP://' },
+      { input: 'HtTpS://nba.com', expected: 'nba.com', desc: 'mixed-case scheme' },
+      { input: 'nba.com', expected: 'nba.com', desc: 'schemeless passthrough' },
+    ];
+
+    stripSchemeCases.forEach(({ input, expected, desc }) => {
+      it(`stripScheme: ${desc} -> ${expected}`, async () => {
+        const context = buildContext({ domain: input });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(200);
+        expect(composeBaseURLStub).to.have.been.calledWith(expected);
+      });
+    });
+
+    // Non-http schemes and protocol-relative inputs are NOT stripped; isValidDomain rejects them.
+    const stripSchemeRejectCases = [
+      { input: 'ftp://nba.com', desc: 'non-http scheme not stripped' },
+      { input: '//nba.com', desc: 'protocol-relative not stripped' },
+    ];
+
+    stripSchemeRejectCases.forEach(({ input, desc }) => {
+      it(`stripScheme: ${desc} -> 400`, async () => {
+        const context = buildContext({ domain: input });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(400);
       });
     });
   });
@@ -887,6 +1034,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -995,6 +1143,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -1107,6 +1256,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -1346,6 +1496,94 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('user@example.com');
+    });
+
+    it('sets createdBy when request comes from ASO UI on an existing record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'IN_PROGRESS', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
+    });
+
+    it('does not set createdBy when request does not come from ASO UI', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'IN_PROGRESS', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('does not set createdBy when x-client-type is a different value', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'IN_PROGRESS', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { headers: { 'x-client-type': 'some-other-client' } },
+      );
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('sets createdBy when request comes from ASO UI on a WAITLISTED record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'WAITLISTED', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      await controller.onboard(context);
+
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
+    });
+
+    it('sets createdBy when request comes from ASO UI on an ERROR record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'ERROR', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      await controller.onboard(context);
+
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
+    });
+
+    it('sets createdBy when request comes from ASO UI on an OUTDATED record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'OUTDATED', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      await controller.onboard(context);
+
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
     });
 
     it('resumes existing onboarding record for same imsOrgId+domain', async () => {
@@ -1994,6 +2232,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2006,7 +2245,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2403,6 +2642,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2415,7 +2655,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2524,6 +2764,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2536,7 +2777,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2632,6 +2873,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2644,7 +2886,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -3209,27 +3451,51 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('stamps customer identity as createdBy when existing record is PRE_ONBOARDING', async () => {
+    it('stamps customer identity as createdBy when request comes from ASO UI', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('customer@example.com');
+    });
+
+    it('does not set createdBy when request is not from ASO UI', async () => {
       mockOnboarding.getStatus.returns('PRE_ONBOARDING');
       const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
       const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
       const res = await controller.onboard(context);
       expect(res.status).to.equal(200);
-      expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('customer@example.com');
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
     });
 
-    it('stamps customer identity as createdBy when existing record is INACTIVE', async () => {
-      mockOnboarding.getStatus.returns('INACTIVE');
+    it('does not set createdBy when x-client-type is a different value', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
       const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
-      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo, headers: { 'x-client-type': 'some-other-client' } });
       const res = await controller.onboard(context);
       expect(res.status).to.equal(200);
-      expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('customer@example.com');
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
     });
 
-    it('does not overwrite createdBy when status is not PRE_ONBOARDING or INACTIVE', async () => {
-      mockOnboarding.getStatus.returns('IN_PROGRESS');
-      const context = buildContext({ domain: TEST_DOMAIN });
+    it('does not set createdBy when pathInfo is absent', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      delete context.pathInfo;
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('does not set createdBy when headers are absent', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      context.pathInfo = {};
       const res = await controller.onboard(context);
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
@@ -4968,6 +5234,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -5115,6 +5382,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             },
             '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
               default: {
+                ...PLG_MODEL_DOMAIN_HELPERS,
                 STATUSES: {
                   IN_PROGRESS: 'IN_PROGRESS',
                   ONBOARDED: 'ONBOARDED',
@@ -5691,6 +5959,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -5713,6 +5982,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 CLOSED: 'CLOSED',
                 REOPENED: 'REOPENED',
                 OFFBOARDED: 'OFFBOARDED',
+                PENDING: 'PENDING',
               },
             },
           },
@@ -5795,6 +6065,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             },
             '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
               default: {
+                ...PLG_MODEL_DOMAIN_HELPERS,
                 STATUSES: {
                   IN_PROGRESS: 'IN_PROGRESS',
                   ONBOARDED: 'ONBOARDED',
@@ -6044,6 +6315,88 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setUpdatedBy).to.have.been.calledWith('admin');
         const reviews = record.setReviews.firstCall.args[0];
         expect(reviews[0].reviewedBy).to.equal('admin');
+      });
+
+      it('PENDING: records review without changing status', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain is not an AEM site',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Emailed customer, awaiting response' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setReviews).to.have.been.calledOnce;
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(1);
+        expect(reviews[0].decision).to.equal('PENDING');
+        expect(reviews[0].justification).to.equal('Emailed customer, awaiting response');
+        expect(reviews[0].reviewedBy).to.equal('ese@adobe.com');
+        expect(record.setStatus).to.not.have.been.called;
+        expect(record.setWaitlistReason).to.not.have.been.called;
+        expect(record.save).to.have.been.calledOnce;
+      });
+
+      it('PENDING: preserves existing reviews', async () => {
+        const existingReview = {
+          reason: 'Domain is not an AEM site',
+          decision: 'PENDING',
+          reviewedBy: 'other-ese@adobe.com',
+          reviewedAt: '2026-05-01T10:00:00.000Z',
+          justification: 'First contact attempt',
+        };
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain is not an AEM site',
+          reviews: [existingReview],
+        });
+        record.getReviews.returns([existingReview]);
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Second follow-up sent' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(2);
+        expect(reviews[0]).to.deep.equal(existingReview);
+        expect(reviews[1].decision).to.equal('PENDING');
+        expect(reviews[1].justification).to.equal('Second follow-up sent');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
+      it('PENDING: succeeds even when waitlistReason is absent (no checkKey needed)', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: null,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Emailed customer, awaiting response' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews[0].decision).to.equal('PENDING');
+        expect(record.setStatus).to.not.have.been.called;
+        expect(record.save).to.have.been.calledOnce;
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: replaces old domain and re-runs flow', async () => {
@@ -7041,6 +7394,60 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setStatus).to.not.have.been.called;
       });
 
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: rejects scheme-prefixed internal IP (regression for isSafeDomain bypass)', async () => {
+        // Regression: previously `https://10.0.0.1` slipped past isSafeDomain because
+        // split('/')[0] returned `https:` instead of the IP. isValidDomain now runs first.
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Use alternate', siteConfig: { alternateDomain: 'https://10.0.0.1' } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid alternate domain');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: rejects syntactically-valid SSRF target (foo.localhost)', async () => {
+        // Covers the isSafeDomain branch: input passes isValidDomain (has a dot, alphabetic TLD)
+        // but matches the \.localhost$ blocklist entry.
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Use alternate', siteConfig: { alternateDomain: 'foo.localhost' } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid alternate domain');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
       it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: retires current domain and onboards alternate domain', async () => {
         const record = createMockOnboarding({
           status: 'WAITLISTED',
@@ -7070,6 +7477,40 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setStatus).to.have.been.calledWith('OUTDATED');
         expect(record.setWaitlistReason).to.have.been.calledWith(null);
         expect(record.save).to.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: subpath alternate domain reaches composeBaseURL and create with full path', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'Use alternate subpath',
+            siteConfig: { alternateDomain: 'other-example.com/kings' },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        // Pin that the FULL subpath (not just hostname) flows through the bypass entry
+        // point — locks in I4 equivalence for the alternateDomain code path.
+        expect(composeBaseURLStub).to.have.been.calledWith('other-example.com/kings');
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ domain: 'other-example.com/kings' }),
+        );
       });
 
       it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: retires current record when imsOrgId is missing', async () => {
@@ -8104,6 +8545,63 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           expect(mockOnboarding.remove).to.have.been.called;
         });
       });
+    });
+  });
+
+  // Direct unit tests for the isSafeDomain defense-in-depth layer. These exercise
+  // branches that cannot be reached through the controller because isValidDomain
+  // rejects the relevant inputs upstream (hex IPs, malformed hostnames). The
+  // defense-in-depth contract still needs coverage so a future regression in
+  // isValidDomain does not silently expose the fetch path.
+  describe('isSafeDomain (direct unit tests for defense-in-depth)', () => {
+    it('returns false when new URL throws on a malformed rawHostname', () => {
+      // `[` makes WHATWG URL parser throw (unbalanced bracket).
+      expect(isSafeDomain('[')).to.be.false;
+    });
+
+    it('returns false when canonicalized hostname is an IPv4 literal', () => {
+      // Hex IPv4 canonicalizes to a private IP via new URL.
+      expect(isSafeDomain('0xa9.254.169.254')).to.be.false; // → 169.254.169.254 (AWS IMDS)
+      expect(isSafeDomain('0x7f.0.0.1')).to.be.false; // → 127.0.0.1
+      expect(isSafeDomain('0xa.0.0.1')).to.be.false; // → 10.0.0.1
+    });
+
+    it('returns false when canonicalized hostname is bare IPv4', () => {
+      expect(isSafeDomain('127.0.0.1')).to.be.false;
+      expect(isSafeDomain('10.0.0.1')).to.be.false;
+      expect(isSafeDomain('169.254.169.254')).to.be.false;
+    });
+
+    it('returns false when canonicalized hostname is a bracketed IPv6 literal', () => {
+      // new URL serializes IPv6 with brackets; the bracket-strip in isSafeDomain
+      // is what lets net.isIP recognize it. Without the strip, every private/
+      // link-local/IPv4-mapped IPv6 form would slip past the backstop.
+      expect(isSafeDomain('[fd00::1]')).to.be.false; // RFC 4193 ULA
+      expect(isSafeDomain('[fe80::1]')).to.be.false; // RFC 4291 link-local
+      expect(isSafeDomain('[::1]')).to.be.false; // loopback
+      expect(isSafeDomain('[::ffff:169.254.169.254]')).to.be.false; // IPv4-mapped IMDS
+      expect(isSafeDomain('[::ffff:7f00:1]')).to.be.false; // IPv4-mapped loopback
+    });
+
+    it('returns false for denylist string matches (non-IP)', () => {
+      expect(isSafeDomain('foo.localhost')).to.be.false;
+      expect(isSafeDomain('myhost.local')).to.be.false;
+      expect(isSafeDomain('service.internal')).to.be.false;
+      expect(isSafeDomain('foo.private.adobe.io')).to.be.false;
+      expect(isSafeDomain('localhost')).to.be.false;
+    });
+
+    it('returns true for legitimate public hostnames', () => {
+      expect(isSafeDomain('nba.com')).to.be.true;
+      expect(isSafeDomain('nba.com/kings')).to.be.true;
+      expect(isSafeDomain('1.2.3.4.example.com')).to.be.true;
+    });
+
+    it('extracts hostname from path-qualified domains before checking', () => {
+      // The path is stripped before canonicalization so an internal target in the
+      // hostname segment cannot be hidden behind a path.
+      expect(isSafeDomain('127.0.0.1/some/path')).to.be.false;
+      expect(isSafeDomain('myhost.local/api')).to.be.false;
     });
   });
 });

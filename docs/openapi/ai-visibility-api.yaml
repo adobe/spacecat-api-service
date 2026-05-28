@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 24 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – 27 GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 
@@ -110,13 +110,139 @@ x-ai-vis-topic-id-optional: &topicIdOptionalParam
     pattern: '^\d+$'
     example: '12345'
 
+x-ai-vis-v1-brand-topics-sort-by: &v1BrandTopicsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `BRAND_TOPICS_ORDER_BY` for Semrush v2 `BrandTopicsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `VISIBILITY` (2).
+  schema:
+    oneOf:
+      - type: string
+        enum:
+          - UNSPECIFIED
+          - RELEVANCY
+          - VISIBILITY
+          - DIFFICULTY
+          - MENTIONS
+          - VOLUME
+          - NAME
+      - type: integer
+        enum: [0, 1, 2, 3, 4, 5, 6]
+    example: VISIBILITY
+
+x-ai-vis-v1-brand-topics-search-query: &v1BrandTopicsSearchQueryParam
+  name: searchQuery
+  in: query
+  required: false
+  description: |
+    Free-text substring filter on the topic name. Maps to Semrush v2
+    `BrandTopicsRequest.dimension_filter_ql` as `topic CONTAINS "<searchQuery>"`.
+    Backslash and double-quote characters in the value are escaped automatically
+    so embedded quotes do not break the QL string.
+  schema:
+    type: string
+    example: link build
+
+x-ai-vis-v1-brand-topics-volume-from: &v1BrandTopicsVolumeFromParam
+  name: volumeFrom
+  in: query
+  required: false
+  description: |
+    Inclusive lower bound on `volume` for Semrush v2 `BrandTopicsRequest.metric_filter_ql`.
+    When only `volumeFrom` is supplied the filter becomes `volume >= volumeFrom`;
+    when only `volumeTo` is supplied it becomes `volume <= volumeTo`;
+    supplying both yields the closed range `volume >= volumeFrom AND volume <= volumeTo`.
+    Values that are not non-negative integers produce HTTP 400 `invalid_volume`.
+  schema:
+    type: integer
+    minimum: 0
+    example: 101
+
+x-ai-vis-v1-brand-topics-volume-to: &v1BrandTopicsVolumeToParam
+  name: volumeTo
+  in: query
+  required: false
+  description: |
+    Inclusive upper bound on `volume` for Semrush v2 `BrandTopicsRequest.metric_filter_ql`.
+    See `volumeFrom` for the combined semantics. Values that are not non-negative
+    integers produce HTTP 400 `invalid_volume`.
+  schema:
+    type: integer
+    minimum: 0
+    example: 1000
+
+x-ai-vis-v1-brand-topics-visibility-from: &v1BrandTopicsVisibilityFromParam
+  name: visibilityFrom
+  in: query
+  required: false
+  description: |
+    Inclusive lower bound on `visibility` for Semrush v2 `BrandTopicsRequest.metric_filter_ql`.
+    Same single-bound semantics as `volumeFrom` / `volumeTo`. Values outside `[0, 100]`
+    (or non-integers) produce HTTP 400 `invalid_visibility`.
+  schema:
+    type: integer
+    minimum: 0
+    maximum: 100
+    example: 81
+
+x-ai-vis-v1-brand-topics-visibility-to: &v1BrandTopicsVisibilityToParam
+  name: visibilityTo
+  in: query
+  required: false
+  description: |
+    Inclusive upper bound on `visibility` for Semrush v2 `BrandTopicsRequest.metric_filter_ql`.
+    See `visibilityFrom` for the combined semantics. Values outside `[0, 100]`
+    (or non-integers) produce HTTP 400 `invalid_visibility`.
+  schema:
+    type: integer
+    minimum: 0
+    maximum: 100
+    example: 100
+
+x-ai-vis-v1-gap-topics-sort-by: &v1GapTopicsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `TOPICS_REQUEST_ORDER_BY` for Semrush v2 `GapTopicsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `VISIBILITY` (2).
+  schema:
+    oneOf:
+      - type: string
+        enum:
+          - UNSPECIFIED
+          - NAME
+          - VISIBILITY
+          - DIFFICULTY
+          - MENTIONS
+          - VOLUME
+          - MENTIONS_COUNT_BY_BRAND
+          - MENTIONED_COMPETITORS
+          - TOTAL_COMPETITOR_MENTIONS
+      - type: integer
+        enum: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    example: VISIBILITY
+
+x-ai-vis-v1-gap-topics-gap-kinds: &v1GapTopicsGapKindsParam
+  name: gapKinds
+  in: query
+  required: false
+  description: |
+    Comma-separated list of gap kinds for Semrush v2 `GapTopicsRequest.kind[]`
+    (`ALL`, `MISSING`, `WEAK`, `SHARED`, `STRONG`, `UNIQUE`). Default when omitted: `ALL`.
+  schema:
+    type: string
+    example: ALL
+
 x-ai-vis-v1-prompts-sort-by: &v1PromptsSortByParam
   name: sortBy
   in: query
   required: false
   description: |
-    `PROMPTS_REQUEST_ORDER_BY` field for Semrush v2 `PromptsRequest.order.by` (name or integer).
-    When omitted, the service applies its default ordering.
+    `PROMPTS_REQUEST_ORDER_BY` for Semrush v2 `PromptsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `MENTIONED_BRANDS_COUNT` (3).
   schema:
     oneOf:
       - type: string
@@ -129,19 +255,147 @@ x-ai-vis-v1-prompts-sort-by: &v1PromptsSortByParam
           - TOPIC_VOLUME
       - type: integer
         enum: [0, 1, 2, 3, 4, 5]
+    example: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-v1-gap-prompts-sort-by: &v1GapPromptsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `GAP_PROMPTS_REQUEST_ORDER_BY` for Semrush v2 `GapPromptsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `MENTIONED_BRANDS_COUNT` (2).
+  schema:
+    oneOf:
+      - type: string
+        enum:
+          - UNSPECIFIED
+          - PROMPT
+          - MENTIONED_BRANDS_COUNT
+          - SOURCES_COUNT
+          - TOPIC_VOLUME
+      - type: integer
+        enum: [0, 1, 2, 3, 4]
+    example: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-v1-gap-prompts-source-domain: &v1GapPromptsSourceDomainParam
+  name: sourceDomain
+  in: query
+  required: false
+  description: |
+    Optional filter restricting gap prompts to the given source domain.
+    Forwarded as the native `GapPromptsRequest.source_domain` proto field (not a QL filter).
+  schema:
+    type: string
+    example: nytimes.com
 
 x-ai-vis-sort-direction: &sortDirectionParam
   name: sortDirection
   in: query
   required: false
-  description: Sort direction for `order.direction` (default descending).
+  description: |
+    `ORDER_DIRECTION` for Semrush `order.direction` (protobuf name or integer).
+    Default when omitted: `DESC` (2).
   schema:
     oneOf:
       - type: string
         enum: [UNKNOWN, ASC, DESC]
       - type: integer
         enum: [0, 1, 2]
+
+x-ai-vis-fts-sort-direction: &ftsSortDirectionParam
+  name: sortDirection
+  in: query
+  required: false
+  description: |
+    `ORDER_DIRECTION` for Semrush `order.direction`. Accepted values: `ASC`, `DESC`.
+    Default when omitted: `DESC`. Returns `400 invalid_sort_direction` for any other value.
+  schema:
+    type: string
+    enum: [ASC, DESC]
+    default: DESC
     example: DESC
+
+x-ai-vis-fts-topics-sort-by: &ftsTopicsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `TOPICS_BY_FTS_REQUEST_ORDER_BY` for Semrush v2 `TopicsByFTSRequest.order.by`.
+    Default when omitted: `RELEVANCE_SCORE`. Returns `400 invalid_sort_by` for any other value.
+
+    Note: on the all-engines path (no `engine` query param) the sort is applied
+    server-side per LLM and the merged page is re-sorted in-process, so ordering
+    is fully consistent within each page but only approximate across pages.
+  schema:
+    type: string
+    enum: [RELEVANCE_SCORE, VOLUME]
+    default: RELEVANCE_SCORE
+
+x-ai-vis-fts-prompts-sort-by: &ftsPromptsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY` for Semrush v2 `PromptsByTopicFTSRequest.order.by`.
+    Default when omitted: `MENTIONED_BRANDS_COUNT`. Returns `400 invalid_sort_by` for any other value.
+
+    Note: on the all-engines path (no `engine` query param) the sort is applied
+    server-side per LLM and the merged page is re-sorted in-process, so ordering
+    is fully consistent within each page but only approximate across pages.
+  schema:
+    type: string
+    enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT]
+    default: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-fts-brands-sort-by: &ftsBrandsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY` for Semrush v2 `BrandsByTopicFTSRequest.order.by`.
+    Default when omitted: `MENTIONS`. Returns `400 invalid_sort_by` for any other value.
+
+    Note: on the all-engines path (no `engine` query param) the sort is applied
+    server-side per LLM and the merged page is re-sorted in-process, so ordering
+    is fully consistent within each page but only approximate across pages.
+  schema:
+    type: string
+    enum: [NAME, MENTIONS, SOURCES_COUNT]
+    default: MENTIONS
+
+x-ai-vis-fts-source-domains-sort-by: &ftsSourceDomainsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY` for Semrush v2 `SourceDomainsByTopicFTSRequest.order.by`.
+    Default when omitted: `MENTIONS`. Returns `400 invalid_sort_by` for any other value.
+
+    Note: on the all-engines path (no `engine` query param) the sort is applied
+    server-side per LLM and the merged page is re-sorted in-process, so ordering
+    is fully consistent within each page but only approximate across pages.
+  schema:
+    type: string
+    enum: [DOMAIN, SOURCES_COUNT, MENTIONS, ORGANIC_TRAFFIC]
+    default: MENTIONS
+
+x-ai-vis-prompt-hash: &promptHashParam
+  name: promptHash
+  in: query
+  required: true
+  description: Hash of the prompt (`PromptRequest.prompt_hash` / `uint64`, passed as decimal string).
+  schema:
+    type: string
+    pattern: '^\d+$'
+    example: '18446744073709551615'
+
+x-ai-vis-serp-id: &serpIdParam
+  name: serpId
+  in: query
+  required: false
+  description: SERP identifier for a specific LLM response (`PromptRequest.serp_id`).
+  schema:
+    type: string
 
 x-ai-vis-competitors: &competitorsParam
   name: competitors
@@ -690,12 +944,18 @@ ai-visibility-topics-research:
       Returns a paginated list of topics matching the search query.
       All-models queries merge and deduplicate rows across LLMs.
       Data from `TopicService/TopicsByFTS`.
+
+      Sortable via `sortBy` (`RELEVANCE_SCORE` (default), `VOLUME`) and `sortDirection`
+      (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is applied per LLM
+      and the merged page is re-sorted in-process, so cross-page ordering is approximate.
     operationId: getAiVisibilityTopicsResearch
     parameters:
       - *searchQueryParam
       - *countryParam
       - *regionParam
       - *engineParam
+      - *ftsTopicsSortByParam
+      - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
     responses:
@@ -745,12 +1005,19 @@ ai-visibility-topics-research-prompts:
       All-models queries merge and deduplicate across LLMs; total is
       the sum of per-LLM totals.
       Data from `PromptService/PromptsByTopicFTS` and `PromptsByTopicFTSTotals`.
+
+      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT` (default), `SOURCES_COUNT`)
+      and `sortDirection` (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is
+      applied per LLM and the merged page is re-sorted in-process; cross-page ordering is
+      approximate.
     operationId: getAiVisibilityTopicsResearchPrompts
     parameters:
       - *searchQueryParam
       - *countryParam
       - *regionParam
       - *engineParam
+      - *ftsPromptsSortByParam
+      - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
     responses:
@@ -773,12 +1040,18 @@ ai-visibility-topics-research-brands:
       All-models queries merge rows (deduplicated by domain); total is
       the sum of per-LLM `BrandsByTopicFTSTotals`.
       Data from `BrandService/BrandsByTopicFTS` and `BrandsByTopicFTSTotals`.
+
+      Sortable via `sortBy` (`NAME`, `MENTIONS` (default), `SOURCES_COUNT`) and `sortDirection`
+      (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is applied per LLM and the
+      merged page is re-sorted in-process; cross-page ordering is approximate.
     operationId: getAiVisibilityTopicsResearchBrands
     parameters:
       - *searchQueryParam
       - *countryParam
       - *regionParam
       - *engineParam
+      - *ftsBrandsSortByParam
+      - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
     responses:
@@ -802,12 +1075,19 @@ ai-visibility-topics-research-source-domains:
       containing `sourceDomain`, `sourcesCount`, `mentions`, `organicTraffic`,
       and optionally `promptExample`.
       Data from `SourceService/SourceDomainsByTopicFTS` and `SourceDomainsByTopicFTSTotals`.
+
+      Sortable via `sortBy` (`DOMAIN`, `SOURCES_COUNT`, `MENTIONS` (default), `ORGANIC_TRAFFIC`)
+      and `sortDirection` (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is
+      applied per LLM and the merged page is re-sorted in-process; cross-page ordering is
+      approximate.
     operationId: getAiVisibilityTopicsResearchSourceDomains
     parameters:
       - *searchQueryParam
       - *countryParam
       - *regionParam
       - *engineParam
+      - *ftsSourceDomainsSortByParam
+      - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
     responses:
@@ -828,16 +1108,42 @@ ai-visibility-v1-topic-brand-topics:
     description: |
       Returns brand-associated topics using Semrush `TopicService` v2 `BrandTopics` and
       `BrandTopicsTotals`. Unlike `/llmo/ai-visibility/brands/topics`, this route fixes prompt
-      categories to **mentions target** and **cites target**, orders by **topic volume**,
-      and returns each topic as **native protobuf JSON** (camelCase), including fields such as `visibility`,
-      `difficulty`, `volumeTrend`, and `intents`. The response body is `{ data, total }` plus `srFilters`;
+      categories to `MENTIONS_TARGET` and `CITES_TARGET`, returns each topic as **native protobuf JSON**
+      (camelCase), and supports `sortBy` / `sortDirection` on `BRAND_TOPICS_ORDER_BY` (default
+      `VISIBILITY` descending). Row fields include `visibility`, `difficulty`, `volumeTrend`, and
+      `intents` (`TOPIC_INTENT` distribution). The response body is `{ data, total }` plus `srFilters`;
       `offset` and `limit` are not echoed (use the query parameters).
+
+      ### Filters
+
+      The endpoint accepts optional filters that are forwarded as Semrush QL strings on both the
+      list and totals requests:
+
+      - `searchQuery` → `dimension_filter_ql: topic CONTAINS "<searchQuery>"` (backslash and
+        double-quote characters in the value are escaped automatically).
+      - `volumeFrom` / `volumeTo` → `metric_filter_ql` on `volume`. Supplying only one bound emits
+        `volume >= volumeFrom` or `volume <= volumeTo`; supplying both emits the closed range
+        `volume >= volumeFrom AND volume <= volumeTo`. Non-negative integers only —
+        invalid values return HTTP 400 `invalid_volume`.
+      - `visibilityFrom` / `visibilityTo` → `metric_filter_ql` on `visibility` with the same
+        single-bound semantics. Integers in `[0, 100]` only — invalid values return HTTP 400
+        `invalid_visibility`.
+
+      When both volume and visibility ranges are supplied they are joined with ` AND ` into a
+      single `metric_filter_ql` value.
     operationId: getAiVisibilityV1TopicBrandTopics
     parameters:
       - *domainParam
       - *countryParam
       - *regionParam
       - *engineParam
+      - *v1BrandTopicsSortByParam
+      - *sortDirectionParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+      - *v1BrandTopicsVisibilityFromParam
+      - *v1BrandTopicsVisibilityToParam
       - *limitParam
       - *offsetParam
     responses:
@@ -851,6 +1157,56 @@ ai-visibility-v1-topic-brand-topics:
     security:
       - api_key: []
 
+ai-visibility-v1-topic-gap-topics:
+  get:
+    tags: [ai-visibility]
+    summary: Get gap topics (Topic v2 JSON)
+    description: |
+      Returns topics with the gap between the target brand and its competitors using Semrush
+      `TopicService` v2 `GapTopics` and `GapTopicsTotals`. Returns each topic as **native
+      protobuf JSON** (camelCase) including `gapMentions` per competitor brand. Supports
+      `sortBy` / `sortDirection` on `TOPICS_REQUEST_ORDER_BY` (default `TOTAL_COMPETITOR_MENTIONS` descending).
+      The response body is `{ data, totals }` plus `srFilters`; `offset` and `limit` are not
+      echoed (use the query parameters).
+
+      ### Filters
+
+      The endpoint accepts optional filters that are forwarded as Semrush QL strings on both
+      the list and totals requests:
+
+      - `searchQuery` → `dimension_filter_ql: topic CONTAINS "<searchQuery>"` (backslash and
+        double-quote characters in the value are escaped automatically).
+      - `volumeFrom` / `volumeTo` → `metric_filter_ql` on `volume`. Supplying only one bound
+        emits `volume >= volumeFrom` or `volume <= volumeTo`; supplying both emits the closed
+        range `volume >= volumeFrom AND volume <= volumeTo`. Non-negative integers only —
+        invalid values return HTTP 400 `invalid_volume`.
+      - `gapKinds` → Semrush v2 `GapTopicsRequest.kind[]` (default `ALL`).
+    operationId: getAiVisibilityV1TopicGapTopics
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1GapTopicsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap topics (v2 topic payload) retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicGapTopicsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-v1-prompt-brand-prompts:
   get:
     tags: [ai-visibility]
@@ -858,9 +1214,11 @@ ai-visibility-v1-prompt-brand-prompts:
     description: |
       Returns prompts for the target domain using Semrush `PromptService` v2 `Prompts` and
       `PromptsTotals`. Unlike `/llmo/ai-visibility/brands/prompts`, this route fixes prompt
-      categories to **mentions target** and **cites target**, returns each row as **native protobuf JSON**
-      (camelCase), and responds with `{ data, total }` plus `srFilters`; `offset` and `limit` are not echoed
-      (use the query parameters). Optional `topicId` applies a `topic_hash` dimension filter.
+      categories to `MENTIONS_TARGET` and `CITES_TARGET`, returns each row as **native protobuf JSON**
+      (camelCase) with `PROMPT_CATEGORY` in `categories`, and supports `sortBy` / `sortDirection` on
+      `PROMPTS_REQUEST_ORDER_BY` (default `MENTIONED_BRANDS_COUNT` descending). Responds with
+      `{ data, total }` plus `srFilters`; `offset` and `limit` are not echoed (use the query parameters).
+      Optional `topicId` applies a `topic_hash = <topicId>` dimension filter.
     operationId: getAiVisibilityV1PromptBrandPrompts
     parameters:
       - *domainParam
@@ -879,6 +1237,79 @@ ai-visibility-v1-prompt-brand-prompts:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1PromptBrandPromptsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-gap-prompts:
+  get:
+    tags: [ai-visibility]
+    summary: Get gap prompts (Prompt v2 JSON)
+    description: |
+      Returns prompts with the gap between the target brand and its competitors using Semrush
+      `PromptService` v2 `GapPrompts` and `GapPromptsTotals`. Returns each row as **native
+      protobuf JSON** (camelCase) including `gapMentions` per competitor brand. Supports
+      `sortBy` / `sortDirection` on `GAP_PROMPTS_REQUEST_ORDER_BY` (default
+      `MENTIONED_BRANDS_COUNT` descending). The response body is `{ data, totals }` plus
+      `srFilters`; `offset` and `limit` are not echoed (use the query parameters).
+
+      ### Filters
+
+      The endpoint accepts the following optional filters, forwarded as native protobuf fields
+      on both the list and totals requests (no QL filters):
+
+      - `gapKinds` → Semrush v2 `GapPromptsRequest.kinds[]` (default `ALL`).
+      - `topicId` → native `GapPromptsRequest.topic_hash` (uint64) — narrows results to a single topic.
+      - `sourceDomain` → native `GapPromptsRequest.source_domain` — narrows results to a single source domain.
+    operationId: getAiVisibilityV1PromptGapPrompts
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1GapPromptsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *topicIdOptionalParam
+      - *v1GapPromptsSourceDomainParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap prompts (v2 prompt payload) retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptGapPromptsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-prompt-response:
+  get:
+    tags: [ai-visibility]
+    summary: Get full prompt response (Relations v1 JSON)
+    description: |
+      Returns the full LLM response for a single prompt via Semrush `Relations/Prompt`
+      (`PromptResponse` protobuf JSON, camelCase). Requires `promptHash`; optional `serpId` and
+      `topicId` narrow the lookup. Response includes `value` (prompt text, Markdown `response`,
+      `mentionedBrands`, `sources`, `isoDate`) and `sourcesWithTitles`.
+    operationId: getAiVisibilityV1PromptPromptResponse
+    parameters:
+      - *promptHashParam
+      - *serpIdParam
+      - *topicIdOptionalParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+    responses:
+      '200':
+        description: Prompt response retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptPromptResponse'
       <<: *errorResponses
     security:
       - api_key: []

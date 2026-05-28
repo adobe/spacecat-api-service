@@ -649,6 +649,174 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'No updates provided');
   });
 
+  it('updates config.defaults with a valid siteId', async () => {
+    const siteId = '550e8400-e29b-41d4-a716-446655440001';
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    organizations[0].setConfig = sinon.stub();
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => orgId });
+    sandbox.stub(TierClient, 'createForSite').resolves({
+      checkValidEntitlement: sinon.stub().resolves({
+        entitlement: { getTier: () => 'PAID' },
+        siteEnrollment: { getId: () => 'enrollment-1' },
+      }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId } } } },
+      ...context,
+    });
+
+    const expectedConfig = { defaults: { ASO: { siteId } } };
+    expect(organizations[0].setConfig).to.have.been.calledOnceWith(expectedConfig);
+    expect(organizations[0].save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+  });
+
+  it('updates config.defaults without siteId (other fields allowed)', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    organizations[0].setConfig = sinon.stub();
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    sandbox.stub(TierClient, 'createForOrg').returns({
+      checkValidEntitlement: sinon.stub().resolves({ entitlement: { getTier: () => 'PAID' } }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { someOtherField: 'value' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+  });
+
+  it('returns forbidden when non-admin tries to update config.defaults', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error.message).to.include('Only admins can update config.defaults');
+  });
+
+  it('returns bad request for an unknown product code in config.defaults', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { UNKNOWN_PRODUCT: { siteId: 'site1' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Unknown product code in config.defaults: UNKNOWN_PRODUCT');
+  });
+
+  it('returns bad request when config.defaults product has no entitlement (with siteId)', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => orgId });
+    sandbox.stub(TierClient, 'createForSite').resolves({
+      checkValidEntitlement: sinon.stub().resolves({ entitlement: null, siteEnrollment: null }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'config.defaults.ASO: organization does not have an entitlement for this product');
+  });
+
+  it('returns bad request when config.defaults site is not enrolled for product', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => orgId });
+    sandbox.stub(TierClient, 'createForSite').resolves({
+      checkValidEntitlement: sinon.stub().resolves({
+        entitlement: { getTier: () => 'PAID' },
+        siteEnrollment: null,
+      }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'config.defaults.ASO: site is not enrolled for this product');
+  });
+
+  it('returns bad request when config.defaults siteId is not a valid UUID', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: 'not-a-uuid' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid siteId for product ASO in config.defaults');
+  });
+
+  it('returns bad request when config.defaults siteId does not belong to the organization', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => 'different-org-id' });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'config.defaults.ASO: site not found or does not belong to this organization');
+  });
+
+  it('returns bad request when config.defaults siteId does not exist', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves(null);
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440099' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'config.defaults.ASO: site not found or does not belong to this organization');
+  });
+
   it('gets all organizations', async () => {
     mockDataAccess.Organization.all.resolves(organizations);
 

@@ -24,6 +24,7 @@ import {
   updatePromptById,
   deletePromptById,
   bulkDeletePrompts,
+  checkPromptsExist,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -114,10 +115,24 @@ describe('prompts-storage', () => {
       expect(result).to.be.null;
     });
 
-    it('returns category id when found', async () => {
+    it('returns category id when found by business key', async () => {
       const client = { from: () => makeChain({ data: { id: 'cat-uuid' }, error: null }) };
       const result = await resolveCategoryUuid(ORG_ID, 'cat-1', client);
       expect(result).to.equal('cat-uuid');
+    });
+
+    it('resolves by primary key scoped to org when categoryId is a valid UUID', async () => {
+      const uuid = 'a1111111-1111-4111-b111-111111111111';
+      const client = { from: () => makeChain({ data: { id: uuid }, error: null }) };
+      const result = await resolveCategoryUuid(ORG_ID, uuid, client);
+      expect(result).to.equal(uuid);
+    });
+
+    it('returns null when UUID does not belong to the organization', async () => {
+      const uuid = 'a1111111-1111-4111-b111-111111111111';
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await resolveCategoryUuid(ORG_ID, uuid, client);
+      expect(result).to.be.null;
     });
   });
 
@@ -127,7 +142,7 @@ describe('prompts-storage', () => {
       expect(result).to.be.null;
     });
 
-    it('returns topic id when found', async () => {
+    it('returns topic id when found by business key', async () => {
       const client = { from: () => makeChain({ data: { id: 'topic-uuid' }, error: null }) };
       const result = await resolveTopicUuid(ORG_ID, 'topic-1', client);
       expect(result).to.equal('topic-uuid');
@@ -136,6 +151,20 @@ describe('prompts-storage', () => {
     it('returns null when topic is not found', async () => {
       const client = { from: () => makeChain({ data: null, error: null }) };
       const result = await resolveTopicUuid(ORG_ID, 'nonexistent', client);
+      expect(result).to.be.null;
+    });
+
+    it('resolves by primary key scoped to org when topicId is a valid UUID', async () => {
+      const uuid = 'b2222222-2222-4222-b222-222222222222';
+      const client = { from: () => makeChain({ data: { id: uuid }, error: null }) };
+      const result = await resolveTopicUuid(ORG_ID, uuid, client);
+      expect(result).to.equal(uuid);
+    });
+
+    it('returns null when UUID does not belong to the organization', async () => {
+      const uuid = 'b2222222-2222-4222-b222-222222222222';
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await resolveTopicUuid(ORG_ID, uuid, client);
       expect(result).to.be.null;
     });
   });
@@ -1989,6 +2018,59 @@ describe('prompts-storage', () => {
       expect(result.metadata.total).to.equal(2);
       expect(result.metadata.success).to.equal(1);
       expect(result.metadata.failure).to.equal(1);
+    });
+  });
+
+  describe('checkPromptsExist', () => {
+    const PROMPTS = [
+      { text: 'What are generative credits?', region: 'gb' },
+      { text: 'should not exist', region: 'tw' },
+    ];
+
+    it('throws when postgrestClient has no rpc', async () => {
+      await expect(
+        checkPromptsExist({
+          brandUuid: BRAND_UUID,
+          prompts: PROMPTS,
+          postgrestClient: null,
+        }),
+      ).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('returns empty array when RPC returns null data', async () => {
+      const client = { rpc: sandbox.stub().resolves({ data: null, error: null }) };
+      const result = await checkPromptsExist({
+        brandUuid: BRAND_UUID,
+        prompts: PROMPTS,
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal([]);
+    });
+
+    it('returns matching pairs on success', async () => {
+      const expected = [{ text: 'What are generative credits?', region: 'gb' }];
+      const client = { rpc: sandbox.stub().resolves({ data: expected, error: null }) };
+      const result = await checkPromptsExist({
+        brandUuid: BRAND_UUID,
+        prompts: PROMPTS,
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal(expected);
+      const [rpcName, rpcArgs] = client.rpc.firstCall.args;
+      expect(rpcName).to.equal('rpc_check_prompts_exist');
+      expect(rpcArgs.p_brand_id).to.equal(BRAND_UUID);
+      expect(rpcArgs.p_prompts).to.deep.equal(PROMPTS);
+    });
+
+    it('throws when RPC returns an error', async () => {
+      const client = { rpc: sandbox.stub().resolves({ data: null, error: { message: 'DB error' } }) };
+      await expect(
+        checkPromptsExist({
+          brandUuid: BRAND_UUID,
+          prompts: PROMPTS,
+          postgrestClient: client,
+        }),
+      ).to.be.rejectedWith('checkPromptsExist RPC failed: DB error');
     });
   });
 });

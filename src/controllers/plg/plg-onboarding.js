@@ -11,6 +11,7 @@
  */
 
 // TODO: re-export from @adobe/spacecat-shared-data-access package root
+import { isIP } from 'node:net';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
@@ -53,6 +54,10 @@ import { updateRumConfig } from '../../support/rum-config-service.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { cleanupPlgSiteSuggestionsAndFixes } from './plg-onboarding-cleanup.js';
+
+function isFromAsoUI(context) {
+  return context?.pathInfo?.headers?.['x-client-type'] === 'sites-optimizer-ui';
+}
 
 const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
@@ -239,38 +244,75 @@ async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
 // AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
 const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
 
-// RFC 1123 hostname: labels of 1-63 alphanumeric/hyphen chars, separated by dots, max 253 chars
-const HOSTNAME_RE = /^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+// Strip http:// or https:// scheme so callers can pass either scheme-prefixed input or a bare
+// hostname/path. Only the scheme is removed — port, userinfo, query, and fragment are NOT
+// stripped and will be rejected by the domain validator downstream.
+const stripScheme = (s) => s.replace(/^https?:\/\//i, '');
 
-/**
- * Validates that a domain is a syntactically valid hostname (RFC 1123).
- * @param {string} domain - The domain to validate.
- * @returns {boolean} true if valid hostname, false otherwise.
- */
-function isValidHostname(domain) {
-  return HOSTNAME_RE.test(domain);
-}
+// Prepare a raw user-supplied domain for validation and persistence: strip scheme, then
+// lowercase via PlgOnboarding.normalizeDomain so callers can pass mixed-case input.
+// The shared schema requires lowercase, so callers must normalize before validating
+// or saving — otherwise the data-access layer would reject the write.
+const prepareDomain = (raw) => PlgOnboardingModel.normalizeDomain(stripScheme(raw));
+
+// Delegates to the shared PlgOnboarding.isValidDomain validator so this service, the
+// data-access schema (plg-onboarding.schema.js), and any future consumer share a single
+// implementation. Do NOT import DOMAIN_PATTERN directly — it is incomplete on its own
+// (no length cap, no all-numeric/short-form-IP rejection, no control-char check).
+const isValidDomain = (domain) => PlgOnboardingModel.isValidDomain(domain);
 
 /**
  * Validates that a domain is not a private/internal address to prevent SSRF.
- * @param {string} domain - The domain to validate.
+ *
+ * IMPORTANT ordering contract: callers MUST invoke prepareDomain() and isValidDomain() BEFORE
+ * this function. The hostname is extracted via `split('/')[0]`, so if a raw scheme-prefixed
+ * input like "https://10.0.0.1" reaches this function, the split yields "https:" and the
+ * private-IP blocklist is bypassed. isValidDomain() rejects any scheme-prefixed input, which
+ * is what makes this contract safe.
+ *
+ * Defense in depth: the raw input is first canonicalized via the WHATWG URL parser so that
+ * hex/decimal/octal IP forms (e.g. 0xa9.254.169.254 → 169.254.169.254 AWS IMDS) and
+ * IPv6 forms are normalized before denylist matching. The shared isValidDomain already
+ * rejects these via its alphabetic-TLD requirement, but canonicalizing here closes the
+ * gap if a future caller composes a bypass that survives validation.
+ *
+ * @param {string} domain - The domain to validate (may include a path, e.g. "nba.com/kings").
  * @returns {boolean} true if safe, false if potentially dangerous.
  */
-function isSafeDomain(domain) {
+export function isSafeDomain(domain) {
+  const rawHostname = domain.split('/')[0];
+  let hostname;
+  try {
+    hostname = new URL(`https://${rawHostname}`).hostname;
+  } catch {
+    return false;
+  }
+  // net.isIP returns 4 (IPv4), 6 (IPv6), or 0 (not an IP). new URL serializes IPv6
+  // hostnames WITH brackets (`[fd00::1]`), which makes a naive isIP(hostname) check
+  // return 0 and silently misses every IPv6 private/loopback/link-local/IPv4-mapped
+  // form. Unwrap the brackets before the isIP test so the backstop catches IPv6
+  // literals (RFC 4193 ULA, RFC 4291 link-local, IPv4-mapped IMDS, etc.) too.
+  const ipLiteral = hostname.replace(/^\[|\]$/g, '');
+  if (isIP(ipLiteral)) {
+    return false;
+  }
   const blocked = [
     /^localhost$/i,
+    /\.localhost$/i,
     /^127\./,
     /^10\./,
     /^172\.(1[6-9]|2\d|3[01])\./,
     /^192\.168\./,
     /^169\.254\./,
     /^0\./,
+    // RFC 6761 reserves .localhost for loopback; runtime resolution is platform-dependent
+    // (Linux glibc/systemd hardcode it; macOS does not), so the static gate is required.
     /^\[::1\]/,
     /\.local$/i,
     /\.internal$/i,
     /\.private\./i,
   ];
-  return !blocked.some((pattern) => pattern.test(domain));
+  return !blocked.some((pattern) => pattern.test(hostname));
 }
 
 function getReviewerIdentity(context) {
@@ -646,23 +688,30 @@ async function createOrFindProject(baseURL, organizationId, context) {
  * @returns {Promise<object>} PlgOnboarding record
  */
 async function performAsoPlgOnboarding({
-  domain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
+  domain: rawDomain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
 }, context) {
+  const domain = prepareDomain(rawDomain);
   const { dataAccess, env, log } = context;
   const callerIdentity = getReviewerIdentity(context);
   const {
     Site, PlgOnboarding, Organization,
   } = dataAccess;
 
-  /* c8 ignore next 7 */
-  if (!isValidHostname(domain)) {
+  // Defense-in-depth: outer entry points (onboard, alternateDomain bypass) already
+  // prepareDomain + isValidDomain + isSafeDomain. These inner checks guard against any
+  // future caller that constructs an unvalidated payload (admin tooling, backfill scripts).
+  // The predicates are covered by the alternateDomain test path; the throw bodies are
+  // unreachable from the current test corpus because every caller pre-validates.
+  if (!isValidDomain(domain)) {
+    /* c8 ignore next 5 */
     throw Object.assign(
-      new Error('Invalid domain: must be a valid hostname'),
+      new Error('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)'),
       { clientError: true },
     );
   }
 
   if (!isSafeDomain(domain)) {
+    /* c8 ignore next 5 */
     throw Object.assign(
       new Error('Invalid domain'),
       { clientError: true },
@@ -704,7 +753,7 @@ async function performAsoPlgOnboarding({
     }
   }
   onboarding.setUpdatedBy(callerIdentity);
-  if ([STATUSES.PRE_ONBOARDING, STATUSES.INACTIVE].includes(onboarding.getStatus())) {
+  if (isFromAsoUI(context)) {
     onboarding.setCreatedBy(callerIdentity);
   }
 
@@ -1435,11 +1484,13 @@ function PlgOnboardingController(ctx) {
       return badRequest('Request body is required');
     }
 
-    const { domain, imsOrgId: requestedImsOrgId } = data;
+    const { domain: rawDomain, imsOrgId: requestedImsOrgId } = data;
 
-    if (!hasText(domain)) {
+    if (!hasText(rawDomain)) {
       return badRequest('domain is required');
     }
+
+    const domain = prepareDomain(rawDomain);
 
     const { authInfo } = attributes;
 
@@ -1477,8 +1528,9 @@ function PlgOnboardingController(ctx) {
       }
     }
 
-    if (!isValidHostname(domain)) {
-      return badRequest('Invalid domain: must be a valid hostname');
+    if (!isValidDomain(domain)) {
+      log.warn(`PLG onboard rejected — invalid domain syntax. rawDomain=${JSON.stringify(rawDomain)} normalized=${JSON.stringify(domain)} imsOrgId=${imsOrgId}`);
+      return badRequest('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)');
     }
 
     try {
@@ -1695,6 +1747,8 @@ function PlgOnboardingController(ctx) {
    * - UPHELD: transition to REJECTED (terminal)
    * - CLOSED: retire the current domain to OUTDATED and onboard an alternate domain
    *           (requires siteConfig.alternateDomain for DOMAIN_ALREADY_ASSIGNED reason)
+   * - PENDING: record that an ESE is actively working on this (e.g. emailed customer)
+   *            without changing the status; reviewedBy identifies who is handling it
    * REOPENED and OFFBOARDED are handled by transitionStatus
    * (PATCH /plg/onboard/:onboardingId/status).
    */
@@ -1721,6 +1775,7 @@ function PlgOnboardingController(ctx) {
 
     const allowedDecisions = [
       REVIEW_DECISIONS.BYPASSED, REVIEW_DECISIONS.UPHELD, REVIEW_DECISIONS.CLOSED,
+      REVIEW_DECISIONS.PENDING,
     ];
     if (!hasText(decision) || !allowedDecisions.includes(decision)) {
       return badRequest(`decision must be one of: ${allowedDecisions.join(', ')}`);
@@ -1761,12 +1816,18 @@ function PlgOnboardingController(ctx) {
     const updatedReviews = [...existingReviews, reviewEntry];
     onboarding.setReviews(updatedReviews);
 
+    onboarding.setUpdatedBy(reviewedBy);
+
+    // PENDING: record ESE action without changing status (e.g. emailed customer)
+    if (decision === REVIEW_DECISIONS.PENDING) {
+      await onboarding.save();
+      return ok(PlgOnboardingDto.toAdminJSON(onboarding));
+    }
+
     const checkKey = deriveCheckKey(onboarding);
     if (!checkKey) {
       return badRequest('Unable to determine the review reason from the onboarding record');
     }
-
-    onboarding.setUpdatedBy(reviewedBy);
 
     // UPHOLD: reject the domain — transition to REJECTED (terminal)
     if (decision === REVIEW_DECISIONS.UPHELD) {
@@ -1884,17 +1945,23 @@ function PlgOnboardingController(ctx) {
 
           // Handle alternateDomain: retire current domain, onboard a new domain under current org
           if (hasText(siteConfig?.alternateDomain)) {
-            if (!isSafeDomain(siteConfig.alternateDomain)) {
-              return badRequest(`Invalid alternate domain: ${siteConfig.alternateDomain}`);
+            const altDomain = prepareDomain(siteConfig.alternateDomain);
+            if (!isValidDomain(altDomain)) {
+              log.warn(`PLG bypass rejected — invalid alternate domain syntax. raw=${JSON.stringify(siteConfig.alternateDomain)} normalized=${JSON.stringify(altDomain)} onboardingId=${onboarding.getId?.()}`);
+              return badRequest(`Invalid alternate domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings): ${altDomain}`);
+            }
+            if (!isSafeDomain(altDomain)) {
+              log.warn(`PLG bypass rejected — unsafe alternate domain (SSRF gate). normalized=${JSON.stringify(altDomain)} onboardingId=${onboarding.getId?.()}`);
+              return badRequest(`Invalid alternate domain: ${altDomain}`);
             }
             onboarding.setStatus(STATUSES.OUTDATED);
             onboarding.setWaitlistReason(null);
             await onboarding.save();
             await postPlgOnboardingNotification(onboarding, context);
-            log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${siteConfig.alternateDomain}`);
+            log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${altDomain}`);
             const result = await performAsoPlgOnboarding(
               {
-                domain: siteConfig.alternateDomain,
+                domain: altDomain,
                 imsOrgId: onboarding.getImsOrgId(),
               },
               context,

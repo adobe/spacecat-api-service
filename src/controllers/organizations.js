@@ -23,6 +23,8 @@ import {
   isString,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
@@ -388,6 +390,37 @@ function OrganizationsController(ctx, env) {
     }
 
     if (isObject(requestBody.config)) {
+      if (isObject(requestBody.config.defaults)) {
+        if (!accessControlUtil.hasAdminAccess()) {
+          return forbidden('Only admins can update config.defaults');
+        }
+        const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
+        for (const [productCode, entry] of Object.entries(requestBody.config.defaults)) {
+          if (!VALID_PRODUCT_CODES.has(productCode)) {
+            return badRequest(`Unknown product code in config.defaults: ${productCode}`);
+          }
+          if (isObject(entry) && entry.siteId != null) {
+            if (!isValidUUID(entry.siteId)) {
+              return badRequest(`Invalid siteId for product ${productCode} in config.defaults`);
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const site = await Site.findById(entry.siteId);
+            if (!site || site.getOrganizationId() !== organization.getId()) {
+              return badRequest(`config.defaults.${productCode}: site not found or does not belong to this organization`);
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const siteTierClient = await TierClient.createForSite(context, site, productCode);
+            // eslint-disable-next-line no-await-in-loop
+            const { entitlement, siteEnrollment } = await siteTierClient.checkValidEntitlement();
+            if (!entitlement) {
+              return badRequest(`config.defaults.${productCode}: organization does not have an entitlement for this product`);
+            }
+            if (!siteEnrollment) {
+              return badRequest(`config.defaults.${productCode}: site is not enrolled for this product`);
+            }
+          }
+        }
+      }
       organization.setConfig(requestBody.config);
       updates = true;
     }
