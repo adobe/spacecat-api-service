@@ -247,6 +247,31 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Site Id is invalid. Please provide a valid UUID.');
   });
 
+  it('accepts UUID v7 site ids (RFC 9562) — gateway must not v4-restrict', async () => {
+    // Mystique-side site / opportunity / suggestion IDs are progressively
+    // moving to UUID v7 (sortable). The route gate used to v4-restrict the
+    // siteId, returning 400 "Site Id is invalid" on a syntactically valid v7
+    // UUID. The gateway must accept any UUID version and let the controller
+    // decide whether the row exists. (Variant nibble is independently clamped
+    // to `[89ab]` in the gate regex; that's still enforced.)
+    const v7SiteId = '019cde0c-fe79-76b2-bc50-a40e1b1b1c36';
+    context.pathInfo.suffix = `/sites/${v7SiteId}`;
+
+    request = new Request(
+      `${baseUrl}/sites/${v7SiteId}`,
+      { headers: { 'x-api-key': apiKey } },
+    );
+
+    const resp = await main(request, context);
+
+    // Past the gateway — controller may 404 or 200 depending on fixture, but
+    // it MUST NOT be a 400 with the "Site Id is invalid" message.
+    expect(resp.status).to.not.equal(400);
+    expect(resp.headers.plain()['x-error']).to.not.equal(
+      'Site Id is invalid. Please provide a valid UUID.',
+    );
+  });
+
   it('handles plgOnboardingId not correctly formatted error', async () => {
     context.pathInfo.suffix = '/plg/records/not-a-uuid';
 
@@ -335,8 +360,8 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Execution Id is invalid. Please provide a valid UUID.');
   });
 
-  it('rejects /semrush/projects/:workspaceId/:projectId/... with an invalid workspaceId UUID', async () => {
-    const path = '/v2/orgs/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/e730ec12-4325-4bdd-ac71-0f4aa5b18ce0/semrush/projects/not-a-uuid/proj-1/tags';
+  it('rejects /serenity/projects/:workspaceId/:projectId/... with an invalid workspaceId UUID', async () => {
+    const path = '/v2/orgs/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/e730ec12-4325-4bdd-ac71-0f4aa5b18ce0/serenity/projects/not-a-uuid/proj-1/tags';
     context.pathInfo.suffix = path;
     request = new Request(`${baseUrl}${path}`, {
       method: 'GET',
