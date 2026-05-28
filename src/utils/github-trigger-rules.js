@@ -26,13 +26,14 @@ export const EVENT_JOB_MAP = {
  * @param {object} data - Parsed webhook payload
  * @param {string} action - The event action (e.g. 'review_requested', 'labeled')
  * @param {object} env - Environment variables
+ * @param {string} [appSlug] - Allowed-bot slug; defaults to env.GITHUB_APP_SLUG
  * @returns {string|null} Skip reason or null
  */
-export function getSkipReason(data, action, env) {
+export function getSkipReason(data, action, env, appSlug = env.GITHUB_APP_SLUG) {
   const pr = data.pull_request;
-  // Caller must validate env.GITHUB_APP_SLUG before invoking (the controller
-  // returns 500 on missing config so GitHub retries, rather than 204 from a skip).
-  const appSlug = env.GITHUB_APP_SLUG;
+  // appSlug is resolved by the caller: the per-target appSlug in registry mode,
+  // else env.GITHUB_APP_SLUG (the default). Used to form the expected bot
+  // reviewer login. Defaulting keeps existing 3-arg callers unchanged.
 
   // Unsupported actions (auto-triggers deferred to Phase 3)
   if (action === 'opened' || action === 'ready_for_review') {

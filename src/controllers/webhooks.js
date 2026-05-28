@@ -94,14 +94,19 @@ function WebhooksController(context) {
     const deliveryId = ctx.pathInfo?.headers?.['x-github-delivery'];
     const { data } = ctx;
 
-    // Validate required config up front. GITHUB_APP_SLUG is a security-relevant
-    // decision (which bot can trigger automated runs). Missing config must be
-    // a 5xx so GitHub retries once it is fixed — returning 204 here would
-    // mean GitHub treats the delivery as succeeded and never redelivers,
-    // permanently losing every webhook during the misconfiguration window.
-    if (!env.GITHUB_APP_SLUG) {
-      log.error('GITHUB_APP_SLUG not configured', { deliveryId });
-      return internalServerError('GITHUB_APP_SLUG not configured');
+    // Destination resolved by the HMAC handler (registry mode). Legacy mode has
+    // no profile target_id/app_slug -> fall back to env.GITHUB_APP_SLUG and emit
+    // no target_id (worker then resolves its flat keys).
+    const profile = ctx.attributes?.authInfo?.getProfile?.() || {};
+    const targetId = profile.target_id;
+    const appSlug = profile.app_slug || env.GITHUB_APP_SLUG;
+
+    // Security-relevant: which bot can trigger automated runs. In registry mode
+    // this comes from the target's appSlug; in legacy mode from env. A missing
+    // value must be a 5xx (GitHub retries) rather than a 204 (delivery lost).
+    if (!appSlug) {
+      log.error('No app slug resolved (GITHUB_APP_SLUG unset and no target app_slug)', { deliveryId });
+      return internalServerError('app slug not configured');
     }
 
     // Filter on event type BEFORE validating payload fields. Unmapped events
@@ -140,7 +145,7 @@ function WebhooksController(context) {
     }
 
     // Apply trigger rules (returns skip reason string or null)
-    const skipReason = getSkipReason(data, action, env);
+    const skipReason = getSkipReason(data, action, env, appSlug);
     if (skipReason) {
       log.info('Skipping webhook', {
         skipReason,
@@ -214,6 +219,7 @@ function WebhooksController(context) {
       job_type: jobType,
       workspace_repos: workspaceRepos,
       retry_count: 0,
+      ...(targetId ? { target_id: targetId } : {}),
       ...(observability ? { observability } : {}),
     };
 
@@ -229,6 +235,10 @@ function WebhooksController(context) {
       repo: jobPayload.repo,
       prNumber: pr.number,
       installationId: jobPayload.installation_id,
+      // Classification outcome, for traffic-distribution observability (per the
+      // PR #2503 review recommendation). 'legacy' = GITHUB_TARGETS unset, so the
+      // worker resolves its flat keys; otherwise the resolved destination id.
+      targetId: targetId || 'legacy',
     });
 
     return accepted({ status: 'accepted' });

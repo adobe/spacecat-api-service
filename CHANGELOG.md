@@ -1,3 +1,31 @@
+# [1.525.0](https://github.com/adobe/spacecat-api-service/compare/v1.524.0...v1.525.0) (2026-05-28)
+
+
+### Features
+
+* auto-create org entitlement and site enrollment via x-product header upon new site/org creation ([#2432](https://github.com/adobe/spacecat-api-service/issues/2432)) ([acdcc1b](https://github.com/adobe/spacecat-api-service/commit/acdcc1bc8e6f3e1425900fab427affb4aa7ab7d6))
+
+# [1.524.0](https://github.com/adobe/spacecat-api-service/compare/v1.523.0...v1.524.0) (2026-05-28)
+
+
+### Features
+
+* **webhooks:** log resolved targetId on the enqueue log ([#2509](https://github.com/adobe/spacecat-api-service/issues/2509)) ([d289627](https://github.com/adobe/spacecat-api-service/commit/d28962778bc48843ebfa9f6108a751debe82fc01)), closes [#2503](https://github.com/adobe/spacecat-api-service/issues/2503)
+
+# [1.523.0](https://github.com/adobe/spacecat-api-service/compare/v1.522.2...v1.523.0) (2026-05-28)
+
+
+### Features
+
+* classify GitHub webhook destination and carry target_id to the worker ([#2503](https://github.com/adobe/spacecat-api-service/issues/2503)) ([ef66b61](https://github.com/adobe/spacecat-api-service/commit/ef66b6179c29a7d538d1ab540aac56fbb54c74ee)), closes [adobe/mysticat-architecture#94](https://github.com/adobe/mysticat-architecture/issues/94) [#27](https://github.com/adobe/spacecat-api-service/issues/27)
+
+## [1.522.2](https://github.com/adobe/spacecat-api-service/compare/v1.522.1...v1.522.2) (2026-05-28)
+
+
+### Bug Fixes
+
+* **plg:** move scrape-top-pages before broken-backlinks in aso_plg profile ([#2502](https://github.com/adobe/spacecat-api-service/issues/2502)) ([f63208d](https://github.com/adobe/spacecat-api-service/commit/f63208da259070302da6b787c463284e8f9ef4ae))
+
 ## [1.522.1](https://github.com/adobe/spacecat-api-service/compare/v1.522.0...v1.522.1) (2026-05-27)
 
 
