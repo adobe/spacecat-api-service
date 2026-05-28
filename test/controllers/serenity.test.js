@@ -343,6 +343,23 @@ describe('SerenityController', () => {
       expect(body.message).to.equal('Upstream request failed');
       expect(JSON.stringify(body)).not.to.match(/leak/);
     });
+
+    // mapError's final fallback: anything that isn't ErrorWithStatusCode and
+    // isn't SerenityTransportError lands on the generic 500 path. No upstream
+    // body, no status code leakage — the message is always the constant
+    // 'Internal server error'. The error itself is log.error'd server-side
+    // so an operator can still reconstruct.
+    it('generic Error maps to 500 internalServerError with no upstream detail leakage', async () => {
+      handlers.handleListMarkets.rejects(new Error('boom from somewhere'));
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(500);
+      const body = await readBody(response);
+      expect(body.error).to.equal('internalServerError');
+      expect(body.message).to.equal('Internal server error');
+      expect(log.error).to.have.been.calledWithMatch('Serenity controller error');
+    });
   });
 
   describe('controller surface', () => {
