@@ -19,8 +19,10 @@ import {
   OPPTY_2_ID,
   OPPTY_3_ID,
   FIX_1_ID,
+  FIX_2_ID,
   FIX_1_CREATED_DATE,
   SUGG_1_ID,
+  SUGG_2_ID,
   NON_EXISTENT_FIX_ID,
 } from '../seed-ids.js';
 
@@ -56,12 +58,20 @@ export default function fixTests(getHttpClient, resetData) {
     describe('GET .../fixes', () => {
       before(() => resetData());
 
-      it('user: returns fixes for opportunity', async () => {
+      it('user: returns fixes with suggestions for opportunity', async () => {
         const http = getHttpClient();
         const res = await http.user.get(BASE);
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(2);
         res.body.forEach((f) => expectFixDto(f));
+
+        const fix1 = res.body.find((f) => f.id === FIX_1_ID);
+        expect(fix1.suggestions).to.be.an('array').with.lengthOf(1);
+        expect(fix1.suggestions[0].id).to.equal(SUGG_1_ID);
+
+        const fix2 = res.body.find((f) => f.id === FIX_2_ID);
+        expect(fix2.suggestions).to.be.an('array').with.lengthOf(1);
+        expect(fix2.suggestions[0].id).to.equal(SUGG_2_ID);
       });
 
       it('user: returns 403 for denied site', async () => {
