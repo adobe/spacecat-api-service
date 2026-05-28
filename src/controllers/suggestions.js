@@ -53,21 +53,13 @@ import { postSlackMessage } from '../utils/slack/base.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
-async function getSiteAsoTier(site) {
+async function isSitePlgTier(site) {
   try {
     const enrollments = await site.getSiteEnrollments();
-    if (!enrollments?.length) {
-      return null;
-    }
-    const entitlements = await Promise.all(enrollments.map((e) => e.getEntitlement()));
-    const asoEntitlement = entitlements.find((e) => e?.getProductCode() === 'ASO');
-    if (!asoEntitlement) {
-      return null;
-    }
-    const tier = asoEntitlement.getTier();
-    return (tier === 'PAID' || tier === 'PLG') ? tier : null;
+    const entitlements = await Promise.all((enrollments ?? []).map((e) => e.getEntitlement()));
+    return entitlements.some((e) => e?.getProductCode() === 'ASO' && e.getTier() === 'PLG');
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -80,8 +72,7 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
   }
 
   try {
-    const tier = await getSiteAsoTier(site);
-    if (tier !== 'PLG') {
+    if (!await isSitePlgTier(site)) {
       return;
     }
 
