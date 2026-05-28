@@ -43,7 +43,7 @@ export const fixes = [
 
 /**
  * Junction table: fix_entity_suggestions
- * Links FIX_1 → SUGG_1
+ * Links FIX_1 → SUGG_1, FIX_2 → SUGG_2
  */
 export const fixEntitySuggestions = [
   {
@@ -51,5 +51,11 @@ export const fixEntitySuggestions = [
     suggestion_id: 'bb111111-1111-4111-b111-111111111111',
     opportunity_id: 'aa111111-1111-4111-b111-111111111111',
     fix_entity_created_at: '2025-01-20T12:00:00.000Z',
+  },
+  {
+    fix_entity_id: 'cc222222-2222-4222-a222-222222222222',
+    suggestion_id: 'bb222222-2222-4222-a222-222222222222',
+    opportunity_id: 'aa111111-1111-4111-b111-111111111111',
+    fix_entity_created_at: '2025-02-15T10:00:00.000Z',
   },
 ];

@@ -149,7 +149,9 @@ describe('Fixes Controller', () => {
           changeDetails: { arbitrary: 'value 3' },
         }),
       ]);
-      fixEntityCollection.allByOpportunityId.resolves(fixEntities);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves(fixEntities.map((fixEntity) => ({ fixEntity, suggestions: [] })));
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -158,12 +160,13 @@ describe('Fixes Controller', () => {
     });
 
     it('responds 404 if the fix does not belong to the given opportunity', async () => {
-      fixEntityCollection.allByOpportunityId.resolves([
-        await fixEntityCollection.create({
-          type: Suggestion.TYPES.CONTENT_UPDATE,
-          opportunityId: 'wrong-opportunity-id',
-        }),
-      ]);
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId: 'wrong-opportunity-id',
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
       expect(response).includes({ status: 404 });
@@ -173,7 +176,13 @@ describe('Fixes Controller', () => {
     });
 
     it('responds 404 if the opportunity does not belong to the given site', async () => {
-      fixEntityCollection.allByOpportunityId.resolves([]);
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
       opportunityGetStub.callsFake((data) => ({
         go: async () => ({ data: { ...data, siteId: 'wrong-site-id' } }),
       }));
@@ -183,6 +192,16 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals({
         message: 'Opportunity not found',
       });
+    });
+
+    it('returns empty array when no fixes exist for the opportunity', async () => {
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
     });
 
     it('responds 400 if the site ID parameter is not a uuid', async () => {

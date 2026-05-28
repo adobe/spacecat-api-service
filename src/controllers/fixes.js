@@ -149,26 +149,24 @@ export class FixesController {
       return ok(fixes);
     }
 
-    fixEntities = await this.#FixEntity.allByOpportunityId(opportunityId);
+    const fixEntitiesWithSuggestions = await this.#FixEntity
+      .getAllFixesWithSuggestionsByOpportunityId(opportunityId);
 
-    // Check whether the suggestion belongs to the opportunity,
-    // and the opportunity belongs to the site.
+    if (fixEntitiesWithSuggestions.length === 0) {
+      return ok([]);
+    }
+
+    fixEntities = fixEntitiesWithSuggestions.map((item) => {
+      const { fixEntity } = item;
+      // eslint-disable-next-line no-underscore-dangle
+      fixEntity._suggestions = item.suggestions;
+      return fixEntity;
+    });
+
     res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
     if (res) {
       return res;
     }
-
-    // SITES-45274: attach suggestions to each fix entity so FixDto.toJSON
-    // includes them in the response. Without this, the UI's DeployedViewTable
-    // renders 0 rows (it iterates fixEntity.suggestions) even though the tab
-    // counter correctly counts the fix entities.
-    // The fixCreatedDate path above (lines 112-126) already does this via
-    // getAllFixesWithSuggestionByCreatedAt; this path was missing it.
-    await Promise.all(fixEntities.map(async (fixEntity) => {
-      const suggestions = await fixEntity.getSuggestions();
-      // eslint-disable-next-line no-underscore-dangle,no-param-reassign
-      fixEntity._suggestions = suggestions;
-    }));
 
     fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);

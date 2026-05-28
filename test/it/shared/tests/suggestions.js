@@ -21,6 +21,7 @@ import {
   SUGG_1_ID,
   SUGG_2_ID,
   FIX_1_ID,
+  FIX_2_ID,
   NON_EXISTENT_SUGG_ID,
 } from '../seed-ids.js';
 
@@ -227,11 +228,12 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(res.body.data[0].id).to.equal(FIX_1_ID);
       });
 
-      it('user: returns empty for suggestion with no fix associations', async () => {
+      it('user: returns fixes linked to SUGG_2 via junction', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/${SUGG_2_ID}/fixes`);
         expect(res.status).to.equal(200);
-        expect(res.body.data).to.be.an('array').with.lengthOf(0);
+        expect(res.body.data).to.be.an('array').with.lengthOf(1);
+        expect(res.body.data[0].id).to.equal(FIX_2_ID);
       });
 
       it('user: returns 200 with empty data for non-existent suggestion', async () => {
