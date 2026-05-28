@@ -383,6 +383,7 @@ function SerenityController(context, log, env) {
         auth.brandUuid,
         auth.semrushWorkspaceId,
         parsedQuery(ctx),
+        log,
       );
       return ok(result);
     } catch (e) {

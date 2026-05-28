@@ -102,6 +102,21 @@ Missing required filters → 400 (`invalidRequest`). The endpoint always resolve
   "tags": ["..."]   // optional — omit = preserve; explicit [] = clear
 }
 
+// POST /serenity/prompts
+//   text + tags REQUIRED on every input. `tags: []` is allowed and means "no tags";
+//   PATCH semantics differ — see PATCH spec above. Slice (geoTargetId, languageCode)
+//   resolves the upstream project; rows for an unknown slice are reported in `skipped`.
+{
+  "prompts": [
+    {
+      "text": "...",
+      "tags": ["..."],
+      "geoTargetId": 2840,
+      "languageCode": "en"
+    }
+  ]
+}
+
 // POST /serenity/prompts/bulk-delete
 {
   "prompts": [
@@ -110,16 +125,25 @@ Missing required filters → 400 (`invalidRequest`). The endpoint always resolve
 }
 
 // POST /serenity/markets
-//   brand domain + brand names are read server-side from the `brands` row.
-//   `name` defaults to `<brand display name>-<6 char random hex>` when omitted
-//   (e.g. `Adobe-a3f7c1`). The random suffix lets operators distinguish
-//   multiple projects in the Semrush workspace UI even when their (market,
-//   language) tuple is identical — guards against accidental collisions in
-//   shared workspaces and against re-create-after-delete confusion.
+//   All five fields below are required on the request body. An earlier draft of
+//   this spec proposed reading `brandDomain` and `brandNames` server-side from
+//   the `brands` row; the shipped implementation keeps them in the request body
+//   because (a) the client already has the values loaded for the BrandSelector
+//   it just rendered, (b) a server-side read would force a second DB lookup per
+//   create with no behaviour change, and (c) it keeps the controller's
+//   pre-flight validation a single self-contained step. `name` is optional —
+//   defaults to `<brand display name>-<6 char random hex>` (e.g. `Adobe-a3f7c1`).
+//   The random suffix lets operators distinguish multiple projects in the
+//   Semrush workspace UI even when their (market, language) tuple is identical
+//   — guards against accidental collisions in shared workspaces and against
+//   re-create-after-delete confusion.
 {
-  "geoTargetId": 2840,
+  "market": "US",                    // ISO-2 country code (alpha-2)
   "languageCode": "en",
-  "name": "<optional display name; defaults to '<brand>-<random>' when omitted>"
+  "brandDomain": "example.com",
+  "brandNames": ["Example", "Example Brand"],
+  "name": "<optional display name; defaults to '<brand>-<random>' when omitted>",
+  "brandDisplayName": "<optional; controls the default name's prefix>"
 }
 
 // DELETE /serenity/markets/:geoTargetId/:languageCode
@@ -131,14 +155,20 @@ Missing required filters → 400 (`invalidRequest`). The endpoint always resolve
 
 ```jsonc
 {
+  "brandId": "<uuid>",
   "geoTargetId": 2840,
   "languageCode": "en",
-  "status": "live" | "pending" | "publish_failed" | "create_failed",
-  "name": "<display name>",
   "createdAt": "...",
   "updatedAt": "..."
 }
 ```
+
+**Deferred fields (post-implementation revision, 2026-05-28).** Earlier drafts of this spec included `status` (`live | pending | publish_failed | create_failed`) and `name` (display name) on this DTO. The shipped implementation drops both:
+
+- `status` was redundant: `handleCreateMarket` publishes synchronously before responding, so any DB row represents a successfully published market — there is no `pending` state observable to the client, and `publish_failed` / `create_failed` would only ever surface as upstream errors (502) at create time, never as a row in the list.
+- `name` was an upstream display label with no UI consumer (the elmo Prompts Management page never reads it). Removing it lets the `/markets` list be a pure DB read; previously it forced an O(workspace-size) `listWorkspaceProjects` enrichment per request to populate one unused string.
+
+If a future UI surface needs publish-status or a display name, both can be re-added without breaking changes — `status` would be a derived field (DB row present + last-known publish state) and `name` would re-enable the enrichment on demand.
 
 ### 3.4 Tag / Model DTOs
 
@@ -335,7 +365,7 @@ There is no cleanup phase. Everything is removed in Phase 1.
 None. Previously-open items resolved:
 
 - `POST /serenity/markets` default `name` → `<brand display name>-<6 char random hex>` (e.g. `Adobe-a3f7c1`). The random suffix prevents collisions in shared workspaces and disambiguates re-create-after-delete. Explicit `name` in the body wins. See §3.2.
-- `GET /serenity/markets` `status` field → included (`live` / `pending` / `publish_failed` / `create_failed`). Lets the UI surface a banner for `publish_failed` slices. See §3.3.
+- `GET /serenity/markets` `status` field → **dropped** post-design (see §3.3 "Deferred fields"). The DB row is the source of truth: its presence means the slice was successfully published. There is no `pending` state visible to the client; create-time failures surface as 502 from `POST /serenity/markets` and produce no row.
 
 ## 10. Tracker
 

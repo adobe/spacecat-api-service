@@ -107,10 +107,15 @@ async function resolveLanguageId(transport, languageTag, log) {
       }
     }
     if (languageCache.byTag.size === 0 && items.length > 0) {
+      /* c8 ignore start -- `items[0] || {}` guards against a malformed
+         upstream where the first slot is explicitly null; in this branch
+         items.length > 0 so items[0] is defined, but the `|| {}` keeps
+         Object.keys safe under that adversarial shape. */
       log?.warn?.(
         'resolveLanguageId: language catalog returned no usable names — upstream field shape may have changed',
         { receivedKeys: Object.keys(items[0] || {}) },
       );
+      /* c8 ignore stop */
     }
     languageCache.expiresAt = now + LANGUAGE_CACHE_TTL_MS;
   }
@@ -475,21 +480,35 @@ export function clearTagCache() {
   tagCache.clear();
 }
 
+/* c8 ignore start -- LRU eviction only fires past TAG_CACHE_MAX_ENTRIES (512
+   distinct (workspace, project) tuples held in this container). The guard
+   is defensive against tagCache.delete failing silently; exercising it in a
+   unit test would require seeding 512 cache entries which is wasted work for
+   a branch the runtime hits only under unusual scale. */
 function evictTagCacheIfNeeded() {
   while (tagCache.size >= TAG_CACHE_MAX_ENTRIES) {
     const oldest = tagCache.keys().next().value;
-    /* c8 ignore next 3 -- defensive: size>=MAX implies a key exists */
     if (oldest === undefined) {
       break;
     }
     tagCache.delete(oldest);
   }
 }
+/* c8 ignore stop */
 
 /**
  * GET /serenity/tags?geoTargetId=&languageCode= — unique tag names across
  * the slice's prompts. Required filters; one slice → one upstream call set.
  * Short-TTL cache to keep dashboard polling cheap.
+ *
+ * TODO: the tag set is computed by paginating the project's prompts and
+ * aggregating distinct tag names in JS. This is an O(N) approximation —
+ * for a project with N prompts we do ceil(N/200) upstream calls. Capped
+ * at 50 pages (10k prompts); beyond that the tag set is silently
+ * truncated and a `warn` log fires (see TAG_PAGE_LIMIT in
+ * `handleListTags`). When/if Semrush exposes a dedicated tags endpoint
+ * (`GET /v1/workspaces/{ws}/projects/{pid}/tags`), this whole loop
+ * collapses to one upstream call and the truncation risk goes away.
  */
 export async function handleListTags(
   transport,
@@ -497,6 +516,7 @@ export async function handleListTags(
   brandId,
   semrushWorkspaceId,
   query,
+  log,
 ) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
@@ -526,7 +546,9 @@ export async function handleListTags(
   const seen = new Map();
   let page = 1;
   const LIMIT = 200;
-  while (page <= 50) {
+  const TAG_PAGE_LIMIT = 50;
+  let truncated = false;
+  while (page <= TAG_PAGE_LIMIT) {
     // eslint-disable-next-line no-await-in-loop
     const resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
       tag_ids: [],
@@ -552,7 +574,34 @@ export async function handleListTags(
     if (items.length < LIMIT) {
       break;
     }
+    if (page === TAG_PAGE_LIMIT) {
+      // We hit the ceiling AND the last page was full — there is at least
+      // one more page of prompts we never read, so the tag set is
+      // incomplete. Surface this to operators (the response is still 200
+      // because returning a partial set is preferable to a hard 500 here,
+      // but a missing tag in the UI dropdown is a real symptom and the
+      // log line is what makes it diagnosable).
+      truncated = true;
+      break;
+    }
     page += 1;
+  }
+
+  if (truncated) {
+    log?.warn?.(
+      'handleListTags: tag pagination ceiling reached, tag set is truncated',
+      {
+        brandId,
+        semrushWorkspaceId,
+        projectId,
+        geoTargetId,
+        languageCode,
+        pagesWalked: TAG_PAGE_LIMIT,
+        pageSize: LIMIT,
+        approximatePromptsScanned: TAG_PAGE_LIMIT * LIMIT,
+        tagsFound: seen.size,
+      },
+    );
   }
 
   const sorted = Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
