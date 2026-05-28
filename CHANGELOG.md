@@ -1,3 +1,122 @@
+# [1.523.0](https://github.com/adobe/spacecat-api-service/compare/v1.522.2...v1.523.0) (2026-05-28)
+
+
+### Features
+
+* classify GitHub webhook destination and carry target_id to the worker ([#2503](https://github.com/adobe/spacecat-api-service/issues/2503)) ([ef66b61](https://github.com/adobe/spacecat-api-service/commit/ef66b6179c29a7d538d1ab540aac56fbb54c74ee)), closes [adobe/mysticat-architecture#94](https://github.com/adobe/mysticat-architecture/issues/94) [#27](https://github.com/adobe/spacecat-api-service/issues/27)
+
+## [1.522.2](https://github.com/adobe/spacecat-api-service/compare/v1.522.1...v1.522.2) (2026-05-28)
+
+
+### Bug Fixes
+
+* **plg:** move scrape-top-pages before broken-backlinks in aso_plg profile ([#2502](https://github.com/adobe/spacecat-api-service/issues/2502)) ([f63208d](https://github.com/adobe/spacecat-api-service/commit/f63208da259070302da6b787c463284e8f9ef4ae))
+
+## [1.522.1](https://github.com/adobe/spacecat-api-service/compare/v1.522.0...v1.522.1) (2026-05-27)
+
+
+### Bug Fixes
+
+* **fixes:** filter by executedAt date instead of junction table in date query ([#2501](https://github.com/adobe/spacecat-api-service/issues/2501)) ([45809e0](https://github.com/adobe/spacecat-api-service/commit/45809e0cc56db979fa079dd41a16ddd3cf3eab53))
+
+# [1.522.0](https://github.com/adobe/spacecat-api-service/compare/v1.521.0...v1.522.0) (2026-05-27)
+
+
+### Features
+
+* **webhooks:** link PR and name requester/author in the enqueued Slack parent ([#2500](https://github.com/adobe/spacecat-api-service/issues/2500)) ([bd7065f](https://github.com/adobe/spacecat-api-service/commit/bd7065fff227182bdfca9d416d1370b603c9e744)), closes [#71](https://github.com/adobe/spacecat-api-service/issues/71)
+
+# [1.521.0](https://github.com/adobe/spacecat-api-service/compare/v1.520.3...v1.521.0) (2026-05-27)
+
+
+### Features
+
+* **api:** accept non-v4 UUIDs (RFC 9562) at the route gate ([#2496](https://github.com/adobe/spacecat-api-service/issues/2496)) ([00050a9](https://github.com/adobe/spacecat-api-service/commit/00050a9cecafae5ae717025faa49ab2f39f60b62))
+
+## [1.520.3](https://github.com/adobe/spacecat-api-service/compare/v1.520.2...v1.520.3) (2026-05-27)
+
+
+### Bug Fixes
+
+* **ci:** add exit:true to mocha config to fix it-postgres timeout ([#2495](https://github.com/adobe/spacecat-api-service/issues/2495)) ([f1d655a](https://github.com/adobe/spacecat-api-service/commit/f1d655a4dde0d5fa1e9eb681fdf96a98e503d1a8))
+
+## [1.520.2](https://github.com/adobe/spacecat-api-service/compare/v1.520.1...v1.520.2) (2026-05-27)
+
+
+### Bug Fixes
+
+* **auth:** use method+suffix for route matching in RouteScopedLegacyApiKeyHandler ([#2493](https://github.com/adobe/spacecat-api-service/issues/2493)) ([ec71d24](https://github.com/adobe/spacecat-api-service/commit/ec71d245b245e33eb3cdcc5499dfd457fa3d9fd0))
+
+## [1.520.1](https://github.com/adobe/spacecat-api-service/compare/v1.520.0...v1.520.1) (2026-05-27)
+
+
+### Bug Fixes
+
+* bump spacecat shared data access ([#2492](https://github.com/adobe/spacecat-api-service/issues/2492)) ([ac02ea2](https://github.com/adobe/spacecat-api-service/commit/ac02ea2f2be5cf1be40740d6e8d11e67c24cab88)), closes [#FixEntity](https://github.com/adobe/spacecat-api-service/issues/FixEntity) [#1619](https://github.com/adobe/spacecat-api-service/issues/1619)
+
+# [1.520.0](https://github.com/adobe/spacecat-api-service/compare/v1.519.0...v1.520.0) (2026-05-26)
+
+
+### Features
+
+* **slack:** add add-oae-stage-domain command for OAE stage domain on… ([#2482](https://github.com/adobe/spacecat-api-service/issues/2482)) ([78caf4c](https://github.com/adobe/spacecat-api-service/commit/78caf4c5928bf9ac206dbca769161e84917f6764))
+
+# [1.519.0](https://github.com/adobe/spacecat-api-service/compare/v1.518.0...v1.519.0) (2026-05-26)
+
+
+### Features
+
+* add POST /prompts/check endpoint for batch existence check | LLMO-5156 ([#2489](https://github.com/adobe/spacecat-api-service/issues/2489)) ([c0ca916](https://github.com/adobe/spacecat-api-service/commit/c0ca916d680719a08e16bff11d11841ff4744036))
+
+# [1.518.0](https://github.com/adobe/spacecat-api-service/compare/v1.517.0...v1.518.0) (2026-05-26)
+
+
+### Features
+
+* **llmo:** add PATCH endpoint to update a row in an LLMO XLSX data sheet ([#2473](https://github.com/adobe/spacecat-api-service/issues/2473)) ([e70a784](https://github.com/adobe/spacecat-api-service/commit/e70a7845677277951cdbc8d6112f145049e6e16b))
+
+# [1.517.0](https://github.com/adobe/spacecat-api-service/compare/v1.516.0...v1.517.0) (2026-05-26)
+
+
+### Features
+
+* **llmo:** detect AEM CS Fastly behind WAF simple proxy (Case 0) ([#2426](https://github.com/adobe/spacecat-api-service/issues/2426)) ([3b91905](https://github.com/adobe/spacecat-api-service/commit/3b919059528427b332f8563077abcac12cab5eca))
+
+# [1.516.0](https://github.com/adobe/spacecat-api-service/compare/v1.515.0...v1.516.0) (2026-05-26)
+
+
+### Features
+
+* **serenity:** rename /semrush → /serenity + post-launch hardening ([#2467](https://github.com/adobe/spacecat-api-service/issues/2467)) ([c9cdb42](https://github.com/adobe/spacecat-api-service/commit/c9cdb42fe64a94a9c0db1c839fb3db8fa6ed5eb3)), closes [#2466](https://github.com/adobe/spacecat-api-service/issues/2466)
+
+# [1.515.0](https://github.com/adobe/spacecat-api-service/compare/v1.514.1...v1.515.0) (2026-05-26)
+
+
+### Features
+
+* auto-create Atomic strategy on async edge-deploy | LLMO-4695 ([#2324](https://github.com/adobe/spacecat-api-service/issues/2324)) ([e2879a0](https://github.com/adobe/spacecat-api-service/commit/e2879a0365a2cf509af70ef26f2c05f6a660be59))
+
+## [1.514.1](https://github.com/adobe/spacecat-api-service/compare/v1.514.0...v1.514.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **auth:** use context.log in auth handler subclasses for per-request logging ([#2485](https://github.com/adobe/spacecat-api-service/issues/2485)) ([a115abb](https://github.com/adobe/spacecat-api-service/commit/a115abb795914688e197431c50deb5fed6e43e04))
+
+# [1.514.0](https://github.com/adobe/spacecat-api-service/compare/v1.513.0...v1.514.0) (2026-05-25)
+
+
+### Features
+
+* add PATCH /sites/:siteId/config/scraper ([#2469](https://github.com/adobe/spacecat-api-service/issues/2469)) ([7ca40ac](https://github.com/adobe/spacecat-api-service/commit/7ca40ac079fceb1130673f01e08d5a47ad72b9c3))
+
+# [1.513.0](https://github.com/adobe/spacecat-api-service/compare/v1.512.2...v1.513.0) (2026-05-25)
+
+
+### Features
+
+* **auth:** add route-scoped legacy API key handler for S2S-exempt endpoints ([#2481](https://github.com/adobe/spacecat-api-service/issues/2481)) ([ac498ce](https://github.com/adobe/spacecat-api-service/commit/ac498cedd2cb4550eb9495d56f92a535b3fe9e2e))
+
 ## [1.512.2](https://github.com/adobe/spacecat-api-service/compare/v1.512.1...v1.512.2) (2026-05-25)
 
 
