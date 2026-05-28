@@ -422,7 +422,7 @@ function SitesController(ctx, log, env) {
         : DEFAULT_LIMIT;
 
       const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
-      sites = (results.data || []).map((site) => SiteDto.toListJSON(site));
+      sites = (results?.data || []).map((site) => SiteDto.toListJSON(site));
       responseBody = {
         sites,
         pagination: {
