@@ -1146,6 +1146,41 @@ function SitesController(ctx, log, env) {
   };
 
   /**
+   * GET /sites/:siteId/config/scraper
+   *
+   * Returns just the per-site scraper configuration. Symmetric with the
+   * PATCH endpoint below — same narrow `{ siteId, scraperConfig }` shape
+   * so a caller writing then reading sees an identical envelope, and the
+   * full site config (which may include unrelated secrets such as
+   * `tokowakaConfig.apiKey`) is never echoed to a caller that only needs
+   * `scraperConfig`.
+   *
+   * Returns `scraperConfig: {}` when nothing is persisted yet, so callers
+   * don't need to handle a separate "missing" case.
+   */
+  const getScraperConfig = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Invalid site ID');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can read its sites');
+    }
+
+    return ok({
+      siteId: site.getId(),
+      scraperConfig: site.getConfig().getScraperConfig() ?? {},
+    });
+  };
+
+  /**
    * PATCH /sites/:siteId/config/scraper
    *
    * Replaces the entire `scraperConfig` on the site. Passing
@@ -1582,6 +1617,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    getScraperConfig,
     updateScraperConfig,
     getPageCitabilityCounts,
     getTopPages,

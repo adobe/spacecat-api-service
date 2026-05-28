@@ -134,6 +134,7 @@ describe('Sites Controller', () => {
     'removeSite',
     'updateSite',
     'updateCdnLogsConfig',
+    'getScraperConfig',
     'updateScraperConfig',
     'getPageCitabilityCounts',
     'getTopPages',
@@ -4360,6 +4361,87 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Failed to update CDN logs config');
+    });
+  });
+
+  describe('getScraperConfig', () => {
+    /* eslint-disable no-param-reassign */
+    const stubSiteWithScraperConfig = (site, headers) => {
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'getScraperConfig', {
+        value: () => (headers ? { headers } : undefined),
+        writable: true,
+        configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+      return wrapped;
+    };
+    /* eslint-enable no-param-reassign */
+
+    it('returns the persisted scraperConfig in the narrow response shape', async () => {
+      const site = sites[0];
+      const headers = { 'Accept-Language': 'en-US,en;q=0.9' };
+      stubSiteWithScraperConfig(site, headers);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        siteId: SITE_IDS[0],
+        scraperConfig: { headers },
+      });
+    });
+
+    it('returns an empty object when no scraperConfig is persisted', async () => {
+      const site = sites[0];
+      stubSiteWithScraperConfig(site, null);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      // Lock the "no missing case" contract: callers always get an object.
+      expect(body).to.deep.equal({ siteId: SITE_IDS[0], scraperConfig: {} });
+    });
+
+    it('returns bad request when site ID is invalid', async () => {
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: 'not-a-uuid' },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Invalid site ID');
+    });
+
+    it('returns not found when the site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(404);
+      expect((await response.json()).message).to.equal('Site not found');
+    });
+
+    it('returns forbidden when the user lacks access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(403);
     });
   });
 

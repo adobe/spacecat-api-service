@@ -244,6 +244,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId': sitesController.getByID,
     'PATCH /sites/:siteId': sitesController.updateSite,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
+    'GET /sites/:siteId/config/scraper': sitesController.getScraperConfig,
     'PATCH /sites/:siteId/config/scraper': sitesController.updateScraperConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/bot-blocker': botBlockerController.checkBotBlocker,
