@@ -1625,29 +1625,29 @@ function SuggestionsController(ctx, sqs, env) {
     context.log.info(`[edge-deploy] suggestionIds: ${JSON.stringify(context.data?.suggestionIds)}`);
 
     if (!isValidUUID(siteId)) {
-      context.log.warn(`[edge-deploy-failed] site: n/a, siteId ${siteId} is not a valid UUID`);
+      context.log.warn(`[edge-deploy-warn] site: n/a, siteId ${siteId} is not a valid UUID`);
       return badRequest('Site ID required');
     }
 
     const site = await Site.findById(siteId);
     if (!site) {
-      context.log.warn(`[edge-deploy-failed] site ${siteId} not found`);
+      context.log.warn(`[edge-deploy-warn] site ${siteId} not found`);
       return notFound('Site not found');
     }
     const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
 
     if (!isValidUUID(opportunityId)) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, opportunityId ${opportunityId} is not a valid UUID`);
+      context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, opportunityId ${opportunityId} is not a valid UUID`);
       return badRequest('Opportunity ID required');
     }
 
     if (!isNonEmptyObject(context.data)) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, no request body data provided`);
+      context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, no request body data provided`);
       return badRequest('No data provided');
     }
     const { suggestionIds: rawSuggestionIds } = context.data;
     if (!isArray(rawSuggestionIds) || rawSuggestionIds.length === 0) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestionIds is not a non-empty array`);
+      context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, suggestionIds is not a non-empty array`);
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
     const suggestionIds = [...new Set(rawSuggestionIds)];
@@ -1656,26 +1656,26 @@ function SuggestionsController(ctx, sqs, env) {
     // Org membership is the intended access gate for this endpoint.
     if (!await accessControlUtil.hasAccess(site)) {
       context.log.warn(
-        `[edge-deploy-failed] site: ${apexBaseUrl}, user does not have access to the site.`,
+        `[edge-deploy-warn] site: ${apexBaseUrl}, user does not have access to the site.`,
       );
       return forbidden('User does not belong to the organization');
     }
 
     if (!accessControlUtil.isLLMOAdministrator()) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user is not an LLMO administrator`);
+      context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, user is not an LLMO administrator`);
       return forbidden('Only LLMO administrators can deploy suggestions to edge');
     }
 
     if (!await accessControlUtil.isOwnerOfSite(site)) {
       context.log.warn(
-        `[edge-deploy-failed] site: ${apexBaseUrl}, user is not the owner of the site`,
+        `[edge-deploy-warn] site: ${apexBaseUrl}, user is not the owner of the site`,
       );
       return forbidden('User does not have access to deploy edge optimize fixes for this site');
     }
 
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, opportunity ${opportunityId} not found`);
+      context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, opportunity ${opportunityId} not found`);
       return notFound('Opportunity not found');
     }
 
@@ -1692,12 +1692,11 @@ function SuggestionsController(ctx, sqs, env) {
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
     // Check each requested suggestion (basic validation only)
-    context.log.info(`[edge-deploy] Classifying ${suggestionIds.length} suggestion(s), allSuggestions pool: ${allSuggestions.length}`);
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
 
       if (!suggestion) {
-        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} not found`);
+        context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, suggestion ${suggestionId} not found`);
         failedSuggestions.push({
           uuid: suggestionId,
           index,
@@ -1713,7 +1712,7 @@ function SuggestionsController(ctx, sqs, env) {
             allowedRegexPatterns: data.allowedRegexPatterns,
           });
         } else {
-          context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, domain-wide suggestion ${suggestionId} missing allowedRegexPatterns`);
+          context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, domain-wide suggestion ${suggestionId} missing allowedRegexPatterns`);
           failedSuggestions.push({
             uuid: suggestionId,
             index,
@@ -1725,7 +1724,7 @@ function SuggestionsController(ctx, sqs, env) {
         context.log.info(`[edge-deploy] ${suggestionId} → PATH (patterns=${JSON.stringify(suggestion.getData()?.allowedRegexPatterns)})`);
         const data = suggestion.getData();
         if (data?.edgeDeployed) {
-          context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, path suggestion ${suggestionId} is already deployed`);
+          context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, path suggestion ${suggestionId} is already deployed`);
           failedSuggestions.push({
             uuid: suggestionId,
             index,
@@ -1735,7 +1734,7 @@ function SuggestionsController(ctx, sqs, env) {
         } else if (isNonEmptyArray(data.allowedRegexPatterns)) {
           pathSuggestions.push({ suggestion, allowedRegexPatterns: data.allowedRegexPatterns });
         } else {
-          context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, path suggestion ${suggestionId} missing allowedRegexPatterns`);
+          context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, path suggestion ${suggestionId} missing allowedRegexPatterns`);
           failedSuggestions.push({
             uuid: suggestionId,
             index,
@@ -1744,7 +1743,7 @@ function SuggestionsController(ctx, sqs, env) {
           });
         }
       } else if (!isEdgeDeployableStatus(suggestion.getStatus())) {
-        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} (status: ${suggestion.getStatus()}) must be NEW or PENDING_VALIDATION for edge deploy`);
+        context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, suggestion ${suggestionId} (status: ${suggestion.getStatus()}) must be NEW or PENDING_VALIDATION for edge deploy`);
         failedSuggestions.push({
           uuid: suggestionId,
           index,
@@ -1765,7 +1764,7 @@ function SuggestionsController(ctx, sqs, env) {
     ];
 
     if (validSuggestionIds.length === 0) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, no valid suggestions to deploy`);
+      context.log.warn(`[edge-deploy-warn] site: ${apexBaseUrl}, no valid suggestions to deploy`);
       const response = {
         suggestions: [...failedSuggestions],
         metadata: {
