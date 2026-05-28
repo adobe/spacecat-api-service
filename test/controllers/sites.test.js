@@ -803,6 +803,24 @@ describe('Sites Controller', () => {
       );
     });
 
+    it('grants access to S2S consumer with site:readAll on the paginated path', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-paginated-1' };
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '10' } });
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-paginated-1/,
+      );
+    });
+
     it('denies S2S consumer with only site:read (no readAll)', async () => {
       context.s2sConsumer = makeS2SConsumer();
       mockDataAccess.Consumer.findByClientIdAndImsOrgId

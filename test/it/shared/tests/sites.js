@@ -143,6 +143,29 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.s2sConsumerUnknown.get('/sites');
         expect(res.status).to.equal(403);
       });
+
+      it('admin: returns the paginated envelope when limit is provided', async () => {
+        // Pins the controller↔DAL contract for the `returnCursor: true` shape that
+        // the in-controller null-guard depends on. Unit tests mock Site.all; this
+        // test exercises the real data-access layer end-to-end.
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?limit=2');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.sites).to.be.an('array').with.lengthOf.at.most(2);
+        expect(res.body.pagination.limit).to.equal(2);
+        expect(res.body.pagination.hasMore).to.be.a('boolean');
+        if (res.body.pagination.hasMore) {
+          expect(res.body.pagination.cursor).to.be.a('string').and.not.empty;
+        } else {
+          expect(res.body.pagination.cursor).to.be.null;
+        }
+        // Each returned site should match the slim DTO contract (skip LLMO fixtures
+        // since their created_at values intentionally fail the "recent" assertion).
+        res.body.sites
+          .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
+          .forEach((s) => expectSiteListDto(s));
+      });
     });
 
     describe('GET /sites/:siteId', () => {
