@@ -23,15 +23,16 @@ import {
   isString,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
-import TierClient from '@adobe/spacecat-shared-tier-client';
-
 import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
 import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
+import {
+  ensureOrgEntitlement,
+  resolveWriteTimeProductCode,
+} from '../support/tier-provisioning.js';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -61,45 +62,25 @@ function OrganizationsController(ctx, env) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Ensures the organization has an entitlement for the given product.
-   * `TierClient.createEntitlement` is idempotent at the library level: an existing
-   * entitlement is returned as-is, otherwise a new one is created. Errors (invalid tier,
-   * DB failures) bubble up to the caller.
-   *
-   * Triggered when callers pass an `x-product` header on POST /organizations; without the
-   * header the call is a no-op (preserves backward compatibility for existing integrations).
-   *
-   * @param {object} context - Request context (forwarded to TierClient).
-   * @param {object} organization - The newly created or existing organization entity.
-   * @param {string} productCode - Product code from the `x-product` header.
-   */
-  const ensureOrgEntitlement = async (context, organization, productCode) => {
-    const { log } = ctx;
-    const tierClient = await TierClient.createForOrg(context, organization, productCode);
-    const { entitlement } = await tierClient.createEntitlement(
-      EntitlementModel.TIERS.FREE_TRIAL,
-    );
-    log.info(`Ensured ${productCode} entitlement ${entitlement.getId()} for organization ${organization.getId()}`);
-  };
-
-  /**
    * Creates an organization. The organization ID is generated automatically.
    *
-   * Tier-model compliance: when the caller provides an `x-product` header, a FREE_TRIAL
-   * entitlement for that product is created for the organization (idempotent — existing
-   * entitlements are reused). This brings POST /organizations in line with the entitlement
-   * model so that downstream product-scoped APIs can resolve the org without a separate
-   * manual provisioning step. Entitlement failures return 500 — `TierClient.createEntitlement`
-   * is idempotent so retries are safe.
+   * Write-time tier provisioning: optional `x-product` header provisions a single product
+   * at FREE_TRIAL when the org has no entitlement or is already on FREE_TRIAL. Existing PAID,
+   * PLG, and PRE_ONBOARD entitlements are never downgraded (see `tier-provisioning.js`).
+   * Entitlement failures return 500; retries are safe when the same imsOrgId is re-posted.
    *
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Organization response.
    */
   const createOrganization = async (context) => {
+    const { log } = ctx;
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new Organizations');
     }
-    const productCode = context.pathInfo?.headers?.['x-product'];
+    const { productCode, error: productCodeError } = resolveWriteTimeProductCode(context);
+    if (productCodeError) {
+      return badRequest(productCodeError);
+    }
     let organization;
     let status;
     // check if the organization already exists
@@ -116,13 +97,15 @@ function OrganizationsController(ctx, env) {
       }
     }
 
-    if (hasText(productCode)) {
+    if (productCode) {
       try {
-        await ensureOrgEntitlement(context, organization, productCode);
+        await ensureOrgEntitlement(context, organization, productCode, log);
       } catch (error) {
-        const { log } = ctx;
-        log.error(`Error ensuring ${productCode} entitlement for organization ${organization.getId()}: ${error.message}`, error);
-        return internalServerError(`Failed to ensure ${productCode} entitlement for organization`);
+        log.error(
+          `Error ensuring entitlement for organization ${organization.getId()}: ${error.message}`,
+          error,
+        );
+        return internalServerError('Failed to ensure entitlement for organization');
       }
     }
 

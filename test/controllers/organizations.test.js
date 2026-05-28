@@ -242,7 +242,7 @@ describe('Organizations Controller', () => {
         debug: sinon.stub(),
       },
       pathInfo: {
-        headers: { 'x-product': 'abcd' },
+        headers: {},
       },
       attributes: {
         authInfo: new AuthInfo()
@@ -332,6 +332,7 @@ describe('Organizations Controller', () => {
 
   it('returns bad request when creating an organization fails', async () => {
     mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
+    context.pathInfo = { headers: {} };
     const response = await organizationsController.createOrganization({
       data: { name: 'Org 1' },
       ...context,
@@ -372,11 +373,12 @@ describe('Organizations Controller', () => {
 
     beforeEach(() => {
       tierClientStub = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
         createEntitlement: sinon.stub().resolves({
           entitlement: { getId: () => 'entitlement-456' },
         }),
       };
-      sandbox.stub(TierClient, 'createForOrg').resolves(tierClientStub);
+      sandbox.stub(TierClient, 'createForOrg').returns(tierClientStub);
     });
 
     it('creates entitlement for a newly created organization when x-product header is set', async () => {
@@ -390,7 +392,11 @@ describe('Organizations Controller', () => {
 
       expect(response.status).to.equal(201);
       expect(TierClient.createForOrg).to.have.been.calledOnce;
-      expect(TierClient.createForOrg.firstCall.args[2]).to.equal('ASO');
+      expect(TierClient.createForOrg).to.have.been.calledWith(
+        sinon.match.object,
+        sinon.match.object,
+        'ASO',
+      );
       expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('FREE_TRIAL');
       expect(context.log.info).to.have.been.calledWithMatch(/Ensured ASO entitlement entitlement-456/);
     });
@@ -411,7 +417,11 @@ describe('Organizations Controller', () => {
       expect(response.status).to.equal(200);
       expect(mockDataAccess.Organization.create).to.not.have.been.called;
       expect(TierClient.createForOrg).to.have.been.calledOnce;
-      expect(TierClient.createForOrg.firstCall.args[2]).to.equal('LLMO');
+      expect(TierClient.createForOrg).to.have.been.calledWith(
+        sinon.match.object,
+        sinon.match.object,
+        'LLMO',
+      );
       expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('FREE_TRIAL');
     });
 
@@ -428,6 +438,60 @@ describe('Organizations Controller', () => {
       expect(TierClient.createForOrg).to.have.not.been.called;
     });
 
+    it('skips auto-entitlement when x-product header is an empty string', async () => {
+      mockDataAccess.Organization.create.resolves(organizations[0]);
+      context.pathInfo = { headers: { 'x-product': '' } };
+
+      const response = await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(201);
+      expect(TierClient.createForOrg).to.have.not.been.called;
+    });
+
+    it('returns 400 for an invalid x-product header', async () => {
+      mockDataAccess.Organization.create.resolves(organizations[0]);
+      context.pathInfo = { headers: { 'x-product': 'INVALID' } };
+
+      const response = await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      expect(TierClient.createForOrg).to.have.not.been.called;
+    });
+
+    it('does not call TierClient for non-admin callers even when x-product is set', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const response = await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      expect(TierClient.createForOrg).to.have.not.been.called;
+    });
+
+    it('does not downgrade PRE_ONBOARD entitlement when x-product is set', async () => {
+      tierClientStub.checkValidEntitlement.resolves({
+        entitlement: { getId: () => 'entitlement-pre', getTier: () => 'PRE_ONBOARD' },
+      });
+      mockDataAccess.Organization.create.resolves(organizations[0]);
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(tierClientStub.createEntitlement).to.not.have.been.called;
+    });
+
     it('returns 500 when TierClient.createEntitlement throws for a newly created organization', async () => {
       mockDataAccess.Organization.create.resolves(organizations[0]);
       tierClientStub.createEntitlement.rejects(new Error('Database error'));
@@ -440,8 +504,8 @@ describe('Organizations Controller', () => {
 
       expect(response.status).to.equal(500);
       const body = await response.json();
-      expect(body).to.have.property('message', 'Failed to ensure ASO entitlement for organization');
-      expect(context.log.error).to.have.been.calledWithMatch(/Error ensuring ASO entitlement for organization .*Database error/);
+      expect(body).to.have.property('message', 'Failed to ensure entitlement for organization');
+      expect(context.log.error).to.have.been.calledWithMatch(/Error ensuring entitlement for organization .*Database error/);
     });
 
     it('returns 500 when TierClient.createEntitlement throws for an existing organization', async () => {
@@ -460,7 +524,7 @@ describe('Organizations Controller', () => {
 
       expect(response.status).to.equal(500);
       const body = await response.json();
-      expect(body).to.have.property('message', 'Failed to ensure ASO entitlement for organization');
+      expect(body).to.have.property('message', 'Failed to ensure entitlement for organization');
     });
   });
 

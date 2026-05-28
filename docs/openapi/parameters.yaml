@@ -400,14 +400,22 @@ xPromiseToken:
 xProduct:
   name: x-product
   description: |
-    Product code identifying which Spacecat product the call is scoped to (e.g. `ASO`, `LLMO`).
-    Used both for read-time filtering (e.g. listing only sites enrolled in the requested product)
-    and write-time tier-model compliance (e.g. auto-creating a `FREE_TRIAL` entitlement and site
-    enrollment when a site/organization is created).
+    Product code identifying which Spacecat product the call is scoped to.
+    Read-time: required on some list endpoints (e.g. `GET /organizations/{organizationId}/sites`)
+    to filter sites by product enrollment.
+    Write-time (optional on `POST /sites` and `POST /organizations`): when present, provisions a
+    single product at `FREE_TRIAL` only if the organization has no entitlement or is already on
+    `FREE_TRIAL`. Existing `PAID`, `PLG`, and `PRE_ONBOARD` entitlements are never downgraded;
+    missing site enrollments are still created when possible. Omit this header to leave tier
+    provisioning to the caller (backward compatible).
   in: header
   required: false
   schema:
     type: string
+    enum:
+      - ASO
+      - LLMO
+      - ACO
   example: ASO
 
 suggestionView:

@@ -201,6 +201,7 @@ describe('Sites Controller', () => {
       SiteEnrollment: {
         allByEntitlementId: sandbox.stub().resolves([]),
         allBySiteId: sandbox.stub().resolves([]),
+        create: sandbox.stub().resolves({ getId: () => 'enrollment-created' }),
       },
     };
 
@@ -402,6 +403,10 @@ describe('Sites Controller', () => {
 
     beforeEach(() => {
       tierClientStub = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: null,
+          siteEnrollment: null,
+        }),
         createEntitlement: sandbox.stub().resolves({
           entitlement: { getId: () => 'entitlement-123' },
           siteEnrollment: { getId: () => 'enrollment-123' },
@@ -420,7 +425,11 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(201);
       expect(TierClient.createForSite).to.have.been.calledOnce;
-      expect(TierClient.createForSite.firstCall.args[2]).to.equal('ASO');
+      expect(TierClient.createForSite).to.have.been.calledWith(
+        sinon.match.object,
+        sinon.match.object,
+        'ASO',
+      );
       expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('FREE_TRIAL');
       expect(loggerStub.info).to.have.been.calledWithMatch(/Ensured ASO entitlement entitlement-123 and enrollment enrollment-123/);
     });
@@ -461,6 +470,47 @@ describe('Sites Controller', () => {
       expect(TierClient.createForSite).to.have.not.been.called;
     });
 
+    it('returns 400 for an invalid x-product header', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'NOT_A_PRODUCT' } },
+      });
+
+      expect(response.status).to.equal(400);
+      expect(TierClient.createForSite).to.have.not.been.called;
+      const body = await response.json();
+      expect(body.message).to.match(/Unsupported product code/);
+    });
+
+    it('does not call TierClient for non-admin callers even when x-product is set', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(TierClient.createForSite).to.have.not.been.called;
+    });
+
+    it('does not downgrade PRE_ONBOARD entitlement when x-product is set', async () => {
+      tierClientStub.checkValidEntitlement.resolves({
+        entitlement: { getId: () => 'entitlement-pre', getTier: () => 'PRE_ONBOARD' },
+        siteEnrollment: { getId: () => 'enrollment-pre' },
+      });
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(tierClientStub.createEntitlement).to.not.have.been.called;
+    });
+
     it('returns 500 when TierClient.createEntitlement throws for a newly created site', async () => {
       mockDataAccess.Site.findByBaseURL.resolves(null);
       tierClientStub.createEntitlement.rejects(new Error('Database error'));
@@ -472,8 +522,8 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(500);
       const body = await response.json();
-      expect(body).to.have.property('message', 'Failed to ensure ASO entitlement/enrollment for site');
-      expect(loggerStub.error).to.have.been.calledWithMatch(/Error ensuring ASO entitlement\/enrollment for site .*Database error/);
+      expect(body).to.have.property('message', 'Failed to ensure entitlement/enrollment for site');
+      expect(loggerStub.error).to.have.been.calledWithMatch(/event=site_orphaned_after_create/);
     });
 
     it('returns 500 when TierClient.createEntitlement throws for an existing site', async () => {
@@ -486,7 +536,7 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(500);
       const body = await response.json();
-      expect(body).to.have.property('message', 'Failed to ensure ASO entitlement/enrollment for site');
+      expect(body).to.have.property('message', 'Failed to ensure entitlement/enrollment for site');
     });
   });
 
