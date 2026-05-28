@@ -4,7 +4,8 @@ organizations:
       - organization
     summary: Create a new organization
     description: |
-      This endpoint is useful for creating a new organization.
+      Creates a new organization (or returns the existing one with HTTP 200 if an organization
+      with the same `imsOrgId` already exists).
     operationId: createOrganization
     requestBody:
       required: true
@@ -13,6 +14,12 @@ organizations:
           schema:
             $ref: './schemas.yaml#/OrganizationCreate'
     responses:
+      '200':
+        description: Existing organization returned (idempotent create — an organization with the same `imsOrgId` already exists)
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Organization'
       '201':
         description: Organization created successfully
         content:
