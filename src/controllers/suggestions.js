@@ -1257,8 +1257,10 @@ function SuggestionsController(ctx, sqs, env) {
     if (!skipPromiseToken) {
       const headerToken = context.pathInfo?.headers?.['x-promise-token'];
       if (hasText(headerToken)) {
+        context.log.info('[autofix] using promise token from x-promise-token header');
         promiseTokenResponse = { promise_token: headerToken };
       } else {
+        context.log.info('[autofix] no x-promise-token header, creating promise token via IMS');
         try {
           promiseTokenResponse = await getIMSPromiseToken(context);
         } catch (e) {
