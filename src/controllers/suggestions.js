@@ -40,7 +40,6 @@ import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
 import {
   sendAutofixMessage,
-  getCookieValue,
   getIMSPromiseToken,
   ErrorWithStatusCode,
   getHostName,
@@ -1256,9 +1255,9 @@ function SuggestionsController(ctx, sqs, env) {
     let promiseTokenResponse;
     const skipPromiseToken = isAssessAction && precheckOnly === true;
     if (!skipPromiseToken) {
-      const cookieToken = getCookieValue(context, 'promiseToken');
-      if (hasText(cookieToken)) {
-        promiseTokenResponse = { promise_token: cookieToken };
+      const headerToken = context.pathInfo?.headers?.['x-promise-token'];
+      if (hasText(headerToken)) {
+        promiseTokenResponse = { promise_token: headerToken };
       } else {
         try {
           promiseTokenResponse = await getIMSPromiseToken(context);

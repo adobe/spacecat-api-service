@@ -5729,7 +5729,7 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Error getting promise token');
     });
 
-    it('uses promiseToken cookie when present instead of IMS', async () => {
+    it('uses x-promise-token header when present instead of IMS', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -5759,7 +5759,7 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-            cookie: 'promiseToken=promiseToken123',
+            'x-promise-token': 'promiseToken123',
           },
         },
         params: {
@@ -5777,7 +5777,7 @@ describe('Suggestions Controller', () => {
       expect(getIMSPromiseTokenStub).to.not.have.been.called;
     });
 
-    it('falls back to IMS when promiseToken cookie is absent', async () => {
+    it('falls back to IMS when x-promise-token header is absent', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -5789,35 +5789,6 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-          },
-        },
-        params: {
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-        },
-        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
-        log: context.log,
-        ...authContext,
-      });
-
-      expect(response.status).to.equal(207);
-      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
-      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
-    });
-
-    it('falls back to IMS when promiseToken cookie is not present among other cookies', async () => {
-      mockSuggestion.allByOpportunityId.resolves(
-        [mockSuggestionEntity(suggs[0]),
-          mockSuggestionEntity(suggs[2]),
-        ],
-      );
-      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
-      const response = await suggestionsControllerWithIms.autofixSuggestions({
-        pathInfo: {
-          headers: {
-            authorization: 'Bearer token123',
-            cookie: 'otherCookie=abc',
           },
         },
         params: {
