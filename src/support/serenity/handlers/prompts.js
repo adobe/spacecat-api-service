@@ -266,35 +266,6 @@ export async function handleCreatePrompts(
   return { created, skipped, failed };
 }
 
-async function findUpstreamPromptByText(transport, semrushWorkspaceId, semrushProjectId, text) {
-  // PATCH carries only text/tags; we look up the current upstream prompt by
-  // listing the project (paginated) and matching on prompt name. Cost is
-  // bounded; only paid on PATCH (low volume). Returns the full item so the
-  // caller can preserve tags when PATCH omits them.
-  const FETCH_PAGE_SIZE = 200;
-  const MAX_PAGES = 50;
-  let page = 1;
-  while (page <= MAX_PAGES) {
-    // eslint-disable-next-line no-await-in-loop
-    const resp = await transport.listPromptsByTags(semrushWorkspaceId, semrushProjectId, {
-      tag_ids: [],
-      page,
-      limit: FETCH_PAGE_SIZE,
-      search: text,
-    });
-    const items = Array.isArray(resp?.items) ? resp.items : [];
-    const found = items.find((it) => (it?.name || '') === text);
-    if (found) {
-      return found;
-    }
-    if (items.length < FETCH_PAGE_SIZE) {
-      break;
-    }
-    page += 1;
-  }
-  return null;
-}
-
 /**
  * PATCH /serenity/prompts/:semrushPromptId — partial update.
  *
@@ -356,9 +327,15 @@ export async function handleUpdatePrompt(
     };
   }
   const projectId = project.getSemrushProjectId();
-  // Look up the current upstream prompt by the URL :semrushPromptId by
-  // listing pages and matching id. We need the row to read its current text
-  // (for the next-text fallback) and tags (for the preserve-on-omit case).
+  // PATCH addresses by `:semrushPromptId` (the upstream UUID). Look it up by
+  // paginating upstream and matching on id — Semrush's AIO API has no direct
+  // GET-by-id, so this is the cheapest reliable path. The walk early-exits
+  // when the item is found or the last page is reached. We need the row to
+  // read its current text (for the preserve-on-omit-text case) and tags
+  // (preserve-on-omit-tags). No text-based fallback: a previous version
+  // matched by `body.text` when the id wasn't found, which deleted the
+  // wrong prompt when two prompts shared the same text in different tags.
+  // PATCH on a missing id is a 404 — clients must address by id.
   let oldItem = null;
   let pageIdx = 1;
   const LIMIT = 200;
@@ -377,25 +354,13 @@ export async function handleUpdatePrompt(
     pageIdx += 1;
   }
   if (!oldItem) {
-    // Fall back: maybe the caller passed text+slice expecting upsert. Try
-    // text-based lookup using body.text (only safe if text was provided).
-    if (hasText(body.text)) {
-      oldItem = await findUpstreamPromptByText(
-        transport,
-        semrushWorkspaceId,
-        projectId,
-        String(body.text),
-      );
-    }
-    if (!oldItem) {
-      return {
-        status: 404,
-        body: {
-          error: 'promptNotFound',
-          message: 'No upstream prompt matches the supplied semrushPromptId in this slice',
-        },
-      };
-    }
+    return {
+      status: 404,
+      body: {
+        error: 'promptNotFound',
+        message: 'No upstream prompt matches the supplied semrushPromptId in this slice',
+      },
+    };
   }
   const oldId = String(oldItem.id);
   const oldText = String(oldItem?.name || '');

@@ -388,6 +388,11 @@ export async function handleCreateMarket(
     };
   }
 
+  // `publishProject` succeeded synchronously above, so by the time we hand
+  // back the 201 the upstream is already published — return `live`, not
+  // `pending`. The `pending` enum value is reserved for the (currently
+  // unreachable) path where a future revision separates publish into a
+  // background step.
   return {
     status: 201,
     body: {
@@ -395,7 +400,7 @@ export async function handleCreateMarket(
       geoTargetId: location.geoTargetId,
       languageCode,
       name,
-      status: 'pending',
+      status: 'live',
     },
   };
 }
@@ -408,6 +413,17 @@ export async function handleCreateMarket(
  *   3. delete the DB row
  * Upstream non-404 failure → 502, row stays. Half-delete (upstream 204 but
  * DB delete fails) → 500; operator retries (idempotent).
+ *
+ * Concurrent DELETE on the same slice: low-probability race where two
+ * callers both pass the `findBySlice` check and both attempt the upstream
+ * delete. The 404-as-success branch absorbs the second call's upstream
+ * delete (the first call already removed it); the second `row.remove()`
+ * then attempts to delete an electroDB row that's already gone. ElectroDB
+ * surfaces this as a `not found` error, which we re-throw as a 500. The
+ * client retries idempotently — by then the row is gone and the next
+ * lookup returns 204. A pre-lock on the slice (advisory lock, conditional
+ * delete) would tighten this further but is out of scope for the LLMO-5190
+ * cut-over.
  */
 export async function handleDeleteMarket(
   transport,

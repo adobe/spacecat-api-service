@@ -210,6 +210,43 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(result.body.error).to.equal('marketNotFound');
   });
 
+  // Regression guard: the previous implementation fell back to a text-based
+  // lookup (`body.text`) when the paginated id walk did not find the prompt.
+  // That fallback deleted a different prompt with the same text when two
+  // prompts shared text across tags — a data-corruption vector. PATCH now
+  // returns 404 strictly on missing id, regardless of whether body.text is
+  // present.
+  it('404s when no upstream prompt matches the supplied id (no text fallback)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      // Assert that neither deletePromptsByIds nor createTaggedPrompts are
+      // called — a fallback-by-text would invoke them on the wrong item.
+      deletePromptsByIds: sinon.stub().resolves(),
+      createTaggedPrompts: sinon.stub().resolves({ ids: ['should-not-happen'] }),
+    };
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-missing',
+      { geoTargetId: 2840, languageCode: 'en', text: 'some text that exists elsewhere' },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(404);
+    expect(result.body.error).to.equal('promptNotFound');
+    expect(transport.deletePromptsByIds).to.have.callCount(0);
+    expect(transport.createTaggedPrompts).to.have.callCount(0);
+  });
+
   it('preserves existing tags when PATCH body omits tags', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',

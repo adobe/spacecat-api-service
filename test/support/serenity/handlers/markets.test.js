@@ -192,7 +192,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       name: 'Adobe-US-en',
-      status: 'pending',
+      // 'live' (not 'pending') because publishProject was awaited synchronously
+      // above and resolved without error.
+      status: 'live',
     });
     expect(dataAccess.BrandSemrushProject.create).to.have.been.calledOnceWithExactly({
       brandId: BRAND,
