@@ -412,6 +412,10 @@ function SitesController(ctx, log, env) {
     const cursor = context?.data?.cursor || null;
     const paginated = hasText(limitParam) || hasText(cursor);
 
+    if (cursor && cursor.length > 256) {
+      return badRequest('cursor exceeds maximum length');
+    }
+
     let sites;
     let responseBody;
 
@@ -422,7 +426,7 @@ function SitesController(ctx, log, env) {
         : DEFAULT_LIMIT;
 
       const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
-      if (!results?.data) {
+      if (!Array.isArray(results?.data)) {
         log.warn(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
         sites = [];
         responseBody = {

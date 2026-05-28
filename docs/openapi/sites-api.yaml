@@ -138,13 +138,14 @@ sites:
         in: query
         required: false
         description: |
-          Maximum number of items per page. Capped at 500. When `limit` (or `cursor`) is
-          provided the response uses the paginated envelope shape; when both are omitted
-          the response uses the legacy flat-array shape (see endpoint description).
-          Defaults to 100 when the paginated shape is selected.
+          Maximum number of items per page. When `limit` (or `cursor`) is provided the
+          response uses the paginated envelope shape; when both are omitted the response
+          uses the legacy flat-array shape (see endpoint description). Defaults to 100
+          when the paginated shape is selected; capped at 500. Out-of-range or
+          non-integer values (e.g. `0`, `-1`, `abc`) are silently coerced to 100 rather
+          than rejected — clients must not rely on a 400 response for invalid `limit`.
         schema:
           type: integer
-          minimum: 1
           maximum: 500
           example: 100
       - name: cursor
@@ -153,10 +154,12 @@ sites:
         description: |
           Opaque cursor returned from a previous page's `pagination.cursor`. Pass it back
           to fetch the next page. When present (or `limit` is present), the response uses
-          the paginated envelope shape.
+          the paginated envelope shape. Treat as opaque — do not parse or construct
+          cursors client-side; the encoding is internal and may change without notice.
         schema:
           type: string
-          example: "c2l0ZTpwYWdlOjEyMzQ1Ng"
+          maxLength: 256
+          example: "eyJvZmZzZXQiOjEwMH0="
     responses:
       '200':
         description: |

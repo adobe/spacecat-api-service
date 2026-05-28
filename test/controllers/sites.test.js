@@ -584,6 +584,19 @@ describe('Sites Controller', () => {
     expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
   });
 
+  it('emits [sites][legacy-shape] log on every legacy-path hit', async () => {
+    // The [sites][legacy-shape] marker is the sunset gate for removing the legacy
+    // branch — Coralogix must show zero hits before removal. Pin the format here so
+    // a rename or accidental drop is caught by tests, not 30 days of silent lying.
+    mockDataAccess.Site.all.resolves(sites);
+
+    await sitesController.getAll({ ...context, invocation: { id: 'req-legacy-1' } });
+
+    expect(loggerStub.info).to.have.been.calledWithMatch(
+      /\[sites\]\[legacy-shape\] GET \/sites called without limit\/cursor requestId=req-legacy-1/,
+    );
+  });
+
   it('gets all sites for a read-only admin user', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
     mockDataAccess.Site.all.resolves(sites);
@@ -721,6 +734,17 @@ describe('Sites Controller', () => {
         {},
         sinon.match({ limit: 10, cursor: 'some-cursor', returnCursor: true }),
       );
+    });
+
+    it('rejects cursor longer than 256 characters with 400', async () => {
+      const longCursor = 'a'.repeat(257);
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: longCursor } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'cursor exceeds maximum length');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
     });
 
     it('returns sites with slim DTO shape in paginated response', async () => {
