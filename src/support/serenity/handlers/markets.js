@@ -417,9 +417,27 @@ export async function handleDeleteMarket(
   return { status: 204 };
 }
 
-const TAG_CACHE_TTL_MS = 5 * 60 * 1000;
+// 60s TTL bounds cross-Lambda-container staleness (multiple warm containers
+// each hold an independent Map). Same-container freshness comes from the
+// `invalidateTagCacheForProject` call wired into every mutating prompts
+// handler (POST /prompts, PATCH, bulk-delete). Together: writes are visible
+// immediately on the same container, and at most ~60s late on a peer.
+const TAG_CACHE_TTL_MS = 60 * 1000;
 const TAG_CACHE_MAX_ENTRIES = 512;
 const tagCache = new Map();
+
+function tagCacheKey(semrushWorkspaceId, projectId) {
+  return `${semrushWorkspaceId}::${projectId}`;
+}
+
+/**
+ * Removes the cached tag set for one (workspace, project). Called by any
+ * handler that mutates prompts in that project so the next /serenity/tags
+ * read sees the new set without waiting for TTL.
+ */
+export function invalidateTagCacheForProject(semrushWorkspaceId, projectId) {
+  tagCache.delete(tagCacheKey(semrushWorkspaceId, projectId));
+}
 
 export function clearTagCache() {
   tagCache.clear();
@@ -466,7 +484,7 @@ export async function handleListTags(
     return { items: [] };
   }
   const projectId = row.getSemrushProjectId();
-  const cacheKey = `${semrushWorkspaceId}::${projectId}`;
+  const cacheKey = tagCacheKey(semrushWorkspaceId, projectId);
   const now = Date.now();
   const cached = tagCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {

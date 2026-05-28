@@ -245,6 +245,99 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(transport.createTaggedPrompts).to.have.callCount(0);
   });
 
+  it('fast path: skips prompt walk when body provides both text and tags', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    const transport = {
+      // Would surface as undefined-call if the fast path mistakenly walks.
+      listPromptsByTags: sinon.stub(),
+      deletePromptsByIds: sinon.stub().resolves(),
+      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'new text', tags: ['fresh'],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(200);
+    expect(result.body.tags).to.deep.equal(['fresh']);
+    expect(transport.listPromptsByTags).to.have.callCount(0);
+    expect(transport.deletePromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['sem-1']);
+  });
+
+  it('fast path 404: upstream DELETE 404 → return 404 (no create)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    const err = Object.assign(new Error('not found'), { status: 404 });
+    const transport = {
+      deletePromptsByIds: sinon.stub().rejects(err),
+      createTaggedPrompts: sinon.stub(),
+    };
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-missing',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'x', tags: [],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(404);
+    expect(result.body.error).to.equal('promptNotFound');
+    expect(transport.createTaggedPrompts).to.have.callCount(0);
+  });
+
+  it('DELETE non-404 error → throws (no CREATE) to prevent duplicate', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    const err = Object.assign(new Error('upstream 503'), { status: 503 });
+    const transport = {
+      deletePromptsByIds: sinon.stub().rejects(err),
+      createTaggedPrompts: sinon.stub().resolves({ ids: ['should-not-happen'] }),
+    };
+
+    // The previous warn-and-create behavior would leave both old and new
+    // prompts in the project; this assertion locks the new throw-on-error
+    // contract so a regression resurrects #1.
+    await expect(handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'x', tags: [],
+      },
+      fakeLog(),
+    )).to.be.rejectedWith(/upstream 503/);
+    expect(transport.createTaggedPrompts).to.have.callCount(0);
+  });
+
   it('preserves existing tags when PATCH body omits tags', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
