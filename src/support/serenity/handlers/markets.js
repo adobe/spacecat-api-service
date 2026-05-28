@@ -185,6 +185,38 @@ function defaultMarketName(brandDisplayName) {
  * POST /serenity/markets — onboard a new (brand, geoTargetId, languageCode)
  * slice for this brand. Strict ordering: upstream create → upstream publish →
  * DB row. A row is written **only** when both upstream calls succeed.
+ *
+ * Known gap: orphan upstream projects on partial failure.
+ *   If `publishProject` fails after `createProject` succeeds (or the DB
+ *   `BrandSemrushProject.create` races / errors after publish succeeds),
+ *   the upstream project stays in the Semrush workspace with no row
+ *   pointing at it. We log the orphan at error level with everything
+ *   needed to reconcile (brandId, semrushWorkspaceId, semrushProjectId,
+ *   slice), but the handler does NOT call `transport.deleteProject` to
+ *   roll back automatically.
+ *
+ *   Why not auto-clean: an auto-rollback path has its own failure modes
+ *   (the rollback DELETE itself can 5xx, leaving a partially-deleted
+ *   upstream project; the rollback can race with a retry that already
+ *   succeeded; the rollback can hide a transient publish failure that
+ *   would have self-healed on retry). Adding those edges is non-trivial
+ *   and the trade-off only becomes obviously right once the storage
+ *   contract is stable.
+ *
+ *   Why we're deferring: the underlying mapping table
+ *   (`brand_to_semrush_projects`) and its relationship to upstream
+ *   projects is not final — the plan note for LLMO-5190 calls out that
+ *   the brand-to-upstream mapping may be restructured independently
+ *   (multi-upstream provider, sub-national geo dimension). Investing in
+ *   a tight transactional create/rollback flow against a layout that's
+ *   about to change is likely wasted work. Once the mapping stabilises,
+ *   revisit with the right pattern (saga, outbox, or a reconciliation
+ *   job that scans for orphans on a schedule).
+ *
+ *   Operational stopgap: the orphan log line is greppable
+ *   ("handleCreateMarket: orphaned upstream project"); any orphan can
+ *   be reconciled by an operator running `transport.deleteProject` (or
+ *   via a one-off script reading the same log stream).
  */
 export async function handleCreateMarket(
   transport,
