@@ -235,6 +235,10 @@ function WebhooksController(context) {
       repo: jobPayload.repo,
       prNumber: pr.number,
       installationId: jobPayload.installation_id,
+      // Classification outcome, for traffic-distribution observability (per the
+      // PR #2503 review recommendation). 'legacy' = GITHUB_TARGETS unset, so the
+      // worker resolves its flat keys; otherwise the resolved destination id.
+      targetId: targetId || 'legacy',
     });
 
     return accepted({ status: 'accepted' });
