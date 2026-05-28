@@ -66,7 +66,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
 
   it('delegates to LegacyApiKeyHandler.checkAuth for POST /event/fulfillment', async () => {
     const req = {};
-    const ctx = { pathInfo: { route: 'POST /event/fulfillment' } };
+    const ctx = { pathInfo: { method: 'POST', suffix: '/event/fulfillment' }, log: logStubs };
     const result = await handler.checkAuth(req, ctx);
     expect(result).to.equal('SUPER_RESULT');
     expect(superCheckAuthStub).to.have.been.calledOnceWith(req, ctx);
@@ -74,7 +74,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
 
   it('delegates to LegacyApiKeyHandler.checkAuth for POST /slack/channels/invite-by-user-id', async () => {
     const req = {};
-    const ctx = { pathInfo: { route: 'POST /slack/channels/invite-by-user-id' } };
+    const ctx = { pathInfo: { method: 'POST', suffix: '/slack/channels/invite-by-user-id' }, log: logStubs };
     const result = await handler.checkAuth(req, ctx);
     expect(result).to.equal('SUPER_RESULT');
     expect(superCheckAuthStub).to.have.been.calledOnceWith(req, ctx);
@@ -84,7 +84,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
 
   it('emits an info log when auth succeeds on POST /event/fulfillment', async () => {
     superCheckAuthStub.resolves({ getType: () => 'legacyApiKey' });
-    await handler.checkAuth({}, { pathInfo: { route: 'POST /event/fulfillment' } });
+    await handler.checkAuth({}, { pathInfo: { method: 'POST', suffix: '/event/fulfillment' }, log: logStubs });
     expect(logStubs.info).to.have.been.calledOnceWithExactly(
       '[legacyApiKey] request authenticated via route-scoped legacy API key handler [POST /event/fulfillment]',
     );
@@ -92,7 +92,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
 
   it('emits an info log when auth succeeds on POST /slack/channels/invite-by-user-id', async () => {
     superCheckAuthStub.resolves({ getType: () => 'legacyApiKey' });
-    await handler.checkAuth({}, { pathInfo: { route: 'POST /slack/channels/invite-by-user-id' } });
+    await handler.checkAuth({}, { pathInfo: { method: 'POST', suffix: '/slack/channels/invite-by-user-id' }, log: logStubs });
     expect(logStubs.info).to.have.been.calledOnceWithExactly(
       '[legacyApiKey] request authenticated via route-scoped legacy API key handler [POST /slack/channels/invite-by-user-id]',
     );
@@ -100,49 +100,49 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
 
   it('does NOT emit the success log when super.checkAuth returns null (auth failed)', async () => {
     superCheckAuthStub.resolves(null);
-    await handler.checkAuth({}, { pathInfo: { route: 'POST /event/fulfillment' } });
+    await handler.checkAuth({}, { pathInfo: { method: 'POST', suffix: '/event/fulfillment' } });
     expect(logStubs.info).to.not.have.been.called;
   });
 
   // --- out-of-scope routes: must return null without calling super ---
 
   it('returns null without calling super for GET /trigger', async () => {
-    const ctx = { pathInfo: { route: 'GET /trigger' } };
+    const ctx = { pathInfo: { method: 'GET', suffix: '/trigger' } };
     const result = await handler.checkAuth({}, ctx);
     expect(result).to.equal(null);
     expect(superCheckAuthStub).to.not.have.been.called;
   });
 
   it('returns null without calling super for POST /sites', async () => {
-    const ctx = { pathInfo: { route: 'POST /sites' } };
+    const ctx = { pathInfo: { method: 'POST', suffix: '/sites' } };
     const result = await handler.checkAuth({}, ctx);
     expect(result).to.equal(null);
     expect(superCheckAuthStub).to.not.have.been.called;
   });
 
   it('returns null without calling super for GET /sites', async () => {
-    const ctx = { pathInfo: { route: 'GET /sites' } };
+    const ctx = { pathInfo: { method: 'GET', suffix: '/sites' } };
     const result = await handler.checkAuth({}, ctx);
     expect(result).to.equal(null);
     expect(superCheckAuthStub).to.not.have.been.called;
   });
 
   it('returns null without calling super for POST /tools/api-keys', async () => {
-    const ctx = { pathInfo: { route: 'POST /tools/api-keys' } };
+    const ctx = { pathInfo: { method: 'POST', suffix: '/tools/api-keys' } };
     const result = await handler.checkAuth({}, ctx);
     expect(result).to.equal(null);
     expect(superCheckAuthStub).to.not.have.been.called;
   });
 
   it('returns null for GET /event/fulfillment (wrong method, same path)', async () => {
-    const ctx = { pathInfo: { route: 'GET /event/fulfillment' } };
+    const ctx = { pathInfo: { method: 'GET', suffix: '/event/fulfillment' } };
     const result = await handler.checkAuth({}, ctx);
     expect(result).to.equal(null);
     expect(superCheckAuthStub).to.not.have.been.called;
   });
 
   it('returns null for GET /slack/channels/invite-by-user-id (wrong method)', async () => {
-    const ctx = { pathInfo: { route: 'GET /slack/channels/invite-by-user-id' } };
+    const ctx = { pathInfo: { method: 'GET', suffix: '/slack/channels/invite-by-user-id' } };
     const result = await handler.checkAuth({}, ctx);
     expect(result).to.equal(null);
     expect(superCheckAuthStub).to.not.have.been.called;
@@ -162,8 +162,8 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
     expect(superCheckAuthStub).to.not.have.been.called;
   });
 
-  it('returns null when route is undefined', async () => {
-    const ctx = { pathInfo: { route: undefined } };
+  it('returns null when method and suffix are missing', async () => {
+    const ctx = { pathInfo: {} };
     const result = await handler.checkAuth({}, ctx);
     expect(result).to.equal(null);
     expect(superCheckAuthStub).to.not.have.been.called;
@@ -171,7 +171,7 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
 
   it('propagates exceptions from super.checkAuth without catching', async () => {
     superCheckAuthStub.rejects(new Error('key validation failed'));
-    const ctx = { pathInfo: { route: 'POST /event/fulfillment' } };
+    const ctx = { pathInfo: { method: 'POST', suffix: '/event/fulfillment' } };
     await expect(handler.checkAuth({}, ctx)).to.be.rejectedWith('key validation failed');
   });
 });

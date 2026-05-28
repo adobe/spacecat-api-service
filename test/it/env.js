@@ -33,8 +33,11 @@ export function buildEnv(publicKeyB64) {
     AWS_ENDPOINT_URL_S3: `http://localhost:${process.env.IT_MINIO_PORT || '9100'}`,
     S3_BUCKET_NAME: 'spacecat-it-test',
 
-    // IMS client (eager, hard-throws per-request)
-    IMS_HOST: 'https://dummy-ims.example.com',
+    // IMS client (eager, hard-throws per-request). NB: hostname only, no
+    // scheme — ImsClient builds URLs as `https://${IMS_HOST}${endpoint}`,
+    // so a scheme-prefixed value yields `https://https://...` and fails
+    // DNS with `ENOTFOUND https`.
+    IMS_HOST: 'dummy-ims.example.com',
     IMS_CLIENT_ID: 'dummy-client-id',
     IMS_CLIENT_CODE: 'dummy-client-code',
     IMS_CLIENT_SECRET: 'dummy-client-secret',

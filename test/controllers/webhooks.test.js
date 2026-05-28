@@ -339,7 +339,7 @@ describe('WebhooksController', () => {
 
     expect(response.status).to.equal(500);
     const errorCall = mockLog.error.getCalls()
-      .find((c) => c.args[0].includes('GITHUB_APP_SLUG not configured'));
+      .find((c) => c.args[0].includes('No app slug resolved'));
     expect(errorCall).to.not.be.undefined;
     expect(errorCall.args[1]).to.deep.include({ deliveryId: 'delivery-uuid-123' });
     expect(mockSqs.sendMessage.called).to.be.false;
@@ -360,6 +360,45 @@ describe('WebhooksController', () => {
     expect(mockLog.info.firstCall.args[0]).to.equal('Skipping unmapped event');
     // Injected value goes to structured context, not message
     expect(mockLog.info.firstCall.args[1]).to.deep.include({ event: 'evil\ninjected' });
+  });
+
+  describe('multi-destination target_id', () => {
+    function ghecAuthContext() {
+      // Mirrors what the HMAC handler attaches in registry mode.
+      return {
+        ...validContext,
+        attributes: {
+          authInfo: { getProfile: () => ({ user_id: 'github-webhook', target_id: 'ghec', app_slug: 'mysticat-bot' }) },
+        },
+        data: {
+          ...validContext.data,
+          requested_reviewer: { login: 'mysticat-bot[bot]' },
+        },
+      };
+    }
+
+    it('adds target_id from the auth profile to the SQS payload', async () => {
+      const response = await controller.processGitHubWebhook(ghecAuthContext());
+      expect(response.status).to.equal(202);
+      const [, payload] = mockSqs.sendMessage.firstCall.args;
+      expect(payload.target_id).to.equal('ghec');
+    });
+
+    it('uses the per-target app_slug for the reviewer check (mysticat-bot[bot])', async () => {
+      // env.GITHUB_APP_SLUG is 'mysticat', but the profile app_slug is
+      // 'mysticat-bot'; the requested reviewer mysticat-bot[bot] must match and
+      // the job must enqueue (not skip).
+      const response = await controller.processGitHubWebhook(ghecAuthContext());
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage.calledOnce).to.be.true;
+    });
+
+    it('omits target_id when no auth profile target_id is present (legacy)', async () => {
+      const response = await controller.processGitHubWebhook(validContext);
+      expect(response.status).to.equal(202);
+      const [, payload] = mockSqs.sendMessage.firstCall.args;
+      expect(payload).to.not.have.property('target_id');
+    });
   });
 
   describe('Slack observability', () => {
@@ -491,6 +530,25 @@ describe('WebhooksController', () => {
       expect(postMessage.called).to.be.false;
       const [, payload] = mockSqs.sendMessage.firstCall.args;
       expect(payload.observability).to.be.undefined;
+    });
+
+    it('parent links the PR and names the requester and author', async () => {
+      const obsController = buildObsController();
+      const ctx = {
+        ...validContext,
+        data: {
+          ...validContext.data,
+          sender: { ...validContext.data.sender, login: 'alice' },
+          pull_request: { ...validContext.data.pull_request, user: { login: 'bob' } },
+        },
+      };
+      const response = await obsController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(202);
+      const { text } = postMessage.firstCall.args[0];
+      expect(text).to.include('<https://github.com/adobe/spacecat-api-service/pull/');
+      expect(text).to.include('requested by <https://github.com/alice|alice>');
+      expect(text).to.include('author <https://github.com/bob|bob>');
     });
   });
 });

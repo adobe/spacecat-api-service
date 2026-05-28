@@ -28,10 +28,6 @@ import { ErrorWithStatusCode, getImsUserToken } from '../support/utils.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
-import {
-  LLMO_CONFIG_DB_SYNC_TYPE,
-  isSyncEnabledForSite,
-} from './llmo/llmo-config-sync-constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { requirePostgrestForV2Config } from '../support/postgrest-availability.js';
 import {
@@ -41,6 +37,7 @@ import {
   updatePromptById,
   deletePromptById,
   bulkDeletePrompts,
+  checkPromptsExist,
   resolveBrandUuid,
 } from '../support/prompts-storage.js';
 import {
@@ -589,6 +586,62 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  // ── Prompt existence check (v2) ──
+
+  const checkPromptsByBrand = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const body = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+
+      const { prompts } = body;
+      if (!Array.isArray(prompts) || prompts.length === 0) {
+        return badRequest('"prompts" array required (min 1)');
+      }
+      if (prompts.length > 500) {
+        return badRequest('Maximum 500 prompt pairs per request');
+      }
+      if (prompts.some((p) => !p || typeof p !== 'object' || !p.text?.trim() || !p.region?.trim() || p.text.length > 2000)) {
+        return badRequest('Each prompt must have "text" (max 2000 chars) and "region"');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      const results = await checkPromptsExist({ brandUuid, prompts, postgrestClient });
+      return ok({ results });
+    } catch (error) {
+      log.error('Error checking prompts existence', { brandId, error });
+      return createErrorResponse(error);
+    }
+  };
+
   // ── Brand list (v2, reads from normalized tables) ──
 
   const getBrandForOrg = async (context) => {
@@ -673,9 +726,6 @@ function BrandsController(ctx, log, env) {
         return notFound(`Site not found: ${siteId}`);
       }
       if (site.getOrganizationId() !== spaceCatId) {
-        // Same tenant-isolation check as triggerConfigSync — return forbidden
-        // so the controller is internally consistent (different status codes
-        // for the identical check would be incoherent for clients).
         return forbidden('Site does not belong to this organization');
       }
 
@@ -1300,60 +1350,6 @@ function BrandsController(ctx, log, env) {
     }
   };
 
-  const triggerConfigSync = async (context) => {
-    const { spaceCatId, siteId } = context.params || {};
-
-    try {
-      if (!hasText(spaceCatId)) {
-        return badRequest('Organization ID required');
-      }
-      if (!isValidUUID(spaceCatId)) {
-        return badRequest('Organization ID must be a valid UUID');
-      }
-
-      const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) {
-        return organization;
-      }
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
-      }
-
-      if (!hasText(siteId) || !isValidUUID(siteId)) {
-        return badRequest('Site ID (valid UUID) is required');
-      }
-
-      const site = await Site.findById(siteId);
-      if (!site) {
-        return notFound(`Site not found: ${siteId}`);
-      }
-      if (site.getOrganizationId() !== spaceCatId) {
-        return forbidden('Site does not belong to this organization');
-      }
-
-      if (!isSyncEnabledForSite(siteId)) {
-        return badRequest(`Config sync is not enabled for site ${siteId}`);
-      }
-
-      const rawQueryString = context.invocation?.event?.rawQueryString || '';
-      const queryParams = Object.fromEntries(
-        rawQueryString.split('&').filter(Boolean).map((p) => p.split('=')),
-      );
-      const isDryRun = queryParams.dryRun === 'true';
-      await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
-        type: LLMO_CONFIG_DB_SYNC_TYPE,
-        siteId,
-        ...(isDryRun && { dryRun: true }),
-      });
-
-      log.info(`[${LLMO_CONFIG_DB_SYNC_TYPE}] On-demand config DB sync${isDryRun ? ' (dry run)' : ''} triggered for site ${siteId}`);
-      return ok({ message: `Config sync${isDryRun ? ' (dry run)' : ''} triggered`, siteId, ...(isDryRun && { dryRun: true }) });
-    } catch (error) {
-      log.error(`Error triggering config sync for org ${spaceCatId}:`, error);
-      return createErrorResponse(error);
-    }
-  };
-
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
@@ -1377,7 +1373,7 @@ function BrandsController(ctx, log, env) {
     updatePromptByBrandAndId,
     deletePromptByBrandAndId,
     bulkDeletePromptsByBrand,
-    triggerConfigSync,
+    checkPromptsByBrand,
   };
 }
 

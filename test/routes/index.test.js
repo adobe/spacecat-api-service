@@ -167,7 +167,7 @@ describe('getRouteHandlers', () => {
     updatePromptByBrandAndId: sinon.stub(),
     deletePromptByBrandAndId: sinon.stub(),
     bulkDeletePromptsByBrand: sinon.stub(),
-    triggerConfigSync: sinon.stub(),
+    checkPromptsByBrand: sinon.stub(),
   };
 
   const mockPreflightController = {
@@ -322,6 +322,7 @@ describe('getRouteHandlers', () => {
     onboardCustomer: () => null,
     offboardCustomer: () => null,
     queryFiles: () => null,
+    patchLlmoDataRow: () => null,
     getLlmoRationale: () => null,
     getBrandClaims: () => null,
     createOrUpdateEdgeConfig: () => null,
@@ -508,6 +509,18 @@ describe('getRouteHandlers', () => {
     revokeMappingById: sinon.stub(),
   };
 
+  const mockSerenityController = {
+    listPrompts: sinon.stub(),
+    createPrompts: sinon.stub(),
+    updatePrompt: sinon.stub(),
+    bulkDeletePrompts: sinon.stub(),
+    listProjects: sinon.stub(),
+    createProject: sinon.stub(),
+    listProjectTags: sinon.stub(),
+    listProjectModels: sinon.stub(),
+    listWorkspaceProjects: sinon.stub(),
+  };
+
   const mockSemrushController = {
     listPrompts: sinon.stub(),
     createPrompts: sinon.stub(),
@@ -578,6 +591,7 @@ describe('getRouteHandlers', () => {
       mockFanoutReportController,
       mockFacsAccessMappingsController,
       mockSemrushController,
+      mockSerenityController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -749,16 +763,16 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
-      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts',
-      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts',
-      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/bulk-delete',
-      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/:promptId',
-      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects',
-      'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects',
-      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/tags',
-      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/models',
-      'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/workspaces/:workspaceId/projects',
-      'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:promptId',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/tags',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/models',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/workspaces/:workspaceId/projects',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
@@ -986,6 +1000,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/data/:dataSource',
       'GET /sites/:siteId/llmo/data/:sheetType/:dataSource',
       'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource',
+      'PATCH /sites/:siteId/llmo/data/:dataSource/row',
+      'PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row',
       'GET /sites/:siteId/llmo/config',
       'PATCH /sites/:siteId/llmo/config',
       'POST /sites/:siteId/llmo/config',
@@ -1355,6 +1371,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.queryFiles);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/data/:dataSource/row'].handler).to.equal(mockLlmoController.patchLlmoDataRow);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/data/:dataSource/row'].paramNames).to.deep.equal(['siteId', 'dataSource']);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row'].handler).to.equal(mockLlmoController.patchLlmoDataRow);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/url-store'].handler).to.equal(mockUrlStoreController.listUrls);
     expect(dynamicRoutes['GET /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/url-store/by-audit/:auditType'].handler).to.equal(mockUrlStoreController.listUrlsByAuditType);

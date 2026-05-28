@@ -461,6 +461,8 @@ export function getSkipReason(data, action, env) {
 | `GITHUB_WEBHOOK_SECRET` | HMAC-SHA256 verification | Vault (`dx_mysticat/{env}/mysticat-github-service` key `github_app_webhook_secret`), delivered via Secrets Manager |
 | `MYSTICAT_GITHUB_JOBS_QUEUE_URL` | SQS queue URL for job enqueue | Infrastructure module output (`module.mysticat_github_service.work_queue_url`) |
 | `GITHUB_APP_SLUG` | App login for reviewer match (default: `mysticat`) | Environment variable or hardcoded |
+| `GITHUB_TARGETS` | JSON registry of webhook destinations (`[{id, match, appSlug, webhookSecretEnvVar}]`), evaluated top-to-bottom with the `default` entry last. UNSET = legacy single-secret path (no `target_id` emitted). See the multi-destination ADR (`mysticat-architecture` `platform/decisions/support-multiple-github-destinations.md`). | api-service env (per env) |
+| `GITHUB_WEBHOOK_SECRET_GHEC` | Per-target HMAC secret for the `ghec` destination (only when GHEC is enabled; named by that target's `webhookSecretEnvVar`) | Vault -> Secrets Manager, same channel as `GITHUB_WEBHOOK_SECRET` |
 | `MYSTICAT_OBSERVABILITY_SLACK_TOKEN` | Dedicated chat:write-only bot token for the Slack observability feed (best-effort; absent disables Slack posting) | Vault (`dx_mysticat/{env}/...`) -> helix-deploy package secret; on the rotation list |
 | `MYSTICAT_OBSERVABILITY_SLACK_CHANNEL` | Channel id the web tier posts to and propagates to the worker; OMIT to disable observability entirely | api-service env (per env) |
 
