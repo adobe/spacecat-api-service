@@ -1157,22 +1157,55 @@ ai-visibility-v1-topic-brand-topics:
     security:
       - api_key: []
 
+ai-visibility-v1-topic-brand-topics-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get brand topics count (Topic v2)
+    description: |
+      Returns only the total count of brand-associated topics matching the request filters,
+      using Semrush `TopicService` v2 `BrandTopicsTotals`. Accepts the same filter parameters
+      as `GET /llmo/ai-visibility/v1/topic/brand-topics` (`searchQuery`, `volumeFrom`/`volumeTo`,
+      `visibilityFrom`/`visibilityTo`) but no pagination or sort parameters.
+
+      Use this endpoint to populate tab badge counts without fetching full paginated data.
+    operationId: getAiVisibilityV1TopicBrandTopicsTotals
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+      - *v1BrandTopicsVisibilityFromParam
+      - *v1BrandTopicsVisibilityToParam
+    responses:
+      '200':
+        description: Brand topics count retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicBrandTopicsTotalsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-v1-topic-gap-topics:
   get:
     tags: [ai-visibility]
     summary: Get gap topics (Topic v2 JSON)
     description: |
       Returns topics with the gap between the target brand and its competitors using Semrush
-      `TopicService` v2 `GapTopics` and `GapTopicsTotals`. Returns each topic as **native
-      protobuf JSON** (camelCase) including `gapMentions` per competitor brand. Supports
-      `sortBy` / `sortDirection` on `TOPICS_REQUEST_ORDER_BY` (default `TOTAL_COMPETITOR_MENTIONS` descending).
-      The response body is `{ data, totals }` plus `srFilters`; `offset` and `limit` are not
-      echoed (use the query parameters).
+      `TopicService` v2 `GapTopics`. Returns each topic as **native protobuf JSON** (camelCase)
+      including `gapMentions` per competitor brand. Supports `sortBy` / `sortDirection` on
+      `TOPICS_REQUEST_ORDER_BY` (default `TOTAL_COMPETITOR_MENTIONS` descending).
+      The response body is `{ data }` plus `srFilters`; `offset` and `limit` are not echoed
+      (use the query parameters). For per-kind totals, use
+      `GET /llmo/ai-visibility/v1/topic/gap-topics-totals`.
 
       ### Filters
 
-      The endpoint accepts optional filters that are forwarded as Semrush QL strings on both
-      the list and totals requests:
+      The endpoint accepts optional filters that are forwarded as Semrush QL strings:
 
       - `searchQuery` → `dimension_filter_ql: topic CONTAINS "<searchQuery>"` (backslash and
         double-quote characters in the value are escaped automatically).
@@ -1203,6 +1236,40 @@ ai-visibility-v1-topic-gap-topics:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1TopicGapTopicsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-gap-topics-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get gap topics per-kind counts (Topic v2)
+    description: |
+      Returns only the per-kind totals for gap topics using Semrush `TopicService` v2
+      `GapTopicsTotals`. Accepts the same filter parameters as
+      `GET /llmo/ai-visibility/v1/topic/gap-topics` (`searchQuery`, `volumeFrom`/`volumeTo`,
+      `gapKinds`) but no pagination or sort parameters.
+
+      Use this endpoint to populate the Topic Opportunities tab badge count without fetching
+      full paginated data.
+    operationId: getAiVisibilityV1TopicGapTopicsTotals
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1GapTopicsGapKindsParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+    responses:
+      '200':
+        description: Gap topics per-kind counts retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicGapTopicsTotalsResponse'
       <<: *errorResponses
     security:
       - api_key: []
