@@ -14,7 +14,7 @@
 // inbound webhook to a destination ("target") from the SIGNED body, so the
 // worker can select per-destination credentials by a non-secret target_id.
 // Secrets are NOT in this registry: webhookSecretEnvVar names the env var that
-// carries the secret (injected from the deploy secret store).
+// carries the secret (loaded at runtime from Vault into context.env).
 
 /**
  * Parse + validate the GITHUB_TARGETS env var.
