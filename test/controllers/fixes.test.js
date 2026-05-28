@@ -194,6 +194,16 @@ describe('Fixes Controller', () => {
       });
     });
 
+    it('returns empty array when no fixes exist for the opportunity', async () => {
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
+    });
+
     it('responds 400 if the site ID parameter is not a uuid', async () => {
       requestContext.params.siteId = 'not-a-uuid';
       const response = await fixesController.getAllForOpportunity(requestContext);
