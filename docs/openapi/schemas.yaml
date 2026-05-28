@@ -749,7 +749,7 @@ SitePagedResponse:
       items:
         $ref: './schemas.yaml#/Site'
     pagination:
-      $ref: '#/PaginationMetadata'
+      $ref: './schemas.yaml#/PaginationMetadata'
   required:
     - sites
     - pagination

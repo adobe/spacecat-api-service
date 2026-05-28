@@ -124,12 +124,12 @@ sites:
     description: |
       Retrieves sites. Supports two response shapes for backwards compatibility:
 
-      - **Legacy (no query params):** returns a flat array of sites. The `DEFAULT_ORGANIZATION_ID`
-        and `ORGANIZATION_ID_FRIENDS_FAMILY` orgs are excluded on this path to stay under
-        the 6MB Lambda response limit. This shape will be removed once consumers migrate.
-      - **Paginated (with `limit` and/or `cursor`):** returns `{ sites, pagination }`. Loop
-        using `pagination.cursor` until `pagination.hasMore` is `false` to fetch all sites.
-        No org exclusion is applied since the page-size cap protects response size.
+      - **Legacy (no query params):** returns a flat array of sites — a filtered subset for
+        backward compatibility. This shape is deprecated and will be removed once all
+        consumers have migrated to pagination.
+      - **Paginated (with `limit` and/or `cursor`):** returns `{ sites, pagination }` with
+        the full unfiltered result set. Iterate using `pagination.cursor` until
+        `pagination.hasMore` is `false` to fetch all sites.
 
       Required capabilities: admin access (legacy admin path) or S2S `site:readAll`.
     operationId: getSites
@@ -138,13 +138,14 @@ sites:
         in: query
         required: false
         description: |
-          Maximum number of items to return per page. When present (or `cursor` is present),
-          the response uses the paginated envelope shape. Capped at 1000.
+          Maximum number of items per page. Capped at 1000. When `limit` (or `cursor`) is
+          provided the response uses the paginated envelope shape; when both are omitted
+          the response uses the legacy flat-array shape (see endpoint description).
+          Defaults to 100 when the paginated shape is selected.
         schema:
           type: integer
           minimum: 1
           maximum: 1000
-          default: 100
           example: 100
       - name: cursor
         in: query
@@ -155,7 +156,7 @@ sites:
           the paginated envelope shape.
         schema:
           type: string
-          example: "eyJvZmZzZXQiOjEwMH0="
+          example: "c2l0ZTpwYWdlOjEyMzQ1Ng"
     responses:
       '200':
         description: |

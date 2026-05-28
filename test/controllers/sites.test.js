@@ -738,6 +738,26 @@ describe('Sites Controller', () => {
       expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
       expect(mockDataAccess.Site.all).to.not.have.been.called;
     });
+
+    [
+      { label: 'null', value: null },
+      { label: 'undefined', value: undefined },
+      { label: 'empty object', value: {} },
+    ].forEach(({ label, value }) => {
+      it(`logs a warning and returns an empty paginated envelope when Site.all resolves ${label}`, async () => {
+        mockDataAccess.Site.all.resolves(value);
+
+        const result = await sitesController.getAll({ ...context, data: { limit: '10' } });
+        const body = await result.json();
+
+        expect(result.status).to.equal(200);
+        expect(body.sites).to.be.an('array').with.lengthOf(0);
+        expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
+        expect(loggerStub.warn).to.have.been.calledWithMatch(
+          /\[sites\] Site\.all returned unexpected shape with returnCursor=true/,
+        );
+      });
+    });
   });
 
   describe('GET /sites - S2S readAll capability', () => {

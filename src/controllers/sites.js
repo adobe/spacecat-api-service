@@ -422,16 +422,26 @@ function SitesController(ctx, log, env) {
         : DEFAULT_LIMIT;
 
       const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
-      sites = (results?.data || []).map((site) => SiteDto.toListJSON(site));
-      responseBody = {
-        sites,
-        pagination: {
-          limit: effectiveLimit,
-          cursor: results.cursor ?? null,
-          hasMore: !!results.cursor,
-        },
-      };
+      if (!results?.data) {
+        log.warn(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
+        sites = [];
+        responseBody = {
+          sites,
+          pagination: { limit: effectiveLimit, cursor: null, hasMore: false },
+        };
+      } else {
+        sites = results.data.map((site) => SiteDto.toListJSON(site));
+        responseBody = {
+          sites,
+          pagination: {
+            limit: effectiveLimit,
+            cursor: results.cursor ?? null,
+            hasMore: !!results.cursor,
+          },
+        };
+      }
     } else {
+      // TODO: remove this legacy branch once all consumers have migrated to the paginated shape.
       // legacy: no limit/cursor params -> flat array for backwards comp.
       // keep the default + friends-and-family exclusion on this path to stay
       // under the 6MB Lambda response limit until consumers migrate to pagination.
