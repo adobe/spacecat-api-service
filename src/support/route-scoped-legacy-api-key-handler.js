@@ -40,12 +40,14 @@ const SCOPED_ROUTES = new Set([
  */
 export default class RouteScopedLegacyApiKeyHandler extends LegacyApiKeyHandler {
   async checkAuth(request, context) {
-    if (!SCOPED_ROUTES.has(context?.pathInfo?.route)) {
+    const { method, suffix } = context?.pathInfo || {};
+    const routeKey = method && suffix ? `${method} ${suffix}` : null;
+    if (!SCOPED_ROUTES.has(routeKey)) {
       return null;
     }
     const result = await super.checkAuth(request, context);
     if (result) {
-      context.log.info(`[legacyApiKey] request authenticated via route-scoped legacy API key handler [${context.pathInfo.route}]`);
+      context.log.info(`[legacyApiKey] request authenticated via route-scoped legacy API key handler [${routeKey}]`);
     }
     return result;
   }
