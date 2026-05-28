@@ -997,8 +997,11 @@ export async function createOrFindSite(baseURL, organizationId, context, deliver
   if (site) {
     if (site.getOrganizationId() !== organizationId) {
       const enrollments = await site.getSiteEnrollments();
-      if (enrollments?.length > 0) {
-        throw new Error(`Site ${baseURL} is already associated with another org that has active products and cannot be moved.`);
+      if (!Array.isArray(enrollments)) {
+        throw new Error(`Unable to verify enrollments for site ${baseURL} (current org: ${site.getOrganizationId()}, requested org: ${organizationId}); aborting org move.`);
+      }
+      if (enrollments.length > 0) {
+        throw new Error(`Site ${baseURL} belongs to org ${site.getOrganizationId()} with active enrollments and cannot be moved to org ${organizationId}.`);
       }
       site.setOrganizationId(organizationId);
       // Persist the re-parent immediately. resolveLlmoOnboardingMode (called
