@@ -471,6 +471,7 @@ describe('Suggestions Controller', () => {
         return Promise.resolve(mockSuggestionEntity(suggData));
       }),
       getFixEntitiesBySuggestionId: sandbox.stub(),
+      saveMany: sandbox.stub().resolves(),
     };
 
     mockSuggestionGrant = {
@@ -9107,6 +9108,8 @@ describe('Suggestions Controller', () => {
     let headingsOpportunity;
 
     beforeEach(() => {
+      // Clear cached TokowakaClient so createFrom picks up the current context
+      delete context.tokowakaClient;
       // Default: allow LLMO administrator access (can be overridden in specific tests)
       sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
       sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
