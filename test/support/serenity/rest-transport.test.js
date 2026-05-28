@@ -386,36 +386,6 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  describe('listWorkspaceProjects', () => {
-    it('GETs /v2/workspaces/{ws}/projects with type=AIO and publish_status filter', async () => {
-      fetchStub.resolves(fetchOk({ items: [], total: 0 }));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      await transport.listWorkspaceProjects(WORKSPACE_ID);
-
-      const [url, init] = fetchStub.firstCall.args;
-      expect(init.method).to.equal('GET');
-      expect(url).to.include(`/v2/workspaces/${WORKSPACE_ID}/projects?`);
-      expect(url).to.include('type=AIO');
-      expect(url).to.include(
-        'publish_status=live%2Clive_with_unpublished_updates',
-      );
-      expect(url).to.include('limit=100');
-      expect(url).to.include('page=1');
-    });
-
-    it('honours explicit page/limit for pagination', async () => {
-      fetchStub.resolves(fetchOk({ items: [] }));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      await transport.listWorkspaceProjects(WORKSPACE_ID, { page: 4, limit: 50 });
-
-      const [url] = fetchStub.firstCall.args;
-      expect(url).to.include('page=4');
-      expect(url).to.include('limit=50');
-    });
-  });
-
   describe('listAiModels', () => {
     it('GETs /v1/.../ai_models with page=1&limit=100 by default', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));

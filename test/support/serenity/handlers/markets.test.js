@@ -85,52 +85,47 @@ describe('handlers/markets.js — handleListMarkets', () => {
   beforeEach(() => clearLanguageCache());
 
   it('returns empty when no rows', async () => {
-    const transport = { listWorkspaceProjects: sinon.stub() };
+    const transport = {};
     const dataAccess = makeDataAccess([]);
-    const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE, fakeLog());
+    const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE);
     expect(result).to.deep.equal({ items: [] });
-    expect(transport.listWorkspaceProjects).not.to.have.been.called;
   });
 
-  it('emits markets with status and no semrushLocationId / semrushProjectId on the DTO', async () => {
+  it('emits DB rows with no semrush identifiers or upstream-derived fields', async () => {
     const row = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([row]);
-    const transport = {
-      listWorkspaceProjects: sinon.stub().resolves({
-        items: [{ id: 'proj-us-en', name: 'Adobe-US-en', publish_status: 'live' }],
-      }),
-    };
+    const transport = {};
 
-    const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE, fakeLog());
+    const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE);
 
+    expect(result.items).to.have.lengthOf(1);
     expect(result.items[0]).to.deep.equal({
       brandId: BRAND,
       geoTargetId: 2840,
       languageCode: 'en',
-      name: 'Adobe-US-en',
-      status: 'live',
       createdAt: '2026-05-28T10:00:00Z',
       updatedAt: '2026-05-28T10:00:00Z',
     });
     expect(result.items[0]).not.to.have.property('semrushProjectId');
     expect(result.items[0]).not.to.have.property('semrushLocationId');
+    expect(result.items[0]).not.to.have.property('name');
+    expect(result.items[0]).not.to.have.property('status');
+    expect(result).not.to.have.property('enrichment');
   });
 
-  it('marks status create_failed and surfaces enrichment failure when upstream throws SerenityTransportError', async () => {
+  it('does not call upstream — list is a pure DB read', async () => {
     const row = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([row]);
-    const transport = {
-      listWorkspaceProjects: sinon.stub().rejects(new SerenityTransportError(502, 'boom')),
-    };
+    // No upstream methods stubbed — calling any would surface as an
+    // undefined-function error, proving the handler made no upstream call.
+    const transport = {};
 
-    const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE, fakeLog());
-
-    expect(result.enrichment).to.equal('failed');
-    expect(result.items[0].status).to.equal('create_failed');
+    const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE);
+    expect(result.items).to.have.lengthOf(1);
   });
 });
 
@@ -168,7 +163,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(result.body.error).to.equal('sliceExists');
   });
 
-  it('creates upstream, publishes, writes row, returns 201 with status=pending', async () => {
+  it('creates upstream, publishes, writes row, returns 201 with slice-only body', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
@@ -191,11 +186,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       brandId: BRAND,
       geoTargetId: 2840,
       languageCode: 'en',
-      name: 'Adobe-US-en',
-      // 'live' (not 'pending') because publishProject was awaited synchronously
-      // above and resolved without error.
-      status: 'live',
     });
+    expect(result.body).not.to.have.property('name');
+    expect(result.body).not.to.have.property('status');
     expect(dataAccess.BrandSemrushProject.create).to.have.been.calledOnceWithExactly({
       brandId: BRAND,
       semrushProjectId: 'proj-new',

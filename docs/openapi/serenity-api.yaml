@@ -238,10 +238,8 @@ v2-serenity-markets:
     tags: [serenity]
     summary: List markets configured for a brand
     description: |
-      Returns the brand's (geoTargetId, languageCode) slices, enriched with
-      live upstream metadata (name, status). `status` is one of `live`,
-      `pending`, `publish_failed`, or `create_failed`; the UI can surface a
-      banner for the failure states.
+      Returns the brand's (geoTargetId, languageCode) slices. The presence
+      of a row is the contract that the market is active.
     operationId: listSerenityMarkets
     security:
       - ims_key: []
@@ -266,10 +264,10 @@ v2-serenity-markets:
     description: |
       Onboards a new (brandId, geoTargetId, languageCode) slice. `market` is
       an ISO 3166-1 alpha-2 country code resolved server-side to a Geo Target
-      ID; `languageCode` is a BCP-47 primary subtag. `name` is optional —
-      defaults to `<brandDisplayName>-<6 hex>` to avoid collisions in shared
-      workspaces. Strict ordering: upstream create → publish → DB row. A row
-      is written only on full success.
+      ID; `languageCode` is a BCP-47 primary subtag. The optional `name` is
+      forwarded to the upstream project; it is not echoed back. Strict
+      ordering: upstream create → publish → DB row. A row is written only
+      on full success.
     operationId: createSerenityMarket
     security:
       - ims_key: []
@@ -280,7 +278,7 @@ v2-serenity-markets:
           schema: { $ref: './schemas.yaml#/SerenityCreateMarketRequest' }
     responses:
       '201':
-        description: Market created (status starts as `pending` until upstream publish completes).
+        description: Market created — upstream project published, DB row written.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityMarket' }

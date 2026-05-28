@@ -20,11 +20,6 @@ import { SerenityTransportError } from '../rest-transport.js';
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 const LANGUAGE_TAG_REGEX = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
 
-// Pagination caps for the live workspace lookup used to enrich market rows.
-// Workspaces typically have ~10–100 projects; the cap is a safety net.
-const WORKSPACE_PROJECTS_PAGE = 100;
-const MAX_WORKSPACE_PROJECTS_PAGES = 20; // 2000 projects ceiling
-
 // Reusable English region-name formatter (ICU-backed, built into Node). Used
 // for the `location_name` we send upstream — matches the form Semrush stores
 // on existing projects (`United States`, `Germany`, `Türkiye`).
@@ -127,104 +122,31 @@ async function resolveLanguageId(transport, languageTag, log) {
 }
 
 /**
- * Fetches every page of `listWorkspaceProjects` up to MAX_WORKSPACE_PROJECTS_PAGES.
- */
-async function fetchAllWorkspaceProjects(transport, semrushWorkspaceId) {
-  const all = [];
-  let page = 1;
-  while (page <= MAX_WORKSPACE_PROJECTS_PAGES) {
-    // eslint-disable-next-line no-await-in-loop
-    const resp = await transport.listWorkspaceProjects(semrushWorkspaceId, {
-      page,
-      limit: WORKSPACE_PROJECTS_PAGE,
-    });
-    const items = Array.isArray(resp?.items) ? resp.items : [];
-    if (items.length === 0) {
-      break;
-    }
-    all.push(...items);
-    if (items.length < WORKSPACE_PROJECTS_PAGE) {
-      break;
-    }
-    page += 1;
-  }
-  return all;
-}
-
-function mapLiveStatus(publishStatus) {
-  // Best-effort mapping of upstream `publish_status` to the four states the
-  // UI banner cares about. Anything we don't recognise reads as `pending`
-  // so a new upstream state never silently looks `live`.
-  if (publishStatus === 'live' || publishStatus === 'live_with_unpublished_updates') {
-    return 'live';
-  }
-  if (publishStatus === 'publish_failed') {
-    return 'publish_failed';
-  }
-  return 'pending';
-}
-
-/**
- * GET /serenity/markets — DB rows enriched with live upstream metadata
- * (name, status) via `listWorkspaceProjects` (paginated). Status is included
- * so the UI can surface a banner for failed slices.
+ * GET /serenity/markets — list a brand's (geoTargetId, languageCode) slices.
  *
- * Enrichment failure → row status `create_failed`. The DB row is the
- * authoritative truth of "what we mapped"; status is best-effort.
+ * Pure DB read: the row's existence IS the contract that the market is
+ * active for this brand. We do not enrich with upstream metadata — name
+ * and publish_status would require an O(workspace-size) `listWorkspaceProjects`
+ * call per request, and the consumer (project-elmo-ui) reads neither.
+ *
+ * `transport` and `semrushWorkspaceId` are kept on the signature for the
+ * controller's parity with the other handlers; they are unused here.
  */
-export async function handleListMarkets(transport, dataAccess, brandId, semrushWorkspaceId, log) {
+// eslint-disable-next-line no-unused-vars
+export async function handleListMarkets(transport, dataAccess, brandId, semrushWorkspaceId) {
   const rows = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
   if (!rows || rows.length === 0) {
     return { items: [] };
   }
-
-  let liveByProjectId = new Map();
-  let enrichmentFailed = false;
-  try {
-    const items = await fetchAllWorkspaceProjects(transport, semrushWorkspaceId);
-    liveByProjectId = new Map(
-      items
-        .filter((p) => p && hasText(p.id))
-        .map((p) => [String(p.id), {
-          name: p.name,
-          publishStatus: p.publish_status,
-        }]),
-    );
-  } catch (e) {
-    if (e?.name !== 'SerenityTransportError') {
-      throw e;
-    }
-    enrichmentFailed = true;
-    log?.warn?.('handleListMarkets: enrichment lookup failed, returning rows without live metadata', {
-      error: e.message,
-    });
-  }
-
-  const out = {
-    items: rows.map((row) => {
-      const projectId = row.getSemrushProjectId();
-      const live = liveByProjectId.get(projectId) || {};
-      let status;
-      if (enrichmentFailed || live.publishStatus === undefined) {
-        status = 'create_failed';
-      } else {
-        status = mapLiveStatus(live.publishStatus);
-      }
-      return {
-        brandId,
-        geoTargetId: row.getGeoTargetId(),
-        languageCode: row.getLanguageCode(),
-        name: live.name ?? null,
-        status,
-        createdAt: row.getCreatedAt ? row.getCreatedAt() : null,
-        updatedAt: row.getUpdatedAt ? row.getUpdatedAt() : null,
-      };
-    }),
+  return {
+    items: rows.map((row) => ({
+      brandId,
+      geoTargetId: row.getGeoTargetId(),
+      languageCode: row.getLanguageCode(),
+      createdAt: row.getCreatedAt ? row.getCreatedAt() : null,
+      updatedAt: row.getUpdatedAt ? row.getUpdatedAt() : null,
+    })),
   };
-  if (enrichmentFailed) {
-    out.enrichment = 'failed';
-  }
-  return out;
 }
 
 function validateCreateBody(body) {
@@ -388,19 +310,12 @@ export async function handleCreateMarket(
     };
   }
 
-  // `publishProject` succeeded synchronously above, so by the time we hand
-  // back the 201 the upstream is already published — return `live`, not
-  // `pending`. The `pending` enum value is reserved for the (currently
-  // unreachable) path where a future revision separates publish into a
-  // background step.
   return {
     status: 201,
     body: {
       brandId,
       geoTargetId: location.geoTargetId,
       languageCode,
-      name,
-      status: 'live',
     },
   };
 }

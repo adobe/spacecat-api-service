@@ -222,22 +222,6 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * GET /v2/workspaces/{ws}/projects?type=AIO&publish_status=live,…
-     * Lists published AIO projects in a workspace. Drafts and failed
-     * publishes are omitted. Paginated — yields the full set across pages.
-     */
-    async listWorkspaceProjects(semrushWorkspaceId, { page = 1, limit = 100 } = {}) {
-      const params = new URLSearchParams({
-        type: 'AIO',
-        publish_status: 'live,live_with_unpublished_updates',
-        page: String(page),
-        limit: String(limit),
-      });
-      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects?${params.toString()}`;
-      return request('GET', url, imsToken, undefined);
-    },
-
-    /**
      * GET /v1/workspaces/{ws}/projects/{pid}/ai_models — list AI models
      * configured for a project. `model.key` is the value the Reporting API
      * expects as `CBF_model`.

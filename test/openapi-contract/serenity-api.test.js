@@ -145,8 +145,6 @@ const FIXTURES = {
         brandId: BRAND,
         geoTargetId: 2840,
         languageCode: 'en',
-        name: 'United States — English',
-        status: 'live',
       }],
     },
   },
@@ -160,8 +158,6 @@ const FIXTURES = {
         brandId: BRAND,
         geoTargetId: 2840,
         languageCode: 'en',
-        name: 'United States — English',
-        status: 'live',
       },
     },
     data: {

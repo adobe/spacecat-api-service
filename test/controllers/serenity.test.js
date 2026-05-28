@@ -249,7 +249,7 @@ describe('SerenityController', () => {
     });
 
     it('listMarkets returns the handler result wrapped in ok()', async () => {
-      handlers.handleListMarkets.resolves({ items: [{ brandId: BRAND, status: 'live' }] });
+      handlers.handleListMarkets.resolves({ items: [{ brandId: BRAND, geoTargetId: 2840, languageCode: 'en' }] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listMarkets(fakeContext());
       expect(response.status).to.equal(200);

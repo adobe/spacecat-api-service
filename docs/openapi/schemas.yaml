@@ -10080,8 +10080,10 @@ SerenityBulkDeletePromptsResponse:
 
 SerenityMarket:
   type: object
-  description: A (brandId, geoTargetId, languageCode) slice configured for a brand.
-  required: [brandId, geoTargetId, languageCode, status]
+  description: |
+    A (brandId, geoTargetId, languageCode) slice configured for a brand.
+    The row's existence is the contract that the market is active.
+  required: [brandId, geoTargetId, languageCode]
   properties:
     brandId:
       type: string
@@ -10092,17 +10094,6 @@ SerenityMarket:
     languageCode:
       type: string
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
-    name:
-      type: [string, 'null']
-      description: Market display name from the upstream; null when enrichment fails.
-    status:
-      type: string
-      enum: [live, pending, publish_failed, create_failed]
-      description: |
-        Live status of the slice. `live` = upstream project is published.
-        `pending` = upstream not yet published. `publish_failed` = upstream
-        publish reported a failure. `create_failed` = enrichment lookup
-        failed; the DB row exists but the upstream state is unknown.
     createdAt:
       oneOf:
         - $ref: '#/DateTime'
@@ -10119,13 +10110,6 @@ SerenityMarketListResponse:
     items:
       type: array
       items: { $ref: '#/SerenityMarket' }
-    enrichment:
-      type: string
-      enum: [failed]
-      description: |
-        Present and set to `failed` when the live-metadata lookup couldn't
-        be completed. The `items` array still carries the authoritative DB
-        rows; each item's `status` will be `create_failed` in that case.
 
 SerenityCreateMarketRequest:
   type: object
