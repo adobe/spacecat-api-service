@@ -99,6 +99,15 @@ describe('github-targets parseTargets', () => {
     ]);
     expect(() => parseTargets({ GITHUB_TARGETS: bad })).to.throw('strings');
   });
+
+  it('throws when webhookSecretEnvVar is not a valid env var name', () => {
+    const bad = JSON.stringify([
+      {
+        id: 'github-public', match: { default: true }, appSlug: 's', webhookSecretEnvVar: '__proto__',
+      },
+    ]);
+    expect(() => parseTargets({ GITHUB_TARGETS: bad })).to.throw('valid env var name');
+  });
 });
 
 describe('github-targets extractClassificationMetadata', () => {

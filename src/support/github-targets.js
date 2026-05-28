@@ -52,6 +52,13 @@ export function parseTargets(env) {
     if (typeof t.webhookSecretEnvVar !== 'string' || !t.webhookSecretEnvVar) {
       throw new Error(`GITHUB_TARGETS["${t.id}"] is missing a string "webhookSecretEnvVar"`);
     }
+    // Defense-in-depth for operator-authored config: webhookSecretEnvVar is used
+    // as `context.env[name]`, so a typo like "__proto__" would resolve to a
+    // truthy prototype object (not a secret) and break HMAC. Restrict to the
+    // conventional env-var charset so a bad name fails loudly at parse.
+    if (!/^[A-Z][A-Z0-9_]*$/.test(t.webhookSecretEnvVar)) {
+      throw new Error(`GITHUB_TARGETS["${t.id}"].webhookSecretEnvVar must be a valid env var name (^[A-Z][A-Z0-9_]*$)`);
+    }
     const isDefault = t.match?.default === true;
     const hasSlugs = Array.isArray(t.match?.enterpriseSlug)
       && t.match.enterpriseSlug.length > 0
