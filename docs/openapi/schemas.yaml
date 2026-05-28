@@ -740,6 +740,19 @@ SiteList:
   type: array
   items:
     $ref: './schemas.yaml#/Site'
+SitePagedResponse:
+  type: object
+  description: Paginated response for sites (returned when `limit` or `cursor` query parameter is provided)
+  properties:
+    sites:
+      type: array
+      items:
+        $ref: './schemas.yaml#/Site'
+    pagination:
+      $ref: '#/PaginationMetadata'
+  required:
+    - sites
+    - pagination
 SiteWithLatestAuditList:
   type: array
   items:
