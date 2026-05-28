@@ -1,3 +1,10 @@
+# [1.524.0](https://github.com/adobe/spacecat-api-service/compare/v1.523.0...v1.524.0) (2026-05-28)
+
+
+### Features
+
+* **webhooks:** log resolved targetId on the enqueue log ([#2509](https://github.com/adobe/spacecat-api-service/issues/2509)) ([d289627](https://github.com/adobe/spacecat-api-service/commit/d28962778bc48843ebfa9f6108a751debe82fc01)), closes [#2503](https://github.com/adobe/spacecat-api-service/issues/2503)
+
 # [1.523.0](https://github.com/adobe/spacecat-api-service/compare/v1.522.2...v1.523.0) (2026-05-28)
 
 
