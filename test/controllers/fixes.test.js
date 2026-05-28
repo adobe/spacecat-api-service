@@ -93,8 +93,7 @@ describe('Fixes Controller', () => {
     sandbox.stub(fixEntityCollection, 'allByOpportunityIdAndStatus');
     sandbox.stub(fixEntityCollection, 'findById');
     sandbox.stub(fixEntityCollection, 'setSuggestionsForFixEntity');
-    sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionByCreatedAt');
-    fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId = sandbox.stub();
+    sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionsByOpportunityId');
     sandbox.stub(fixEntityCollection, 'updateByKeys');
     sandbox.stub(fixEntityCollection, 'getSuggestionsByFixEntityId');
     sandbox.stub(suggestionCollection, 'bulkUpdateStatus');
@@ -132,7 +131,7 @@ describe('Fixes Controller', () => {
       });
     });
 
-    it('can get all fixes for an opportunity with suggestions', async () => {
+    it('can get all fixes for an opportunity', async () => {
       const fixEntities = await Promise.all([
         fixEntityCollection.create({
           type: Suggestion.TYPES.CONTENT_UPDATE,
@@ -144,34 +143,20 @@ describe('Fixes Controller', () => {
           opportunityId,
           changeDetails: { arbitrary: 'value 2' },
         }),
+        fixEntityCollection.create({
+          type: Suggestion.TYPES.METADATA_UPDATE,
+          opportunityId,
+          changeDetails: { arbitrary: 'value 3' },
+        }),
       ]);
-
-      const suggestions = await Promise.all([
-        suggestionCollection.create({ opportunityId, type: Suggestion.TYPES.CONTENT_UPDATE }),
-        suggestionCollection.create({ opportunityId, type: Suggestion.TYPES.REDIRECT_UPDATE }),
-      ]);
-
-      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId.resolves([
-        { fixEntity: fixEntities[0], suggestions: [suggestions[0]] },
-        { fixEntity: fixEntities[1], suggestions: [suggestions[1]] },
-      ]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves(fixEntities.map((fixEntity) => ({ fixEntity, suggestions: [] })));
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
       expect(response).includes({ status: 200 });
-      const result = await response.json();
-      expect(result).to.have.lengthOf(2);
-      expect(result[0].suggestions).to.have.lengthOf(1);
-      expect(result[1].suggestions).to.have.lengthOf(1);
-    });
-
-    it('responds 200 with empty array when no fixes exist', async () => {
-      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId.resolves([]);
-
-      const response = await fixesController.getAllForOpportunity(requestContext);
-
-      expect(response).includes({ status: 200 });
-      expect(await response.json()).deep.equals([]);
+      expect(await response.json()).deep.equals(fixEntities.map(FixDto.toJSON));
     });
 
     it('responds 404 if the fix does not belong to the given opportunity', async () => {
@@ -179,9 +164,9 @@ describe('Fixes Controller', () => {
         type: Suggestion.TYPES.CONTENT_UPDATE,
         opportunityId: 'wrong-opportunity-id',
       });
-      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId.resolves([
-        { fixEntity, suggestions: [] },
-      ]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
       expect(response).includes({ status: 404 });
@@ -195,9 +180,9 @@ describe('Fixes Controller', () => {
         type: Suggestion.TYPES.CONTENT_UPDATE,
         opportunityId,
       });
-      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId.resolves([
-        { fixEntity, suggestions: [] },
-      ]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
       opportunityGetStub.callsFake((data) => ({
         go: async () => ({ data: { ...data, siteId: 'wrong-site-id' } }),
       }));
@@ -222,13 +207,18 @@ describe('Fixes Controller', () => {
     });
 
     describe('with fixEntityCreatedDate parameter', () => {
-      const fixEntityCreatedDate = '2025-05-19T01:23:45.678Z';
+      // YYYY-MM-DD date string — matches what the UI accordion key uses
+      const fixCreatedDateStr = '2025-05-19';
+      // A timestamp on that UTC date — simulates executedAt being set after creation
+      const executedAtOnDate = '2025-05-19T14:30:00.000Z';
+      // A timestamp on a DIFFERENT date — should NOT be returned for the above key
+      const executedAtOtherDate = '2025-05-18T22:00:00.000Z';
 
       beforeEach(() => {
-        requestContext.data = { fixCreatedDate: fixEntityCreatedDate };
+        requestContext.data = { fixCreatedDate: fixCreatedDateStr };
       });
 
-      it('can get all fixes with suggestions by created date', async () => {
+      it('can get all fixes with suggestions by created date (filters by executedAt)', async () => {
         const suggestion1 = await suggestionCollection.create({
           opportunityId,
           type: Suggestion.TYPES.CONTENT_UPDATE,
@@ -242,17 +232,12 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
           changeDetails: { arbitrary: 'value 1' },
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
-          .resolves([
-            {
-              fixEntity,
-              suggestions: [suggestion1, suggestion2],
-            },
-          ]);
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [suggestion1, suggestion2] }]);
 
         const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -269,9 +254,35 @@ describe('Fixes Controller', () => {
         expect(result[0].suggestions[1].id).to.equal(suggestion2.getId());
       });
 
+      it('filters out fixes whose executedAt ?? createdAt does not match the date', async () => {
+        const fixOnDate = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          executedAt: executedAtOnDate,
+        });
+        const fixOtherDate = await fixEntityCollection.create({
+          type: Suggestion.TYPES.REDIRECT_UPDATE,
+          opportunityId,
+          executedAt: executedAtOtherDate,
+        });
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([
+            { fixEntity: fixOnDate, suggestions: [] },
+            { fixEntity: fixOtherDate, suggestions: [] },
+          ]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.have.lengthOf(1);
+        expect(result[0].id).to.equal(fixOnDate.getId());
+      });
+
       it('returns empty array when no fixes found for the given created date', async () => {
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
           .resolves([]);
 
         const response = await fixesController.getAllForOpportunity(requestContext);
@@ -285,11 +296,11 @@ describe('Fixes Controller', () => {
         const fixEntity = await fixEntityCollection.create({
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId: 'wrong-opportunity-id',
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
           .resolves([
             {
               fixEntity,
@@ -308,17 +319,12 @@ describe('Fixes Controller', () => {
         const fixEntity = await fixEntityCollection.create({
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
-          .resolves([
-            {
-              fixEntity,
-              suggestions: [],
-            },
-          ]);
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
 
         opportunityGetStub.callsFake((data) => ({
           go: async () => ({ data: { ...data, siteId: 'wrong-site-id' } }),
@@ -349,27 +355,21 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
           changeDetails: { arbitrary: 'value 1' },
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
         const fixEntity2 = await fixEntityCollection.create({
           type: Suggestion.TYPES.REDIRECT_UPDATE,
           opportunityId,
           changeDetails: { arbitrary: 'value 2' },
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
           .resolves([
-            {
-              fixEntity: fixEntity1,
-              suggestions: [suggestion1, suggestion2],
-            },
-            {
-              fixEntity: fixEntity2,
-              suggestions: [suggestion3],
-            },
+            { fixEntity: fixEntity1, suggestions: [suggestion1, suggestion2] },
+            { fixEntity: fixEntity2, suggestions: [suggestion3] },
           ]);
 
         const response = await fixesController.getAllForOpportunity(requestContext);
@@ -398,17 +398,12 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
           changeDetails: { arbitrary: 'value 1' },
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
-          .resolves([
-            {
-              fixEntity,
-              suggestions: [],
-            },
-          ]);
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
 
         const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -421,6 +416,69 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
         });
         expect(result[0].suggestions).to.have.lengthOf(0);
+      });
+
+      // Regression guard: the original bug manifested when executedAt is null
+      // at fix-creation time. The junction table was populated with createdAt,
+      // but once executedAt was set the key no longer matched. The filter must
+      // use executedAt ?? createdAt so newly-created fixes (executedAt=null)
+      // still match on createdAt.
+      it('returns fix when executedAt is null but createdAt matches the requested date', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+        });
+        // Simulate executedAt=null (not yet deployed) with createdAt on target date
+        sandbox.stub(fixEntity, 'getExecutedAt').returns(null);
+        sandbox.stub(fixEntity, 'getCreatedAt').returns(executedAtOnDate);
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.have.lengthOf(1);
+        expect(result[0].id).to.equal(fixEntity.getId());
+      });
+
+      it('filters out fix when executedAt is null and createdAt does not match the requested date', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+        });
+        // Simulate executedAt=null with createdAt on a DIFFERENT date
+        sandbox.stub(fixEntity, 'getExecutedAt').returns(null);
+        sandbox.stub(fixEntity, 'getCreatedAt').returns(executedAtOtherDate);
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.deep.equal([]);
+      });
+
+      it('skips fix with malformed timestamp instead of throwing', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+        });
+        sandbox.stub(fixEntity, 'getExecutedAt').returns('not-a-valid-date');
+        sandbox.stub(fixEntity, 'getCreatedAt').returns('also-garbage');
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        // Should return 200 and skip the malformed fix rather than 500
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.deep.equal([]);
       });
     });
   });

@@ -1,3 +1,24 @@
+## [1.522.1](https://github.com/adobe/spacecat-api-service/compare/v1.522.0...v1.522.1) (2026-05-27)
+
+
+### Bug Fixes
+
+* **fixes:** filter by executedAt date instead of junction table in date query ([#2501](https://github.com/adobe/spacecat-api-service/issues/2501)) ([45809e0](https://github.com/adobe/spacecat-api-service/commit/45809e0cc56db979fa079dd41a16ddd3cf3eab53))
+
+# [1.522.0](https://github.com/adobe/spacecat-api-service/compare/v1.521.0...v1.522.0) (2026-05-27)
+
+
+### Features
+
+* **webhooks:** link PR and name requester/author in the enqueued Slack parent ([#2500](https://github.com/adobe/spacecat-api-service/issues/2500)) ([bd7065f](https://github.com/adobe/spacecat-api-service/commit/bd7065fff227182bdfca9d416d1370b603c9e744)), closes [#71](https://github.com/adobe/spacecat-api-service/issues/71)
+
+# [1.521.0](https://github.com/adobe/spacecat-api-service/compare/v1.520.3...v1.521.0) (2026-05-27)
+
+
+### Features
+
+* **api:** accept non-v4 UUIDs (RFC 9562) at the route gate ([#2496](https://github.com/adobe/spacecat-api-service/issues/2496)) ([00050a9](https://github.com/adobe/spacecat-api-service/commit/00050a9cecafae5ae717025faa49ab2f39f60b62))
+
 ## [1.520.3](https://github.com/adobe/spacecat-api-service/compare/v1.520.2...v1.520.3) (2026-05-27)
 
 

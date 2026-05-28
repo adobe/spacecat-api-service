@@ -37,12 +37,29 @@ function escapeSlack(text) {
  * @param {number|string} p.prNumber
  * @param {string} p.action - GitHub event action (e.g. review_requested)
  * @param {string} p.jobType - mapped job type (e.g. pr-review)
+ * @param {string} [p.requestedBy] - GitHub login that requested the review (sender)
+ * @param {string} [p.author] - GitHub login of the PR author
  * @returns {string} mrkdwn text
  */
 export function enqueuedParentText({
-  owner, repo, prNumber, action, jobType,
+  owner, repo, prNumber, action, jobType, requestedBy, author,
 }) {
-  return `:inbox_tray: *Review enqueued* \`${owner}/${repo}\` #${prNumber}\n${escapeSlack(action)} → ${escapeSlack(jobType)}`;
+  const prUrl = `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull/${prNumber}`;
+  const lines = [
+    `:inbox_tray: *Review enqueued* <${prUrl}|${escapeSlack(owner)}/${escapeSlack(repo)} #${prNumber}>`,
+    `${escapeSlack(action)} → ${escapeSlack(jobType)}`,
+  ];
+  const people = [];
+  if (requestedBy) {
+    people.push(`requested by <https://github.com/${encodeURIComponent(requestedBy)}|${escapeSlack(requestedBy)}>`);
+  }
+  if (author) {
+    people.push(`author <https://github.com/${encodeURIComponent(author)}|${escapeSlack(author)}>`);
+  }
+  if (people.length > 0) {
+    lines.push(people.join(' · '));
+  }
+  return lines.join('\n');
 }
 
 /**

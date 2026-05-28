@@ -1,0 +1,213 @@
+# SpaceCat API — Local HTTP Requests
+# ====================================
+# Uses the REST Client extension (Cursor / VS Code).
+# Secrets are read from a .env file in the repo root — never committed.
+#
+# Setup:
+#   cp .env.example .env
+#   Fill in BASE_URL, ADMIN_API_KEY, USER_API_KEY, SITE_ID, ORG_ID
+#
+# .env keys used here:
+#   BASE_URL          — e.g. https://spacecat.experiencecloud.live/api/ci
+#                         or http://localhost:3002
+#   ADMIN_API_KEY     — x-api-key with write access
+#   USER_API_KEY      — x-api-key with read-only access
+#   SITE_ID           — UUID of the site under test
+#   ORG_ID            — UUID of the organization under test
+
+# =============================================================================
+# HEALTH
+# =============================================================================
+
+### Ping
+GET {{$dotenv BASE_URL}}/ping
+
+# =============================================================================
+# SITES
+# =============================================================================
+
+### List all sites
+GET {{$dotenv BASE_URL}}/sites
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get site by ID
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get site by base URL
+# URL must be base64url encoded
+# node -e "console.log(Buffer.from('https://www.example.com').toString('base64url'))"
+GET {{$dotenv BASE_URL}}/sites/by-base-url/aHR0cHM6Ly93d3cuZXhhbXBsZS5jb20
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Create site
+POST {{$dotenv BASE_URL}}/sites
+x-api-key: {{$dotenv ADMIN_API_KEY}}
+Content-Type: application/json
+
+{
+  "baseURL": "https://www.example.com",
+  "organizationId": "{{$dotenv ORG_ID}}",
+  "deliveryType": "aem_edge"
+}
+
+### Update site
+PATCH {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}
+x-api-key: {{$dotenv ADMIN_API_KEY}}
+Content-Type: application/json
+
+{
+  "config": {}
+}
+
+### Delete site
+DELETE {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}
+x-api-key: {{$dotenv ADMIN_API_KEY}}
+
+# =============================================================================
+# ORGANIZATIONS
+# =============================================================================
+
+### List all organizations
+GET {{$dotenv BASE_URL}}/organizations
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get organization by ID
+GET {{$dotenv BASE_URL}}/organizations/{{$dotenv ORG_ID}}
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get sites for organization
+GET {{$dotenv BASE_URL}}/organizations/{{$dotenv ORG_ID}}/sites
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Create organization
+POST {{$dotenv BASE_URL}}/organizations
+x-api-key: {{$dotenv ADMIN_API_KEY}}
+Content-Type: application/json
+
+{
+  "name": "Example Org",
+  "imsOrgId": "ABCD1234@AdobeOrg"
+}
+
+# =============================================================================
+# AUDITS
+# =============================================================================
+
+### List all audits for site
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/audits
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get latest audits for site (all types)
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/audits/latest
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get latest audit for site by type
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/latest-audit/paid-traffic-analysis
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get latest audit for site — cookie consent
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/latest-audit/paid-cookie-consent
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get audits by type
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/audits/paid-traffic-analysis
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get latest audits across all sites by type
+GET {{$dotenv BASE_URL}}/audits/latest/paid-traffic-analysis
+x-api-key: {{$dotenv USER_API_KEY}}
+
+# =============================================================================
+# OPPORTUNITIES & SUGGESTIONS
+# =============================================================================
+
+### List opportunities for site
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/opportunities
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### List opportunities by status
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/opportunities/by-status/NEW
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get top paid opportunities
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/opportunities/top-paid
+x-api-key: {{$dotenv USER_API_KEY}}
+
+# Replace OPPORTUNITY_ID with an actual ID from the list above
+### Get suggestions for opportunity
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/opportunities/OPPORTUNITY_ID/suggestions
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get suggestions paginated
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/opportunities/OPPORTUNITY_ID/suggestions/paged/20
+x-api-key: {{$dotenv USER_API_KEY}}
+
+# =============================================================================
+# PAID TRAFFIC ANALYSIS
+# =============================================================================
+
+### Top paid pages
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/traffic/paid
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Paid by traffic type
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/traffic/paid/type
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Paid by channel
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/traffic/paid/channel
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Paid by URL and page type
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/traffic/paid/url-page-type
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Paid temporal series (trend over time)
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/traffic/paid/temporal-series
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Paid impact by page
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/traffic/paid/impact-by-page
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### PTA2 weekly summary
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/traffic/paid/pta2/weekly-summary
+x-api-key: {{$dotenv USER_API_KEY}}
+
+# =============================================================================
+# METRICS & TOP PAGES
+# =============================================================================
+
+### Get latest metrics for site
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/latest-metrics
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get top pages (all sources)
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/top-pages
+x-api-key: {{$dotenv USER_API_KEY}}
+
+### Get top pages by source
+GET {{$dotenv BASE_URL}}/sites/{{$dotenv SITE_ID}}/top-pages/ahrefs
+x-api-key: {{$dotenv USER_API_KEY}}
+
+# =============================================================================
+# IMPORT JOBS
+# =============================================================================
+
+### Get import job status
+# Replace JOB_ID with an actual job ID
+GET {{$dotenv BASE_URL}}/tools/import/jobs/JOB_ID
+x-api-key: {{$dotenv ADMIN_API_KEY}}
+
+### Get import job progress
+GET {{$dotenv BASE_URL}}/tools/import/jobs/JOB_ID/progress
+x-api-key: {{$dotenv ADMIN_API_KEY}}
+
+# =============================================================================
+# GLOBAL CONFIGURATION
+# =============================================================================
+
+### Get latest configuration
+GET {{$dotenv BASE_URL}}/configurations/latest
+x-api-key: {{$dotenv ADMIN_API_KEY}}

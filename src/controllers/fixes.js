@@ -109,8 +109,21 @@ export class FixesController {
     let fixes = [];
 
     if (hasText(fixCreatedDate)) {
-      const fixEntitiesWithSuggestions = await this.#FixEntity
-        .getAllFixesWithSuggestionByCreatedAt(opportunityId, fixCreatedDate);
+      // Fetch all fixes with suggestions then filter in-memory by
+      // executedAt ?? createdAt date. The previous approach used the junction
+      // table (getAllFixesWithSuggestionByCreatedAt) which stores the date at
+      // fix-creation time when executedAt is still null. Once the deploy
+      // completes and executedAt is updated, the junction date no longer
+      // matches the UI accordion key (which uses executedAt), causing the
+      // accordion to show empty even though fixes exist.
+      const allFixesWithSuggestions = await this.#FixEntity
+        .getAllFixesWithSuggestionsByOpportunityId(opportunityId);
+
+      const fixEntitiesWithSuggestions = allFixesWithSuggestions.filter(({ fixEntity }) => {
+        const ts = fixEntity.getExecutedAt() ?? fixEntity.getCreatedAt();
+        const d = ts ? new Date(ts) : null;
+        return d && !Number.isNaN(d.getTime()) && d.toISOString().split('T')[0] === fixCreatedDate;
+      });
 
       if (fixEntitiesWithSuggestions.length === 0) {
         return ok([]);
