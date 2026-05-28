@@ -6,20 +6,7 @@ organizations:
     description: |
       Creates a new organization (or returns the existing one with HTTP 200 if an organization
       with the same `imsOrgId` already exists).
-
-      **Auto-entitlement (via `x-product` header):** When the caller supplies an `x-product`
-      header (e.g. `ASO`), a `FREE_TRIAL` entitlement for that product is created for the
-      organization. The underlying TierClient is idempotent — existing entitlements for the
-      same `(orgId, productCode)` pair are reused — so retries are safe. This brings POST
-      `/organizations` in line with the entitlement model so that downstream product-scoped
-      APIs can resolve the organization without a separate manual provisioning step. If the
-      entitlement step fails (e.g. transient DB error), the endpoint returns HTTP 500 even
-      though the org itself was persisted; the caller should retry. Without the header, no
-      entitlement is created (backward-compatible for callers that manage entitlements
-      separately).
     operationId: createOrganization
-    parameters:
-      - $ref: './parameters.yaml#/xProduct'
     requestBody:
       required: true
       content:

@@ -87,21 +87,7 @@ sites:
       - Schema prepended if missing
       
       This idempotent behavior allows clients to safely retry site creation requests without creating duplicates.
-
-      **Auto-enrollment (via `x-product` header):** When the caller supplies an `x-product` header
-      (e.g. `ASO`), the site is auto-enrolled into a `FREE_TRIAL` entitlement for that product
-      (the org-level entitlement is created if missing, and a `SiteEnrollment` is created linking
-      the site to it). This keeps the site visible in product-scoped listing endpoints such as
-      `GET /organizations/{organizationId}/sites` without a separate onboarding step.
-      The underlying TierClient is idempotent — existing entitlements/enrollments are reused — so
-      retries are safe. If the entitlement/enrollment step fails (e.g. transient DB error), the
-      endpoint returns HTTP 500 even though the site itself was persisted; the caller should retry
-      (the site lookup will return the already-persisted site). Without the header, no
-      entitlement/enrollment is created (backward-compatible for callers that manage enrollment
-      separately).
     operationId: createSite
-    parameters:
-      - $ref: './parameters.yaml#/xProduct'
     requestBody:
       required: true
       content:

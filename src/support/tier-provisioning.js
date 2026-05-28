@@ -31,7 +31,7 @@ export const SITE_ORPHANED_AFTER_CREATE_EVENT = 'site_orphaned_after_create';
 /**
  * Reads and validates the `x-product` header for write-time tier provisioning.
  *
- * Write-time contract (see also OpenAPI `xProduct`):
+ * Write-time contract (`x-product` header, documented at the CDN/gateway layer):
  * - Optional; when absent, callers manage entitlements separately.
  * - When present, provisions a single product at FREE_TRIAL only (no tier override field).
  * - Does not downgrade an existing non-PAID entitlement that is already above FREE_TRIAL
