@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.516.0",
+  "version": "1.524.0",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -68,6 +68,7 @@
   "mocha": {
     "require": "test/setup-env.js",
     "recursive": "true",
+    "exit": true,
     "reporter": "mocha-multi-reporters",
     "reporter-options": "configFile=.mocha-multi.json"
   },
@@ -84,7 +85,7 @@
     "@adobe/spacecat-shared-athena-client": "1.9.12",
     "@adobe/spacecat-shared-brand-client": "1.1.42",
     "@adobe/spacecat-shared-content-client": "1.8.24",
-    "@adobe/spacecat-shared-data-access": "3.71.1",
+    "@adobe/spacecat-shared-data-access": "3.71.2",
     "@adobe/spacecat-shared-data-access-v2": "npm:@adobe/spacecat-shared-data-access@2.109.0",
     "@adobe/spacecat-shared-drs-client": "1.7.2",
     "@adobe/spacecat-shared-gpt-client": "1.6.23",
@@ -117,6 +118,7 @@
     "csv": "6.5.1",
     "csv-writer": "1.6.0",
     "date-fns": "4.1.0",
+    "exceljs": "^4.4.0",
     "fuse.js": "7.3.0",
     "iso-3166": "^4.4.0",
     "iso-639-3": "3.0.1",
