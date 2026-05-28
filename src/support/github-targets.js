@@ -42,6 +42,12 @@ export function parseTargets(env) {
     if (!t || typeof t.id !== 'string' || !t.id) {
       throw new Error(`GITHUB_TARGETS[${i}] is missing a string "id"`);
     }
+    // The id becomes the worker's SQS target_id, which the worker validates as
+    // ^[a-z][a-z0-9-]{0,63}$. Enforce the same here so a bad id fails loudly at
+    // config parse, and so result.id stays a bounded value where it is logged.
+    if (!/^[a-z][a-z0-9-]{0,63}$/.test(t.id)) {
+      throw new Error(`GITHUB_TARGETS[${i}] id "${t.id}" must match ^[a-z][a-z0-9-]{0,63}$ (it becomes the worker target_id)`);
+    }
     if (ids.has(t.id)) {
       throw new Error(`GITHUB_TARGETS has duplicate id "${t.id}"`);
     }

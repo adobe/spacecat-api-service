@@ -113,6 +113,13 @@ describe('github-targets parseTargets', () => {
     const bad = JSON.stringify([{ match: { default: true }, appSlug: 's', webhookSecretEnvVar: 'V' }]);
     expect(() => parseTargets({ GITHUB_TARGETS: bad })).to.throw('missing a string "id"');
   });
+
+  it('throws when an entry id is not a valid worker target_id', () => {
+    const bad = JSON.stringify([{
+      id: 'GitHub_Public', match: { default: true }, appSlug: 's', webhookSecretEnvVar: 'V',
+    }]);
+    expect(() => parseTargets({ GITHUB_TARGETS: bad })).to.throw('target_id');
+  });
 });
 
 describe('github-targets extractClassificationMetadata', () => {
@@ -157,7 +164,9 @@ describe('github-targets classify', () => {
   });
 
   it('routes an EMU enterprise slug to ghec', () => {
-    expect(classify({ host: 'github.com', enterpriseSlug: 'adobe-prd' }, targets).id).to.equal('ghec');
+    expect(classify({ host: 'github.com', enterpriseSlug: 'adobe-prd' }, targets)).to.deep.include({
+      id: 'ghec', appSlug: 'mysticat-bot', webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET_GHEC',
+    });
   });
 
   it('routes a github.com body with no enterprise to github-public (catch-all)', () => {
