@@ -305,7 +305,10 @@ function BrandsController(ctx, log, env) {
 
       const organizationId = site.getOrganizationId();
       const organization = await Organization.findById(organizationId);
-      const imsOrgId = organization?.getImsOrgId();
+      if (!organization) {
+        return notFound(`Organization not found for site: ${siteId}`);
+      }
+      const imsOrgId = organization.getImsOrgId();
 
       // Try Brand Governance Agent first (URL-based lookup, no brandId required)
       const govConfig = getImsConfigForBrandGovernance();

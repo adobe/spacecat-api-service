@@ -338,6 +338,19 @@ describe('Brands Controller', () => {
       expect(error).to.have.property('message', `Site not found: ${SITE_ID}`);
     });
 
+    it('returns not found if organization does not exist for site', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const response = await brandsController.getBrandGuidelinesForSite({
+        ...context,
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', `Organization not found for site: ${SITE_ID}`);
+    });
+
     it('returns not found if brand mapping does not exist', async () => {
       const siteWithoutBrand = new Site(
         {
