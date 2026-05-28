@@ -171,6 +171,47 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
 });
 
 describe('handlers/prompts.js — handleUpdatePrompt', () => {
+  // Regression guard for the "drop slow path" decision: PATCH treats the
+  // body as the full next state, so omitting either text or tags is a
+  // client error. Previously omitting tags meant "preserve" and forced a
+  // 10k-prompt walk per request — that's now gone, and the missing-field
+  // 400 keeps the contract honest.
+  it('400s when text is missing from body', async () => {
+    const transport = {};
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      { geoTargetId: 2840, languageCode: 'en', tags: ['only-tags'] },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('missingFields');
+  });
+
+  it('400s when tags is missing from body', async () => {
+    const transport = {};
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      { geoTargetId: 2840, languageCode: 'en', text: 'only text' },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('missingFields');
+  });
+
   it('400s when geoTargetId or languageCode missing from body', async () => {
     const transport = {};
     const dataAccess = makeDataAccess([]);
@@ -181,7 +222,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       BRAND,
       WORKSPACE,
       'sem-1',
-      { text: 'next' },
+      { text: 'next', tags: [] },
       fakeLog(),
     );
 
@@ -200,7 +241,9 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       BRAND,
       WORKSPACE,
       'sem-1',
-      { geoTargetId: 2840, languageCode: 'en', text: 'next' },
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tags: [],
+      },
       fakeLog(),
     );
 
@@ -208,13 +251,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(result.body.error).to.equal('marketNotFound');
   });
 
-  // Regression guard: the previous implementation fell back to a text-based
-  // lookup (`body.text`) when the paginated id walk did not find the prompt.
-  // That fallback deleted a different prompt with the same text when two
-  // prompts shared text across tags — a data-corruption vector. PATCH now
-  // returns 404 strictly on missing id, regardless of whether body.text is
-  // present.
-  it('404s when no upstream prompt matches the supplied id (no text fallback)', async () => {
+  it('replaces text+tags and never paginates upstream prompts', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -222,38 +259,9 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
 
     const transport = {
-      listPromptsByTags: sinon.stub().resolves({ items: [] }),
-      // Assert that neither deletePromptsByIds nor createTaggedPrompts are
-      // called — a fallback-by-text would invoke them on the wrong item.
-      deletePromptsByIds: sinon.stub().resolves(),
-      createTaggedPrompts: sinon.stub().resolves({ ids: ['should-not-happen'] }),
-    };
-
-    const result = await handleUpdatePrompt(
-      transport,
-      dataAccess,
-      BRAND,
-      WORKSPACE,
-      'sem-missing',
-      { geoTargetId: 2840, languageCode: 'en', text: 'some text that exists elsewhere' },
-      fakeLog(),
-    );
-
-    expect(result.status).to.equal(404);
-    expect(result.body.error).to.equal('promptNotFound');
-    expect(transport.deletePromptsByIds).to.have.callCount(0);
-    expect(transport.createTaggedPrompts).to.have.callCount(0);
-  });
-
-  it('fast path: skips prompt walk when body provides both text and tags', async () => {
-    const project = makeProject({
-      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
-    });
-    const dataAccess = makeDataAccess([]);
-    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
-
-    const transport = {
-      // Would surface as undefined-call if the fast path mistakenly walks.
+      // listPromptsByTags is no longer called from PATCH — wiring it as a
+      // stub lets us assert callCount(0) so a regression that brings the
+      // walk back fails this test.
       listPromptsByTags: sinon.stub(),
       deletePromptsByIds: sinon.stub().resolves(),
       createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
@@ -273,12 +281,18 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     );
 
     expect(result.status).to.equal(200);
-    expect(result.body.tags).to.deep.equal(['fresh']);
+    expect(result.body).to.deep.equal({
+      semrushPromptId: 'new-sem-id',
+      geoTargetId: 2840,
+      languageCode: 'en',
+      text: 'new text',
+      tags: ['fresh'],
+    });
     expect(transport.listPromptsByTags).to.have.callCount(0);
     expect(transport.deletePromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['sem-1']);
   });
 
-  it('fast path 404: upstream DELETE 404 → return 404 (no create)', async () => {
+  it('upstream DELETE 404 → return 404 (no create)', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -336,39 +350,6 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       fakeLog(),
     )).to.be.rejectedWith(/upstream 503/);
     expect(transport.createTaggedPrompts).to.have.callCount(0);
-  });
-
-  it('preserves existing tags when PATCH body omits tags', async () => {
-    const project = makeProject({
-      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
-    });
-    const dataAccess = makeDataAccess([]);
-    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
-
-    const transport = {
-      // First page lookup by id resolves the old item.
-      listPromptsByTags: sinon.stub().resolves({
-        items: [{ id: 'sem-1', name: 'old text', tags: ['keep-me'] }],
-      }),
-      deletePromptsByIds: sinon.stub().resolves(),
-      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
-      publishProject: sinon.stub().resolves(),
-    };
-
-    const result = await handleUpdatePrompt(
-      transport,
-      dataAccess,
-      BRAND,
-      WORKSPACE,
-      'sem-1',
-      { geoTargetId: 2840, languageCode: 'en', text: 'new text' },
-      fakeLog(),
-    );
-
-    expect(result.status).to.equal(200);
-    expect(result.body.tags).to.deep.equal(['keep-me']);
-    expect(result.body.semrushPromptId).to.equal('new-sem-id');
-    expect(result.body.text).to.equal('new text');
   });
 });
 

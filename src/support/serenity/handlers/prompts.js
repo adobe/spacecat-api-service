@@ -277,58 +277,30 @@ export async function handleCreatePrompts(
 }
 
 /**
- * Walks `listPromptsByTags` to find an item by id. Returns null when the
- * id is not present in any page. Used by the slow path of PATCH below to
- * read old text/tags for preserve-on-omit semantics; not needed when the
- * client provides both `text` and `tags` (the fast path uses the upstream
- * DELETE response for the existence check instead of this walk).
- */
-async function findPromptById(transport, semrushWorkspaceId, projectId, semrushPromptId) {
-  const LIMIT = 200;
-  for (let pageIdx = 1; pageIdx <= 50; pageIdx += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    const resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
-      tag_ids: [],
-      page: pageIdx,
-      limit: LIMIT,
-    });
-    const items = Array.isArray(resp?.items) ? resp.items : [];
-    const found = items.find((it) => String(it?.id ?? '') === String(semrushPromptId));
-    if (found) {
-      return found;
-    }
-    if (items.length < LIMIT) {
-      return null;
-    }
-  }
-  return null;
-}
-
-/**
- * PATCH /serenity/prompts/:semrushPromptId — partial update.
+ * PATCH /serenity/prompts/:semrushPromptId — replace.
  *
- * Body carries `{geoTargetId, languageCode, text?, tags?}`. Two paths:
+ * Body carries `{geoTargetId, languageCode, text, tags}`. All four are
+ * required: the upstream provider has no in-place update (no GET-by-id
+ * either), so the implementation is DELETE-then-CREATE and we treat the
+ * payload as the full next state. Clients always have the existing
+ * `text`/`tags` available locally (they were returned by the preceding
+ * list call that rendered the edit form), so requiring both keeps the
+ * server side a single straight line and removes the per-request
+ * pagination that "preserve-on-omit" semantics would force.
  *
- *   Fast path — body provides BOTH `text` and `tags`.
- *     Skip the prompt walk: we already have the id from the URL, and the
- *     body fully specifies the new state. Use upstream DELETE's response
- *     for the 404 contract: DELETE returns 404 → return 404 to client,
- *     DELETE succeeds → proceed to CREATE, DELETE 5xx → propagate as 502
- *     (the upstream prompt stays in place, retry-safe).
+ * Contract:
+ *   - body missing text or tags → 400 (missingFields).
+ *   - slice missing on the brand → 404 (marketNotFound).
+ *   - upstream DELETE returns 404 → 404 (promptNotFound).
+ *   - upstream DELETE returns any other error → throw (handler-level
+ *     500 / 502 mapping by the controller). We never CREATE after a
+ *     failed DELETE: a previous warn-and-create behaviour produced
+ *     duplicate prompts whenever DELETE flaked (5xx / timeout).
  *
- *   Slow path — body omits either `text` or `tags` (preserve-on-omit).
- *     Paginate `listPromptsByTags` to find the old item, then PATCH
- *     semantics: omitted text → keep `oldItem.name`; omitted tags →
- *     keep `tagNamesOf(oldItem)`. Same DELETE error handling as above.
- *
- * DELETE failure is never swallowed — a previous version warn-logged and
- * proceeded to CREATE, which produced duplicate prompts whenever the
- * upstream DELETE flaked (5xx/timeout). Now: 404 → 404, other errors →
- * 502 (no CREATE).
- *
- * The new upstream prompt id is always different (re-create), and
- * tag-cache invalidation runs after the successful CREATE so the next
- * /serenity/tags read for this project sees any newly-introduced tag.
+ * After a successful CREATE the per-project tag cache is invalidated on
+ * this container (a PATCH can introduce a new tag or drop the last
+ * carrier of an old tag), then `publishProject` is fired to push the
+ * new upstream prompt id live.
  */
 export async function handleUpdatePrompt(
   transport,
@@ -342,10 +314,10 @@ export async function handleUpdatePrompt(
   // `semrushPromptId` is validated as non-empty at the controller boundary
   // (serenity.js:259) before this handler is invoked over HTTP, so no
   // re-check here.
-  if (!body || (body.text === undefined && body.tags === undefined)) {
+  if (!body || body.text === undefined || body.tags === undefined) {
     return {
       status: 400,
-      body: { error: 'missingFields', message: 'PATCH body must include text or tags' },
+      body: { error: 'missingFields', message: 'PATCH body must include both text and tags' },
     };
   }
   const geoTargetId = normalizeGeoTargetId(Number(body.geoTargetId));
@@ -376,44 +348,11 @@ export async function handleUpdatePrompt(
   }
   const projectId = project.getSemrushProjectId();
 
-  const hasFullPayload = body.text !== undefined && body.tags !== undefined;
-  let nextText;
-  let nextTags;
+  const nextText = String(body.text);
+  const nextTags = Array.isArray(body.tags)
+    ? body.tags.map((t) => String(t || '').trim()).filter(Boolean)
+    : [];
 
-  if (hasFullPayload) {
-    // Fast path: trust the client-supplied state, skip the walk.
-    nextText = String(body.text);
-    nextTags = Array.isArray(body.tags)
-      ? body.tags.map((t) => String(t || '').trim()).filter(Boolean)
-      : [];
-  } else {
-    // Slow path: paginate to read old item for preserve-on-omit.
-    const oldItem = await findPromptById(transport, semrushWorkspaceId, projectId, semrushPromptId);
-    if (!oldItem) {
-      return {
-        status: 404,
-        body: {
-          error: 'promptNotFound',
-          message: 'No upstream prompt matches the supplied semrushPromptId in this slice',
-        },
-      };
-    }
-    const oldText = String(oldItem?.name || '');
-    const oldTags = tagNamesOf(oldItem);
-    nextText = body.text === undefined ? oldText : String(body.text);
-    if (body.tags === undefined) {
-      nextTags = oldTags;
-    } else if (Array.isArray(body.tags)) {
-      nextTags = body.tags.map((t) => String(t || '').trim()).filter(Boolean);
-    } else {
-      nextTags = [];
-    }
-  }
-
-  // Unified DELETE error handling for both paths. 404 → return 404 to the
-  // client (fast path's existence check; slow path catches the edge case
-  // where the item disappeared between findPromptById and this DELETE).
-  // Any other error propagates as 502 so we never CREATE a duplicate.
   try {
     await transport.deletePromptsByIds(semrushWorkspaceId, projectId, [semrushPromptId]);
   } catch (e) {
@@ -442,8 +381,6 @@ export async function handleUpdatePrompt(
   const newSemrushPromptId = Array.isArray(resp?.ids) && resp.ids.length > 0
     ? String(resp.ids[0]) : '';
 
-  // A PATCH can introduce a new tag (or drop the last carrier of an old
-  // tag), so drop the cached tag set for this project on this container.
   invalidateTagCacheForProject(semrushWorkspaceId, projectId);
 
   await publishAffected(transport, semrushWorkspaceId, [projectId], log);

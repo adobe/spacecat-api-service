@@ -136,12 +136,18 @@ v2-serenity-prompt-by-id:
     tags: [serenity]
     summary: Update a Serenity prompt
     description: |
-      Body carries `{geoTargetId, languageCode}` to resolve the owning slice
-      plus the fields to change (`text` and/or `tags`). The implementation
-      runs upstream DELETE-old + POST-new + publish; the response carries the
-      new `semrushPromptId` (the value changes on every upstream re-create).
-      Omitting `tags` preserves the existing tags; an explicit empty array
-      clears them.
+      Body carries `{geoTargetId, languageCode, text, tags}`. All four fields
+      are required — the upstream provider has no in-place update (and no
+      GET-by-id), so the implementation is DELETE-old + POST-new + publish
+      and the payload is treated as the full next state. Clients always
+      have `text`/`tags` available locally (from the list call that
+      rendered the edit form), which keeps this endpoint a single straight
+      line and avoids the per-request pagination "preserve-on-omit"
+      semantics would force.
+
+      An explicit empty `tags: []` clears tags. The response carries the
+      new `semrushPromptId` (the value changes on every upstream
+      re-create).
     operationId: updateSerenityPrompt
     security:
       - ims_key: []

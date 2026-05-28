@@ -10028,10 +10028,13 @@ SerenityCreatePromptsResponse:
 SerenityUpdatePromptRequest:
   type: object
   description: |
-    Partial update. Carries the owning slice in `geoTargetId` + `languageCode`
-    so the server can resolve the upstream project without scanning. At
-    least one of `text` / `tags` must be present.
-  required: [geoTargetId, languageCode]
+    Replace the prompt's text and tags. Carries the owning slice in
+    `geoTargetId` + `languageCode` so the server can resolve the upstream
+    project without scanning. All four fields are required — the upstream
+    provider's API has no in-place update or GET-by-id, so the server runs
+    DELETE-old + POST-new and treats the body as the full next state.
+    Pass `tags: []` to clear tags.
+  required: [geoTargetId, languageCode, text, tags]
   properties:
     geoTargetId:
       type: integer
