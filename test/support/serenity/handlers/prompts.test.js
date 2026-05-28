@@ -120,15 +120,13 @@ describe('handlers/prompts.js — handleListPrompts', () => {
 });
 
 describe('handlers/prompts.js — handleCreatePrompts', () => {
-  it('returns empty buckets on empty payload (no upstream call)', async () => {
+  it('400s on empty prompts array (no upstream call)', async () => {
     const transport = { createTaggedPrompts: sinon.stub() };
     const dataAccess = makeDataAccess([]);
 
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+    await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [],
-    }, fakeLog());
-
-    expect(result).to.deep.equal({ created: [], skipped: [], failed: [] });
+    }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode);
     expect(transport.createTaggedPrompts).not.to.have.been.called;
   });
 

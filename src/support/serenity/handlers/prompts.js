@@ -13,6 +13,7 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
+import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 
 const DEFAULT_PAGE_LIMIT = 50;
 const MAX_PAGE_LIMIT = 1000;
@@ -58,10 +59,8 @@ export async function handleListPrompts(
   semrushWorkspaceId,
   query,
 ) {
-  const geoTargetId = Number.isInteger(query?.geoTargetId) && query.geoTargetId > 0
-    ? query.geoTargetId : null;
-  const languageCode = hasText(query?.languageCode)
-    ? String(query.languageCode).toLowerCase() : null;
+  const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
+  const languageCode = normalizeLanguageCode(query?.languageCode);
   if (geoTargetId === null || languageCode === null) {
     throw new ErrorWithStatusCode(
       'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
@@ -69,10 +68,12 @@ export async function handleListPrompts(
     );
   }
 
-  const page = Math.max(1, parseInt(query?.page ?? '1', 10) || 1);
-  const rawLimit = parseInt(query?.limit ?? String(DEFAULT_PAGE_LIMIT), 10)
-    || DEFAULT_PAGE_LIMIT;
-  const limit = Math.max(1, Math.min(rawLimit, MAX_PAGE_LIMIT));
+  // `parsedQuery` in the controller has already converted page/limit to
+  // integers (or null on parse failure). Trust that and skip the reparse.
+  const page = Number.isInteger(query?.page) && query.page > 0 ? query.page : 1;
+  const requestedLimit = Number.isInteger(query?.limit) && query.limit > 0
+    ? query.limit : DEFAULT_PAGE_LIMIT;
+  const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
   const search = hasText(query?.search) ? String(query.search).trim() : undefined;
 
   const row = await dataAccess.BrandSemrushProject.findBySlice(
@@ -124,12 +125,12 @@ async function publishAffected(transport, semrushWorkspaceId, projectIds, log) {
 
 function normalizePromptInput(input) {
   const text = String(input?.text || '').trim();
-  const languageCode = String(input?.languageCode || '').trim().toLowerCase();
-  const geoTargetId = Number(input?.geoTargetId);
+  const languageCode = normalizeLanguageCode(input?.languageCode);
+  const geoTargetId = normalizeGeoTargetId(Number(input?.geoTargetId));
   const tags = Array.isArray(input?.tags)
     ? input.tags.map((t) => String(t || '').trim()).filter(Boolean)
     : [];
-  if (!text || !languageCode || !Number.isInteger(geoTargetId) || geoTargetId <= 0) {
+  if (!text || languageCode === null || geoTargetId === null) {
     return null;
   }
   return {
@@ -174,7 +175,7 @@ export async function handleCreatePrompts(
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
-    return { created: [], skipped: [], failed: [] };
+    throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
   }
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
@@ -287,22 +288,18 @@ export async function handleUpdatePrompt(
   body,
   log,
 ) {
-  if (!hasText(semrushPromptId)) {
-    return {
-      status: 400,
-      body: { error: 'missingPromptId', message: 'Path :semrushPromptId is required' },
-    };
-  }
+  // `semrushPromptId` is validated as non-empty at the controller boundary
+  // (serenity.js:259) before this handler is invoked over HTTP, so no
+  // re-check here.
   if (!body || (body.text === undefined && body.tags === undefined)) {
     return {
       status: 400,
       body: { error: 'missingFields', message: 'PATCH body must include text or tags' },
     };
   }
-  const geoTargetId = Number(body.geoTargetId);
-  const languageCode = hasText(body.languageCode)
-    ? String(body.languageCode).toLowerCase() : null;
-  if (!Number.isInteger(geoTargetId) || geoTargetId <= 0 || languageCode === null) {
+  const geoTargetId = normalizeGeoTargetId(Number(body.geoTargetId));
+  const languageCode = normalizeLanguageCode(body.languageCode);
+  if (geoTargetId === null || languageCode === null) {
     return {
       status: 400,
       body: {
@@ -435,14 +432,13 @@ export async function handleBulkDeletePrompts(
   const failed = [];
   targets.forEach((t) => {
     const sid = String(t?.semrushPromptId || '');
-    const geoTargetId = Number(t?.geoTargetId);
-    const languageCode = hasText(t?.languageCode)
-      ? String(t.languageCode).toLowerCase() : '';
-    if (!sid || !Number.isInteger(geoTargetId) || geoTargetId <= 0 || !languageCode) {
+    const geoTargetId = normalizeGeoTargetId(Number(t?.geoTargetId));
+    const languageCode = normalizeLanguageCode(t?.languageCode);
+    if (!sid || geoTargetId === null || languageCode === null) {
       failed.push({
         semrushPromptId: sid,
-        geoTargetId: Number.isFinite(geoTargetId) ? geoTargetId : null,
-        languageCode: languageCode || null,
+        geoTargetId,
+        languageCode,
         message: 'Missing semrushPromptId, geoTargetId, or languageCode',
       });
       return;

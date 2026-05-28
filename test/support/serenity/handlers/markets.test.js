@@ -212,15 +212,18 @@ describe('handlers/markets.js — handleDeleteMarket', () => {
     )).to.be.rejectedWith(ErrorWithStatusCode);
   });
 
-  it('400s on invalid languageCode', async () => {
+  it('400s on invalid languageCode (regex-rejected, not just uppercase)', async () => {
     const dataAccess = makeDataAccess([]);
+    // normalizeLanguageCode lowercases before regex-testing, so 'EN-US' is
+    // accepted as 'en-us'. Use a truly malformed value to exercise the
+    // regex-reject branch.
     await expect(handleDeleteMarket(
       {},
       dataAccess,
       BRAND,
       WORKSPACE,
       2840,
-      'EN-US',
+      '1z',
       fakeLog(),
     )).to.be.rejectedWith(ErrorWithStatusCode);
   });

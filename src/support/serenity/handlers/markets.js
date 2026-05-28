@@ -16,9 +16,9 @@ import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import { SerenityTransportError } from '../rest-transport.js';
+import { LANGUAGE_TAG_REGEX, normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
-const LANGUAGE_TAG_REGEX = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
 
 // Reusable English region-name formatter (ICU-backed, built into Node). Used
 // for the `location_name` we send upstream — matches the form Semrush stores
@@ -143,8 +143,8 @@ export async function handleListMarkets(transport, dataAccess, brandId, semrushW
       brandId,
       geoTargetId: row.getGeoTargetId(),
       languageCode: row.getLanguageCode(),
-      createdAt: row.getCreatedAt ? row.getCreatedAt() : null,
-      updatedAt: row.getUpdatedAt ? row.getUpdatedAt() : null,
+      createdAt: row.getCreatedAt(),
+      updatedAt: row.getUpdatedAt(),
     })),
   };
 }
@@ -349,10 +349,10 @@ export async function handleDeleteMarket(
   languageCode,
   log,
 ) {
-  if (!Number.isInteger(geoTargetId) || geoTargetId <= 0) {
+  if (normalizeGeoTargetId(geoTargetId) === null) {
     throw new ErrorWithStatusCode('geoTargetId must be a positive integer', 400);
   }
-  if (!hasText(languageCode) || !LANGUAGE_TAG_REGEX.test(languageCode)) {
+  if (normalizeLanguageCode(languageCode) === null) {
     throw new ErrorWithStatusCode(
       'languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$',
       400,
@@ -448,10 +448,8 @@ export async function handleListTags(
   semrushWorkspaceId,
   query,
 ) {
-  const geoTargetId = Number.isInteger(query?.geoTargetId) && query.geoTargetId > 0
-    ? query.geoTargetId : null;
-  const languageCode = hasText(query?.languageCode)
-    ? String(query.languageCode).toLowerCase() : null;
+  const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
+  const languageCode = normalizeLanguageCode(query?.languageCode);
   if (geoTargetId === null || languageCode === null) {
     throw new ErrorWithStatusCode(
       'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
@@ -508,6 +506,8 @@ export async function handleListTags(
   }
 
   const sorted = Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
+  // delete-then-set refreshes Map insertion order so evictTagCacheIfNeeded()
+  // (LRU-by-insertion-order) treats this entry as freshest.
   tagCache.delete(cacheKey);
   evictTagCacheIfNeeded();
   tagCache.set(cacheKey, { items: sorted, expiresAt: now + TAG_CACHE_TTL_MS });
@@ -550,10 +550,8 @@ export async function handleListModels(
   semrushWorkspaceId,
   query,
 ) {
-  const geoTargetId = Number.isInteger(query?.geoTargetId) && query.geoTargetId > 0
-    ? query.geoTargetId : null;
-  const languageCode = hasText(query?.languageCode)
-    ? String(query.languageCode).toLowerCase() : null;
+  const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
+  const languageCode = normalizeLanguageCode(query?.languageCode);
   if (geoTargetId === null || languageCode === null) {
     throw new ErrorWithStatusCode(
       'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
