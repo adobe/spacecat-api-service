@@ -19,10 +19,8 @@ import {
   ensureOrgEntitlement,
   ensureSiteEntitlementAndEnrollment,
   logSiteOrphanedAfterCreate,
-  resolveWriteTimeProductCode,
-  shouldPreserveExistingEntitlementTier,
+  resolveProductCode,
   SITE_ORPHANED_AFTER_CREATE_EVENT,
-  wouldDowngradeExistingTier,
 } from '../../src/support/tier-provisioning.js';
 
 use(chaiAsPromised);
@@ -39,14 +37,14 @@ describe('tier-provisioning', () => {
     sandbox.restore();
   });
 
-  describe('resolveWriteTimeProductCode', () => {
+  describe('resolveProductCode', () => {
     it('returns null product when header is absent', () => {
-      const result = resolveWriteTimeProductCode({ pathInfo: { headers: {} } });
+      const result = resolveProductCode({ pathInfo: { headers: {} } });
       expect(result).to.deep.equal({ error: null, productCode: null });
     });
 
     it('returns 400-style error for unsupported product codes', () => {
-      const result = resolveWriteTimeProductCode({
+      const result = resolveProductCode({
         pathInfo: { headers: { 'x-product': 'INVALID' } },
       });
       expect(result.productCode).to.be.undefined;
@@ -55,51 +53,32 @@ describe('tier-provisioning', () => {
     });
 
     it('trims and accepts valid product codes', () => {
-      const result = resolveWriteTimeProductCode({
+      const result = resolveProductCode({
         pathInfo: { headers: { 'x-product': '  ASO  ' } },
       });
       expect(result).to.deep.equal({ error: null, productCode: 'ASO' });
     });
   });
 
-  describe('wouldDowngradeExistingTier', () => {
-    it('flags PLG and PRE_ONBOARD as downgrade risks for FREE_TRIAL', () => {
-      expect(wouldDowngradeExistingTier('PLG', 'FREE_TRIAL')).to.equal(true);
-      expect(wouldDowngradeExistingTier('PRE_ONBOARD', 'FREE_TRIAL')).to.equal(true);
-    });
-
-    it('does not flag PAID or FREE_TRIAL', () => {
-      expect(wouldDowngradeExistingTier('PAID', 'FREE_TRIAL')).to.equal(false);
-      expect(wouldDowngradeExistingTier('FREE_TRIAL', 'FREE_TRIAL')).to.equal(false);
-    });
-  });
-
-  describe('shouldPreserveExistingEntitlementTier', () => {
-    it('preserves PAID and elevated non-PAID tiers', () => {
-      expect(shouldPreserveExistingEntitlementTier('PAID')).to.equal(true);
-      expect(shouldPreserveExistingEntitlementTier('PRE_ONBOARD')).to.equal(true);
-      expect(shouldPreserveExistingEntitlementTier('FREE_TRIAL')).to.equal(false);
-    });
-  });
-
   describe('ensureOrgEntitlement', () => {
-    it('skips createEntitlement when org already has PAID tier', async () => {
+    it('calls createEntitlement with existing tier when org already has PAID', async () => {
       const tierClient = {
         checkValidEntitlement: sandbox.stub().resolves({
           entitlement: { getId: () => 'ent-1', getTier: () => 'PAID' },
         }),
-        createEntitlement: sandbox.stub(),
+        createEntitlement: sandbox.stub().resolves({
+          entitlement: { getId: () => 'ent-1', getTier: () => 'PAID' },
+        }),
       };
       sandbox.stub(TierClient, 'createForOrg').returns(tierClient);
       const organization = { getId: () => 'org-1' };
 
-      const entitlement = await ensureOrgEntitlement({}, organization, 'ASO', log);
+      await ensureOrgEntitlement({}, organization, 'ASO', log);
 
-      expect(entitlement.getId()).to.equal('ent-1');
-      expect(tierClient.createEntitlement).to.not.have.been.called;
+      expect(tierClient.createEntitlement).to.have.been.calledOnceWith('PAID');
     });
 
-    it('calls createEntitlement when no entitlement exists', async () => {
+    it('calls createEntitlement with FREE_TRIAL when no entitlement exists', async () => {
       const tierClient = {
         checkValidEntitlement: sandbox.stub().resolves({ entitlement: null }),
         createEntitlement: sandbox.stub().resolves({
@@ -116,13 +95,16 @@ describe('tier-provisioning', () => {
   });
 
   describe('ensureSiteEntitlementAndEnrollment', () => {
-    it('does not downgrade PRE_ONBOARD and reuses existing enrollment', async () => {
+    it('calls createEntitlement with existing tier when entitlement is PRE_ONBOARD', async () => {
       const tierClient = {
         checkValidEntitlement: sandbox.stub().resolves({
           entitlement: { getId: () => 'ent-1', getTier: () => 'PRE_ONBOARD' },
           siteEnrollment: { getId: () => 'enr-1' },
         }),
-        createEntitlement: sandbox.stub(),
+        createEntitlement: sandbox.stub().resolves({
+          entitlement: { getId: () => 'ent-1' },
+          siteEnrollment: { getId: () => 'enr-1' },
+        }),
       };
       sandbox.stub(TierClient, 'createForSite').resolves(tierClient);
       const site = {
@@ -130,18 +112,12 @@ describe('tier-provisioning', () => {
         getOrganizationId: sandbox.stub().resolves('org-1'),
       };
 
-      const result = await ensureSiteEntitlementAndEnrollment(
-        { dataAccess: { SiteEnrollment: { create: sandbox.stub() } } },
-        site,
-        'ASO',
-        log,
-      );
+      await ensureSiteEntitlementAndEnrollment({}, site, 'ASO', log);
 
-      expect(tierClient.createEntitlement).to.not.have.been.called;
-      expect(result.siteEnrollment.getId()).to.equal('enr-1');
+      expect(tierClient.createEntitlement).to.have.been.calledOnceWith('PRE_ONBOARD');
     });
 
-    it('calls createEntitlement when no entitlement exists', async () => {
+    it('calls createEntitlement with FREE_TRIAL when no entitlement exists', async () => {
       const tierClient = {
         checkValidEntitlement: sandbox.stub().resolves({
           entitlement: null,
@@ -158,12 +134,7 @@ describe('tier-provisioning', () => {
         getOrganizationId: sandbox.stub().resolves('org-1'),
       };
 
-      await ensureSiteEntitlementAndEnrollment(
-        { dataAccess: { SiteEnrollment: { create: sandbox.stub() } } },
-        site,
-        'ASO',
-        log,
-      );
+      await ensureSiteEntitlementAndEnrollment({}, site, 'ASO', log);
 
       expect(tierClient.createEntitlement).to.have.been.calledOnceWith('FREE_TRIAL');
       expect(log.info).to.have.been.calledWithMatch(/Ensured ASO entitlement ent-new for site site-1/);
@@ -186,43 +157,9 @@ describe('tier-provisioning', () => {
         getOrganizationId: sandbox.stub().resolves('org-1'),
       };
 
-      await ensureSiteEntitlementAndEnrollment(
-        { dataAccess: { SiteEnrollment: { create: sandbox.stub() } } },
-        site,
-        'ASO',
-        log,
-      );
+      await ensureSiteEntitlementAndEnrollment({}, site, 'ASO', log);
 
       expect(log.info).to.have.been.calledWithMatch(/and enrollment enr-new/);
-    });
-
-    it('creates site enrollment only when tier is preserved and enrollment is missing', async () => {
-      const tierClient = {
-        checkValidEntitlement: sandbox.stub().resolves({
-          entitlement: { getId: () => 'ent-1', getTier: () => 'PRE_ONBOARD' },
-          siteEnrollment: null,
-        }),
-        createEntitlement: sandbox.stub(),
-      };
-      sandbox.stub(TierClient, 'createForSite').resolves(tierClient);
-      const siteEnrollmentCreate = sandbox.stub().resolves({ getId: () => 'enr-new' });
-      const site = {
-        getId: () => 'site-1',
-        getOrganizationId: sandbox.stub().resolves('org-1'),
-      };
-
-      await ensureSiteEntitlementAndEnrollment(
-        { dataAccess: { SiteEnrollment: { create: siteEnrollmentCreate } } },
-        site,
-        'ASO',
-        log,
-      );
-
-      expect(tierClient.createEntitlement).to.not.have.been.called;
-      expect(siteEnrollmentCreate).to.have.been.calledOnceWith({
-        siteId: 'site-1',
-        entitlementId: 'ent-1',
-      });
     });
   });
 

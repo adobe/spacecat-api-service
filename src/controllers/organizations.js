@@ -33,7 +33,7 @@ import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
 import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
 import {
   ensureOrgEntitlement,
-  resolveWriteTimeProductCode,
+  resolveProductCode,
 } from '../support/tier-provisioning.js';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
@@ -66,10 +66,9 @@ function OrganizationsController(ctx, env) {
   /**
    * Creates an organization. The organization ID is generated automatically.
    *
-   * Write-time tier provisioning: optional `x-product` header provisions a single product
-   * at FREE_TRIAL when the org has no entitlement or is already on FREE_TRIAL. Existing PAID,
-   * PLG, and PRE_ONBOARD entitlements are never downgraded (see `tier-provisioning.js`).
-   * Entitlement failures return 500; retries are safe when the same imsOrgId is re-posted.
+   * Write-time tier provisioning: when an organization is newly created, it ensures org
+   * entitlement via TierClient using the existing tier when present, otherwise FREE_TRIAL.
+   * Idempotent re-POSTs do not run provisioning.
    *
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Organization response.
@@ -79,7 +78,7 @@ function OrganizationsController(ctx, env) {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new Organizations');
     }
-    const { productCode, error: productCodeError } = resolveWriteTimeProductCode(context);
+    const { productCode, error: productCodeError } = resolveProductCode(context);
     if (productCodeError) {
       return badRequest(productCodeError);
     }
@@ -99,7 +98,7 @@ function OrganizationsController(ctx, env) {
       }
     }
 
-    if (productCode) {
+    if (productCode && status === 201) {
       try {
         await ensureOrgEntitlement(context, organization, productCode, log);
       } catch (error) {

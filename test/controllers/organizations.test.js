@@ -402,7 +402,7 @@ describe('Organizations Controller', () => {
       expect(context.log.info).to.have.been.calledWithMatch(/Ensured ASO entitlement entitlement-456/);
     });
 
-    it('creates entitlement for an existing organization when x-product header is set', async () => {
+    it('skips auto-entitlement for an existing organization when x-product header is set', async () => {
       const existingOrg = organizations[1];
       mockDataAccess.Organization.findByImsOrgId.resolves(existingOrg);
       context.pathInfo = { headers: { 'x-product': 'LLMO' } };
@@ -417,13 +417,7 @@ describe('Organizations Controller', () => {
 
       expect(response.status).to.equal(200);
       expect(mockDataAccess.Organization.create).to.not.have.been.called;
-      expect(TierClient.createForOrg).to.have.been.calledOnce;
-      expect(TierClient.createForOrg).to.have.been.calledWith(
-        sinon.match.object,
-        sinon.match.object,
-        'LLMO',
-      );
-      expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('FREE_TRIAL');
+      expect(TierClient.createForOrg).to.have.not.been.called;
     });
 
     it('skips auto-entitlement when x-product header is missing', async () => {
@@ -478,7 +472,7 @@ describe('Organizations Controller', () => {
       expect(TierClient.createForOrg).to.have.not.been.called;
     });
 
-    it('does not downgrade PRE_ONBOARD entitlement when x-product is set', async () => {
+    it('uses existing PRE_ONBOARD tier when provisioning a newly created organization', async () => {
       tierClientStub.checkValidEntitlement.resolves({
         entitlement: { getId: () => 'entitlement-pre', getTier: () => 'PRE_ONBOARD' },
       });
@@ -490,7 +484,7 @@ describe('Organizations Controller', () => {
         ...context,
       });
 
-      expect(tierClientStub.createEntitlement).to.not.have.been.called;
+      expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('PRE_ONBOARD');
     });
 
     it('returns 500 when TierClient.createEntitlement throws for a newly created organization', async () => {
@@ -507,25 +501,6 @@ describe('Organizations Controller', () => {
       const body = await response.json();
       expect(body).to.have.property('message', 'Failed to ensure entitlement for organization');
       expect(context.log.error).to.have.been.calledWithMatch(/Error ensuring entitlement for organization .*Database error/);
-    });
-
-    it('returns 500 when TierClient.createEntitlement throws for an existing organization', async () => {
-      const existingOrg = organizations[1];
-      mockDataAccess.Organization.findByImsOrgId.resolves(existingOrg);
-      tierClientStub.createEntitlement.rejects(new Error('Database error'));
-      context.pathInfo = { headers: { 'x-product': 'ASO' } };
-
-      const response = await organizationsController.createOrganization({
-        data: {
-          name: 'New Org Name',
-          imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
-        },
-        ...context,
-      });
-
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body).to.have.property('message', 'Failed to ensure entitlement for organization');
     });
   });
 

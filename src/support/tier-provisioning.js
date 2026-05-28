@@ -20,7 +20,6 @@ export { X_PRODUCT_HEADER };
 
 const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
 const FREE_TRIAL_TIER = EntitlementModel.TIERS.FREE_TRIAL;
-const PAID_TIER = EntitlementModel.TIERS.PAID;
 
 /**
  * Structured log marker when a site was persisted but entitlement/enrollment failed.
@@ -30,17 +29,12 @@ export const SITE_ORPHANED_AFTER_CREATE_EVENT = 'site_orphaned_after_create';
 
 /**
  * Reads and validates the `x-product` header for write-time tier provisioning.
- *
- * Write-time contract (`x-product` header, documented at the CDN/gateway layer):
- * - Optional; when absent, callers manage entitlements separately.
- * - When present, provisions a single product at FREE_TRIAL only (no tier override field).
- * - Does not downgrade an existing non-PAID entitlement that is already above FREE_TRIAL
- *   (e.g. PLG, PRE_ONBOARD); missing site enrollments are still created when possible.
+ * The header is set at the CDN layer; when absent, provisioning is skipped.
  *
  * @param {object} context - Request context with `pathInfo.headers`.
  * @returns {{ productCode: string } | { error: string }} Validated product code or error message.
  */
-export function resolveWriteTimeProductCode(context) {
+export function resolveProductCode(context) {
   const raw = context.pathInfo?.headers?.[X_PRODUCT_HEADER];
   if (!hasText(raw)) {
     return { error: null, productCode: null };
@@ -54,62 +48,33 @@ export function resolveWriteTimeProductCode(context) {
 }
 
 /**
- * Returns true when `createEntitlement(FREE_TRIAL)` must not be called because it would
- * mutate an existing entitlement tier (TierClient downgrades non-PAID tiers to the requested tier).
- *
- * @param {string} currentTier - Existing entitlement tier.
- * @param {string} targetTier - Tier we would pass to createEntitlement.
- * @returns {boolean}
+ * @param {object} tierClient - TierClient instance with `checkValidEntitlement`.
+ * @returns {Promise<string>} Tier to pass to `createEntitlement`.
  */
-export function wouldDowngradeExistingTier(currentTier, targetTier) {
-  return currentTier !== targetTier
-    && currentTier !== PAID_TIER
-    && currentTier !== FREE_TRIAL_TIER;
+async function resolveProvisioningTier(tierClient) {
+  const existing = await tierClient.checkValidEntitlement();
+  return existing.entitlement?.getTier?.() ?? FREE_TRIAL_TIER;
 }
 
 /**
- * Returns true when an existing entitlement tier must not be passed through
- * `createEntitlement` (PAID must stay PAID; PLG/PRE_ONBOARD must not downgrade).
- *
- * @param {string} currentTier - Existing entitlement tier.
- * @returns {boolean}
- */
-export function shouldPreserveExistingEntitlementTier(currentTier) {
-  return currentTier === PAID_TIER || wouldDowngradeExistingTier(currentTier, FREE_TRIAL_TIER);
-}
-
-/**
- * Ensures org-level FREE_TRIAL entitlement for `productCode` without downgrading existing tiers.
+ * Ensures org-level entitlement for `productCode` on newly created organizations.
  *
  * @param {object} context - Request context.
  * @param {object} organization - Organization entity.
  * @param {string} productCode - Validated product code.
  * @param {object} log - Logger.
- * @returns {Promise<object>} Created or existing entitlement entity.
+ * @returns {Promise<object>} Created or updated entitlement entity.
  */
 export async function ensureOrgEntitlement(context, organization, productCode, log) {
   const tierClient = TierClient.createForOrg(context, organization, productCode);
-  const existing = await tierClient.checkValidEntitlement();
-
-  if (
-    existing.entitlement?.getTier
-    && shouldPreserveExistingEntitlementTier(existing.entitlement.getTier())
-  ) {
-    const currentTier = existing.entitlement.getTier();
-    log.info(
-      `${productCode} entitlement already exists at tier ${currentTier} for organization `
-      + `${organization.getId()}; skipping tier mutation`,
-    );
-    return existing.entitlement;
-  }
-
-  const { entitlement } = await tierClient.createEntitlement(FREE_TRIAL_TIER);
+  const tier = await resolveProvisioningTier(tierClient);
+  const { entitlement } = await tierClient.createEntitlement(tier);
   log.info(`Ensured ${productCode} entitlement ${entitlement.getId()} for organization ${organization.getId()}`);
   return entitlement;
 }
 
 /**
- * Ensures org entitlement and site enrollment for `productCode` without downgrading existing tiers.
+ * Ensures org entitlement and site enrollment for `productCode` on newly created sites.
  *
  * @param {object} context - Request context.
  * @param {object} site - Site entity.
@@ -119,34 +84,11 @@ export async function ensureOrgEntitlement(context, organization, productCode, l
  */
 export async function ensureSiteEntitlementAndEnrollment(context, site, productCode, log) {
   const tierClient = await TierClient.createForSite(context, site, productCode);
-  const existing = await tierClient.checkValidEntitlement();
-
-  if (
-    existing.entitlement?.getTier
-    && shouldPreserveExistingEntitlementTier(existing.entitlement.getTier())
-  ) {
-    const currentTier = existing.entitlement.getTier();
-    log.info(
-      `${productCode} entitlement already exists at tier ${currentTier} for organization `
-      + `${(await site.getOrganizationId())}; skipping tier mutation`,
-    );
-    if (existing.siteEnrollment) {
-      return { entitlement: existing.entitlement, siteEnrollment: existing.siteEnrollment };
-    }
-    const { SiteEnrollment } = context.dataAccess;
-    const siteEnrollment = await SiteEnrollment.create({
-      siteId: site.getId(),
-      entitlementId: existing.entitlement.getId(),
-    });
-    const enrollmentSuffix = ` and enrollment ${siteEnrollment.getId()}`;
-    log.info(`Ensured ${productCode} entitlement ${existing.entitlement.getId()}${enrollmentSuffix} for site ${site.getId()}`);
-    return { entitlement: existing.entitlement, siteEnrollment };
-  }
-
+  const tier = await resolveProvisioningTier(tierClient);
   const {
     entitlement,
     siteEnrollment,
-  } = await tierClient.createEntitlement(FREE_TRIAL_TIER);
+  } = await tierClient.createEntitlement(tier);
   const enrollmentSuffix = siteEnrollment ? ` and enrollment ${siteEnrollment.getId()}` : '';
   log.info(`Ensured ${productCode} entitlement ${entitlement.getId()}${enrollmentSuffix} for site ${site.getId()}`);
   return { entitlement, siteEnrollment };

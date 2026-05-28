@@ -52,7 +52,7 @@ import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 import {
   ensureSiteEntitlementAndEnrollment,
   logSiteOrphanedAfterCreate,
-  resolveWriteTimeProductCode,
+  resolveProductCode,
 } from '../support/tier-provisioning.js';
 
 /**
@@ -359,11 +359,10 @@ function SitesController(ctx, log, env) {
    *
    * Alternative: If strict REST semantics are preferred, 409 Conflict is also valid.
    *
-   * Write-time tier provisioning: optional `x-product` header enrolls the site for that product
-   * (creating a FREE_TRIAL org entitlement only when none exists or tier is already FREE_TRIAL).
-   * PAID, PLG, and PRE_ONBOARD entitlements are never downgraded; missing enrollments are still
-   * created. Keeps the site visible in product-scoped listings without separate onboarding.
-   * Enrollment failures return 500 with `event=site_orphaned_after_create`; retries are safe.
+   * Write-time tier provisioning: when a site is newly created, it ensures org entitlement and
+   * site enrollment via TierClient using the existing tier when present, otherwise FREE_TRIAL.
+   * Idempotent re-POSTs do not run provisioning.
+   * Provisioning failures return 500 with `event=site_orphaned_after_create`.
    *
    * @param {object} context - Request context containing site data
    * @returns {Promise<Response>} HTTP 200 with existing site or 201 with new site
@@ -375,7 +374,7 @@ function SitesController(ctx, log, env) {
     if (!hasText(context.data?.baseURL)) {
       return badRequest('Base URL required');
     }
-    const { productCode, error: productCodeError } = resolveWriteTimeProductCode(context);
+    const { productCode, error: productCodeError } = resolveProductCode(context);
     if (productCodeError) {
       return badRequest(productCodeError);
     }
@@ -405,7 +404,7 @@ function SitesController(ctx, log, env) {
       return internalServerError('Failed to create site');
     }
 
-    if (productCode) {
+    if (productCode && status === 201) {
       try {
         await ensureSiteEntitlementAndEnrollment(context, site, productCode, log);
       } catch (error) {

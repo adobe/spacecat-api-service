@@ -435,7 +435,7 @@ describe('Sites Controller', () => {
       expect(loggerStub.info).to.have.been.calledWithMatch(/Ensured ASO entitlement entitlement-123 and enrollment enrollment-123/);
     });
 
-    it('creates entitlement and enrollment for an existing site when x-product header is set', async () => {
+    it('skips auto-enrollment for an existing site when x-product header is set', async () => {
       const response = await sitesController.createSite({
         data: { baseURL: 'https://site1.com' },
         pathInfo: { headers: { 'x-product': 'ASO' } },
@@ -443,8 +443,7 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(200);
       expect(mockDataAccess.Site.create).to.have.not.been.called;
-      expect(TierClient.createForSite).to.have.been.calledOnce;
-      expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('FREE_TRIAL');
+      expect(TierClient.createForSite).to.have.not.been.called;
     });
 
     it('skips auto-enrollment when x-product header is missing', async () => {
@@ -497,10 +496,11 @@ describe('Sites Controller', () => {
       expect(TierClient.createForSite).to.have.not.been.called;
     });
 
-    it('does not downgrade PRE_ONBOARD entitlement when x-product is set', async () => {
+    it('uses existing PRE_ONBOARD tier when provisioning a newly created site', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
       tierClientStub.checkValidEntitlement.resolves({
         entitlement: { getId: () => 'entitlement-pre', getTier: () => 'PRE_ONBOARD' },
-        siteEnrollment: { getId: () => 'enrollment-pre' },
+        siteEnrollment: null,
       });
 
       const response = await sitesController.createSite({
@@ -508,8 +508,8 @@ describe('Sites Controller', () => {
         pathInfo: { headers: { 'x-product': 'ASO' } },
       });
 
-      expect(response.status).to.equal(200);
-      expect(tierClientStub.createEntitlement).to.not.have.been.called;
+      expect(response.status).to.equal(201);
+      expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('PRE_ONBOARD');
     });
 
     it('returns 500 when TierClient.createEntitlement throws for a newly created site', async () => {
@@ -525,19 +525,6 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body).to.have.property('message', 'Failed to ensure entitlement/enrollment for site');
       expect(loggerStub.error).to.have.been.calledWithMatch(/event=site_orphaned_after_create/);
-    });
-
-    it('returns 500 when TierClient.createEntitlement throws for an existing site', async () => {
-      tierClientStub.createEntitlement.rejects(new Error('Database error'));
-
-      const response = await sitesController.createSite({
-        data: { baseURL: 'https://site1.com' },
-        pathInfo: { headers: { 'x-product': 'ASO' } },
-      });
-
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body).to.have.property('message', 'Failed to ensure entitlement/enrollment for site');
     });
   });
 
