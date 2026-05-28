@@ -384,6 +384,13 @@ describe('WebhooksController', () => {
       expect(payload.target_id).to.equal('ghec');
     });
 
+    it('logs the resolved target id on the enqueue log', async () => {
+      await controller.processGitHubWebhook(ghecAuthContext());
+      const enqueueLog = mockLog.info.getCalls().find((c) => c.args[0] === 'Enqueued webhook job');
+      expect(enqueueLog, 'expected an "Enqueued webhook job" info log').to.exist;
+      expect(enqueueLog.args[1]).to.include({ targetId: 'ghec' });
+    });
+
     it('uses the per-target app_slug for the reviewer check (mysticat-bot[bot])', async () => {
       // env.GITHUB_APP_SLUG is 'mysticat', but the profile app_slug is
       // 'mysticat-bot'; the requested reviewer mysticat-bot[bot] must match and
@@ -398,6 +405,13 @@ describe('WebhooksController', () => {
       expect(response.status).to.equal(202);
       const [, payload] = mockSqs.sendMessage.firstCall.args;
       expect(payload).to.not.have.property('target_id');
+    });
+
+    it('logs targetId "legacy" on the enqueue log when no target_id is present', async () => {
+      await controller.processGitHubWebhook(validContext);
+      const enqueueLog = mockLog.info.getCalls().find((c) => c.args[0] === 'Enqueued webhook job');
+      expect(enqueueLog, 'expected an "Enqueued webhook job" info log').to.exist;
+      expect(enqueueLog.args[1]).to.include({ targetId: 'legacy' });
     });
   });
 
