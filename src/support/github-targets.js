@@ -53,9 +53,11 @@ export function parseTargets(env) {
       throw new Error(`GITHUB_TARGETS["${t.id}"] is missing a string "webhookSecretEnvVar"`);
     }
     const isDefault = t.match?.default === true;
-    const hasSlugs = Array.isArray(t.match?.enterpriseSlug) && t.match.enterpriseSlug.length > 0;
+    const hasSlugs = Array.isArray(t.match?.enterpriseSlug)
+      && t.match.enterpriseSlug.length > 0
+      && t.match.enterpriseSlug.every((s) => typeof s === 'string' && s.length > 0);
     if (!isDefault && !hasSlugs) {
-      throw new Error(`GITHUB_TARGETS["${t.id}"] needs match.default:true or a non-empty match.enterpriseSlug[]`);
+      throw new Error(`GITHUB_TARGETS["${t.id}"] needs match.default:true or a non-empty match.enterpriseSlug[] of strings`);
     }
     if (isDefault && i !== parsed.length - 1) {
       throw new Error(`GITHUB_TARGETS default entry "${t.id}" must be last`);
@@ -113,6 +115,8 @@ export function classify(meta, targets) {
   if (host !== null && host !== 'github.com') {
     return { skip: true };
   }
+  // Registry is validated default-last (parseTargets), so a slug-specific entry
+  // is always evaluated before the catch-all default in this find loop.
   const match = targets.find((t) => t.match?.default === true
     || (enterpriseSlug
         && Array.isArray(t.match?.enterpriseSlug)

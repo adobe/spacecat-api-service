@@ -87,6 +87,18 @@ describe('github-targets parseTargets', () => {
     }]);
     expect(() => parseTargets({ GITHUB_TARGETS: noDefault })).to.throw('exactly one');
   });
+
+  it('throws when enterpriseSlug contains non-string entries', () => {
+    const bad = JSON.stringify([
+      {
+        id: 'ghec', match: { enterpriseSlug: [123, null] }, appSlug: 's', webhookSecretEnvVar: 'V',
+      },
+      {
+        id: 'github-public', match: { default: true }, appSlug: 's', webhookSecretEnvVar: 'W',
+      },
+    ]);
+    expect(() => parseTargets({ GITHUB_TARGETS: bad })).to.throw('strings');
+  });
 });
 
 describe('github-targets extractClassificationMetadata', () => {
