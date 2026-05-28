@@ -242,7 +242,8 @@ describe('Organizations Controller', () => {
         debug: sinon.stub(),
       },
       pathInfo: {
-        headers: {},
+        // GET .../sites requires x-product; unit mocks use product code 'abcd'.
+        headers: { 'x-product': 'abcd' },
       },
       attributes: {
         authInfo: new AuthInfo()
@@ -1020,9 +1021,11 @@ describe('Organizations Controller', () => {
   });
 
   it('returns bad request if organization id is not provided when getting sites for organization', async () => {
-    const result = await organizationsController.getSitesForOrganization(
-      { params: {}, ...context },
-    );
+    const result = await organizationsController.getSitesForOrganization({
+      params: {},
+      pathInfo: { headers: { 'x-product': 'abcd' } },
+      ...context,
+    });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
@@ -1416,6 +1419,8 @@ describe('Organizations Controller', () => {
     let mockTierClient;
 
     beforeEach(() => {
+      context.pathInfo = { headers: { 'x-product': 'abcd' } };
+
       delegatedSite = {
         getId: () => 'delegated-site-1',
         getBaseURL: () => 'https://delegated.com',
