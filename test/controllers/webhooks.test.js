@@ -492,5 +492,24 @@ describe('WebhooksController', () => {
       const [, payload] = mockSqs.sendMessage.firstCall.args;
       expect(payload.observability).to.be.undefined;
     });
+
+    it('parent links the PR and names the requester and author', async () => {
+      const obsController = buildObsController();
+      const ctx = {
+        ...validContext,
+        data: {
+          ...validContext.data,
+          sender: { ...validContext.data.sender, login: 'alice' },
+          pull_request: { ...validContext.data.pull_request, user: { login: 'bob' } },
+        },
+      };
+      const response = await obsController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(202);
+      const { text } = postMessage.firstCall.args[0];
+      expect(text).to.include('<https://github.com/adobe/spacecat-api-service/pull/');
+      expect(text).to.include('requested by <https://github.com/alice|alice>');
+      expect(text).to.include('author <https://github.com/bob|bob>');
+    });
   });
 });

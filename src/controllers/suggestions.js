@@ -50,6 +50,7 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { postSlackMessage } from '../utils/slack/base.js';
+import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -1827,6 +1828,9 @@ function SuggestionsController(ctx, sqs, env) {
       });
 
       let geoExperiment = null;
+      // Tracks whether the Atomic strategy was successfully written, so the
+      // outer catch knows whether to compensate by deleting it.
+      let atomicStrategyCreated = false;
       try {
         const preScheduleParams = getScheduleParams(
           context,
@@ -1901,6 +1905,20 @@ function SuggestionsController(ctx, sqs, env) {
         }
 
         context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_STARTED`);
+
+        // Create the Atomic strategy before DRS / suggestion-marking so a
+        // failure rolls back cheaply via the outer catch.
+        await createAtomicStrategy({
+          siteId,
+          geoExperimentId,
+          opportunityId,
+          opportunityType: opportunity.getType(),
+          name: geoExperiment.getName?.() || `${opportunity.getType()}-${new Date().toISOString().slice(0, 10)}`,
+          profile,
+          s3: context.s3,
+          log: context.log,
+        });
+        atomicStrategyCreated = true;
 
         let preScheduleId;
         try {
@@ -1989,6 +2007,19 @@ function SuggestionsController(ctx, sqs, env) {
             await geoExperiment.remove();
           } catch (removeError) {
             context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
+          }
+        }
+        // Delete the strategy if it was created so we don't leave an orphan.
+        if (atomicStrategyCreated) {
+          try {
+            await deleteAtomicStrategy({
+              siteId,
+              strategyId: geoExperimentId,
+              s3: context.s3,
+              log: context.log,
+            });
+          } catch (cleanupError) {
+            context.log.error(`[atomic-strategy-cleanup-failed] site: ${apexBaseUrl}, Failed to delete atomic strategy ${geoExperimentId}: ${cleanupError.message}`, cleanupError);
           }
         }
         const allSuggestionEntities = [

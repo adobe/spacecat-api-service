@@ -100,7 +100,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
- * @param {Object} semrushController - Semrush AIO proxy controller (prompts + projects).
+ * @param {Object} serenityController - Semrush AIO proxy controller (prompts + projects).
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -158,7 +158,7 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
-  semrushController,
+  serenityController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -203,22 +203,22 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/brands': brandsController.createBrandForOrg,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId': brandsController.updateBrandForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
-    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts': semrushController.listPrompts,
-    'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts': semrushController.createPrompts,
-    'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/bulk-delete': semrushController.bulkDeletePrompts,
-    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/semrush/prompts/:promptId': semrushController.updatePrompt,
-    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects': semrushController.listProjects,
-    'POST /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects': semrushController.createProject,
-    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/tags': semrushController.listProjectTags,
-    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/projects/:workspaceId/:projectId/models': semrushController.listProjectModels,
-    'GET /v2/orgs/:spaceCatId/brands/:brandId/semrush/workspaces/:workspaceId/projects': semrushController.listWorkspaceProjects,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:promptId': serenityController.updatePrompt,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects': serenityController.listProjects,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects': serenityController.createProject,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/tags': serenityController.listProjectTags,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/models': serenityController.listProjectModels,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/workspaces/:workspaceId/projects': serenityController.listWorkspaceProjects,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.getPromptByBrandAndId,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.updatePromptByBrandAndId,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.deletePromptByBrandAndId,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': brandsController.bulkDeletePromptsByBrand,
-    'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': brandsController.triggerConfigSync,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check': brandsController.checkPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': brandsController.getBrandForOrgSite,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
@@ -244,6 +244,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId': sitesController.getByID,
     'PATCH /sites/:siteId': sitesController.updateSite,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
+    'PATCH /sites/:siteId/config/scraper': sitesController.updateScraperConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/bot-blocker': botBlockerController.checkBotBlocker,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
@@ -424,6 +425,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/data/:dataSource': llmoController.queryFiles,
     'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': llmoController.queryFiles,
     'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource': llmoController.queryFiles,
+    'PATCH /sites/:siteId/llmo/data/:dataSource/row': llmoController.patchLlmoDataRow,
+    'PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row': llmoController.patchLlmoDataRow,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
     'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,

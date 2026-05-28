@@ -59,7 +59,7 @@ History: SITES-45260 — `handlers/projects.js` read `data/locations.json` synch
 ### Rules
 
 - **Do NOT use `readFileSync(import.meta.url, ...)` or any sibling-file reads at module load.** The bundled artifact does not preserve source-relative paths — `import.meta.url` resolves to the bundle location, not the original source location. Anything you read from a sibling path will be missing.
-- **Prefer JS-module imports for static data.** Inline JSON / locale data / lookup tables as `export const FOO = { ... }` in a `.js` file and `import` it normally. The bundler resolves it at build time; no FS access at runtime; no static-asset registry to maintain. This is the preferred shape — see `src/support/semrush/data/locations.js`.
+- **Prefer JS-module imports for static data.** Inline JSON / locale data / lookup tables as `export const FOO = { ... }` in a `.js` file and `import` it normally. The bundler resolves it at build time; no FS access at runtime; no static-asset registry to maintain. This is the preferred shape — see `src/support/serenity/* JS modules`.
 - **If you must keep a file as a non-JS asset**, declare its repo-relative path in `package.json` under `hlx.static` so `helix-deploy` copies it into the Lambda zip. Do NOT compute its runtime path from `import.meta.url` — read it from the Lambda task root (`process.env.LAMBDA_TASK_ROOT` or a known absolute path inside the zip).
 - **JSON import attributes** (`import x from './x.json' with { type: 'json' }`) are blocked by the repo's eslint parser today; don't try to work around the lint rule. Use the JS-module pattern instead.
 

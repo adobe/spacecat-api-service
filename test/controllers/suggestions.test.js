@@ -6409,8 +6409,41 @@ describe('Suggestions Controller', () => {
           Object.assign(this, input);
         }
       }
+      // Command-aware S3 send stub. Required because the Atomic-strategy
+      // helper (createAtomicStrategy → readStrategy/writeStrategy from
+      // @adobe/spacecat-shared-utils) now runs early in the experiment-async
+      // flow and throws on terminal failure; a blanket .resolves() returns
+      // undefined which makes readStrategy throw "Strategy body is empty".
+      //
+      // Identify commands by shape rather than instanceof, because helpers
+      // use the REAL @aws-sdk GetObjectCommand/PutObjectCommand classes
+      // while the controller uses the StubPut/Get classes injected via
+      // context.s3. Constructor-name check covers both.
+      //
+      // - GetObjectCommand on workspace/llmo/.../strategy.json → NoSuchKey
+      //   (treated as "no strategy yet"; helper writes a fresh blob)
+      // - PutObjectCommand on workspace/llmo/.../strategy.json → returns
+      //   a VersionId so writeStrategy considers the write successful.
+      // - All other commands (prompts upload, etc.) → resolve undefined.
+      const s3SendStub = sandbox.stub().callsFake((command) => {
+        const key = command?.Key || command?.input?.Key || '';
+        const cmdName = command?.constructor?.name || '';
+        const isStrategyKey = key.startsWith('workspace/llmo/')
+          && key.endsWith('/strategy.json');
+        const isGet = cmdName.includes('Get') || command instanceof StubGetObjectCommand;
+        const isPut = cmdName.includes('Put') || command instanceof StubPutObjectCommand;
+        if (isStrategyKey && isGet) {
+          const err = new Error('NoSuchKey');
+          err.name = 'NoSuchKey';
+          return Promise.reject(err);
+        }
+        if (isStrategyKey && isPut) {
+          return Promise.resolve({ VersionId: 'test-strategy-version' });
+        }
+        return Promise.resolve();
+      });
       context.s3 = {
-        s3Client: { send: sandbox.stub().resolves() },
+        s3Client: { send: s3SendStub },
         s3Bucket: 'test-bucket',
         PutObjectCommand: StubPutObjectCommand,
         GetObjectCommand: StubGetObjectCommand,
@@ -6496,6 +6529,7 @@ describe('Suggestions Controller', () => {
         const id = payload.geoExperimentId;
         return {
           getId: () => id,
+          getName: () => payload.name,
           setPreScheduleId: sandbox.stub(),
           setStatus: sandbox.stub(),
           setUpdatedBy: sandbox.stub(),
@@ -8200,6 +8234,328 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
       expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
+    });
+
+    it('appends an atomic strategy after geoExperiment.save() in the async branch', async () => {
+      const createAtomicStrategyStub = sandbox.stub().resolves({
+        success: true,
+        strategyId: 'will-be-overwritten',
+        attempts: 1,
+      });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      const args = createAtomicStrategyStub.firstCall.args[0];
+      expect(args).to.include.keys([
+        'siteId', 'geoExperimentId', 'opportunityId', 'opportunityType',
+        'name', 'profile', 's3', 'log',
+      ]);
+      // strategy.id is geoExperimentId — single-anchor design
+      expect(args.geoExperimentId).to.match(/^[0-9a-f-]{36}$/);
+      expect(args.siteId).to.equal(SITE_ID);
+      expect(args.opportunityId).to.equal(OPPORTUNITY_ID);
+      expect(args.opportunityType).to.equal('headings');
+      // Same UUID appears in the 207 response
+      const body = await response.json();
+      expect(args.geoExperimentId).to.equal(body.geoExperimentId);
+    });
+
+    it('still returns the standard 207 response when atomic-strategy helper terminally fails', async () => {
+      const createAtomicStrategyStub = sandbox.stub().resolves({
+        success: false,
+        strategyId: 'irrelevant',
+        attempts: 3,
+      });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // Response shape unchanged — no strategyId field
+      expect(body).to.have.all.keys([
+        'suggestions', 'metadata', 'geoExperimentId',
+        'geoExperimentStatus', 'geoExperimentPhase', 'prePhaseScheduleId',
+      ]);
+      expect(body).to.not.have.property('strategyId');
+    });
+
+    it('rolls back the GeoExperiment and returns failure when atomic-strategy helper throws', async () => {
+      // Updated for new contract (post-reorder): the helper now runs BEFORE
+      // any irreversible side-effect (DRS schedule, suggestion marking) and
+      // throws on terminal failure. The outer catch must compensate by
+      // removing the GeoExperiment row (and would call deleteAtomicStrategy
+      // if the strategy had been successfully created — not the case here
+      // since the helper threw).
+      const createAtomicStrategyStub = sandbox.stub().rejects(new Error('strategy boom'));
+      const deleteAtomicStrategyStub = sandbox.stub().resolves({ success: true, removed: false, attempts: 1 });
+
+      // Track the GeoExperiment.remove() call to assert cleanup.
+      let geoExperimentRemoveStub;
+      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
+        geoExperimentRemoveStub = sandbox.stub().resolves();
+        return {
+          getId: () => payload.geoExperimentId,
+          getName: () => payload.name,
+          setPreScheduleId: sandbox.stub(),
+          setStatus: sandbox.stub(),
+          setUpdatedBy: sandbox.stub(),
+          save: sandbox.stub().resolves(),
+          remove: geoExperimentRemoveStub,
+        };
+      });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+          deleteAtomicStrategy: deleteAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // Failure body shape: each suggestion gets a 500 statusCode with the
+      // experiment-init error message attached.
+      expect(body.metadata).to.deep.include({ success: 0, failed: 1 });
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('strategy boom');
+
+      // Helper was invoked exactly once and threw → strategy never recorded
+      // as created → deleteAtomicStrategy must NOT be called.
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      expect(deleteAtomicStrategyStub).to.not.have.been.called;
+
+      // The GeoExperiment row created earlier in the flow must be removed.
+      expect(geoExperimentRemoveStub).to.have.been.calledOnce;
+
+      // The outer catch logs the failure with the [edge-geo-exp-failed] tag.
+      expect(context.log.error).to.have.been.calledWithMatch(/edge-geo-exp-failed.*Error initiating experiment: strategy boom/);
+    });
+
+    it('rolls back the GeoExperiment AND deletes the strategy when DRS fails after strategy is created', async () => {
+      // Symmetric coverage: strategy-create succeeded, then a downstream
+      // step (DRS schedule) failed. The outer catch must run BOTH
+      // compensating actions: geoExperiment.remove() and deleteAtomicStrategy.
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true, attempts: 1, strategyId: 'will-be-overridden' });
+      const deleteAtomicStrategyStub = sandbox.stub().resolves({ success: true, removed: true, attempts: 1 });
+
+      // Force the DRS schedule call to fail.
+      mockDrsClient.createExperimentSchedule.rejects(new Error('DRS down for cleanup test'));
+
+      let geoExperimentRemoveStub;
+      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
+        geoExperimentRemoveStub = sandbox.stub().resolves();
+        return {
+          getId: () => payload.geoExperimentId,
+          getName: () => payload.name,
+          setPreScheduleId: sandbox.stub(),
+          setStatus: sandbox.stub(),
+          setUpdatedBy: sandbox.stub(),
+          save: sandbox.stub().resolves(),
+          remove: geoExperimentRemoveStub,
+        };
+      });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+          deleteAtomicStrategy: deleteAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.deep.include({ success: 0, failed: 1 });
+      expect(body.suggestions[0].message).to.include('DRS down for cleanup test');
+
+      // Both compensating actions must run: strategy was created, so it
+      // must be deleted; GeoExperiment row must be removed.
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      expect(deleteAtomicStrategyStub).to.have.been.calledOnce;
+      expect(geoExperimentRemoveStub).to.have.been.calledOnce;
+
+      // The strategyId passed to deleteAtomicStrategy must equal the
+      // geoExperimentId (per the pinned design: strategy.id === geoExperimentId).
+      const deleteArgs = deleteAtomicStrategyStub.firstCall.args[0];
+      expect(deleteArgs).to.include.keys('siteId', 'strategyId', 's3', 'log');
+    });
+
+    it('logs but does not fail when deleteAtomicStrategy itself throws during cleanup', async () => {
+      // Defense-in-depth: if cleanup fails, the original failure response
+      // is still returned. The cleanup error is logged with the
+      // [atomic-strategy-cleanup-failed] tag.
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true, attempts: 1 });
+      const deleteAtomicStrategyStub = sandbox.stub().rejects(new Error('cleanup boom'));
+
+      mockDrsClient.createExperimentSchedule.rejects(new Error('DRS down'));
+
+      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => ({
+        getId: () => payload.geoExperimentId,
+        getName: () => payload.name,
+        setPreScheduleId: sandbox.stub(),
+        setStatus: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+        remove: sandbox.stub().resolves(),
+      }));
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+          deleteAtomicStrategy: deleteAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      // Cleanup failure does not change the response — the original error
+      // still surfaces as a 500 per-suggestion result.
+      expect(response.status).to.equal(207);
+      expect(deleteAtomicStrategyStub).to.have.been.calledOnce;
+      expect(context.log.error).to.have.been.calledWithMatch(/atomic-strategy-cleanup-failed.*cleanup boom/);
+    });
+
+    it('falls back to <type>-<date> name when geoExperiment.getName() returns falsy', async () => {
+      // Override GeoExperiment.create to return a mock whose getName() yields ''
+      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => ({
+        getId: () => payload.geoExperimentId,
+        getName: () => '',
+        setPreScheduleId: sandbox.stub(),
+        setStatus: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+        remove: sandbox.stub().resolves(),
+      }));
+
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true, attempts: 1 });
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      const args = createAtomicStrategyStub.firstCall.args[0];
+      expect(args.name).to.match(/^headings-\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('does not invoke atomic-strategy helper when Prefer: respond-async is absent (sync path)', async () => {
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const mockTokowakaClient = {
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [edgeSuggestions[0]],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(createAtomicStrategyStub).to.not.have.been.called;
     });
   });
 

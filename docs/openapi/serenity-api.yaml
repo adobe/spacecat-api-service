@@ -1,0 +1,431 @@
+# ── Semrush AIO proxy ──
+# Server-side proxy in front of adobe-hackathon.semrush.com. The client sends
+# its IMS user token; api-service forwards it as Authorization: Bearer; Semrush
+# exchanges IMS → Semrush server-side and authorises the call.
+#
+# Project mapping lives in the brand_to_semrush_projects table on
+# mysticat-data-service. The workspace is reachable via
+# brands -> organizations.semrush_workspace_id.
+#
+# All operations are tagged `serenity` so the OpenAPI contract test suite can
+# enumerate them. See test/openapi-contract/serenity-api.test.js.
+
+# ─── Shared path parameters ───────────────────────────────────────────────────
+
+v2-serenity-prompts:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+  get:
+    tags: [serenity]
+    summary: List Semrush AIO prompts for a brand
+    description: |
+      Fans the request out across every Semrush project mapped to this brand
+      in `brand_to_semrush_projects`, merges the results, and paginates.
+      Optional filters narrow the fan-out before the upstream calls.
+    operationId: listSerenityPrompts
+    security:
+      - ims_key: []
+    parameters:
+      - name: page
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, default: 1 }
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+      - name: search
+        in: query
+        required: false
+        schema: { type: string }
+        description: Free-text match against prompt text.
+      - name: semrushLocationId
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1 }
+        description: Narrow the fan-out to projects with this location_id.
+      - name: language
+        in: query
+        required: false
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+        description: Narrow the fan-out to projects with this language (lowercase BCP 47-shaped).
+    responses:
+      '200':
+        description: Prompts retrieved successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushPromptListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization has no semrush_workspace_id, or brand has no mapped projects.
+      '502':
+        description: Semrush upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  post:
+    tags: [serenity]
+    summary: Create Semrush AIO prompts (bulk)
+    description: |
+      Accepts a batch of prompts grouped by `(semrushLocationId, language)`,
+      resolves the matching project via `brand_to_semrush_projects`, fans out
+      to Semrush per project (`POST /v2/.../aio/prompts/tagged` + publish), and
+      returns the per-prompt outcome.
+    operationId: createSerenityPrompts
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SemrushCreatePromptsRequest' }
+    responses:
+      '200':
+        description: Prompts processed. Per-prompt outcome in the response body.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushCreatePromptsResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization has no semrush_workspace_id, or a referenced slice has no mapped project.
+      '502':
+        description: Semrush upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-prompt-by-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+    - name: promptId
+      in: path
+      required: true
+      description: |
+        Logical prompt id: `base64url(JSON({b: brandId, l: semrushLocationId, lang: language, t: text}))`.
+        Stable across regions; api-service decodes it to resolve the project on PATCH.
+      schema: { type: string }
+  patch:
+    tags: [serenity]
+    summary: Update a Semrush AIO prompt
+    description: |
+      Decodes the logical id to find the owning project, then runs DELETE-old
+      + POST-new + publish against Semrush. Returns the new logical id.
+    operationId: updateSerenityPrompt
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SemrushUpdatePromptRequest' }
+    responses:
+      '200':
+        description: Prompt updated successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushPrompt' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or prompt not found.
+      '502':
+        description: Semrush upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-prompts-bulk-delete:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+  post:
+    tags: [serenity]
+    summary: Bulk-delete Semrush AIO prompts
+    description: |
+      Groups the Semrush prompt ids by project, calls `DELETE /v2/.../aio/prompts`
+      per project, then publishes each touched project.
+      Uses POST instead of DELETE because the body-data middleware does not
+      parse DELETE request bodies (see ADR-001).
+    operationId: bulkDeleteSerenityPrompts
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SemrushBulkDeletePromptsRequest' }
+    responses:
+      '200':
+        description: Bulk-delete completed.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushBulkDeletePromptsResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization has no semrush_workspace_id.
+      '502':
+        description: Semrush upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+# ─── Projects ─────────────────────────────────────────────────────────────────
+
+v2-serenity-projects:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+  get:
+    tags: [serenity]
+    summary: List Semrush projects mapped to a brand
+    description: |
+      Returns every `brand_to_semrush_projects` row for the brand, enriched
+      with live Semrush metadata via a single `listWorkspaceProjects` call.
+    operationId: listSerenityProjects
+    security:
+      - ims_key: []
+    parameters:
+      - name: semrushLocationId
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1 }
+      - name: language
+        in: query
+        required: false
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+    responses:
+      '200':
+        description: Projects retrieved successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushProjectListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization has no semrush_workspace_id.
+      '502':
+        description: Semrush upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  post:
+    tags: [serenity]
+    summary: Onboard a brand slice as a new Semrush AIO project
+    description: |
+      Resolves `semrush_workspace_id` from `organizations`, resolves
+      `semrush_location_id` from the ISO `market` via the static locations
+      table, resolves the Semrush `language_id` UUID via cached
+      `/v1/languages`, then `POST /enterprise/projects/api/v1/workspaces/{ws}/projects`
+      + `POST /publish` upstream. **Only on full success** writes one row to
+      `brand_to_semrush_projects`. On any upstream failure no row is written
+      and the Semrush error envelope is returned to the caller (callers retry
+      with the same body).
+    operationId: createSerenityProject
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SemrushCreateProjectRequest' }
+    responses:
+      '201':
+        description: Project created and published; mapping row written.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushCreateProjectResponse' }
+      '400':
+        description: Bad request (unknown market, missing field, malformed language).
+      '404':
+        description: Organization has no semrush_workspace_id.
+      '409':
+        description: A mapping row already exists for this (brand, semrush_location_id, language) slice.
+      '502':
+        description: Semrush upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-project-tags:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+    - name: workspaceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    - name: projectId
+      in: path
+      required: true
+      schema: { type: string }
+  get:
+    tags: [serenity]
+    summary: List Semrush project tags (pass-through)
+    operationId: listSerenityProjectTags
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Tags retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushTagListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Project not found in workspace.
+      '502':
+        description: Semrush upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-project-models:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+    - name: workspaceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    - name: projectId
+      in: path
+      required: true
+      schema: { type: string }
+  get:
+    tags: [serenity]
+    summary: List AI models configured for a Semrush AIO project
+    description: Pass-through to `GET /v1/workspaces/{ws}/projects/{pid}/ai_models?limit=100`.
+    operationId: listSerenityProjectModels
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Models retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushModelListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Project not found in workspace.
+      '502':
+        description: Semrush upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-workspace-projects:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+    - name: workspaceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  get:
+    tags: [serenity]
+    summary: List published AIO projects in a Semrush workspace
+    description: |
+      Pass-through to `GET /v2/workspaces/{ws}/projects?type=AIO&publish_status=live,live_with_unpublished_updates&limit=100`.
+    operationId: listSerenityWorkspaceProjects
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Workspace projects retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushWorkspaceProjectListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Workspace not accessible.
+      '502':
+        description: Semrush upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SemrushErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
