@@ -202,7 +202,11 @@ function makeAjv() {
   return ajv;
 }
 
-describe('OpenAPI contract — /serenity/* endpoints', () => {
+describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
+  // First esmock load of the controller takes ~2s; bump the mocha default
+  // so a cold-start first run doesn't flake the suite.
+  this.timeout(10000);
+
   const spec = loadBundledSpec();
   const ops = operationsForTag(spec, 'serenity');
   const opsByOperationId = new Map(ops.map((o) => [o.operationId, o]));

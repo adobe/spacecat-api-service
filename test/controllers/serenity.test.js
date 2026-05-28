@@ -219,6 +219,38 @@ describe('SerenityController', () => {
       });
     });
 
+    it('listPrompts coerces limit query param to integer and forwards it', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 25,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = {
+        url: 'https://x/v2/orgs/x/brands/y/serenity/prompts?geoTargetId=2840&languageCode=en&limit=25',
+      };
+
+      await controller.listPrompts(ctx);
+
+      const { args } = handlers.handleListPrompts.firstCall;
+      expect(args[4]).to.include({ limit: 25 });
+    });
+
+    it('listPrompts forwards null when limit query param is unparseable', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = {
+        url: 'https://x/v2/orgs/x/brands/y/serenity/prompts?geoTargetId=2840&languageCode=en&limit=abc',
+      };
+
+      await controller.listPrompts(ctx);
+
+      const { args } = handlers.handleListPrompts.firstCall;
+      expect(args[4].limit).to.equal(null);
+    });
+
     it('updatePrompt requires :semrushPromptId path param', async () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.updatePrompt(fakeContext({ params: {} }));
