@@ -131,7 +131,7 @@ const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 const DEFAULT_LIMIT = 100;
-const MAX_LIMIT = 1000; // lower to 500 if 6mb lambda limit is hit again
+const MAX_LIMIT = 500;
 
 /**
  * Filters Ahrefs top pages by site base URL
@@ -441,10 +441,12 @@ function SitesController(ctx, log, env) {
         };
       }
     } else {
-      // TODO: remove this legacy branch once all consumers have migrated to the paginated shape.
+      // TODO: remove this legacy branch once Coralogix shows zero hits on
+      // [sites][legacy-shape] for 30 consecutive days.
       // legacy: no limit/cursor params -> flat array for backwards comp.
       // keep the default + friends-and-family exclusion on this path to stay
       // under the 6MB Lambda response limit until consumers migrate to pagination.
+      log.info(`[sites][legacy-shape] GET /sites called without limit/cursor requestId=${requestId} clientId=${s2sResult.clientId || 'admin'}`);
       const excludedOrgIds = [
         env.DEFAULT_ORGANIZATION_ID,
         env.ORGANIZATION_ID_FRIENDS_FAMILY,

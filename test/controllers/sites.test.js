@@ -676,14 +676,14 @@ describe('Sites Controller', () => {
       });
     });
 
-    it('clamps limit to MAX_LIMIT (1000)', async () => {
+    it('clamps limit to MAX_LIMIT (500)', async () => {
       mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
       const result = await sitesController.getAll({ ...context, data: { limit: '9999' } });
       const body = await result.json();
 
       expect(result.status).to.equal(200);
-      expect(body.pagination.limit).to.equal(1000);
+      expect(body.pagination.limit).to.equal(500);
     });
 
     it('falls back to DEFAULT_LIMIT when limit is invalid (non-numeric)', async () => {
@@ -696,14 +696,20 @@ describe('Sites Controller', () => {
       expect(body.pagination.limit).to.equal(100);
     });
 
-    it('falls back to DEFAULT_LIMIT when limit is zero or negative', async () => {
-      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+    ['0', '-1', '-100'].forEach((badLimit) => {
+      it(`falls back to DEFAULT_LIMIT when limit is "${badLimit}"`, async () => {
+        mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
-      const result = await sitesController.getAll({ ...context, data: { limit: '0' } });
-      const body = await result.json();
+        const result = await sitesController.getAll({ ...context, data: { limit: badLimit } });
+        const body = await result.json();
 
-      expect(result.status).to.equal(200);
-      expect(body.pagination.limit).to.equal(100);
+        expect(result.status).to.equal(200);
+        expect(body.pagination.limit).to.equal(100);
+        expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+          {},
+          sinon.match({ limit: 100 }),
+        );
+      });
     });
 
     it('passes limit, cursor, and returnCursor to data access', async () => {

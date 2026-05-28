@@ -144,27 +144,29 @@ export default function siteTests(getHttpClient, resetData) {
         expect(res.status).to.equal(403);
       });
 
-      it('admin: returns the paginated envelope when limit is provided', async () => {
-        // Pins the controller↔DAL contract for the `returnCursor: true` shape that
-        // the in-controller null-guard depends on. Unit tests mock Site.all; this
-        // test exercises the real data-access layer end-to-end.
+      it('admin: returns the paginated envelope and advances via cursor', async () => {
+        // Pins both the controller↔DAL contract for the `returnCursor: true` shape AND
+        // the cursor round-trip that pagination exists to provide. Seed has 6 sites
+        // total (paginated branch bypasses the org exclusion), so limit=2 MUST yield
+        // exactly 2 sites with hasMore=true on page 1.
         const http = getHttpClient();
-        const res = await http.admin.get('/sites?limit=2');
-        expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
-        expect(res.body.sites).to.be.an('array').with.lengthOf.at.most(2);
-        expect(res.body.pagination.limit).to.equal(2);
-        expect(res.body.pagination.hasMore).to.be.a('boolean');
-        if (res.body.pagination.hasMore) {
-          expect(res.body.pagination.cursor).to.be.a('string').and.not.empty;
-        } else {
-          expect(res.body.pagination.cursor).to.be.null;
-        }
-        // Each returned site should match the slim DTO contract (skip LLMO fixtures
-        // since their created_at values intentionally fail the "recent" assertion).
-        res.body.sites
+        const page1 = await http.admin.get('/sites?limit=2');
+        expect(page1.status).to.equal(200);
+        expect(page1.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(page1.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page1.body.pagination).to.include({ limit: 2, hasMore: true });
+        expect(page1.body.pagination.cursor).to.be.a('string').and.not.empty;
+        page1.body.sites
           .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
           .forEach((s) => expectSiteListDto(s));
+
+        // Page 2 must advance — no overlap with page 1, same envelope shape.
+        const page2 = await http.admin.get(`/sites?limit=2&cursor=${encodeURIComponent(page1.body.pagination.cursor)}`);
+        expect(page2.status).to.equal(200);
+        expect(page2.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page2.body.pagination.limit).to.equal(2);
+        const page1Ids = new Set(page1.body.sites.map((s) => s.id));
+        page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
       });
     });
 
