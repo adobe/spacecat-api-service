@@ -15,6 +15,7 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -278,6 +279,49 @@ describe('SerenityController', () => {
       const { args } = handlers.handleDeleteMarket.firstCall;
       expect(args[4]).to.equal(2840);
       expect(args[5]).to.equal('en');
+    });
+
+    // Minor #1 from review: parseInt('2840abc', 10) === 2840 would silently
+    // route /markets/2840abc/en to the legit slice. The controller now uses a
+    // strict /^\d+$/ regex; non-digit suffixes must surface as null so the
+    // handler returns 400 instead of resolving to (2840, en).
+    it('deleteMarket null-routes a non-digit geoTargetId (e.g. "2840abc") to the handler', async () => {
+      handlers.handleDeleteMarket.rejects(
+        new ErrorWithStatusCode('geoTargetId must be a positive integer', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({
+        params: { geoTargetId: '2840abc', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      const { args } = handlers.handleDeleteMarket.firstCall;
+      expect(args[4]).to.equal(null);
+    });
+
+    it('deleteMarket forwards null for an empty geoTargetId path segment', async () => {
+      handlers.handleDeleteMarket.rejects(
+        new ErrorWithStatusCode('geoTargetId must be a positive integer', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({
+        params: { geoTargetId: '', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      const { args } = handlers.handleDeleteMarket.firstCall;
+      expect(args[4]).to.equal(null);
+    });
+
+    it('deleteMarket forwards null for an empty languageCode path segment', async () => {
+      handlers.handleDeleteMarket.rejects(
+        new ErrorWithStatusCode('languageCode must match', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: '' },
+      }));
+      expect(response.status).to.equal(400);
+      const { args } = handlers.handleDeleteMarket.firstCall;
+      expect(args[5]).to.equal(null);
     });
 
     it('listMarkets returns the handler result wrapped in ok()', async () => {

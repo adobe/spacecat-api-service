@@ -195,6 +195,24 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       geoTargetId: 2840,
       languageCode: 'en',
     });
+
+    // Important #7 from review: assert the full upstream createProject body
+    // shape. A regression that flips `country_code` to uppercase, drops
+    // `language_id`, sends `type: 'ai_overview'`, etc. would otherwise pass
+    // because the prior tests only checked `body.name` against a regex.
+    expect(transport.createProject).to.have.been.calledOnce;
+    const upstreamBody = transport.createProject.firstCall.args[1];
+    expect(upstreamBody).to.include({
+      name: 'Adobe-US-en',
+      type: 'ai',
+      country_code: 'us', // lowercased ISO-2
+      location_id: 2840,
+      location_name: 'United States',
+      language_id: 'lang-en',
+      brand_name_display: 'Adobe',
+      domain: 'adobe.com',
+    });
+    expect(upstreamBody.brand_names).to.deep.equal(['Adobe']);
   });
 
   // Branch coverage: validateCreateBody has a "name provided but invalid"
@@ -215,7 +233,8 @@ describe('handlers/markets.js — handleCreateMarket', () => {
 
     expect(result.status).to.equal(400);
     expect(result.body.error).to.equal('invalidRequest');
-    expect(result.body.messages).to.include('name, when provided, must be a non-empty string');
+    // Joined into a single `message` to match SerenityErrorResponse schema.
+    expect(result.body.message).to.include('name, when provided, must be a non-empty string');
   });
 
   it('400s on unknown language (not present in upstream catalog)', async () => {
@@ -326,7 +345,12 @@ describe('handlers/markets.js — handleCreateMarket', () => {
   // createProject, the handler logs the orphan at error level (with everything
   // an operator needs to reconcile) and re-throws — we do NOT proceed to write
   // the DB row that would later try to publish a project that already failed.
-  it('publish failure: logs orphan upstream project and throws (no DB row written)', async () => {
+  //
+  // Important #3 from review: on publish failure we ALSO attempt a best-effort
+  // upstream deleteProject so the documented retry contract holds (without it,
+  // each retry would create a fresh upstream project with a new
+  // crypto.randomBytes(3) name suffix).
+  it('publish failure: best-effort cleanup deletes upstream then throws (no DB row)', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
@@ -334,6 +358,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-1' }),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
+      deleteProject: sinon.stub().resolves(),
     };
     const log = fakeLog();
 
@@ -342,9 +367,45 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     }, log)).to.be.rejectedWith(/upstream 503/);
 
     expect(dataAccess.BrandSemrushProject.create).to.have.callCount(0);
+    // Best-effort cleanup of the upstream project that failed to publish.
+    expect(transport.deleteProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-orphan-1');
+    expect(log.error).to.have.been.calledWithMatch(
+      'handleCreateMarket: publish failed; upstream project cleaned up',
+      sinon.match({
+        semrushProjectId: 'proj-orphan-1',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        cleanedUp: true,
+      }),
+    );
+  });
+
+  // Important #3, cleanup-failure path: if the best-effort deleteProject also
+  // fails after the publish failure, we log both outcomes (so the operator
+  // sees the actual orphan) and still propagate the original publishProject
+  // error to the caller. Cleanup error MUST NOT mask the underlying failure.
+  it('publish failure + cleanup failure: logs orphan, throws original error', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-orphan-3' }),
+      publishProject: sinon.stub().rejects(new Error('upstream 503')),
+      deleteProject: sinon.stub().rejects(new Error('cleanup network glitch')),
+    };
+    const log = fakeLog();
+
+    await expect(handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, log)).to.be.rejectedWith(/upstream 503/);
+
+    expect(log.error).to.have.been.calledWithMatch(
+      'handleCreateMarket: best-effort cleanup deleteProject failed; orphan upstream project remains',
+      sinon.match({ semrushProjectId: 'proj-orphan-3' }),
+    );
     expect(log.error).to.have.been.calledWithMatch(
       'handleCreateMarket: orphaned upstream project after publish failure',
-      sinon.match({ semrushProjectId: 'proj-orphan-1', geoTargetId: 2840, languageCode: 'en' }),
+      sinon.match({ cleanedUp: false }),
     );
   });
 
@@ -417,6 +478,76 @@ describe('handlers/markets.js — handleCreateMarket', () => {
 
     const [, body] = transport.createProject.firstCall.args;
     expect(body.name).to.match(/^Adobe-[0-9a-f]{6}$/);
+  });
+});
+
+// Important #8 from review: the language catalog cache (1h TTL) must
+// cache across calls within TTL and refresh after TTL expires. A regression
+// that resets expiresAt against a stale `now` would silently hit the
+// upstream catalog on every request — observable in production as added
+// latency but invisible to any existing test (the rest of the suite calls
+// `clearLanguageCache()` in beforeEach, masking exactly this contract).
+describe('handlers/markets.js — language-catalog cache (Important #8)', () => {
+  // Intentionally NOT clearing the cache in beforeEach — both tests need to
+  // observe the same module-scoped cache state across two consecutive calls.
+  // Each test calls clearLanguageCache() at the start of its own setup.
+  it('caches the language catalog across consecutive calls (TTL window)', async () => {
+    clearLanguageCache();
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-1' }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    // Two consecutive handleCreateMarket calls — distinct geoTargetId/lang
+    // so the slice-already-exists guard doesn't trip. Both should resolve
+    // English via the cached catalog after the first miss.
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, fakeLog());
+    transport.createProject.resetHistory();
+    transport.createProject.resolves({ id: 'proj-2' });
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'GB', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    // ONE upstream catalog call across two market creates.
+    expect(transport.listLanguages).to.have.callCount(1);
+  });
+
+  it('refreshes the catalog after the TTL expires', async () => {
+    clearLanguageCache();
+    const clock = sinon.useFakeTimers({ now: Date.now() });
+    try {
+      const dataAccess = makeDataAccess([]);
+      dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+      dataAccess.BrandSemrushProject.create.resolves();
+      const transport = {
+        listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+        createProject: sinon.stub().resolves({ id: 'proj-1' }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+        market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+      }, fakeLog());
+
+      // Advance past the 1h TTL boundary.
+      clock.tick(60 * 60 * 1000 + 1);
+
+      transport.createProject.resetHistory();
+      transport.createProject.resolves({ id: 'proj-2' });
+      await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+        market: 'GB', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+      }, fakeLog());
+
+      expect(transport.listLanguages).to.have.callCount(2);
+    } finally {
+      clock.restore();
+    }
   });
 });
 
@@ -569,6 +700,16 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       .to.be.rejectedWith(ErrorWithStatusCode);
   });
 
+  // Minor #6 from review: malformed languageCode must 400 (regex-validated
+  // via normalizeLanguageCode) instead of silently lowercasing and
+  // mismatching downstream. Lock for handleListTags.
+  it('listTags 400s on syntactically malformed languageCode (`ENG-X`)', async () => {
+    const dataAccess = makeDataAccess([]);
+    await expect(handleListTags({}, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'ENG-X',
+    })).to.be.rejectedWith(ErrorWithStatusCode);
+  });
+
   it('listTags returns empty when slice has no row', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
@@ -698,6 +839,15 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     const dataAccess = makeDataAccess([]);
     await expect(handleListModels({}, dataAccess, BRAND, WORKSPACE, {}))
       .to.be.rejectedWith(ErrorWithStatusCode);
+  });
+
+  // Minor #6 from review: lock the same malformed-languageCode 400 contract
+  // for handleListModels.
+  it('listModels 400s on syntactically malformed languageCode (`1z`)', async () => {
+    const dataAccess = makeDataAccess([]);
+    await expect(handleListModels({}, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: '1z',
+    })).to.be.rejectedWith(ErrorWithStatusCode);
   });
 
   it('listModels returns empty when slice has no row', async () => {

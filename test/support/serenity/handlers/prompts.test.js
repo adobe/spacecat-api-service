@@ -22,6 +22,7 @@ import {
   handleBulkDeletePrompts,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
+import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -71,18 +72,38 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     })).to.be.rejectedWith(ErrorWithStatusCode);
   });
 
-  it('returns empty page when no market exists for the slice', async () => {
+  // Minor #6 from review: malformed languageCode must 400 before "no market
+  // for slice" 404 short-circuits. Locks the b8281e81 behavior change for
+  // handleListPrompts (counterpart tests for tags + models live in
+  // markets.test.js).
+  it('400s on syntactically malformed languageCode (`ENG-X`)', async () => {
+    const transport = {};
+    const dataAccess = makeDataAccess([]);
+    await expect(handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840,
+      languageCode: 'ENG-X',
+    })).to.be.rejectedWith(ErrorWithStatusCode);
+  });
+
+  // Important #4 from review: missing slice on a single-slice handler emits
+  // 404 marketNotFound — same precondition as handleUpdatePrompt, same
+  // contract. Old shape (empty 200) silently rendered the same body as
+  // "slice exists, has no prompts", hiding a renamed/stale market.
+  it('throws 404 marketNotFound when no market exists for the slice', async () => {
     const transport = { listPromptsByTags: sinon.stub() };
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
 
-    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      geoTargetId: 2840, languageCode: 'en',
-    });
-
-    expect(result).to.deep.equal({
-      items: [], total: 0, page: 1, limit: 50,
-    });
+    try {
+      await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        geoTargetId: 2840, languageCode: 'en',
+      });
+      expect.fail('expected ErrorWithStatusCode 404');
+    } catch (e) {
+      expect(e).to.be.instanceOf(ErrorWithStatusCode);
+      expect(e.status).to.equal(404);
+      expect(e.code).to.equal('marketNotFound');
+    }
     expect(transport.listPromptsByTags).not.to.have.been.called;
   });
 
@@ -252,6 +273,25 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [],
     }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode);
+    expect(transport.createTaggedPrompts).not.to.have.been.called;
+  });
+
+  // Review minor #4: maxItems=500 cap matches the OpenAPI declaration and
+  // prevents an authenticated caller from submitting 10k+ items inside API
+  // Gateway's request envelope. Defense-in-depth, not a correctness gate.
+  it('400s when the prompts array exceeds maxItems=500', async () => {
+    const transport = { createTaggedPrompts: sinon.stub() };
+    const dataAccess = makeDataAccess([]);
+    const tooMany = Array.from({ length: 501 }, (_, i) => ({
+      text: `prompt ${i}`,
+      tags: ['t'],
+      geoTargetId: 2840,
+      languageCode: 'en',
+    }));
+
+    await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: tooMany,
+    }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode, /maxItems=500/);
     expect(transport.createTaggedPrompts).not.to.have.been.called;
   });
 
@@ -576,7 +616,10 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
 
-    const err = Object.assign(new Error('not found'), { status: 404 });
+    // Important #1 from review: idempotent-DELETE-404 is now gated by
+    // isUpstreamGone which requires SerenityTransportError specifically.
+    // A generic Error with .status=404 must NOT trip the idempotent path.
+    const err = new SerenityTransportError(404, 'not found');
     const transport = {
       deletePromptsByIds: sinon.stub().rejects(err),
       createTaggedPrompts: sinon.stub(),
@@ -702,6 +745,21 @@ describe('handlers/prompts.js — handleBulkDeletePrompts', () => {
     }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode);
   });
 
+  // Review minor #4: maxItems=500 cap on bulk-delete matches the OpenAPI
+  // declaration. Defense-in-depth — within API Gateway's envelope, an
+  // attacker could otherwise submit tens of thousands of items.
+  it('400s when the prompts array exceeds maxItems=500', async () => {
+    const dataAccess = makeDataAccess([]);
+    const tooMany = Array.from({ length: 501 }, (_, i) => ({
+      semrushPromptId: `sem-${i}`,
+      geoTargetId: 2840,
+      languageCode: 'en',
+    }));
+    await expect(handleBulkDeletePrompts({}, dataAccess, BRAND, WORKSPACE, {
+      prompts: tooMany,
+    }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode, /maxItems=500/);
+  });
+
   // Branch coverage: body without `prompts` field → Array.isArray fallback to
   // [] then the empty-array 400 fires. Locks the contract that the handler
   // does not crash on a missing key.
@@ -761,7 +819,8 @@ describe('handlers/prompts.js — handleBulkDeletePrompts', () => {
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
-    const err = Object.assign(new Error('not found'), { status: 404 });
+    // SerenityTransportError(404) — isUpstreamGone strict-match.
+    const err = new SerenityTransportError(404, 'not found');
     const transport = {
       deletePromptsByIds: sinon.stub().rejects(err),
       publishProject: sinon.stub().resolves(),
@@ -879,5 +938,221 @@ describe('handlers/prompts.js — handleBulkDeletePrompts', () => {
       status: 502,
       message: 'publish: publish boom',
     });
+  });
+
+  // Important #9 from review: bulk-delete buckets targets by project; per-bucket
+  // upstream errors propagate into each target's `failed` entry. The
+  // homogeneous cases (all 200, all 404, all 503) are covered above. The
+  // bucketing logic itself — the only actually load-bearing thing in this
+  // handler — needs mixed-mix coverage.
+  describe('handleBulkDeletePrompts — mixed-mix scenarios (Important #9)', () => {
+    it('(slice A 200 + slice B 503): A counts as deleted, B fans out per-target failed', async () => {
+      const projectA = makeProject({
+        semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+      });
+      const projectB = makeProject({
+        semrushProjectId: 'proj-de-de', geoTargetId: 2276, languageCode: 'de',
+      });
+      const dataAccess = makeDataAccess([projectA, projectB]);
+      const transport = {
+        deletePromptsByIds: sinon.stub(),
+        publishProject: sinon.stub().resolves(),
+      };
+      transport.deletePromptsByIds.withArgs(WORKSPACE, 'proj-us-en').resolves();
+      transport.deletePromptsByIds.withArgs(WORKSPACE, 'proj-de-de')
+        .rejects(new SerenityTransportError(503, 'upstream wobble'));
+
+      const result = await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [
+          { semrushPromptId: 'sem-A1', geoTargetId: 2840, languageCode: 'en' },
+          { semrushPromptId: 'sem-A2', geoTargetId: 2840, languageCode: 'en' },
+          { semrushPromptId: 'sem-B1', geoTargetId: 2276, languageCode: 'de' },
+        ],
+      }, fakeLog());
+
+      // A bucket counted as deleted; B bucket fanned out across its targets.
+      expect(result.deleted).to.equal(2);
+      expect(result.failed).to.have.lengthOf(1);
+      expect(result.failed[0]).to.include({
+        semrushPromptId: 'sem-B1',
+        geoTargetId: 2276,
+        languageCode: 'de',
+        status: 503,
+      });
+    });
+
+    it('(slice A 200 + slice B 404 idempotent): both count as deleted, no failed entries', async () => {
+      const projectA = makeProject({
+        semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+      });
+      const projectB = makeProject({
+        semrushProjectId: 'proj-de-de', geoTargetId: 2276, languageCode: 'de',
+      });
+      const dataAccess = makeDataAccess([projectA, projectB]);
+      const transport = {
+        deletePromptsByIds: sinon.stub(),
+        publishProject: sinon.stub().resolves(),
+      };
+      transport.deletePromptsByIds.withArgs(WORKSPACE, 'proj-us-en').resolves();
+      transport.deletePromptsByIds.withArgs(WORKSPACE, 'proj-de-de')
+        .rejects(new SerenityTransportError(404, 'gone'));
+
+      const result = await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [
+          { semrushPromptId: 'sem-A1', geoTargetId: 2840, languageCode: 'en' },
+          { semrushPromptId: 'sem-B1', geoTargetId: 2276, languageCode: 'de' },
+        ],
+      }, fakeLog());
+
+      expect(result.deleted).to.equal(2);
+      expect(result.failed).to.have.lengthOf(0);
+      // Both buckets queued for publish (404-as-success still rolls up).
+      expect(transport.publishProject).to.have.callCount(2);
+    });
+
+    it('(valid + invalid item shapes in same body): valid items succeed, invalid items land in failed', async () => {
+      const project = makeProject({
+        semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+      });
+      const dataAccess = makeDataAccess([project]);
+      const transport = {
+        deletePromptsByIds: sinon.stub().resolves(),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [
+          { semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' },
+          // missing semrushPromptId
+          { geoTargetId: 2840, languageCode: 'en' },
+          // unparseable geoTargetId
+          { semrushPromptId: 'sem-2', geoTargetId: 'abc', languageCode: 'en' },
+          // unsupported languageCode shape
+          { semrushPromptId: 'sem-3', geoTargetId: 2840, languageCode: 'ENG-X' },
+        ],
+      }, fakeLog());
+
+      expect(result.deleted).to.equal(1);
+      expect(result.failed.length).to.be.at.least(3);
+      expect(transport.deletePromptsByIds).to.have.callCount(1);
+    });
+  });
+});
+
+// Important #6 from review: tag-cache invalidation contract must hold across
+// every mutating handler. Without these tests, dropping `invalidateTagCacheForProject`
+// from any of POST /prompts, PATCH /prompts/:id, DELETE /prompts (bulk) would
+// not trip either suite — and stale tags become user-visible at the 60s TTL
+// boundary.
+describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => {
+  // Late dynamic imports: invalidateTagCacheForProject lives in markets.js,
+  // and module-scoped state across the two handlers is the actual contract
+  // these tests lock.
+  async function setupCachedTagsAndMutationTransport(initialTags, mutatedTags) {
+    const { handleListTags, clearTagCache } = await import('../../../../src/support/serenity/handlers/markets.js');
+    clearTagCache();
+
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    // Build the stub explicitly so onFirstCall / onSecondCall configure the
+    // SAME stub object (the fluent `sinon.stub().onFirstCall().resolves(...)`
+    // form binds the StubBehavior to `transport.listPromptsByTags`, not the
+    // stub itself — that subtle pitfall causes the cache test to read the
+    // wrong page on second call).
+    const listPromptsByTags = sinon.stub();
+    listPromptsByTags.onFirstCall().resolves({
+      items: initialTags.map((t, i) => ({ id: `p${i}`, name: `q${i}`, tags: [t] })),
+    });
+    listPromptsByTags.onSecondCall().resolves({
+      items: mutatedTags.map((t, i) => ({ id: `m${i}`, name: `q${i}`, tags: [t] })),
+    });
+
+    // Step 1: populate cache via handleListTags with set A.
+    const transport = { listPromptsByTags };
+    await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en',
+    }, fakeLog());
+
+    return {
+      handleListTags, transport, dataAccess, project,
+    };
+  }
+
+  it('POST /prompts invalidates the cached tag set (next listTags re-walks upstream)', async () => {
+    const setupCtx = await setupCachedTagsAndMutationTransport(['old-tag'], ['new-tag']);
+    const {
+      handleListTags, transport, dataAccess,
+    } = setupCtx;
+
+    // Mutation: handleCreatePrompts pushes a new prompt → invalidate.
+    transport.createTaggedPrompts = sinon.stub().resolves({ ids: ['sem-new'] });
+    transport.publishProject = sinon.stub().resolves();
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'fresh',
+        tags: ['new-tag'],
+        geoTargetId: 2840,
+        languageCode: 'en',
+      }],
+    }, fakeLog());
+
+    // Verify cache miss: handleListTags now returns set B.
+    const refetched = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en',
+    }, fakeLog());
+
+    expect(refetched.items.map((t) => t.name)).to.deep.equal(['new-tag']);
+    // Two upstream walks: the initial cache populate + the post-invalidation re-fetch.
+    expect(transport.listPromptsByTags).to.have.callCount(2);
+  });
+
+  it('PATCH /prompts/:id invalidates the cached tag set', async () => {
+    const setupCtx = await setupCachedTagsAndMutationTransport(['old-tag'], ['new-tag']);
+    const {
+      handleListTags, transport, dataAccess,
+    } = setupCtx;
+
+    transport.deletePromptsByIds = sinon.stub().resolves();
+    transport.createTaggedPrompts = sinon.stub().resolves({ ids: ['sem-new'] });
+    transport.publishProject = sinon.stub().resolves();
+    await handleUpdatePrompt(transport, dataAccess, BRAND, WORKSPACE, 'sem-1', {
+      geoTargetId: 2840,
+      languageCode: 'en',
+      text: 'updated',
+      tags: ['new-tag'],
+    }, fakeLog());
+
+    const refetched = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en',
+    }, fakeLog());
+
+    expect(refetched.items.map((t) => t.name)).to.deep.equal(['new-tag']);
+    expect(transport.listPromptsByTags).to.have.callCount(2);
+  });
+
+  it('bulk-delete /prompts invalidates the cached tag set', async () => {
+    const setupCtx = await setupCachedTagsAndMutationTransport(['old-tag'], ['kept-tag']);
+    const {
+      handleListTags, transport, dataAccess,
+    } = setupCtx;
+
+    transport.deletePromptsByIds = sinon.stub().resolves();
+    transport.publishProject = sinon.stub().resolves();
+    await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [
+        { semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' },
+      ],
+    }, fakeLog());
+
+    const refetched = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en',
+    }, fakeLog());
+
+    expect(refetched.items.map((t) => t.name)).to.deep.equal(['kept-tag']);
+    expect(transport.listPromptsByTags).to.have.callCount(2);
   });
 });

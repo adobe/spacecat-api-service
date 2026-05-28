@@ -97,8 +97,12 @@ function errorTokenForStatus(status) {
 function mapError(e, log) {
   if (e instanceof ErrorWithStatusCode) {
     const status = Number.isInteger(e.status) ? e.status : 400;
+    // Handlers can set `e.code` (e.g. 'marketNotFound') to pin a specific
+    // error token in the response envelope; falls back to the status-based
+    // default for plain throws.
+    const errorToken = hasText(e.code) ? e.code : errorTokenForStatus(status);
     return createResponse(
-      { error: errorTokenForStatus(status), message: safeError(e.message) },
+      { error: errorToken, message: safeError(e.message) },
       status,
     );
   }
@@ -352,14 +356,18 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const { geoTargetId: pGeo, languageCode: pLang } = ctx?.params || {};
-      const geoTargetId = parseInt(pGeo, 10);
+      // Strict digit match: `parseInt('2840abc', 10)` returns 2840, which would
+      // silently route /markets/2840abc/en to the legit (2840, en) slice. The
+      // OpenAPI contract declares `geoTargetId: integer, minimum: 1`, so the
+      // path segment must be all digits.
+      const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
       const transport = buildTransport(ctx, imsToken);
       const result = await handleDeleteMarket(
         transport,
         ctx.dataAccess,
         auth.brandUuid,
         auth.semrushWorkspaceId,
-        Number.isFinite(geoTargetId) ? geoTargetId : null,
+        geoTargetId,
         pLang ? String(pLang).toLowerCase() : null,
         log,
       );

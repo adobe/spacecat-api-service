@@ -13,6 +13,7 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
+import { isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 
@@ -23,6 +24,14 @@ const MAX_PAGE_LIMIT = 1000;
 // limits — the prior `serenity` testing exhausted Semrush's shared limit
 // with higher concurrency.
 const BULK_CREATE_CONCURRENCY = 8;
+// Matches the OpenAPI declaration (`maxItems: 500` on
+// SerenityCreatePromptsRequest.prompts and SerenityBulkDeletePromptsRequest.prompts).
+// Enforced here because the api-service does not run OpenAPI request validation
+// as middleware — without this cap, an IMS-authenticated caller could submit
+// tens of thousands of items inside API Gateway's request envelope and the
+// handler would faithfully build per-project Maps + upstream payloads for all
+// of them. Defense-in-depth, not a correctness gate.
+const BULK_PROMPTS_MAX_ITEMS = 500;
 
 function tagNamesOf(item) {
   if (!Array.isArray(item?.tags)) {
@@ -89,9 +98,20 @@ export async function handleListPrompts(
     languageCode,
   );
   if (!row) {
-    return {
-      items: [], total: 0, page, limit,
-    };
+    // Aligns with handleUpdatePrompt's missing-slice contract: a renamed
+    // /deleted market between page load and the call should not silently
+    // render an empty list — that hides "this slice no longer exists" behind
+    // the same response shape as "this slice exists but has no prompts".
+    // Single-slice handlers (list, PATCH) emit 404 marketNotFound; bulk
+    // handlers (create, bulk-delete) keep their per-item skipped/failed
+    // shape because each item carries its own slice and the body can mix
+    // slices that exist with slices that don't. (Review Important #4.)
+    const err = new ErrorWithStatusCode(
+      'No market for this brand and (geoTargetId, languageCode) slice',
+      404,
+    );
+    err.code = 'marketNotFound';
+    throw err;
   }
 
   const resp = await transport.listPromptsByTags(
@@ -183,6 +203,12 @@ export async function handleCreatePrompts(
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
     throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
+  }
+  if (inputs.length > BULK_PROMPTS_MAX_ITEMS) {
+    throw new ErrorWithStatusCode(
+      `prompts array exceeds maxItems=${BULK_PROMPTS_MAX_ITEMS}`,
+      400,
+    );
   }
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
@@ -362,7 +388,7 @@ export async function handleUpdatePrompt(
   try {
     await transport.deletePromptsByIds(semrushWorkspaceId, projectId, [semrushPromptId]);
   } catch (e) {
-    if (e?.status === 404) {
+    if (isUpstreamGone(e)) {
       return {
         status: 404,
         body: {
@@ -421,6 +447,12 @@ export async function handleBulkDeletePrompts(
   if (targets.length === 0) {
     throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
   }
+  if (targets.length > BULK_PROMPTS_MAX_ITEMS) {
+    throw new ErrorWithStatusCode(
+      `prompts array exceeds maxItems=${BULK_PROMPTS_MAX_ITEMS}`,
+      400,
+    );
+  }
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
   const projectBySlice = new Map();
@@ -472,7 +504,7 @@ export async function handleBulkDeletePrompts(
       deleted += bucket.ids.length;
       projectsToPublish.add(pid);
     } catch (e) {
-      if (e?.status === 404) {
+      if (isUpstreamGone(e)) {
         deleted += bucket.ids.length;
         projectsToPublish.add(pid);
         log?.info?.('bulk-delete: upstream already-deleted (404 treated as success)', { ids: bucket.ids });

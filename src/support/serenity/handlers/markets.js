@@ -15,8 +15,8 @@ import { iso31661Alpha2ToNumeric } from 'iso-3166';
 import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { SerenityTransportError } from '../rest-transport.js';
-import { LANGUAGE_TAG_REGEX, normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
+import { isUpstreamGone } from '../errors.js';
+import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 
@@ -162,7 +162,12 @@ function validateCreateBody(body) {
   if (!hasText(body?.market) || !/^[A-Za-z]{2}$/.test(body.market)) {
     errors.push('market must be an ISO-2 country code');
   }
-  if (!hasText(body?.languageCode) || !LANGUAGE_TAG_REGEX.test(body.languageCode)) {
+  // Route languageCode through the shared normalizer so POST /markets has the
+  // exact same acceptance contract as every other handler that takes the same
+  // field. The pre-normalizer regex-then-lowercase form rejected uppercase
+  // input here while the rest of the surface silently accepted it — same
+  // field, two different rules. (Review Important #2.)
+  if (normalizeLanguageCode(body?.languageCode) === null) {
     errors.push('languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$');
   }
   if (!hasText(body?.brandDomain)) {
@@ -233,9 +238,13 @@ export async function handleCreateMarket(
 ) {
   const errors = validateCreateBody(body);
   if (errors.length > 0) {
+    // Join into a single `message` so the response body matches the
+    // OpenAPI SerenityErrorResponse schema (which declares `message` as
+    // a string, not `messages` as an array). Caller-facing improvement
+    // and unblocks the contract test from rejecting this response.
     return {
       status: 400,
-      body: { error: 'invalidRequest', messages: errors },
+      body: { error: 'invalidRequest', message: errors.join('; ') },
     };
   }
   const location = resolveLocation(body.market);
@@ -248,7 +257,9 @@ export async function handleCreateMarket(
       },
     };
   }
-  const languageCode = String(body.languageCode).toLowerCase();
+  // Normalizer already validated this above; re-normalize to grab the
+  // canonical lowercase form (the body value may have been "EN" etc.).
+  const languageCode = normalizeLanguageCode(body.languageCode);
 
   const existing = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
@@ -305,8 +316,38 @@ export async function handleCreateMarket(
   try {
     await transport.publishProject(semrushWorkspaceId, semrushProjectId);
   } catch (e) {
+    // Best-effort upstream cleanup so the documented retry contract holds.
+    // Without this, every retry generates a fresh `defaultMarketName` (random
+    // hex suffix) and the upstream `createProject` body has no idempotency
+    // key — a retry after a `publishProject` failure would create a SECOND
+    // upstream project, not recover the first. The 409 gate only fires when
+    // a DB row exists; it never sees orphan upstream projects.
+    //
+    // Swallow the delete's own errors: the publishProject error is what we
+    // need to propagate to the caller, and we don't want a follow-on cleanup
+    // failure to mask it. Both outcomes are logged so an operator can still
+    // reconcile if cleanup itself fails.
+    let cleanedUp = false;
+    try {
+      await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
+      cleanedUp = true;
+    } catch (cleanupErr) {
+      log?.error?.(
+        'handleCreateMarket: best-effort cleanup deleteProject failed; orphan upstream project remains',
+        {
+          brandId,
+          semrushWorkspaceId,
+          semrushProjectId,
+          geoTargetId: location.geoTargetId,
+          languageCode,
+          error: cleanupErr.message,
+        },
+      );
+    }
     log?.error?.(
-      'handleCreateMarket: orphaned upstream project after publish failure',
+      cleanedUp
+        ? 'handleCreateMarket: publish failed; upstream project cleaned up'
+        : 'handleCreateMarket: orphaned upstream project after publish failure',
       {
         brandId,
         semrushWorkspaceId,
@@ -314,6 +355,7 @@ export async function handleCreateMarket(
         geoTargetId: location.geoTargetId,
         languageCode,
         error: e.message,
+        cleanedUp,
       },
     );
     throw e;
@@ -410,7 +452,7 @@ export async function handleDeleteMarket(
   try {
     await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
   } catch (e) {
-    if (e instanceof SerenityTransportError && e.status === 404) {
+    if (isUpstreamGone(e)) {
       // Already gone upstream — proceed to DB cleanup.
       log?.info?.('handleDeleteMarket: upstream project already deleted (404 treated as success)', {
         brandId,
