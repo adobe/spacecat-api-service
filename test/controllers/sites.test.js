@@ -4443,6 +4443,71 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(403);
     });
+
+    it('treats a null site.getConfig() as the documented "nothing persisted" case', async () => {
+      // Locks defensive-optional-chain behavior: even when the model returns
+      // null from getConfig() (which happens for sites without a persisted
+      // config row), the endpoint must not throw — it should return the
+      // documented `{}` envelope.
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(null);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.deep.equal({
+        siteId: SITE_IDS[0],
+        scraperConfig: {},
+      });
+    });
+
+    it('logs a warning when scraperConfig is null (vs undefined) and still returns empty', async () => {
+      // null specifically — vs the undefined "never written" case — should
+      // produce a forensics breadcrumb without changing the response shape.
+      const site = sites[0];
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'getScraperConfig', {
+        value: () => null, writable: true, configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.deep.equal({
+        siteId: SITE_IDS[0],
+        scraperConfig: {},
+      });
+      expect(loggerStub.warn).to.have.been.calledWithMatch(
+        sinon.match((val) => typeof val === 'string'
+          && val.includes('null scraperConfig')
+          && val.includes(SITE_IDS[0])),
+      );
+    });
+
+    it('propagates findById failures as 5xx after logging', async () => {
+      // Transient infra errors (DB throttling, IMS hiccup on hasAccess, etc.)
+      // must produce a CloudWatch breadcrumb so the on-call can find them.
+      const failure = new Error('Transient DB error');
+      mockDataAccess.Site.findById.rejects(failure);
+
+      await expect(sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      })).to.be.rejectedWith(/Transient DB error/);
+
+      expect(loggerStub.error).to.have.been.calledWithMatch(
+        sinon.match((val) => typeof val === 'string'
+          && val.includes('Error getting scraper config for site')
+          && val.includes(SITE_IDS[0])),
+      );
+    });
   });
 
   describe('updateScraperConfig', () => {

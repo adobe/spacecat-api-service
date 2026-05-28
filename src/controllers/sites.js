@@ -1165,19 +1165,40 @@ function SitesController(ctx, log, env) {
       return badRequest('Invalid site ID');
     }
 
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
 
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can read its sites');
-    }
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Only users belonging to the organization can read its sites');
+      }
 
-    return ok({
-      siteId: site.getId(),
-      scraperConfig: site.getConfig().getScraperConfig() ?? {},
-    });
+      // Defensive optional chain: `??` only protects the innermost return value.
+      // `getConfig()` itself can be null (matches `getBrandProfile` precedent on
+      // sites without a persisted config row), and `getScraperConfig` may not
+      // exist on Config objects produced by older `@adobe/spacecat-shared-data-
+      // access` versions if a deploy ever drifts. Either way, treat it as the
+      // documented "nothing persisted" case.
+      const raw = site.getConfig()?.getScraperConfig?.();
+      if (raw === null) {
+        // `undefined` is the normal "never written" case the JSDoc documents.
+        // `null` specifically means the field was explicitly cleared or that
+        // the persisted row went through an out-of-band edit — surface it so
+        // a post-hoc forensics pass can tell the two apart, but do not change
+        // the response shape callers depend on.
+        log.warn(`[getScraperConfig] site ${siteId} returned null scraperConfig (treating as empty)`);
+      }
+
+      return ok({
+        siteId: site.getId(),
+        scraperConfig: raw ?? {},
+      });
+    } catch (error) {
+      log.error(`Error getting scraper config for site ${siteId}: ${error.message}`, error);
+      throw error;
+    }
   };
 
   /**
