@@ -541,6 +541,14 @@ export async function upsertBrand({
       err.status = 409;
       throw err;
     }
+    // chk_active_brand_has_site_id race: the upsert's status guard above reads
+    // existing.site_id before the upsert lands, so a concurrent writer that
+    // clears site_id between read and write can still trip the constraint here.
+    if (error.code === '23514' && error.message?.includes('chk_active_brand_has_site_id')) {
+      const err = new Error('Cannot activate a brand without a base site URL');
+      err.status = 400;
+      throw err;
+    }
     throw new Error(`Failed to upsert brand: ${error.message}`);
   }
 
@@ -603,19 +611,44 @@ export async function updateBrand({
     patch.vertical = updates.vertical;
   }
 
-  // baseSiteId is immutable once set — only allow setting from NULL.
-  // The DB partial unique index (brands_base_site_unique) enforces uniqueness.
-  if (hasText(updates.baseSiteId)) {
+  // Two situations require the persisted site_id:
+  //   1. baseSiteId is immutable once set — we read site_id to check whether
+  //      to allow the transition.
+  //   2. Promoting to status='active' requires a non-NULL site_id per the
+  //      DB constraint chk_active_brand_has_site_id (LLMO-5183). If neither
+  //      the incoming patch nor the persisted row carries one, the DB will
+  //      reject; surface that as a typed 400 before round-tripping to PG.
+  const needsExistingFetch = hasText(updates.baseSiteId) || updates.status === 'active';
+  let existing = null;
+  if (needsExistingFetch) {
     const { data: current } = await postgrestClient
       .from('brands')
       .select('site_id')
       .eq('id', brandId)
       .maybeSingle();
+    existing = current;
+  }
 
-    if (!current?.site_id) {
+  if (hasText(updates.baseSiteId)) {
+    if (!existing?.site_id) {
       patch.site_id = updates.baseSiteId;
     }
     // If site_id is already set, silently ignore the update (immutable).
+  }
+
+  // Guard chk_active_brand_has_site_id: any path that ends with status='active'
+  // must also end with a non-NULL site_id (either supplied in this PATCH or
+  // already persisted).
+  if (patch.status === 'active') {
+    const hasBaseSite = hasText(patch.site_id) || hasText(existing?.site_id);
+    if (!hasBaseSite) {
+      const err = new Error(
+        'Cannot activate a brand without a base site URL — '
+        + 'set baseSiteId in the same PATCH.',
+      );
+      err.status = 400;
+      throw err;
+    }
   }
 
   if (updates.region !== undefined) {
@@ -639,6 +672,12 @@ export async function updateBrand({
     if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
       const err = new Error('This site is already the primary URL for another brand');
       err.status = 409;
+      throw err;
+    }
+    // chk_active_brand_has_site_id race: same rationale as upsertBrand above.
+    if (error.code === '23514' && error.message?.includes('chk_active_brand_has_site_id')) {
+      const err = new Error('Cannot activate a brand without a base site URL');
+      err.status = 400;
       throw err;
     }
     throw new Error(`Failed to update brand: ${error.message}`);

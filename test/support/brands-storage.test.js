@@ -491,6 +491,35 @@ describe('brands-storage', () => {
       })).to.be.rejectedWith('Failed to upsert brand: upsert failed');
     });
 
+    it('throws 400 when DB rejects chk_active_brand_has_site_id on upsert race', async () => {
+      // Defensive: the in-app guard at lines 506-511 downgrades to 'pending'
+      // when no baseSiteId is supplied AND no existing site_id is persisted,
+      // so the constraint shouldn't fire in steady state. This covers the
+      // racy case where another writer cleared site_id between our SELECT
+      // and our UPSERT.
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { site_id: 'preexisting-site-id' }, error: null }, // existing lookup
+          {
+            data: null,
+            error: {
+              code: '23514',
+              message: 'new row for relation "brands" violates check constraint "chk_active_brand_has_site_id"',
+            },
+          },
+        ],
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', status: 'active' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal('Cannot activate a brand without a base site URL');
+      expect(err.status).to.equal(400);
+    });
+
     it('throws 409 when baseSiteId violates unique constraint on upsert', async () => {
       const postgrestClient = createTableMockClient({
         brands: { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
@@ -1399,6 +1428,91 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.not.be.null;
+    });
+
+    it('throws 400 when PATCH status=active on a brand with NULL site_id (no baseSiteId)', async () => {
+      // LLMO-5183: chk_active_brand_has_site_id forbids active brands with NULL
+      // site_id. Surface as a typed 400 before round-tripping to PG.
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { site_id: null }, error: null }, // existing lookup
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { status: 'active' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.include('Cannot activate a brand without a base site URL');
+      expect(err.status).to.equal(400);
+    });
+
+    it('allows PATCH status=active when caller also supplies baseSiteId', async () => {
+      const fullBrandRow = makeBrandRow({ status: 'active', site_id: 'new-site-id' });
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { site_id: null }, error: null }, // existing lookup
+          { data: { id: BRAND_ID }, error: null }, // update succeeds
+          { data: fullBrandRow, error: null }, // getBrandById re-fetch
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { status: 'active', baseSiteId: 'new-site-id' },
+        postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+    });
+
+    it('allows PATCH status=active when brand already has a persisted site_id', async () => {
+      const fullBrandRow = makeBrandRow({ status: 'active', site_id: 'existing-site-id' });
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { site_id: 'existing-site-id' }, error: null }, // existing lookup
+          { data: { id: BRAND_ID }, error: null }, // update succeeds
+          { data: fullBrandRow, error: null }, // getBrandById re-fetch
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { status: 'active' },
+        postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+    });
+
+    it('throws 400 when DB rejects chk_active_brand_has_site_id on update race', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { site_id: 'preexisting-site-id' }, error: null }, // existing lookup
+          {
+            data: null,
+            error: {
+              code: '23514',
+              message: 'new row for relation "brands" violates check constraint "chk_active_brand_has_site_id"',
+            },
+          },
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { status: 'active' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal('Cannot activate a brand without a base site URL');
+      expect(err.status).to.equal(400);
     });
 
     it('ignores baseSiteId when brand already has a site_id (immutable)', async () => {
