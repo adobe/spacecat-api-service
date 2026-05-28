@@ -108,6 +108,11 @@ describe('github-targets parseTargets', () => {
     ]);
     expect(() => parseTargets({ GITHUB_TARGETS: bad })).to.throw('valid env var name');
   });
+
+  it('throws when an entry is missing a string id', () => {
+    const bad = JSON.stringify([{ match: { default: true }, appSlug: 's', webhookSecretEnvVar: 'V' }]);
+    expect(() => parseTargets({ GITHUB_TARGETS: bad })).to.throw('missing a string "id"');
+  });
 });
 
 describe('github-targets extractClassificationMetadata', () => {
@@ -131,6 +136,16 @@ describe('github-targets extractClassificationMetadata', () => {
   it('returns host of a non-github.com html_url', () => {
     const body = JSON.stringify({ repository: { html_url: 'https://git.corp.adobe.com/experience-platform/mystique' } });
     expect(extractClassificationMetadata(body).host).to.equal('git.corp.adobe.com');
+  });
+
+  it('returns null for valid JSON that is not an object', () => {
+    expect(extractClassificationMetadata('123')).to.be.null;
+    expect(extractClassificationMetadata('null')).to.be.null;
+  });
+
+  it('returns host=null for a malformed repository.html_url', () => {
+    const body = JSON.stringify({ repository: { html_url: 'not-a-valid-url' } });
+    expect(extractClassificationMetadata(body).host).to.be.null;
   });
 });
 

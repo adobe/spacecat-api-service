@@ -332,5 +332,12 @@ describe('GitHubWebhookHmacHandler', () => {
       expect(result).to.be.null;
       expect(mockLog.warn.calledWithMatch('not valid JSON')).to.be.true;
     });
+
+    it('returns null + warn for an empty body in registry mode', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature('', secret) }, '');
+      const result = await handler.checkAuth(request, registryContext());
+      expect(result).to.be.null;
+      expect(mockLog.warn.calledWithMatch('Empty')).to.be.true;
+    });
   });
 });
