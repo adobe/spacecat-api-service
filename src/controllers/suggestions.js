@@ -49,8 +49,68 @@ import {
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import { postSlackMessage } from '../utils/slack/base.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+async function getSiteAsoTier(site) {
+  try {
+    const enrollments = await site.getSiteEnrollments();
+    if (!enrollments?.length) {
+      return null;
+    }
+    const entitlements = await Promise.all(enrollments.map((e) => e.getEntitlement()));
+    const asoEntitlement = entitlements.find((e) => e?.getProductCode() === 'ASO');
+    if (!asoEntitlement) {
+      return null;
+    }
+    const tier = asoEntitlement.getTier();
+    return (tier === 'PAID' || tier === 'PLG') ? tier : null;
+  } catch {
+    return null;
+  }
+}
+
+async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context) {
+  const { env, log } = context;
+  const channelId = env?.SLACK_PLG_SKIP_CHANNEL_ID;
+  const token = env?.SLACK_BOT_TOKEN;
+  if (!channelId || !token) {
+    return;
+  }
+
+  try {
+    const tier = await getSiteAsoTier(site);
+    if (tier !== 'PLG') {
+      return;
+    }
+
+    const siteBaseURL = site.getBaseURL?.() ?? site.getId();
+    const opportunityType = opportunity.getType?.() ?? 'unknown';
+    const opportunityId = opportunity.getId?.() ?? 'unknown';
+    const suggestionId = suggestion.getId?.() ?? 'unknown';
+    const skipReason = suggestion.getSkipReason?.() ?? null;
+    const skipDetail = suggestion.getSkipDetail?.() ?? null;
+
+    let message = ':no_entry_sign: *PLG Customer Skipped a Suggestion*\n\n'
+      + `• *Site:* \`${siteBaseURL}\`\n`
+      + `• *Site ID:* \`${site.getId()}\`\n`
+      + `• *Opportunity Type:* \`${opportunityType}\`\n`
+      + `• *Opportunity ID:* \`${opportunityId}\`\n`
+      + `• *Suggestion ID:* \`${suggestionId}\``;
+
+    if (skipReason) {
+      message += `\n• *Skip Reason:* \`${skipReason}\``;
+    }
+    if (skipDetail) {
+      message += `\n• *Skip Detail:* ${skipDetail}`;
+    }
+
+    await postSlackMessage(channelId, message, token);
+  } catch (alertError) {
+    log.error(`Failed to send PLG suggestion skip Slack alert: ${alertError.message}`);
+  }
+}
 
 /**
  * Suggestions controller.
@@ -673,6 +733,7 @@ function SuggestionsController(ctx, sqs, env) {
         suggestion.setKpiDeltas(kpiDeltas);
       }
 
+      let isNewSkipTransition = false;
       if (hasText(status) && status !== suggestion.getStatus()) {
         const { valid, error } = validateSkipFields(status, skipReason, skipDetail);
         if (!valid) {
@@ -681,6 +742,7 @@ function SuggestionsController(ctx, sqs, env) {
         hasUpdates = true;
         suggestion.setStatus(status);
         if (status === SuggestionModel.STATUSES.SKIPPED) {
+          isNewSkipTransition = true;
           if (suggestion.setSkipReason) {
             suggestion.setSkipReason(skipReason ?? null);
             suggestion.setSkipDetail(skipDetail ?? null);
@@ -710,6 +772,9 @@ function SuggestionsController(ctx, sqs, env) {
       if (hasUpdates) {
         suggestion.setUpdatedBy(profile.email || 'system');
         const updatedSuggestion = await suggestion.save();
+        if (isNewSkipTransition) {
+          await postPlgSuggestionSkipAlert(site, opportunity, updatedSuggestion, context);
+        }
         return ok(SuggestionDto.toJSON(updatedSuggestion));
       }
     } catch (e) {
@@ -847,6 +912,7 @@ function SuggestionsController(ctx, sqs, env) {
       }
 
       const currentStatus = suggestion.getStatus();
+      let isNewSkipTransition = false;
       try {
         if (currentStatus !== status) {
           // Validate REJECTED status transition
@@ -874,6 +940,7 @@ function SuggestionsController(ctx, sqs, env) {
 
           suggestion.setStatus(status);
           if (status === SuggestionModel.STATUSES.SKIPPED) {
+            isNewSkipTransition = true;
             if (suggestion.setSkipReason) {
               suggestion.setSkipReason(skipReason ?? null);
               suggestion.setSkipDetail(skipDetail ?? null);
@@ -915,6 +982,10 @@ function SuggestionsController(ctx, sqs, env) {
       }
       try {
         const updatedSuggestion = await suggestion.save();
+        if (isNewSkipTransition) {
+          const opp = await suggestion.getOpportunity();
+          await postPlgSuggestionSkipAlert(site, opp, updatedSuggestion, context);
+        }
         return {
           index,
           uuid: id,
