@@ -809,7 +809,7 @@ This plan is the web half of **migration step 1** plus the **step-2 registry cut
 | `GITHUB_TARGETS` | No (JSON registry) | All envs | Step 2 (registry cutover) |
 | `GITHUB_WEBHOOK_SECRET_GHEC` | **Yes** | Envs serving GHEC | GHEC cutover only |
 
-`GITHUB_WEBHOOK_SECRET` and `GITHUB_APP_SLUG` are unchanged. All of these are injected through the existing secret store via `npm run deploy-secrets` (`hedy --aws-update-secrets --params-file=secrets/secrets.env`, the same store that already provides `GITHUB_WEBHOOK_SECRET` / `GITHUB_APP_SLUG`). `GITHUB_TARGETS` is non-secret but rides the same channel.
+`GITHUB_WEBHOOK_SECRET` and `GITHUB_APP_SLUG` are unchanged. This service loads its runtime config from HashiCorp Vault (`dx_mysticat/{env}/api-service`, KV v2) at Lambda cold start via the `vaultSecrets` middleware (`src/index.js`), which merges it into `context.env` - the same store that already provides `GITHUB_WEBHOOK_SECRET` / `GITHUB_APP_SLUG`. Add `GITHUB_WEBHOOK_SECRET_GHEC` and the (non-secret) `GITHUB_TARGETS` to that same path with `vault kv patch -mount=dx_mysticat {env}/api-service ...`; a patch takes effect on the next cold start (within ~1 min on warm containers via the Vault metadata recheck) - no redeploy. (The `deploy-secrets` npm script writes to AWS Secrets Manager from a `secrets/` file that is absent from the repo and the CI pipeline; it is not how this service's secrets are managed.)
 
 ### Rollout sequence
 
@@ -818,8 +818,8 @@ This plan is the web half of **migration step 1** plus the **step-2 registry cut
    ```json
    [{ "id": "github-public", "match": { "default": true }, "appSlug": "mysticat", "webhookSecretEnvVar": "GITHUB_WEBHOOK_SECRET" }]
    ```
-   (Use the env's real `GITHUB_APP_SLUG` value as `appSlug` - e.g. `mysticat-bot-dev` in dev.) Deploy / update secrets. **Validation:** trigger a dev PR review; confirm the SQS message now carries `target_id: "github-public"`; confirm the review still posts (worker resolves `targets["github-public"]`); watch the **skip-and-log rate and per-target auth-failure rate** (ADR success metric) - both flat.
-3. **GHEC cutover (gated, separate change).** Preconditions (ADR): the EMU enterprise slug is known; the `ghec` app + PAT + webhook secret are provisioned (worker Vault `targets["ghec"]` added; `GITHUB_WEBHOOK_SECRET_GHEC` set). Insert the `ghec` rule **ahead of** the catch-all:
+   (Use the env's real `GITHUB_APP_SLUG` value as `appSlug` - e.g. `mysticat-bot-dev` in dev.) Apply with `vault kv patch -mount=dx_mysticat {env}/api-service GITHUB_TARGETS='...'` (effective on the next cold start; no redeploy). **Validation:** trigger a dev PR review; confirm the SQS message now carries `target_id: "github-public"`; confirm the review still posts (worker resolves `targets["github-public"]`); watch the **skip-and-log rate and per-target auth-failure rate** (ADR success metric) - both flat.
+3. **GHEC cutover (gated, separate change).** Preconditions (ADR): the EMU enterprise slug is known; the `ghec` app + PAT + webhook secret are provisioned (worker Vault `targets["ghec"]` added; `GITHUB_WEBHOOK_SECRET_GHEC` added to Vault `dx_mysticat/{env}/api-service`). Insert the `ghec` rule **ahead of** the catch-all:
    ```json
    [
      { "id": "ghec", "match": { "enterpriseSlug": ["<EMU-enterprise-slug>"] }, "appSlug": "mysticat-bot", "webhookSecretEnvVar": "GITHUB_WEBHOOK_SECRET_GHEC" },
