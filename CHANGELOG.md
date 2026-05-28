@@ -1,3 +1,10 @@
+## [1.522.2](https://github.com/adobe/spacecat-api-service/compare/v1.522.1...v1.522.2) (2026-05-28)
+
+
+### Bug Fixes
+
+* **plg:** move scrape-top-pages before broken-backlinks in aso_plg profile ([#2502](https://github.com/adobe/spacecat-api-service/issues/2502)) ([f63208d](https://github.com/adobe/spacecat-api-service/commit/f63208da259070302da6b787c463284e8f9ef4ae))
+
 ## [1.522.1](https://github.com/adobe/spacecat-api-service/compare/v1.522.0...v1.522.1) (2026-05-27)
 
 
