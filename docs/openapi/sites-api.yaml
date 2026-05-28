@@ -141,11 +141,11 @@ sites:
           Maximum number of items per page. When `limit` (or `cursor`) is provided the
           response uses the paginated envelope shape; when both are omitted the response
           uses the legacy flat-array shape (see endpoint description). Defaults to 100
-          when the paginated shape is selected; capped at 500. Out-of-range or
-          non-integer values (e.g. `0`, `-1`, `abc`) are silently coerced to 100 rather
-          than rejected — clients must not rely on a 400 response for invalid `limit`.
+          when the paginated shape is selected. Non-integer or non-positive values
+          (e.g. `0`, `-1`, `abc`) return 400. Values above 500 are clamped to 500.
         schema:
           type: integer
+          minimum: 1
           maximum: 500
           example: 100
       - name: cursor
@@ -170,6 +170,8 @@ sites:
               oneOf:
                 - $ref: './schemas.yaml#/SiteList'
                 - $ref: './schemas.yaml#/SitePagedResponse'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '403':

@@ -68,10 +68,8 @@ const toListJSON = (config) => {
     result.brandConfig = json.brandConfig;
   }
   if (isNonEmptyObject(json.fetchConfig)) {
-    // Strip fetchConfig.headers from list responses — the schema permits arbitrary
-    // header names (Authorization, Cookie, X-API-Key), and surfacing them to S2S
-    // `site:readAll` consumers would enable cross-tenant credential exfiltration.
-    // Keep overrideBaseURL since it is not credential-bearing.
+    // Only expose overrideBaseURL in list responses. headers can hold credentials
+    // (Authorization, Cookie, etc.) and shouldn't be returned in bulk.
     const { overrideBaseURL } = json.fetchConfig;
     if (overrideBaseURL) {
       result.fetchConfig = { overrideBaseURL };

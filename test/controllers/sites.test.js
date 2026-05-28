@@ -699,29 +699,16 @@ describe('Sites Controller', () => {
       expect(body.pagination.limit).to.equal(500);
     });
 
-    it('falls back to DEFAULT_LIMIT when limit is invalid (non-numeric)', async () => {
-      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
-
-      const result = await sitesController.getAll({ ...context, data: { limit: 'abc' } });
-      const body = await result.json();
-
-      expect(result.status).to.equal(200);
-      expect(body.pagination.limit).to.equal(100);
-    });
-
-    ['0', '-1', '-100'].forEach((badLimit) => {
-      it(`falls back to DEFAULT_LIMIT when limit is "${badLimit}"`, async () => {
+    ['abc', '0', '-1', '-100'].forEach((badLimit) => {
+      it(`returns 400 when limit is "${badLimit}"`, async () => {
         mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
         const result = await sitesController.getAll({ ...context, data: { limit: badLimit } });
-        const body = await result.json();
+        const error = await result.json();
 
-        expect(result.status).to.equal(200);
-        expect(body.pagination.limit).to.equal(100);
-        expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
-          {},
-          sinon.match({ limit: 100 }),
-        );
+        expect(result.status).to.equal(400);
+        expect(error).to.have.property('message', 'limit must be a positive integer');
+        expect(mockDataAccess.Site.all).to.not.have.been.called;
       });
     });
 
@@ -745,6 +732,36 @@ describe('Sites Controller', () => {
       expect(result.status).to.equal(400);
       expect(error).to.have.property('message', 'cursor exceeds maximum length');
       expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+
+    it('accepts cursor of exactly 256 characters (boundary)', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+      const exactCursor = 'a'.repeat(256);
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: exactCursor } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.sites).to.be.an('array');
+      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+        {},
+        sinon.match({ cursor: exactCursor }),
+      );
+    });
+
+    [
+      { label: 'number', value: 42 },
+      { label: 'array', value: [1, 2, 3] },
+      { label: 'object', value: { foo: 'bar' } },
+    ].forEach(({ label, value }) => {
+      it(`rejects non-string cursor (${label}) with 400`, async () => {
+        const result = await sitesController.getAll({ ...context, data: { cursor: value } });
+        const error = await result.json();
+
+        expect(result.status).to.equal(400);
+        expect(error).to.have.property('message', 'cursor exceeds maximum length');
+        expect(mockDataAccess.Site.all).to.not.have.been.called;
+      });
     });
 
     it('returns sites with slim DTO shape in paginated response', async () => {
@@ -774,7 +791,7 @@ describe('Sites Controller', () => {
       { label: 'undefined', value: undefined },
       { label: 'empty object', value: {} },
     ].forEach(({ label, value }) => {
-      it(`logs a warning and returns an empty paginated envelope when Site.all resolves ${label}`, async () => {
+      it(`logs an error and returns an empty paginated envelope when Site.all resolves ${label}`, async () => {
         mockDataAccess.Site.all.resolves(value);
 
         const result = await sitesController.getAll({ ...context, data: { limit: '10' } });
@@ -783,7 +800,7 @@ describe('Sites Controller', () => {
         expect(result.status).to.equal(200);
         expect(body.sites).to.be.an('array').with.lengthOf(0);
         expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
-        expect(loggerStub.warn).to.have.been.calledWithMatch(
+        expect(loggerStub.error).to.have.been.calledWithMatch(
           /\[sites\] Site\.all returned unexpected shape with returnCursor=true/,
         );
       });

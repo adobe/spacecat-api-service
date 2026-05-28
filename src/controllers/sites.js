@@ -412,7 +412,7 @@ function SitesController(ctx, log, env) {
     const cursor = context?.data?.cursor || null;
     const paginated = hasText(limitParam) || hasText(cursor);
 
-    if (cursor && cursor.length > 256) {
+    if (cursor !== null && (typeof cursor !== 'string' || cursor.length > 256)) {
       return badRequest('cursor exceeds maximum length');
     }
 
@@ -420,14 +420,15 @@ function SitesController(ctx, log, env) {
     let responseBody;
 
     if (paginated) {
-      const parsedLimit = parseInt(limitParam, 10);
-      const effectiveLimit = (Number.isInteger(parsedLimit) && parsedLimit > 0)
-        ? Math.min(parsedLimit, MAX_LIMIT)
-        : DEFAULT_LIMIT;
+      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return badRequest('limit must be a positive integer');
+      }
+      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
 
       const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
       if (!Array.isArray(results?.data)) {
-        log.warn(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
+        log.error(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
         sites = [];
         responseBody = {
           sites,
@@ -450,7 +451,7 @@ function SitesController(ctx, log, env) {
       // legacy: no limit/cursor params -> flat array for backwards comp.
       // keep the default + friends-and-family exclusion on this path to stay
       // under the 6MB Lambda response limit until consumers migrate to pagination.
-      log.info(`[sites][legacy-shape] GET /sites called without limit/cursor requestId=${requestId} clientId=${s2sResult.clientId || 'admin'}`);
+      log.info(`[sites][legacy-shape] GET /sites called without limit/cursor requestId=${requestId} clientId=${s2sResult.clientId || (isAdmin ? 'admin-bypass' : 'unknown-s2s')}`);
       const excludedOrgIds = [
         env.DEFAULT_ORGANIZATION_ID,
         env.ORGANIZATION_ID_FRIENDS_FAMILY,
