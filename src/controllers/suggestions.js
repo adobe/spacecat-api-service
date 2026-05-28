@@ -1725,7 +1725,7 @@ function SuggestionsController(ctx, sqs, env) {
         context.log.info(`[edge-deploy] ${suggestionId} → PATH (patterns=${JSON.stringify(suggestion.getData()?.allowedRegexPatterns)})`);
         const data = suggestion.getData();
         if (data?.edgeDeployed) {
-          context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, path suggestion ${suggestionId} is already deployed`);
+          context.log.warn(`[edge-deploy] site: ${apexBaseUrl}, path suggestion ${suggestionId} is already deployed`);
           failedSuggestions.push({
             uuid: suggestionId,
             index,
