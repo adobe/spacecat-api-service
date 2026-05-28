@@ -14,46 +14,13 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 
-const FETCH_PAGE_SIZE = 200;
-const MAX_PROMPTS_PER_PROJECT = 10000;
-// Caps the inflight upstream calls when fanning out a bulk create across the
-// inputs. Semrush's gateway has a shared rate limit; firing 500 concurrent
-// requests from a single API call exhausted it during the prior serenity
-// testing. 8 keeps the per-call wall time reasonable without overwhelming
-// the upstream.
+const DEFAULT_PAGE_LIMIT = 50;
+const MAX_PAGE_LIMIT = 1000;
+// Caps the inflight upstream calls when fanning out a bulk create.
+// 8 keeps per-call wall time reasonable without overwhelming upstream rate
+// limits — the prior `serenity` testing exhausted Semrush's shared limit
+// with higher concurrency.
 const BULK_CREATE_CONCURRENCY = 8;
-
-/**
- * Logical id: opaque, stable across Semrush re-creates. Encodes
- * (brandId, semrushLocationId, language, text) so we can resolve back to a
- * BrandSemrushProject row without a side-channel lookup on PATCH.
- */
-export function encodeLogicalId({
-  brandId, semrushLocationId, language, text,
-}) {
-  const payload = JSON.stringify({
-    b: String(brandId || ''),
-    l: Number(semrushLocationId) || 0,
-    lang: String(language || ''),
-    t: String(text || ''),
-  });
-  return Buffer.from(payload, 'utf8').toString('base64url');
-}
-
-export function decodeLogicalId(id) {
-  try {
-    const json = Buffer.from(id, 'base64url').toString('utf8');
-    const obj = JSON.parse(json);
-    return {
-      brandId: obj.b,
-      semrushLocationId: Number(obj.l) || 0,
-      language: obj.lang,
-      text: obj.t,
-    };
-  } catch {
-    return null;
-  }
-}
 
 function tagNamesOf(item) {
   if (!Array.isArray(item?.tags)) {
@@ -64,135 +31,92 @@ function tagNamesOf(item) {
     .filter(Boolean);
 }
 
-async function fetchProjectPrompts(transport, workspaceId, project, search) {
-  const collected = [];
-  let page = 1;
-  let total = Infinity;
-  while (collected.length < total && collected.length < MAX_PROMPTS_PER_PROJECT) {
-    // eslint-disable-next-line no-await-in-loop
-    const result = await transport.listPromptsByTags(
-      workspaceId,
-      project.getSemrushProjectId(),
-      {
-        tag_ids: [],
-        page,
-        limit: FETCH_PAGE_SIZE,
-        search: hasText(search) ? search : undefined,
-      },
-    );
-    const items = Array.isArray(result?.items) ? result.items : [];
-    if (items.length === 0) {
-      break;
-    }
-    collected.push(...items);
-    total = Number.isFinite(result?.total) ? result.total : collected.length;
-    page += 1;
-  }
-  return collected;
-}
-
-function buildPromptDto(brandId, project, item) {
+function buildPromptDto(geoTargetId, languageCode, item) {
   const text = item?.name || '';
   if (!text) {
     return null;
   }
-  const semrushLocationId = project.getSemrushLocationId();
-  const language = project.getLanguage();
   return {
-    id: encodeLogicalId({
-      brandId, semrushLocationId, language, text,
-    }),
-    semrushId: String(item?.id ?? ''),
-    semrushProjectId: project.getSemrushProjectId(),
-    semrushLocationId,
-    language,
+    semrushPromptId: String(item?.id ?? ''),
+    geoTargetId,
+    languageCode,
     text,
     tags: tagNamesOf(item),
   };
 }
 
-function filterProjects(projects, query) {
-  const wantLoc = Number.isInteger(query?.semrushLocationId) && query.semrushLocationId > 0
-    ? query.semrushLocationId : null;
-  const wantLang = hasText(query?.language) ? String(query.language).toLowerCase() : null;
-  return projects.filter((p) => {
-    if (wantLoc !== null && p.getSemrushLocationId() !== wantLoc) {
-      return false;
-    }
-    if (wantLang !== null && p.getLanguage() !== wantLang) {
-      return false;
-    }
-    return true;
-  });
-}
-
 /**
- * GET /serenity/prompts — fan out across every BrandSemrushProject mapped to
- * the brand, merge results, paginate.
- *
- * Per-project upstream failures are reported via `errors[]` rather than
- * tanking the whole request — when some projects responded the partial set
- * is useful, and the client can surface the missing slices.
+ * GET /serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search= —
+ * list prompts for one slice. Both filters are required (the route handler
+ * returns 400 if either is missing). Pagination is real upstream
+ * pagination — one slice = one project = one upstream call set per page.
  */
-export async function handleListPrompts(transport, dataAccess, brandId, workspaceId, query) {
-  const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
-  if (!projects || projects.length === 0) {
-    return {
-      items: [], total: 0, page: 1, limit: 50,
-    };
-  }
-
-  const filtered = filterProjects(projects, query);
-  const search = hasText(query?.search) ? String(query.search).trim() : '';
-
-  const responses = await Promise.allSettled(
-    filtered.map(async (project) => ({
-      project,
-      items: await fetchProjectPrompts(transport, workspaceId, project, search),
-    })),
-  );
-
-  const dtos = [];
-  const errors = [];
-  for (const r of responses) {
-    if (r.status === 'fulfilled') {
-      const { project, items } = r.value;
-      for (const item of items) {
-        const dto = buildPromptDto(brandId, project, item);
-        if (dto) {
-          dtos.push(dto);
-        }
-      }
-    } else {
-      errors.push({ message: r.reason?.message || String(r.reason) });
-    }
+export async function handleListPrompts(
+  transport,
+  dataAccess,
+  brandId,
+  semrushWorkspaceId,
+  query,
+) {
+  const geoTargetId = Number.isInteger(query?.geoTargetId) && query.geoTargetId > 0
+    ? query.geoTargetId : null;
+  const languageCode = hasText(query?.languageCode)
+    ? String(query.languageCode).toLowerCase() : null;
+  if (geoTargetId === null || languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
+      400,
+    );
   }
 
   const page = Math.max(1, parseInt(query?.page ?? '1', 10) || 1);
-  const limit = Math.max(1, Math.min(parseInt(query?.limit ?? '50', 10) || 50, 1000));
-  const start = (page - 1) * limit;
+  const rawLimit = parseInt(query?.limit ?? String(DEFAULT_PAGE_LIMIT), 10)
+    || DEFAULT_PAGE_LIMIT;
+  const limit = Math.max(1, Math.min(rawLimit, MAX_PAGE_LIMIT));
+  const search = hasText(query?.search) ? String(query.search).trim() : undefined;
 
-  const out = {
-    items: dtos.slice(start, start + limit),
-    total: dtos.length,
+  const row = await dataAccess.BrandSemrushProject.findBySlice(
+    brandId,
+    geoTargetId,
+    languageCode,
+  );
+  if (!row) {
+    return {
+      items: [], total: 0, page, limit,
+    };
+  }
+
+  const resp = await transport.listPromptsByTags(
+    semrushWorkspaceId,
+    row.getSemrushProjectId(),
+    {
+      tag_ids: [],
+      page,
+      limit,
+      search,
+    },
+  );
+  const items = Array.isArray(resp?.items) ? resp.items : [];
+  const total = Number.isFinite(resp?.total) ? resp.total : items.length;
+  return {
+    items: items
+      .map((item) => buildPromptDto(geoTargetId, languageCode, item))
+      .filter(Boolean),
+    total,
     page,
     limit,
   };
-  if (errors.length > 0) {
-    out.errors = errors;
-  }
-  return out;
 }
 
-async function publishAffected(transport, workspaceId, projectIds, log) {
+async function publishAffected(transport, semrushWorkspaceId, projectIds, log) {
   const unique = Array.from(new Set(projectIds.filter(Boolean)));
   const errors = [];
   await Promise.all(unique.map(async (pid) => {
     try {
-      await transport.publishProject(workspaceId, pid);
+      await transport.publishProject(semrushWorkspaceId, pid);
     } catch (e) {
       log?.warn?.('publishProject failed', { projectId: pid, error: e.message });
-      errors.push({ semrushProjectId: pid, message: e.message });
+      errors.push({ projectId: pid, message: e.message });
     }
   }));
   return errors;
@@ -200,56 +124,51 @@ async function publishAffected(transport, workspaceId, projectIds, log) {
 
 function normalizePromptInput(input) {
   const text = String(input?.text || '').trim();
-  const language = String(input?.language || '').trim().toLowerCase();
-  const semrushLocationId = Number(input?.semrushLocationId);
+  const languageCode = String(input?.languageCode || '').trim().toLowerCase();
+  const geoTargetId = Number(input?.geoTargetId);
   const tags = Array.isArray(input?.tags)
     ? input.tags.map((t) => String(t || '').trim()).filter(Boolean)
     : [];
-  if (!text || !language || !Number.isInteger(semrushLocationId) || semrushLocationId <= 0) {
+  if (!text || !languageCode || !Number.isInteger(geoTargetId) || geoTargetId <= 0) {
     return null;
   }
   return {
-    text, language, semrushLocationId, tags,
+    text, languageCode, geoTargetId, tags,
   };
 }
 
-/**
- * Runs an async mapper over `items` with a concurrency cap. Preserves input
- * order in the output array. Simpler than pulling in a dep just for this.
- */
 async function mapLimit(items, limit, mapper) {
   const out = new Array(items.length);
   let i = 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
-    while (true) {
-      const idx = i;
-      i += 1;
-      if (idx >= items.length) {
-        return;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (true) {
+        const idx = i;
+        i += 1;
+        if (idx >= items.length) {
+          return;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        out[idx] = await mapper(items[idx], idx);
       }
-      // eslint-disable-next-line no-await-in-loop
-      out[idx] = await mapper(items[idx], idx);
-    }
-  });
+    },
+  );
   await Promise.all(workers);
   return out;
 }
 
 /**
  * POST /serenity/prompts — bulk create.
- * Each input is grouped by (semrushLocationId, language); the matching
- * BrandSemrushProject row resolves the upstream project; publish runs once
- * per affected project at the end.
- *
- * Inputs are fanned out with a small concurrency cap (BULK_CREATE_CONCURRENCY)
- * to bound the simultaneous upstream load — `prompts.maxItems` is 500 in
- * the spec, and Semrush rate-limits aggressively.
+ * Each input must carry `(geoTargetId, languageCode, text, tags?)`. Inputs
+ * are grouped by slice; the matching BrandSemrushProject row resolves the
+ * upstream project; publish runs once per affected project at the end.
  */
 export async function handleCreatePrompts(
   transport,
   dataAccess,
   brandId,
-  workspaceId,
+  semrushWorkspaceId,
   body,
   log,
 ) {
@@ -261,7 +180,7 @@ export async function handleCreatePrompts(
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
   const projectsBySlice = new Map();
   for (const p of projects || []) {
-    projectsBySlice.set(`${p.getSemrushLocationId()}:${p.getLanguage()}`, p);
+    projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
   }
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
@@ -270,40 +189,33 @@ export async function handleCreatePrompts(
       return {
         skipped: {
           text: String(raw?.text || ''),
-          reason: 'text, language, and semrushLocationId are required',
+          reason: 'text, languageCode, and geoTargetId are required',
         },
       };
     }
-    const project = projectsBySlice.get(`${input.semrushLocationId}:${input.language}`);
+    const project = projectsBySlice.get(`${input.geoTargetId}:${input.languageCode}`);
     if (!project) {
       return {
         skipped: {
           text: input.text,
-          reason: `No BrandSemrushProject for slice (${input.semrushLocationId}, ${input.language})`,
+          reason: `No market for slice (${input.geoTargetId}, ${input.languageCode})`,
         },
       };
     }
     const projectId = project.getSemrushProjectId();
     try {
       const resp = await transport.createTaggedPrompts(
-        workspaceId,
+        semrushWorkspaceId,
         projectId,
         { [input.text]: input.tags },
       );
-      const semrushId = Array.isArray(resp?.ids) && resp.ids.length > 0
+      const semrushPromptId = Array.isArray(resp?.ids) && resp.ids.length > 0
         ? String(resp.ids[0]) : '';
       return {
         created: {
-          id: encodeLogicalId({
-            brandId,
-            semrushLocationId: input.semrushLocationId,
-            language: input.language,
-            text: input.text,
-          }),
-          semrushId,
-          semrushProjectId: projectId,
-          semrushLocationId: input.semrushLocationId,
-          language: input.language,
+          semrushPromptId,
+          geoTargetId: input.geoTargetId,
+          languageCode: input.languageCode,
           text: input.text,
           tags: input.tags,
         },
@@ -313,7 +225,8 @@ export async function handleCreatePrompts(
       return {
         failed: {
           text: input.text,
-          semrushProjectId: projectId,
+          geoTargetId: input.geoTargetId,
+          languageCode: input.languageCode,
           status: e.status || 500,
           message: e.message,
         },
@@ -336,11 +249,15 @@ export async function handleCreatePrompts(
     }
   }
 
-  const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);
+  const publishErrors = await publishAffected(
+    transport,
+    semrushWorkspaceId,
+    affectedProjectIds,
+    log,
+  );
   for (const e of publishErrors) {
     failed.push({
       text: '',
-      semrushProjectId: e.semrushProjectId,
       status: 502,
       message: `publish: ${e.message}`,
     });
@@ -349,83 +266,141 @@ export async function handleCreatePrompts(
   return { created, skipped, failed };
 }
 
-async function findSemrushPromptByText(transport, workspaceId, semrushProjectId, text) {
-  // PATCH carries only text/tags; we look up the current semrush prompt by
+async function findUpstreamPromptByText(transport, semrushWorkspaceId, semrushProjectId, text) {
+  // PATCH carries only text/tags; we look up the current upstream prompt by
   // listing the project (paginated) and matching on prompt name. Cost is
-  // bounded by MAX_PROMPTS_PER_PROJECT and only paid on PATCH (low volume).
-  // Returns the full item so the caller can preserve tags when PATCH omits
-  // them — see R30 (tags-omit shouldn't wipe tags).
-  const collected = await fetchProjectPrompts(
-    transport,
-    workspaceId,
-    { getSemrushProjectId: () => semrushProjectId },
-    text,
-  );
-  return collected.find((it) => (it?.name || '') === text) || null;
+  // bounded; only paid on PATCH (low volume). Returns the full item so the
+  // caller can preserve tags when PATCH omits them.
+  const FETCH_PAGE_SIZE = 200;
+  const MAX_PAGES = 50;
+  let page = 1;
+  while (page <= MAX_PAGES) {
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await transport.listPromptsByTags(semrushWorkspaceId, semrushProjectId, {
+      tag_ids: [],
+      page,
+      limit: FETCH_PAGE_SIZE,
+      search: text,
+    });
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    const found = items.find((it) => (it?.name || '') === text);
+    if (found) {
+      return found;
+    }
+    if (items.length < FETCH_PAGE_SIZE) {
+      break;
+    }
+    page += 1;
+  }
+  return null;
 }
 
 /**
- * PATCH /serenity/prompts/:promptId — partial update. Decodes the logical id
- * to find the owning slice, looks up the current Semrush prompt by text,
- * then DELETE-old + POST-new + publish.
+ * PATCH /serenity/prompts/:semrushPromptId — partial update.
  *
- * When `body.tags` is omitted the old prompt's tags are preserved (the
- * PATCH semantics — omitted field means "don't change", not "clear").
+ * Body carries `{geoTargetId, languageCode, text?, tags?}`. The slice
+ * resolves the owning BrandSemrushProject; upstream DELETE-old + POST-new +
+ * publish. The :semrushPromptId in the URL identifies the prompt being
+ * replaced and is logged for traceability — the upstream prompt id
+ * inevitably changes on re-create.
+ *
+ * Tags-omit preserves the old tags (PATCH semantics: "don't change").
+ * Explicit empty array clears them.
  */
 export async function handleUpdatePrompt(
   transport,
   dataAccess,
   brandId,
-  workspaceId,
-  logicalId,
+  semrushWorkspaceId,
+  semrushPromptId,
   body,
   log,
 ) {
-  const decoded = decodeLogicalId(logicalId);
-  if (!decoded || decoded.brandId !== String(brandId)) {
+  if (!hasText(semrushPromptId)) {
     return {
       status: 400,
-      body: {
-        error: 'invalidLogicalId',
-        message: 'Logical id does not match brand',
-      },
+      body: { error: 'missingPromptId', message: 'Path :semrushPromptId is required' },
     };
   }
   if (!body || (body.text === undefined && body.tags === undefined)) {
     return {
       status: 400,
+      body: { error: 'missingFields', message: 'PATCH body must include text or tags' },
+    };
+  }
+  const geoTargetId = Number(body.geoTargetId);
+  const languageCode = hasText(body.languageCode)
+    ? String(body.languageCode).toLowerCase() : null;
+  if (!Number.isInteger(geoTargetId) || geoTargetId <= 0 || languageCode === null) {
+    return {
+      status: 400,
       body: {
-        error: 'missingFields',
-        message: 'PATCH body must include text or tags',
+        error: 'invalidRequest',
+        message: 'PATCH body must include geoTargetId (integer) and languageCode (BCP-47 primary subtag)',
       },
     };
   }
+
   const project = await dataAccess.BrandSemrushProject.findBySlice(
-    decoded.brandId,
-    decoded.semrushLocationId,
-    decoded.language,
+    brandId,
+    geoTargetId,
+    languageCode,
   );
   if (!project) {
     return {
       status: 404,
       body: {
-        error: 'projectNotFound',
-        message: 'No BrandSemrushProject for this prompt\'s slice',
+        error: 'marketNotFound',
+        message: 'No market for this brand and (geoTargetId, languageCode) slice',
       },
     };
   }
-  const semrushProjectId = project.getSemrushProjectId();
-  const oldPrompt = await findSemrushPromptByText(
-    transport,
-    workspaceId,
-    semrushProjectId,
-    decoded.text,
-  );
-  const oldSemrushId = oldPrompt ? String(oldPrompt.id) : null;
-  const oldTags = oldPrompt ? tagNamesOf(oldPrompt) : [];
-
-  const nextText = String(body.text ?? decoded.text);
-  // Omitted tags → preserve current tags. Explicit empty array → clear them.
+  const projectId = project.getSemrushProjectId();
+  // Look up the current upstream prompt by the URL :semrushPromptId by
+  // listing pages and matching id. We need the row to read its current text
+  // (for the next-text fallback) and tags (for the preserve-on-omit case).
+  let oldItem = null;
+  let pageIdx = 1;
+  const LIMIT = 200;
+  while (pageIdx <= 50) {
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
+      tag_ids: [],
+      page: pageIdx,
+      limit: LIMIT,
+    });
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    oldItem = items.find((it) => String(it?.id ?? '') === String(semrushPromptId)) || null;
+    if (oldItem || items.length < LIMIT) {
+      break;
+    }
+    pageIdx += 1;
+  }
+  if (!oldItem) {
+    // Fall back: maybe the caller passed text+slice expecting upsert. Try
+    // text-based lookup using body.text (only safe if text was provided).
+    if (hasText(body.text)) {
+      oldItem = await findUpstreamPromptByText(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        String(body.text),
+      );
+    }
+    if (!oldItem) {
+      return {
+        status: 404,
+        body: {
+          error: 'promptNotFound',
+          message: 'No upstream prompt matches the supplied semrushPromptId in this slice',
+        },
+      };
+    }
+  }
+  const oldId = String(oldItem.id);
+  const oldText = String(oldItem?.name || '');
+  const oldTags = tagNamesOf(oldItem);
+  const nextText = body.text === undefined ? oldText : String(body.text);
   let nextTags;
   if (body.tags === undefined) {
     nextTags = oldTags;
@@ -435,37 +410,28 @@ export async function handleUpdatePrompt(
       : [];
   }
 
-  if (oldSemrushId) {
-    try {
-      await transport.deletePromptsByIds(workspaceId, semrushProjectId, [oldSemrushId]);
-    } catch (e) {
-      log?.warn?.('deletePromptsByIds (PATCH) failed', { error: e.message });
-    }
+  try {
+    await transport.deletePromptsByIds(semrushWorkspaceId, projectId, [oldId]);
+  } catch (e) {
+    log?.warn?.('deletePromptsByIds (PATCH) failed', { error: e.message });
   }
 
   const resp = await transport.createTaggedPrompts(
-    workspaceId,
-    semrushProjectId,
+    semrushWorkspaceId,
+    projectId,
     { [nextText]: nextTags },
   );
-  const newSemrushId = Array.isArray(resp?.ids) && resp.ids.length > 0
+  const newSemrushPromptId = Array.isArray(resp?.ids) && resp.ids.length > 0
     ? String(resp.ids[0]) : '';
 
-  await publishAffected(transport, workspaceId, [semrushProjectId], log);
+  await publishAffected(transport, semrushWorkspaceId, [projectId], log);
 
   return {
     status: 200,
     body: {
-      id: encodeLogicalId({
-        brandId: decoded.brandId,
-        semrushLocationId: decoded.semrushLocationId,
-        language: decoded.language,
-        text: nextText,
-      }),
-      semrushId: newSemrushId,
-      semrushProjectId,
-      semrushLocationId: decoded.semrushLocationId,
-      language: decoded.language,
+      semrushPromptId: newSemrushPromptId,
+      geoTargetId,
+      languageCode,
       text: nextText,
       tags: nextTags,
     },
@@ -474,78 +440,85 @@ export async function handleUpdatePrompt(
 
 /**
  * POST /serenity/prompts/bulk-delete — body is
- * `{ semrushIds: [{semrushProjectId, semrushPromptId}] }`.
- * Validates each projectId is in the brand's mapped projects, deletes per
- * project in one upstream call each, publishes affected projects.
- *
- * Empty payload throws 400 — distinguish from a successful no-op.
- * Upstream 404s on individual ids are treated as idempotent success: the
- * caller's intent (the id is gone) is satisfied either way.
+ * `{ prompts: [{semrushPromptId, geoTargetId, languageCode}, ...] }`.
+ * Resolves each row's owning slice, batches deletes per upstream project,
+ * publishes affected projects. Upstream 404 == idempotent success.
  */
 export async function handleBulkDeletePrompts(
   transport,
   dataAccess,
   brandId,
-  workspaceId,
+  semrushWorkspaceId,
   body,
   log,
 ) {
-  const targets = Array.isArray(body?.semrushIds) ? body.semrushIds : [];
+  const targets = Array.isArray(body?.prompts) ? body.prompts : [];
   if (targets.length === 0) {
-    throw new ErrorWithStatusCode('Body must include a non-empty semrushIds array', 400);
+    throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
   }
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
-  const projectIds = new Set((projects || []).map((p) => p.getSemrushProjectId()));
+  const projectBySlice = new Map();
+  for (const p of projects || []) {
+    projectBySlice.set(
+      `${p.getGeoTargetId()}:${p.getLanguageCode()}`,
+      p.getSemrushProjectId(),
+    );
+  }
 
   const byProject = new Map();
   const failed = [];
   targets.forEach((t) => {
-    const pid = String(t?.semrushProjectId || '');
     const sid = String(t?.semrushPromptId || '');
-    if (!pid || !sid) {
+    const geoTargetId = Number(t?.geoTargetId);
+    const languageCode = hasText(t?.languageCode)
+      ? String(t.languageCode).toLowerCase() : '';
+    if (!sid || !Number.isInteger(geoTargetId) || geoTargetId <= 0 || !languageCode) {
       failed.push({
-        semrushProjectId: pid,
         semrushPromptId: sid,
-        message: 'Missing semrushProjectId or semrushPromptId',
+        geoTargetId: Number.isFinite(geoTargetId) ? geoTargetId : null,
+        languageCode: languageCode || null,
+        message: 'Missing semrushPromptId, geoTargetId, or languageCode',
       });
-    } else if (!projectIds.has(pid)) {
-      failed.push({
-        semrushProjectId: pid,
-        semrushPromptId: sid,
-        message: 'Project not mapped to brand',
-      });
-    } else {
-      if (!byProject.has(pid)) {
-        byProject.set(pid, []);
-      }
-      byProject.get(pid).push(sid);
+      return;
     }
+    const pid = projectBySlice.get(`${geoTargetId}:${languageCode}`);
+    if (!pid) {
+      failed.push({
+        semrushPromptId: sid,
+        geoTargetId,
+        languageCode,
+        message: `No market for slice (${geoTargetId}, ${languageCode})`,
+      });
+      return;
+    }
+    if (!byProject.has(pid)) {
+      byProject.set(pid, { ids: [], targets: [] });
+    }
+    const bucket = byProject.get(pid);
+    bucket.ids.push(sid);
+    bucket.targets.push({ semrushPromptId: sid, geoTargetId, languageCode });
   });
 
-  // Only publish projects that had at least one successful delete, so a
-  // failed batch doesn't trigger unnecessary upstream publish calls.
   let deleted = 0;
   const projectsToPublish = new Set();
-  await Promise.all(Array.from(byProject.entries()).map(async ([pid, ids]) => {
+  await Promise.all(Array.from(byProject.entries()).map(async ([pid, bucket]) => {
     try {
-      await transport.deletePromptsByIds(workspaceId, pid, ids);
-      deleted += ids.length;
+      await transport.deletePromptsByIds(semrushWorkspaceId, pid, bucket.ids);
+      deleted += bucket.ids.length;
       projectsToPublish.add(pid);
     } catch (e) {
-      // Upstream 404 == idempotent success: the ids are already gone. Count
-      // them as deleted so retries with the same payload converge.
       if (e?.status === 404) {
-        deleted += ids.length;
+        deleted += bucket.ids.length;
         projectsToPublish.add(pid);
-        const idemptCtx = { semrushProjectId: pid, ids };
-        log?.info?.('bulk-delete: upstream already-deleted (404 treated as success)', idemptCtx);
+        log?.info?.('bulk-delete: upstream already-deleted (404 treated as success)', { ids: bucket.ids });
         return;
       }
-      ids.forEach((sid) => {
+      bucket.targets.forEach((t) => {
         failed.push({
-          semrushProjectId: pid,
-          semrushPromptId: sid,
+          semrushPromptId: t.semrushPromptId,
+          geoTargetId: t.geoTargetId,
+          languageCode: t.languageCode,
           status: e.status || 500,
           message: e.message,
         });
@@ -555,13 +528,12 @@ export async function handleBulkDeletePrompts(
 
   const publishErrors = await publishAffected(
     transport,
-    workspaceId,
+    semrushWorkspaceId,
     Array.from(projectsToPublish),
     log,
   );
   publishErrors.forEach((e) => {
     failed.push({
-      semrushProjectId: e.semrushProjectId,
       semrushPromptId: '',
       status: 502,
       message: `publish: ${e.message}`,
