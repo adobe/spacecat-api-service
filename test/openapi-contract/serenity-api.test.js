@@ -203,9 +203,10 @@ function makeAjv() {
 }
 
 describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
-  // First esmock load of the controller takes ~2s; bump the mocha default
-  // so a cold-start first run doesn't flake the suite.
-  this.timeout(10000);
+  // First esmock load of the controller takes ~2s in isolation, more under
+  // mocha --parallel where the worker process is contended. Bump the per-test
+  // timeout so the cold-start first run doesn't flake the suite.
+  this.timeout(30000);
 
   const spec = loadBundledSpec();
   const ops = operationsForTag(spec, 'serenity');

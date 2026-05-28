@@ -324,6 +324,24 @@ describe('SerenityController', () => {
       expect(args[5]).to.equal(null);
     });
 
+    // '0' is a distinct code path from '2840abc' (regex-reject at the
+    // controller) and '' (regex-reject at the controller): the strict-digit
+    // regex /^\d+$/ accepts '0', so the controller forwards Number('0') === 0
+    // to the handler. The handler's normalizeGeoTargetId(0) returns null
+    // because the OpenAPI contract declares `minimum: 1`, surfacing as a 400.
+    it('deleteMarket forwards 0 through to the handler (handler rejects via positive-integer guard)', async () => {
+      handlers.handleDeleteMarket.rejects(
+        new ErrorWithStatusCode('geoTargetId must be a positive integer', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({
+        params: { geoTargetId: '0', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      const { args } = handlers.handleDeleteMarket.firstCall;
+      expect(args[4]).to.equal(0);
+    });
+
     it('listMarkets returns the handler result wrapped in ok()', async () => {
       handlers.handleListMarkets.resolves({ items: [{ brandId: BRAND, geoTargetId: 2840, languageCode: 'en' }] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});

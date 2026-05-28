@@ -13,7 +13,7 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { isUpstreamGone } from '../errors.js';
+import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 
@@ -110,7 +110,7 @@ export async function handleListPrompts(
       'No market for this brand and (geoTargetId, languageCode) slice',
       404,
     );
-    err.code = 'marketNotFound';
+    err.code = ERROR_CODES.MARKET_NOT_FOUND;
     throw err;
   }
 

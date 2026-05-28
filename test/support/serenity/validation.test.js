@@ -68,13 +68,18 @@ describe('serenity/validation — normalizeLanguageCode', () => {
     expect(normalizeLanguageCode('en-USA-XYZ')).to.equal(null); // too many subtags
   });
 
-  it('LANGUAGE_TAG_REGEX itself accepts and rejects exactly what normalize accepts/rejects', () => {
-    // Direct regex coverage so a regression that mutates the regex without
-    // updating normalize (or vice versa) surfaces immediately.
+  it('LANGUAGE_TAG_REGEX is case-sensitive (normalizer asymmetry contract)', () => {
+    // The only behavior the raw-regex block locks that the normalizer block
+    // above does NOT is the case-sensitivity asymmetry: the regex itself
+    // rejects 'EN', while normalizeLanguageCode accepts 'EN' by lowercasing
+    // it first. Locking the regex's case-sensitivity here prevents a future
+    // "fix" that adds an `/i` flag from silently breaking the normalizer's
+    // contract (the normalizer would then accept uppercase via both paths,
+    // hiding regressions in the pre-lowercase step).
     expect(LANGUAGE_TAG_REGEX.test('en')).to.equal(true);
     expect(LANGUAGE_TAG_REGEX.test('de-ch')).to.equal(true);
-    expect(LANGUAGE_TAG_REGEX.test('EN')).to.equal(false); // case-sensitive on the raw regex
-    expect(LANGUAGE_TAG_REGEX.test('eng-x')).to.equal(false);
+    expect(LANGUAGE_TAG_REGEX.test('EN')).to.equal(false);
+    expect(LANGUAGE_TAG_REGEX.test('De-CH')).to.equal(false);
   });
 });
 

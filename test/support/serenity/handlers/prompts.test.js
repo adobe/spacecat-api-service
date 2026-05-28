@@ -1033,7 +1033,10 @@ describe('handlers/prompts.js — handleBulkDeletePrompts', () => {
       }, fakeLog());
 
       expect(result.deleted).to.equal(1);
-      expect(result.failed.length).to.be.at.least(3);
+      // Tight bound (matches the contract: each invalid input → exactly one
+      // failed entry). A regression that double-pushed a target into `failed`
+      // would still satisfy `at.least(3)` — `lengthOf(3)` catches it.
+      expect(result.failed).to.have.lengthOf(3);
       expect(transport.deletePromptsByIds).to.have.callCount(1);
     });
   });

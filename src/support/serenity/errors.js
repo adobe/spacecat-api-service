@@ -32,3 +32,22 @@ import { SerenityTransportError } from './rest-transport.js';
 export function isUpstreamGone(e) {
   return e instanceof SerenityTransportError && e.status === 404;
 }
+
+/**
+ * Frozen catalog of error-token strings handlers attach to
+ * `ErrorWithStatusCode.code` so the controller's `mapError` emits them
+ * verbatim in the response envelope (instead of the generic
+ * `errorTokenForStatus` default).
+ *
+ * Why a frozen map and not just a string literal at the throw site: API
+ * error tokens are part of the public contract that clients pattern-match
+ * on. The single existing token (`marketNotFound`) was chosen as
+ * lowerCamel; without a central catalog, the second author at a different
+ * throw site picks `'market_not_found'` or `'MarketNotFound'` and the
+ * vocabulary diverges silently. Catalog this here so adding a token is a
+ * three-character edit at one place and `grep ERROR_CODES src/` enumerates
+ * every code currently emitted by the serenity surface.
+ */
+export const ERROR_CODES = Object.freeze({
+  MARKET_NOT_FOUND: 'marketNotFound',
+});

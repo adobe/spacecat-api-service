@@ -68,6 +68,8 @@ GET    /v2/orgs/:orgId/brands/:brandId/serenity/models?geoTargetId=&languageCode
 
 Missing required filters → 400 (`invalidRequest`). The endpoint always resolves to exactly one `BrandSemrushProject` → one upstream Semrush project; no fan-out, no merged-and-sliced pagination. Pagination on `/prompts` is real upstream pagination — `total` is the upstream-reported count, `page`/`limit` map 1:1 to the upstream call.
 
+**Missing slice** (filters valid, no `BrandSemrushProject` row for the `(brandId, geoTargetId, languageCode)` tuple) → **404 `marketNotFound`** on the single-slice handlers (`GET /prompts`, `PATCH /prompts/:semrushPromptId`). Distinguishes "this slice does not exist" from "this slice exists but is empty" — a renamed-then-stale market between page load and the call returns 404 instead of an empty 200, so the UI can route accordingly. Bulk handlers (`POST /prompts`, `DELETE /prompts`) keep per-item `skipped`/`failed` entries because each item carries its own slice and the body can mix slices that exist with slices that don't.
+
 ### 3.1 Prompt DTO
 
 ```jsonc
