@@ -424,6 +424,16 @@ describe('SerenityController', () => {
       expect(handlers.handleGetMarket.firstCall.args[3]).to.equal(null);
     });
 
+    it('getMarket returns the authorize() error (403) and does not dispatch when the caller lacks org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleGetMarket).not.to.have.been.called;
+    });
+
     it('upstream SerenityTransportError maps to 502 envelope without leaking provider detail', async () => {
       handlers.handleListMarkets.rejects(new MockTransportError(503, 'upstream down', { secret: 'leak' }));
       const controller = SerenityController({ env: {} }, fakeLog(), {});
