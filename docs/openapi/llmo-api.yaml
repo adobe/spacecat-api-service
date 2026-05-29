@@ -1318,6 +1318,15 @@ llmo-onboard:
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
+      '404':
+        description: |
+          The org is in the Semrush cohort (`SERENITY_SITE_ALLOWLIST`) but has no
+          Semrush workspace bound. An operator must run
+          `PATCH /organizations/:spaceCatId` with `{ semrushWorkspaceId: ... }`
+          before retrying onboarding. No Adobe-side state is created in this case.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
         $ref: './responses.yaml#/500'
     security: []

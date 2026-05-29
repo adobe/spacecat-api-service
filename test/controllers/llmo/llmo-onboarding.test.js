@@ -3428,6 +3428,8 @@ describe('LLMO Onboarding Functions', () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org-serenity-cohort'),
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+        // M5 (LLMO-5203): workspace is bound, so onboarding proceeds into M6–M8.
+        getSemrushWorkspaceId: sinon.stub().returns('semrush-ws-123'),
       };
       const mockSite = {
         getId: sinon.stub().returns('site123'),
@@ -3503,6 +3505,67 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.info).to.have.been.calledWith(
         sinon.match(/Serenity onboarding enabled for org org-serenity-cohort/),
       );
+    });
+
+    it('should fail fast with a 404 when an allowlisted org has no Semrush workspace bound (LLMO-5203)', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org-serenity-cohort'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+        // M5 (LLMO-5203): no workspace bound — onboarding must fail fast.
+        getSemrushWorkspaceId: sinon.stub().returns(null),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves({ getId: sinon.stub().returns('site123') });
+
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, [SERENITY_SITE_ALLOWLIST]: 'org-serenity-cohort' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      let thrown;
+      try {
+        await performLlmoOnboardingWithMocks({ domain: 'example.com', brandName: 'Test Brand', imsOrgId: 'ABC123@AdobeOrg' }, context);
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown, 'expected performLlmoOnboarding to throw').to.exist;
+      expect(thrown.status).to.equal(404);
+      expect(thrown.preflight).to.be.true;
+      expect(thrown.message).to.match(/Semrush workspace not bound to org org-serenity-cohort/);
+      // Fail-fast: nothing downstream of the org lookup should have run.
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
 
     it('should skip serenity provisioning when org is not in SERENITY_SITE_ALLOWLIST', async () => {

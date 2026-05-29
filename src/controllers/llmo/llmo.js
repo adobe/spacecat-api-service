@@ -1082,6 +1082,11 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
+      // M5 (LLMO-5203): a missing Semrush workspace fails fast with a 404 and an
+      // operator-actionable message; everything else stays a 400.
+      if (error.status === 404) {
+        return notFound(error.message);
+      }
       return badRequest(cleanupHeaderValue(error.message));
     }
   };
