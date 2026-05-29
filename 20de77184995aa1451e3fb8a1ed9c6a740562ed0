@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "full",
+  "commit_sha": "20de77184995aa1451e3fb8a1ed9c6a740562ed0",
+  "author": "astroe@Andreeas-MacBook-Pro-6.local",
+  "timestamp": "2026-05-29T16:20:13+03:00",
+  "detection": {
+    "ai_assisted": true,
+    "method": "editor_hook",
+    "tool": "claude",
+    "model": "",
+    "confidence": 1.0
+  },
+  "stats": {
+    "total_additions": 354,
+    "total_deletions": 0,
+    "ai_additions": 354,
+    "ai_deletions": 0,
+    "human_additions": 0,
+    "human_deletions": 0
+  },
+  "files": {
+    "src/controllers/llmo/llmo-onboarding.js": {
+      "ai_additions": 167,
+      "human_additions": 0,
+      "ai_deletions": 0,
+      "human_deletions": 0,
+      "ai_lines": "18-20,41-42,1231-1374,1406-1407,1555,1557,1575-1577,1579-1586,1676-1678",
+      "human_lines": ""
+    },
+    "test/controllers/llmo/llmo-onboarding.test.js": {
+      "ai_additions": 187,
+      "human_additions": 0,
+      "ai_deletions": 0,
+      "human_deletions": 0,
+      "ai_lines": "3650-3836",
+      "human_lines": ""
+    }
+  }
+}
