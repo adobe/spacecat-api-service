@@ -1,3 +1,10 @@
+## [1.526.1](https://github.com/adobe/spacecat-api-service/compare/v1.526.0...v1.526.1) (2026-05-29)
+
+
+### Bug Fixes
+
+* **llmo:** guard createOrFindSite from moving site with active enroll… ([#2491](https://github.com/adobe/spacecat-api-service/issues/2491)) ([9218437](https://github.com/adobe/spacecat-api-service/commit/92184377a2c3b97a0d8549311b049962d91ea72d))
+
 # [1.526.0](https://github.com/adobe/spacecat-api-service/compare/v1.525.0...v1.526.0) (2026-05-29)
 
 
