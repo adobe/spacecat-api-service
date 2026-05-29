@@ -3796,8 +3796,12 @@ describe('LLMO Onboarding Functions', () => {
       expect(createTransportStub).to.not.have.been.called;
       expect(res.succeeded).to.be.empty;
       expect(res.failed).to.deep.equal([
-        { market: 'US', language: 'en', status: 401, error: 'missingImsBearer' },
-        { market: 'DE', language: 'de', status: 401, error: 'missingImsBearer' },
+        {
+          market: 'US', language: 'en', status: 401, error: 'missingImsBearer',
+        },
+        {
+          market: 'DE', language: 'de', status: 401, error: 'missingImsBearer',
+        },
       ]);
     });
 
@@ -3831,8 +3835,12 @@ describe('LLMO Onboarding Functions', () => {
 
       expect(hcp).to.not.have.been.called;
       expect(res.failed).to.deep.equal([
-        { market: 'US', language: 'en', status: 503, error: 'transportUnavailable' },
-        { market: 'DE', language: 'de', status: 503, error: 'transportUnavailable' },
+        {
+          market: 'US', language: 'en', status: 503, error: 'transportUnavailable',
+        },
+        {
+          market: 'DE', language: 'de', status: 503, error: 'transportUnavailable',
+        },
       ]);
     });
   });
