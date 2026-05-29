@@ -695,15 +695,17 @@ describe('handlers/markets.js — handleDeleteMarket', () => {
 describe('handlers/markets.js — handleGetMarket', () => {
   it('400s on invalid geoTargetId (non-positive)', async () => {
     const dataAccess = makeDataAccess([]);
-    await expect(handleGetMarket(dataAccess, BRAND, 0, 'en'))
-      .to.be.rejectedWith(ErrorWithStatusCode);
+    const err = await handleGetMarket(dataAccess, BRAND, 0, 'en').catch((e) => e);
+    expect(err).to.be.instanceOf(ErrorWithStatusCode);
+    expect(err.status).to.equal(400);
     expect(dataAccess.BrandSemrushProject.findBySlice).not.to.have.been.called;
   });
 
   it('400s on syntactically malformed languageCode (`1z`)', async () => {
     const dataAccess = makeDataAccess([]);
-    await expect(handleGetMarket(dataAccess, BRAND, 2840, '1z'))
-      .to.be.rejectedWith(ErrorWithStatusCode);
+    const err = await handleGetMarket(dataAccess, BRAND, 2840, '1z').catch((e) => e);
+    expect(err).to.be.instanceOf(ErrorWithStatusCode);
+    expect(err.status).to.equal(400);
     expect(dataAccess.BrandSemrushProject.findBySlice).not.to.have.been.called;
   });
 

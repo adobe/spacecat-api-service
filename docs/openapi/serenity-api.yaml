@@ -353,11 +353,9 @@ v2-serenity-market-by-slice:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
-      '502':
-        description: Upstream returned a non-2xx response.
-        content:
-          application/json:
-            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      # No 502: this is a pure DB read (findBySlice) with no upstream call —
+      # the only error paths are 400 (validation) and 404 (no row). The
+      # sibling delete: legitimately has a 502 because it calls upstream.
       '500': { $ref: './responses.yaml#/500' }
   delete:
     tags: [serenity]
