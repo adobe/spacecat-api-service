@@ -38,7 +38,7 @@ import {
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
-import { handleCreateProject } from '../../support/serenity/handlers/projects.js';
+import { handleCreateProject, resolveLocation } from '../../support/serenity/handlers/projects.js';
 import { createSerenityTransport } from '../../support/serenity/rest-transport.js';
 
 // LLMO Constants
@@ -1375,6 +1375,80 @@ export async function performSerenityFanOut(context, {
 }
 
 /**
+ * M8 (LLMO-5205): validate cohort readiness by reading back the authoritative
+ * DB state after the M7 fan-out and shaping the final per-tuple outcome.
+ *
+ * Reads `BrandSemrushProject.allByBrandId(brandId)` and asserts one row exists
+ * per requested `(market, language)` tuple — rather than trusting the fan-out's
+ * own responses, which also catches the rare case where the proxy returned 201
+ * but the row insert failed silently (LLMO-5007 §M8). A requested tuple with a
+ * matching row is `succeeded`; one without is `failed`, enriched with the
+ * fan-out's status/error when available (otherwise `projectRowMissing`).
+ *
+ * Successful tuples are never rolled back. The caller maps a non-empty `failed`
+ * to HTTP 207.
+ *
+ * @param {object} context - The request context (log, dataAccess).
+ * @param {object} args
+ * @param {string} args.brandId - The brand UUID.
+ * @param {object} args.fanOut - The M7 result `{ requested, succeeded, failed }`.
+ * @returns {Promise<{requested: object[], succeeded: object[], failed: object[]}>}
+ */
+export async function reconcileSerenityProjects(context, { brandId, fanOut }) {
+  const { log, dataAccess } = context;
+  const { requested } = fanOut;
+
+  // Nothing requested, or no brand to key the read-back on — the fan-out result
+  // is already authoritative (it short-circuited for these cases).
+  if (requested.length === 0 || !hasText(brandId)) {
+    return fanOut;
+  }
+
+  let rows;
+  try {
+    rows = await dataAccess.BrandSemrushProject.allByBrandId(brandId) || [];
+  } catch (e) {
+    // If the read-back itself fails we cannot improve on the fan-out result;
+    // surface it as-is rather than masking a partial success as total failure.
+    log.error(`Serenity M8: read-back failed for brand ${brandId}: ${e.message}`);
+    return fanOut;
+  }
+
+  const rowBySlice = new Map();
+  rows.forEach((row) => {
+    rowBySlice.set(`${row.getSemrushLocationId()}::${row.getLanguage()}`, row);
+  });
+  const failureByTuple = new Map();
+  fanOut.failed.forEach((f) => failureByTuple.set(`${f.market}::${f.language}`, f));
+
+  const succeeded = [];
+  const failed = [];
+  requested.forEach(({ market, language }) => {
+    const location = resolveLocation(market);
+    const lang = String(language).toLowerCase();
+    const row = location ? rowBySlice.get(`${location.locationId}::${lang}`) : undefined;
+    if (row) {
+      succeeded.push({
+        market,
+        language,
+        semrushProjectId: row.getSemrushProjectId(),
+        semrushLocationId: row.getSemrushLocationId(),
+      });
+    } else {
+      const prior = failureByTuple.get(`${market}::${language}`);
+      failed.push({
+        market,
+        language,
+        status: prior?.status ?? 500,
+        error: prior?.error ?? 'projectRowMissing',
+      });
+    }
+  });
+
+  return { requested, succeeded, failed };
+}
+
+/**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
  * @param {string} [params.domain] - The domain name (alternative to baseURL)
@@ -1578,14 +1652,20 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         // workspace presence above. T3b fans out one project per market tuple;
         // T3c (LLMO-5205) will shape the 200/207 response from the result.
         log.info(`Serenity onboarding enabled for org ${organization.getId()} — ${markets?.length ?? 0} market(s) to provision (LLMO-5007)`);
-        serenityProvisioning = await performSerenityFanOut(context, {
+        // M7: fan out one Semrush project per (market, language) tuple.
+        const fanOut = await performSerenityFanOut(context, {
           brandId: upsertedBrand?.id,
           workspaceId: organization.getSemrushWorkspaceId(),
           brandName,
           baseURL,
           markets,
         });
-        log.info(`Serenity fan-out for org ${organization.getId()}: ${serenityProvisioning.succeeded.length} of ${serenityProvisioning.requested.length} project(s) provisioned, ${serenityProvisioning.failed.length} failed (LLMO-5007)`);
+        // M8: read back the authoritative DB state and shape the final outcome.
+        serenityProvisioning = await reconcileSerenityProjects(context, {
+          brandId: upsertedBrand?.id,
+          fanOut,
+        });
+        log.info(`Serenity provisioning for org ${organization.getId()}: ${serenityProvisioning.succeeded.length} of ${serenityProvisioning.requested.length} project(s) live, ${serenityProvisioning.failed.length} failed (LLMO-5007)`);
       }
 
       // Trigger Brandalf immediately after the v2 config exists so downstream
