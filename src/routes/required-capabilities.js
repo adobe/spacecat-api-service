@@ -269,6 +269,7 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:read',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:read',

@@ -327,6 +327,38 @@ v2-serenity-market-by-slice:
       required: true
       description: BCP-47 primary subtag (lowercase) for the slice.
       schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+  get:
+    tags: [serenity]
+    summary: Resolve a single market slice (incl. upstream project id)
+    description: |
+      Returns the full detail for one (brandId, geoTargetId, languageCode)
+      slice, including the resolved `semrushProjectId`. This is the single,
+      explicit place the upstream project id crosses the API boundary — the
+      list endpoint stays provider-free (LLMO-5190). The id is exposed only so
+      the embedded Semrush AIO renderer MFE can mount the dashboard for the
+      selected market. A slice with no row returns 404 `marketNotFound` (unlike
+      the list, addressing a specific missing resource is not an empty success).
+    operationId: getSerenityMarket
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Market resolved successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityMarketDetail' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, workspace, or market slice not found.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
   delete:
     tags: [serenity]
     summary: Remove a market from a brand

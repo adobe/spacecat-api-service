@@ -10114,6 +10114,24 @@ SerenityMarketListResponse:
       type: array
       items: { $ref: '#/SerenityMarket' }
 
+SerenityMarketDetail:
+  description: |
+    A single market slice, including the resolved upstream `semrushProjectId`.
+    This is the ONE place on the /serenity/* surface that deliberately exposes
+    the upstream project id — the list representation (SerenityMarket) stays
+    provider-free (LLMO-5190). It is surfaced here only so the embedded Semrush
+    AIO renderer MFE can mount the dashboard for the selected market. Consume
+    `semrushProjectId` ONLY to mount that renderer; the stable handle for a
+    market remains its (geoTargetId, languageCode) slice.
+  allOf:
+    - $ref: '#/SerenityMarket'
+    - type: object
+      required: [semrushProjectId]
+      properties:
+        semrushProjectId:
+          type: string
+          description: Upstream Semrush AIO project id for this slice (provider-specific by design).
+
 SerenityCreateMarketRequest:
   type: object
   required: [market, languageCode, brandDomain, brandNames]
