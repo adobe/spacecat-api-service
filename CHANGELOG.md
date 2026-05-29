@@ -1,3 +1,10 @@
+## [1.527.1](https://github.com/adobe/spacecat-api-service/compare/v1.527.0...v1.527.1) (2026-05-29)
+
+
+### Bug Fixes
+
+* **auth:** extend RouteScopedLegacyApiKeyHandler to match sub-paths of scoped routes ([#2518](https://github.com/adobe/spacecat-api-service/issues/2518)) ([cda6274](https://github.com/adobe/spacecat-api-service/commit/cda6274261b3e10a832a568e9a109c877d81b40a))
+
 # [1.527.0](https://github.com/adobe/spacecat-api-service/compare/v1.526.1...v1.527.0) (2026-05-29)
 
 
