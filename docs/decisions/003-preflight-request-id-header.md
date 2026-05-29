@@ -1,4 +1,4 @@
-# Preflight Request-ID — SpaceCat Design (`spacecat-api-service`)
+# ADR-003: Preflight Request-ID Header
 
 ## Context
 

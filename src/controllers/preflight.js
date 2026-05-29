@@ -16,21 +16,20 @@ import {
 import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
-import { AsyncJob, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { AsyncJob } from '@adobe/spacecat-shared-data-access';
 import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
 import { TierClient } from '@adobe/spacecat-shared-tier-client';
 import { ErrorWithStatusCode } from '../support/utils.js';
-import { STATUS_BAD_REQUEST } from '../utils/constants.js';
+import { getHeader } from '../support/http-headers.js';
+import {
+  MISSING_X_PROMISE_TOKEN_MESSAGE,
+  PROMISE_BASED_AUTHORING_TYPES,
+  STATUS_BAD_REQUEST,
+  X_PROMISE_TOKEN_HEADER,
+} from '../utils/constants.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
-
-const PROMISE_BASED_TYPES = [
-  SiteModel.AUTHORING_TYPES.CS, SiteModel.AUTHORING_TYPES.CS_CW, SiteModel.AUTHORING_TYPES.AMS,
-];
-
-/** Thrown when job is created on authenticated CMS pages without `x-promise-token` header. */
-const MISSING_X_PROMISE_TOKEN_MESSAGE = 'Invalid request: missing required header: x-promise-token';
 
 /**
  * Creates a preflight controller instance
@@ -148,36 +147,25 @@ function PreflightController(ctx, log, env) {
   }
 
   /**
-   * Reads `x-promise-token` from pathInfo.headers.
-   * @param {Object} context - Request context
-   * @returns {string|null} Trimmed decoded token, or null if absent / empty
+   * Resolves the IMS promise token for promise-based authoring types (CS, CS_CW, AMS).
+   * @param {Object} site - Site entity
+   * @param {Object} context - Request context with pathInfo.headers
+   * @returns {Promise<{ promise_token: string } | null>} Token object, or null
+   * @throws {ErrorWithStatusCode} 400 when the header is missing or empty
    */
-  function getPromiseTokenHeader(context) {
-    const headers = context.pathInfo?.headers;
-    if (!isNonEmptyObject(headers)) {
-      return null;
-    }
-    const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === 'x-promise-token');
-    if (!entry) {
-      return null;
-    }
-    const raw = entry[1];
-    if (!hasText(raw)) {
-      return null;
-    }
-    const trimmed = String(raw).trim();
-    try {
-      return decodeURIComponent(trimmed);
-    } catch {
-      return trimmed;
-    }
-  }
-
   async function resolvePromiseToken(site, context) {
-    if (!PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
+    if (!PROMISE_BASED_AUTHORING_TYPES.includes(site.getAuthoringType())) {
       return null;
     }
-    const promiseTokenHeader = getPromiseTokenHeader(context);
+    let promiseTokenHeader = getHeader(context, X_PROMISE_TOKEN_HEADER);
+    if (hasText(promiseTokenHeader)) {
+      try {
+        promiseTokenHeader = decodeURIComponent(promiseTokenHeader);
+      } catch {
+        // Bearer-style tokens may contain literal %; use trimmed value as-is
+      }
+    }
+    // Re-check after decode
     if (hasText(promiseTokenHeader)) {
       return { promise_token: promiseTokenHeader };
     }
@@ -269,7 +257,7 @@ function PreflightController(ctx, log, env) {
         // remove the promiseToken from the message if it exists from the debug log
         log.debug(`createPreflightJob sending message to SQS with payload: ${JSON.stringify(sqsMessage)}`);
 
-        if (PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
+        if (PROMISE_BASED_AUTHORING_TYPES.includes(site.getAuthoringType())) {
           sqsMessage.promiseToken = promiseTokenResponse;
         }
 
