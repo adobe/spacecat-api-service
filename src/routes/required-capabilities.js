@@ -231,6 +231,7 @@ const routeRequiredCapabilities = {
   'PUT /configurations/latest/queues': 'configuration:write',
   'PATCH /configurations/latest/jobs/:jobType': 'configuration:write',
   'PATCH /configurations/latest/handlers/:handlerType': 'configuration:write',
+  'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': 'configuration:write',
   'PATCH /configurations/sites/audits': 'configuration:write',
 
   // Organizations

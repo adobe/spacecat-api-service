@@ -115,6 +115,7 @@ describe('Configurations Controller', () => {
     'updateQueues',
     'updateJob',
     'updateHandler',
+    'replaceHandlerEnabledDisabled',
     'updateConfiguration',
     'restoreVersion',
   ];
@@ -890,6 +891,238 @@ describe('Configurations Controller', () => {
 
       expect(result.status).to.equal(400);
       expect(error).to.have.property('message', 'Handler "unknown" not found');
+    });
+  });
+
+  describe('replaceHandlerEnabledDisabled', () => {
+    it('replaces enabled lists successfully', async () => {
+      const replaceHandlerEnabledDisabled = sandbox.stub();
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        replaceHandlerEnabledDisabled,
+      });
+
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { sites: ['site1'], orgs: ['org1'] } },
+        attributes: context.attributes,
+      });
+      const configuration = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(replaceHandlerEnabledDisabled).to.have.been.calledOnceWith('cwv', {
+        enabled: { sites: ['site1'], orgs: ['org1'] },
+      });
+      expect(configuration).to.be.an('object');
+    });
+
+    it('replaces disabled lists successfully', async () => {
+      const replaceHandlerEnabledDisabled = sandbox.stub();
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        replaceHandlerEnabledDisabled,
+      });
+
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { disabled: { sites: ['site1'], orgs: ['org1'] } },
+        attributes: context.attributes,
+      });
+
+      expect(result.status).to.equal(200);
+      expect(replaceHandlerEnabledDisabled).to.have.been.calledOnceWith('cwv', {
+        disabled: { sites: ['site1'], orgs: ['org1'] },
+      });
+    });
+
+    it('replaces both enabled and disabled lists successfully', async () => {
+      const replaceHandlerEnabledDisabled = sandbox.stub();
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        replaceHandlerEnabledDisabled,
+      });
+
+      const data = {
+        enabled: { sites: ['s1'], orgs: ['o1'] },
+        disabled: { sites: ['s2'], orgs: ['o2'] },
+      };
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data,
+        attributes: context.attributes,
+      });
+
+      expect(result.status).to.equal(200);
+      expect(replaceHandlerEnabledDisabled).to.have.been.calledOnceWith('cwv', data);
+    });
+
+    it('accepts empty arrays as valid replacement values', async () => {
+      const replaceHandlerEnabledDisabled = sandbox.stub();
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        replaceHandlerEnabledDisabled,
+      });
+
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { sites: [], orgs: [] } },
+        attributes: context.attributes,
+      });
+
+      expect(result.status).to.equal(200);
+      expect(replaceHandlerEnabledDisabled).to.have.been.calledOnceWith('cwv', {
+        enabled: { sites: [], orgs: [] },
+      });
+    });
+
+    it('returns 403 if user is not an admin', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { sites: ['s1'] } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only admins can update handler configuration');
+    });
+
+    it('returns 400 if handlerType is not provided', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: {},
+        data: { enabled: { sites: ['s1'] } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Handler type is required');
+    });
+
+    it('returns 400 if request body is empty', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: {},
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Request body is required and cannot be empty');
+    });
+
+    it('returns 400 when neither enabled nor disabled is provided', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { foo: 'bar' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property(
+        'message',
+        'At least one of enabled or disabled must be provided',
+      );
+    });
+
+    it('returns 400 when enabled is provided without sites or orgs', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: {} },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property(
+        'message',
+        'At least one of enabled.sites or enabled.orgs must be provided',
+      );
+    });
+
+    it('returns 400 when enabled.sites is not an array', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { sites: 'not-an-array' } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'enabled.sites must be an array');
+    });
+
+    it('returns 400 when enabled.orgs is not an array', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { orgs: 'not-an-array' } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'enabled.orgs must be an array');
+    });
+
+    it('returns 400 when disabled is provided without sites or orgs', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { disabled: {} },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property(
+        'message',
+        'At least one of disabled.sites or disabled.orgs must be provided',
+      );
+    });
+
+    it('returns 400 when disabled.sites is not an array', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { disabled: { sites: 'not-an-array' } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'disabled.sites must be an array');
+    });
+
+    it('returns 400 when disabled.orgs is not an array', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { disabled: { orgs: 'not-an-array' } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'disabled.orgs must be an array');
+    });
+
+    it('returns 404 if configuration not found', async () => {
+      mockDataAccess.Configuration.findLatest.resolves(null);
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { sites: ['s1'] } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Configuration not found');
+    });
+
+    it('returns 400 if replaceHandlerEnabledDisabled throws an error', async () => {
+      const replaceHandlerEnabledDisabled = sandbox.stub()
+        .throws(new Error('Handler "unknown" not found in configuration'));
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        replaceHandlerEnabledDisabled,
+      });
+
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'unknown' },
+        data: { enabled: { sites: ['s1'] } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Handler "unknown" not found in configuration');
     });
   });
 
