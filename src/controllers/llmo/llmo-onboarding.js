@@ -1261,6 +1261,34 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // Create or find organization
     const organization = await createOrFindOrganization(imsOrgId, context, say);
 
+    // M1 cohort gate (LLMO-5201) + M5 fail-fast workspace check (LLMO-5203).
+    // Resolved here, right after the org exists and BEFORE any other Adobe-side
+    // state (site, entitlement, audits, brand) is created. Per the orchestration
+    // design (LLMO-5007 §M5), a missing Semrush workspace must fail fast so the
+    // operator can bind one via PATCH /organizations/:id and retry cleanly with
+    // nothing left behind. Only the org is needed for this check; the brand-keyed
+    // fan-out (M6–M8) runs later, once the brand row exists. `serenityEnabled` is
+    // reused there to avoid evaluating the allowlist twice.
+    const serenityEnabled = isSerenityOnboardingEnabled(
+      organization.getId(),
+      imsOrgId,
+      env,
+    );
+    if (serenityEnabled && !organization.getSemrushWorkspaceId?.()) {
+      const spaceCatId = organization.getId();
+      const workspaceError = new Error(
+        `Semrush workspace not bound to org ${spaceCatId}. `
+        + `Run PATCH /organizations/${spaceCatId} with { semrushWorkspaceId: ... } `
+        + 'then retry onboarding.',
+      );
+      // Surfaced as HTTP 404 by the controller (matches the AIO Proxy convention,
+      // LLMO-5007 §M5). `preflight` tells the cleanup handler below there is no
+      // Adobe-side state to roll back — this throw precedes site creation.
+      workspaceError.status = 404;
+      workspaceError.preflight = true;
+      throw workspaceError;
+    }
+
     // Create site BEFORE resolving the onboarding mode. createOrFindSite may
     // re-parent an existing site into the destination org; resolveLlmoOnboardingMode
     // reads Site.allByOrganizationId, so the re-parent has to be persisted first
@@ -1394,9 +1422,10 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
       }
 
-      if (isSerenityOnboardingEnabled(organization.getId(), imsOrgId, env)) {
-        // M5–M8: Semrush provisioning path (cohort gate — LLMO-5007).
-        // T3a (workspace check), T3b (fan-out), T3c (readiness validation)
+      if (serenityEnabled) {
+        // M6–M8: Semrush provisioning path (cohort gate — LLMO-5007).
+        // Workspace presence was already validated at M5 (fail-fast, above).
+        // T3b (fan-out — LLMO-5204) and T3c (readiness validation — LLMO-5205)
         // will be implemented here.
         log.info(`Serenity onboarding enabled for org ${organization.getId()} — ${markets?.length ?? 0} market(s) to provision (LLMO-5007)`);
       }
@@ -1488,6 +1517,13 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       message: 'LLMO onboarding completed successfully',
     };
   } catch (error) {
+    // Pre-flight failures (e.g. the M5 missing-workspace 404) throw before any
+    // Adobe-side state is created — there is nothing to clean up, so propagate
+    // directly and let the caller map the status.
+    if (error.preflight) {
+      throw error;
+    }
+
     log.error(`Error during LLMO onboarding: ${error.message}. Attempting cleanup.`);
 
     // Attempt cleanup

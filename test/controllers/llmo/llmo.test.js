@@ -3733,6 +3733,21 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       expect(performLlmoOnboardingStub.firstCall.args[0]).to.not.have.property('markets');
     });
+
+    it('should return 404 when performLlmoOnboarding reports a missing Semrush workspace (LLMO-5203)', async () => {
+      const workspaceError = new Error(
+        'Semrush workspace not bound to org org-1. Run PATCH /organizations/org-1 with { semrushWorkspaceId: ... } then retry onboarding.',
+      );
+      workspaceError.status = 404;
+      const failingStub = sinon.stub().rejects(workspaceError);
+      const ctrl = await makeOnboardController(failingStub);
+
+      const result = await ctrl.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.match(/Semrush workspace not bound to org org-1/);
+    });
   });
 
   describe('offboardCustomer', () => {
