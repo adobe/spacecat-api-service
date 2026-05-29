@@ -388,8 +388,13 @@ cursor:
 xPromiseToken:
   name: x-promise-token
   description: |
-    Optional session-based promise token. When provided, this token is used directly for operations like creating a preflight job for authenticated CMS pages.
-    Only relevant for promise-based authoring types (CS, CS_CW, AMS); ignored for other site types.
+    IMS session-based promise token for authenticated CMS operations (from `POST /auth/v2/promise`).
+    On `POST /preflight/jobs`, **required** for promise-based authoring types (CS, CS_CW, AMS).
+    If absent for those sites, the API returns **400** with invalid request error.
+    Ignored for other site types.
+    On endpoints that also accept this header (e.g. opportunity suggestion autofix), it may be
+    omitted when the service can resolve a promise token another way. Listed as optional here
+    because requirement depends on the operation and site authoring type.
   in: header
   required: false
   schema:
