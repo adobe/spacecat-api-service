@@ -1,3 +1,10 @@
+# [1.528.0](https://github.com/adobe/spacecat-api-service/compare/v1.527.1...v1.528.0) (2026-05-29)
+
+
+### Features
+
+* decouple Slack one-off audit execution from site enablement ([#1674](https://github.com/adobe/spacecat-api-service/issues/1674)) ([2e6d503](https://github.com/adobe/spacecat-api-service/commit/2e6d503ddcbd4608fee5a71a905c541d484cb334))
+
 ## [1.527.1](https://github.com/adobe/spacecat-api-service/compare/v1.527.0...v1.527.1) (2026-05-29)
 
 
