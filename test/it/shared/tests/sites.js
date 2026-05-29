@@ -378,6 +378,67 @@ export default function siteTests(getHttpClient, resetData) {
         });
         expect(res.status).to.equal(403);
       });
+
+      it('admin: returns 400 for invalid x-product header', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(
+          '/sites',
+          { baseURL: 'https://invalid-product-header.example.com' },
+          { 'x-product': 'NOT_A_PRODUCT' },
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/Unsupported product code/);
+      });
+
+      it('admin: x-product enrolls new site under existing ASO PAID entitlement', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://aso-trial-provisioned.example.com';
+        const createRes = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(createRes.status).to.equal(201);
+        expectSiteDto(createRes.body);
+
+        const listRes = await http.admin.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(listRes.status).to.equal(200);
+        const siteIds = listRes.body.map((s) => s.id);
+        expect(siteIds).to.include(createRes.body.id);
+
+        const entitlementsRes = await http.admin.get(`/organizations/${ORG_1_ID}/entitlements`);
+        const asoEntitlement = entitlementsRes.body.find((e) => e.productCode === 'ASO');
+        expect(asoEntitlement.tier).to.equal('PAID');
+      });
+
+      it('admin: without x-product header does not enroll site for ASO listing', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://no-write-time-product.example.com';
+        const createRes = await http.admin.post(
+          '/sites',
+          { baseURL },
+          { 'x-product': null },
+        );
+        expect(createRes.status).to.equal(201);
+
+        const listRes = await http.admin.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(listRes.status).to.equal(200);
+        const siteIds = listRes.body.map((s) => s.id);
+        expect(siteIds).to.not.include(createRes.body.id);
+      });
+
+      it('admin: idempotent re-POST with x-product returns 200', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://idempotent-x-product.example.com';
+        const first = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(first.status).to.equal(201);
+
+        const second = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(second.status).to.equal(200);
+        expect(second.body.id).to.equal(first.body.id);
+      });
     });
 
     describe('PATCH /sites/:siteId', () => {

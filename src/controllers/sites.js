@@ -49,6 +49,11 @@ import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
+import {
+  ensureSiteEntitlementAndEnrollment,
+  logSiteOrphanedAfterCreate,
+  resolveProductCode,
+} from '../support/tier-provisioning.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -356,6 +361,11 @@ function SitesController(ctx, log, env) {
    *
    * Alternative: If strict REST semantics are preferred, 409 Conflict is also valid.
    *
+   * Write-time tier provisioning: when a site is newly created, it ensures org entitlement and
+   * site enrollment via TierClient using the existing tier when present, otherwise FREE_TRIAL.
+   * Idempotent re-POSTs do not run provisioning.
+   * Provisioning failures return 500 with `event=site_orphaned_after_create`.
+   *
    * @param {object} context - Request context containing site data
    * @returns {Promise<Response>} HTTP 200 with existing site or 201 with new site
    */
@@ -366,27 +376,46 @@ function SitesController(ctx, log, env) {
     if (!hasText(context.data?.baseURL)) {
       return badRequest('Base URL required');
     }
+    const { productCode, error: productCodeError } = resolveProductCode(context);
+    if (productCodeError) {
+      return badRequest(productCodeError);
+    }
+    let site;
+    let status;
     try {
       const baseURL = composeBaseURL(context.data.baseURL);
       const existingSite = await Site.findByBaseURL(baseURL);
       if (existingSite) {
         // Idempotent behavior: return existing site with 200 (not 409)
         log.info(`Site already exists for baseURL: ${baseURL}, returning existing site ${existingSite.getId()}`);
-        return createResponse(SiteDto.toJSON(existingSite), 200);
+        site = existingSite;
+        status = 200;
+      } else {
+        site = await Site.create({
+          organizationId: env.DEFAULT_ORGANIZATION_ID,
+          ...context.data,
+          baseURL, // override with normalized value
+        });
+        updateRumConfig(site, context).catch((e) => {
+          log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
+        });
+        status = 201;
       }
-      const site = await Site.create({
-        organizationId: env.DEFAULT_ORGANIZATION_ID,
-        ...context.data,
-        baseURL, // override with normalized value
-      });
-      updateRumConfig(site, context).catch((e) => {
-        log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
-      });
-      return createResponse(SiteDto.toJSON(site), 201);
     } catch (error) {
       log.error(`Error creating site: ${error.message}`, error);
       return internalServerError('Failed to create site');
     }
+
+    if (productCode && status === 201) {
+      try {
+        await ensureSiteEntitlementAndEnrollment(context, site, productCode, log);
+      } catch (error) {
+        logSiteOrphanedAfterCreate(log, site, productCode, error);
+        return internalServerError('Failed to ensure entitlement/enrollment for site');
+      }
+    }
+
+    return createResponse(SiteDto.toJSON(site), status);
   };
 
   /**

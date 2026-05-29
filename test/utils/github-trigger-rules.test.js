@@ -197,6 +197,22 @@ describe('github-trigger-rules', () => {
     // Note: missing GITHUB_APP_SLUG is validated at controller entry (returns 500),
     // not by getSkipReason. The controller is the gate; this function only sees
     // calls with a validated appSlug.
+
+    it('uses the explicit appSlug arg over env.GITHUB_APP_SLUG when provided', () => {
+      // A ghec target whose appSlug differs from env.GITHUB_APP_SLUG: the explicit
+      // arg must form the expected bot reviewer login.
+      const data = {
+        pull_request: { draft: false, base: { ref: 'main' } },
+        requested_reviewer: { login: 'ghec-bot[bot]' },
+        repository: { default_branch: 'main' },
+        sender: { type: 'User' },
+      };
+      const env = { GITHUB_APP_SLUG: 'mysticat' };
+      // Without the override, expected reviewer is mysticat[bot] -> would skip.
+      expect(getSkipReason(data, 'review_requested', env)).to.match(/is not mysticat\[bot\]/);
+      // With the override, expected reviewer is ghec-bot[bot] -> matches -> null.
+      expect(getSkipReason(data, 'review_requested', env, 'ghec-bot')).to.be.null;
+    });
   });
 
   describe('isMysticatTargetedSkip', () => {
