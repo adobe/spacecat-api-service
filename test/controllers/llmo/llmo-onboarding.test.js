@@ -3650,6 +3650,193 @@ describe('LLMO Onboarding Functions', () => {
     });
   });
 
+  describe('performSerenityFanOut (LLMO-5204)', () => {
+    let log;
+    let createTransportStub;
+
+    const baseArgs = {
+      brandId: 'brand-uuid-1',
+      workspaceId: 'ws-1',
+      brandName: 'Example Brand',
+      baseURL: 'https://example.com',
+      markets: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
+    };
+
+    const makeContext = (overrides = {}) => ({
+      env: { SEMRUSH_PROJECTS_BASE_URL: 'https://sr.example.com' },
+      log,
+      dataAccess: { BrandSemrushProject: {} },
+      attributes: { authInfo: { getType: () => 'ims' } },
+      pathInfo: { headers: { authorization: 'Bearer ims-token' } },
+      ...overrides,
+    });
+
+    const loadFanOut = async (handleCreateProjectStub) => {
+      const mod = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '../../../src/support/serenity/handlers/projects.js': {
+          handleCreateProject: handleCreateProjectStub,
+        },
+        '../../../src/support/serenity/rest-transport.js': {
+          createSerenityTransport: createTransportStub,
+        },
+      });
+      return mod.performSerenityFanOut;
+    };
+
+    beforeEach(() => {
+      log = {
+        info: sinon.stub(), warn: sinon.stub(), error: sinon.stub(), debug: sinon.stub(),
+      };
+      createTransportStub = sinon.stub().returns({ id: 'transport' });
+    });
+
+    it('returns an empty result and makes no calls when markets is absent', async () => {
+      const hcp = sinon.stub();
+      const performSerenityFanOut = await loadFanOut(hcp);
+      const res = await performSerenityFanOut(makeContext(), { ...baseArgs, markets: undefined });
+      expect(res).to.deep.equal({ requested: [], succeeded: [], failed: [] });
+      expect(hcp).to.not.have.been.called;
+      expect(createTransportStub).to.not.have.been.called;
+    });
+
+    it('creates one project per tuple and collects successes (201)', async () => {
+      const hcp = sinon.stub();
+      hcp.onCall(0).resolves({ status: 201, body: { semrushProjectId: 'p-us', semrushLocationId: 2840 } });
+      hcp.onCall(1).resolves({ status: 201, body: { semrushProjectId: 'p-de', semrushLocationId: 2276 } });
+      const performSerenityFanOut = await loadFanOut(hcp);
+
+      const res = await performSerenityFanOut(makeContext(), baseArgs);
+
+      expect(res.requested).to.deep.equal([
+        { market: 'US', language: 'en' }, { market: 'DE', language: 'de' },
+      ]);
+      expect(res.succeeded).to.deep.equal([
+        {
+          market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+        },
+        {
+          market: 'DE', language: 'de', semrushProjectId: 'p-de', semrushLocationId: 2276,
+        },
+      ]);
+      expect(res.failed).to.be.empty;
+      expect(hcp).to.have.been.calledTwice;
+
+      // Body contract enforced by the proxy's validateCreateBody.
+      const [, , brandIdArg, wsArg, body] = hcp.firstCall.args;
+      expect(brandIdArg).to.equal('brand-uuid-1');
+      expect(wsArg).to.equal('ws-1');
+      expect(body.name).to.equal('example-brand · US · en');
+      expect(body.market).to.equal('US');
+      expect(body.language).to.equal('en');
+      expect(body.brandDomain).to.equal('example.com');
+      expect(body.brandNames).to.deep.equal(['Example Brand']);
+      expect(body.projectType).to.equal('ai');
+    });
+
+    it('treats 409 (slice already exists) as an idempotent success', async () => {
+      const hcp = sinon.stub().resolves({ status: 409, body: { semrushProjectId: 'p-existing' } });
+      const performSerenityFanOut = await loadFanOut(hcp);
+      const res = await performSerenityFanOut(
+        makeContext(),
+        { ...baseArgs, markets: [{ market: 'US', language: 'en' }] },
+      );
+      expect(res.succeeded).to.deep.equal([
+        { market: 'US', language: 'en', semrushProjectId: 'p-existing' },
+      ]);
+      expect(res.failed).to.be.empty;
+    });
+
+    it('collects per-tuple failures without aborting the remaining tuples', async () => {
+      const hcp = sinon.stub();
+      hcp.onCall(0).resolves({ status: 502, body: { error: 'semrushUpstreamError' } });
+      hcp.onCall(1).resolves({ status: 201, body: { semrushProjectId: 'p-de', semrushLocationId: 2276 } });
+      const performSerenityFanOut = await loadFanOut(hcp);
+
+      const res = await performSerenityFanOut(makeContext(), baseArgs);
+
+      expect(hcp).to.have.been.calledTwice;
+      expect(res.failed).to.deep.equal([
+        {
+          market: 'US', language: 'en', status: 502, error: 'semrushUpstreamError',
+        },
+      ]);
+      expect(res.succeeded).to.deep.equal([
+        {
+          market: 'DE', language: 'de', semrushProjectId: 'p-de', semrushLocationId: 2276,
+        },
+      ]);
+    });
+
+    it('records a thrown transport error as a failure and continues', async () => {
+      const hcp = sinon.stub();
+      const err = new Error('upstream 503');
+      err.status = 502;
+      hcp.onCall(0).rejects(err);
+      hcp.onCall(1).resolves({ status: 201, body: { semrushProjectId: 'p-de', semrushLocationId: 2276 } });
+      const performSerenityFanOut = await loadFanOut(hcp);
+
+      const res = await performSerenityFanOut(makeContext(), baseArgs);
+
+      expect(res.failed).to.deep.equal([
+        {
+          market: 'US', language: 'en', status: 502, error: 'upstream 503',
+        },
+      ]);
+      expect(res.succeeded).to.have.length(1);
+    });
+
+    it('fails all tuples when no IMS bearer is present', async () => {
+      const hcp = sinon.stub();
+      const performSerenityFanOut = await loadFanOut(hcp);
+      const res = await performSerenityFanOut(
+        makeContext({ pathInfo: { headers: {} } }),
+        baseArgs,
+      );
+      expect(hcp).to.not.have.been.called;
+      expect(createTransportStub).to.not.have.been.called;
+      expect(res.succeeded).to.be.empty;
+      expect(res.failed).to.deep.equal([
+        { market: 'US', language: 'en', status: 401, error: 'missingImsBearer' },
+        { market: 'DE', language: 'de', status: 401, error: 'missingImsBearer' },
+      ]);
+    });
+
+    it('fails all tuples when the caller did not authenticate with IMS', async () => {
+      const hcp = sinon.stub();
+      const performSerenityFanOut = await loadFanOut(hcp);
+      const res = await performSerenityFanOut(
+        makeContext({ attributes: { authInfo: { getType: () => 'jwt' } } }),
+        baseArgs,
+      );
+      expect(hcp).to.not.have.been.called;
+      expect(res.failed.map((f) => f.error)).to.deep.equal(['missingImsBearer', 'missingImsBearer']);
+    });
+
+    it('fails all tuples when the brand row is missing', async () => {
+      const hcp = sinon.stub();
+      const performSerenityFanOut = await loadFanOut(hcp);
+      const res = await performSerenityFanOut(makeContext(), { ...baseArgs, brandId: undefined });
+      expect(hcp).to.not.have.been.called;
+      expect(res.failed.map((f) => f.error)).to.deep.equal(['brandNotCreated', 'brandNotCreated']);
+    });
+
+    it('fails all tuples when the Semrush transport cannot be built', async () => {
+      const hcp = sinon.stub();
+      const tErr = new Error('SEMRUSH_PROJECTS_BASE_URL is not set');
+      tErr.status = 503;
+      createTransportStub.throws(tErr);
+      const performSerenityFanOut = await loadFanOut(hcp);
+
+      const res = await performSerenityFanOut(makeContext(), baseArgs);
+
+      expect(hcp).to.not.have.been.called;
+      expect(res.failed).to.deep.equal([
+        { market: 'US', language: 'en', status: 503, error: 'transportUnavailable' },
+        { market: 'DE', language: 'de', status: 503, error: 'transportUnavailable' },
+      ]);
+    });
+  });
+
   describe('buildInitialCustomerConfigV2', () => {
     it('builds a single active brand config for onboarding', async () => {
       const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
