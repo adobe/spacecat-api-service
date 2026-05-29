@@ -386,36 +386,6 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  describe('listWorkspaceProjects', () => {
-    it('GETs /v2/workspaces/{ws}/projects with type=AIO and publish_status filter', async () => {
-      fetchStub.resolves(fetchOk({ items: [], total: 0 }));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      await transport.listWorkspaceProjects(WORKSPACE_ID);
-
-      const [url, init] = fetchStub.firstCall.args;
-      expect(init.method).to.equal('GET');
-      expect(url).to.include(`/v2/workspaces/${WORKSPACE_ID}/projects?`);
-      expect(url).to.include('type=AIO');
-      expect(url).to.include(
-        'publish_status=live%2Clive_with_unpublished_updates',
-      );
-      expect(url).to.include('limit=100');
-      expect(url).to.include('page=1');
-    });
-
-    it('honours explicit page/limit for pagination', async () => {
-      fetchStub.resolves(fetchOk({ items: [] }));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      await transport.listWorkspaceProjects(WORKSPACE_ID, { page: 4, limit: 50 });
-
-      const [url] = fetchStub.firstCall.args;
-      expect(url).to.include('page=4');
-      expect(url).to.include('limit=50');
-    });
-  });
-
   describe('listAiModels', () => {
     it('GETs /v1/.../ai_models with page=1&limit=100 by default', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
@@ -478,6 +448,36 @@ describe('Semrush REST transport', () => {
       expect(init.method).to.equal('GET');
       expect(url).to.match(/\/v1\/languages$/);
       expect(result.items[0].name).to.equal('English');
+    });
+  });
+
+  describe('deleteProject', () => {
+    it('DELETEs /v1/workspaces/{ws}/projects/{pid} with no body', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.deleteProject(WORKSPACE_ID, PROJECT_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('DELETE');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}`,
+      );
+      expect(init.body).to.be.undefined;
+    });
+
+    it('throws SerenityTransportError(404) on upstream not-found so callers can treat it as idempotent', async () => {
+      fetchStub.resolves(fetchFail(404, { message: 'not found' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.deleteProject(WORKSPACE_ID, PROJECT_ID);
+      await expect(promise).to.be.rejectedWith(SerenityTransportError);
+      try {
+        await promise;
+      } catch (e) {
+        expect(e.status).to.equal(404);
+        expect(e.body).to.deep.equal({ message: 'not found' });
+      }
     });
   });
 });

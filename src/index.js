@@ -148,7 +148,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product, x-promise-token',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -366,9 +366,6 @@ async function run(request, context) {
       }
       if (params.preflightId && !isValidUUID(params.preflightId)) {
         return badRequest('Preflight Id is invalid. Please provide a valid UUID.');
-      }
-      if (params.workspaceId && !isValidUUID(params.workspaceId)) {
-        return badRequest('Workspace Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;

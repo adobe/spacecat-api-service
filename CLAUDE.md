@@ -63,11 +63,11 @@ History: SITES-45260 — `handlers/projects.js` read `data/locations.json` synch
 - **If you must keep a file as a non-JS asset**, declare its repo-relative path in `package.json` under `hlx.static` so `helix-deploy` copies it into the Lambda zip. Do NOT compute its runtime path from `import.meta.url` — read it from the Lambda task root (`process.env.LAMBDA_TASK_ROOT` or a known absolute path inside the zip).
 - **JSON import attributes** (`import x from './x.json' with { type: 'json' }`) are blocked by the repo's eslint parser today; don't try to work around the lint rule. Use the JS-module pattern instead.
 
-### CI gate (`.github/workflows/ci.yaml::bundle-build`)
+### CI gate
 
-`npm run build` runs `hedy -v --test-bundle` on every push/PR. It bundles, zips, imports the bundled `main`, and invokes `lambda()` against a healthcheck event — exits non-zero on any non-2xx response. This is the load-bearing catch for module-load failures in the bundled artifact (the mysticat-ci reusable workflow only runs lint+test+coverage, which is source-only and would have missed SITES-45260).
+The bundle is validated in CI by the `bundle-build: true` input on the `adobe/mysticat-ci` reusable workflow (`.github/workflows/ci.yaml`) — it runs `npm run build` (`hedy -v --test-bundle`) and invokes the bundled `lambda()` against a healthcheck, catching the module-load failures that source-only lint+test+coverage miss (SITES-45260). The gate lives upstream; don't re-add a repo-local `bundle-build` job.
 
-If you change anything that touches the bundle layer (new asset, new dependency that uses FS at boot, change to `hlx.static`, new top-level side-effect), run `npm run build` locally before pushing — the CI gate will catch it, but it's faster to know on your laptop.
+If you touch the bundle layer (new asset, a dependency that uses FS at boot, `hlx.static` changes, new top-level side-effects), run `npm run build` locally before pushing — faster than waiting on CI.
 
 ## Architecture Overview
 
