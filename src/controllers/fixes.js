@@ -119,6 +119,19 @@ export class FixesController {
       const allFixesWithSuggestions = await this.#FixEntity
         .getAllFixesWithSuggestionsByOpportunityId(opportunityId);
 
+      // Validate opportunity-site ownership before filtering/early return. Use the
+      // unfiltered result (or Opportunity.findById fallback) so an opportunity from
+      // a different site returns 404 even when no fix matches the requested date.
+      res = await checkOwnership(
+        allFixesWithSuggestions[0]?.fixEntity,
+        opportunityId,
+        siteId,
+        this.#Opportunity,
+      );
+      if (res) {
+        return res;
+      }
+
       const fixEntitiesWithSuggestions = allFixesWithSuggestions.filter(({ fixEntity }) => {
         const ts = fixEntity.getExecutedAt() ?? fixEntity.getCreatedAt();
         const d = ts ? new Date(ts) : null;
@@ -138,19 +151,25 @@ export class FixesController {
         return fixEntity;
       });
 
-      // Check ownership for the first fix entity to ensure
-      // the opportunity belongs to the site
-      res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
-      if (res) {
-        return res;
-      }
-
       fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
       return ok(fixes);
     }
 
     const fixEntitiesWithSuggestions = await this.#FixEntity
       .getAllFixesWithSuggestionsByOpportunityId(opportunityId);
+
+    // Validate opportunity-site ownership before any early return. checkOwnership
+    // falls back to Opportunity.findById when no fix is passed, so the empty-result
+    // case still returns 404 for an opportunity belonging to a different site.
+    res = await checkOwnership(
+      fixEntitiesWithSuggestions[0]?.fixEntity,
+      opportunityId,
+      siteId,
+      this.#Opportunity,
+    );
+    if (res) {
+      return res;
+    }
 
     if (fixEntitiesWithSuggestions.length === 0) {
       return ok([]);
@@ -162,11 +181,6 @@ export class FixesController {
       fixEntity._suggestions = item.suggestions;
       return fixEntity;
     });
-
-    res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
-    if (res) {
-      return res;
-    }
 
     fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);

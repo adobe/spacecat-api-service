@@ -204,6 +204,21 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals([]);
     });
 
+    it('responds 404 if the opportunity belongs to another site even when no fixes exist', async () => {
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([]);
+      opportunityGetStub.callsFake((data) => ({
+        go: async () => ({ data: { ...data, siteId: 'wrong-site-id' } }),
+      }));
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({
+        message: 'Opportunity not found',
+      });
+    });
+
     it('responds 400 if the site ID parameter is not a uuid', async () => {
       requestContext.params.siteId = 'not-a-uuid';
       const response = await fixesController.getAllForOpportunity(requestContext);

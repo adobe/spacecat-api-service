@@ -20,6 +20,7 @@ import {
   OPPTY_3_ID,
   FIX_1_ID,
   FIX_2_ID,
+  FIX_3_ID,
   FIX_1_CREATED_DATE,
   SUGG_1_ID,
   SUGG_2_ID,
@@ -62,7 +63,7 @@ export default function fixTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.get(BASE);
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
         res.body.forEach((f) => expectFixDto(f));
 
         const fix1 = res.body.find((f) => f.id === FIX_1_ID);
@@ -72,6 +73,11 @@ export default function fixTests(getHttpClient, resetData) {
         const fix2 = res.body.find((f) => f.id === FIX_2_ID);
         expect(fix2.suggestions).to.be.an('array').with.lengthOf(1);
         expect(fix2.suggestions[0].id).to.equal(SUGG_2_ID);
+
+        // FIX_3 has no junction entry — must still be returned with empty
+        // suggestions instead of being silently dropped (the bug this PR fixes)
+        const fix3 = res.body.find((f) => f.id === FIX_3_ID);
+        expect(fix3.suggestions).to.be.an('array').with.lengthOf(0);
       });
 
       it('user: returns 403 for denied site', async () => {

@@ -16,6 +16,8 @@
  *
  * - FIX_1: CODE_CHANGE, PENDING — linked to SUGG_1 via junction
  * - FIX_2: CODE_CHANGE, DEPLOYED — different status for by-status filter
+ * - FIX_3: CODE_CHANGE, DEPLOYED — NO junction entry; must still be returned
+ *   with an empty suggestions array (the silent-drop bug this PR fixes)
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
@@ -37,6 +39,14 @@ export const fixes = [
     type: 'CODE_CHANGE',
     status: 'DEPLOYED',
     change_details: { file: '/blocks/footer/footer.js', diff: '-old +new' },
+    origin: 'spacecat',
+  },
+  {
+    id: 'cc333333-3333-4333-b333-333333333333',
+    opportunity_id: 'aa111111-1111-4111-b111-111111111111',
+    type: 'CODE_CHANGE',
+    status: 'DEPLOYED',
+    change_details: { file: '/blocks/header/header.js', diff: '-a +b' },
     origin: 'spacecat',
   },
 ];
