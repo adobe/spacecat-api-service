@@ -3619,6 +3619,120 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.imsOrgId).to.equal(upperCaseImsOrgId);
     });
+
+    // Helper shared by markets[] tests below
+    const makeOnboardController = async (perfStub) => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          performLlmoOnboarding: perfStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const name = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? name : `dev/${name}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      return LlmoControllerOnboard(mockContext);
+    };
+
+    it('should forward markets[] to performLlmoOnboarding when supplied (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: {
+          ...onboardingContext.data,
+          markets: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
+        },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
+        { market: 'US', language: 'en' },
+        { market: 'DE', language: 'de' },
+      ]);
+    });
+
+    it('should synthesize markets from region when markets is absent (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = { ...onboardingContext, data: { ...onboardingContext.data, region: 'IN' } };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
+        { market: 'IN', language: 'en' },
+      ]);
+    });
+
+    it('should use markets and ignore region when both are supplied (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: {
+          ...onboardingContext.data,
+          region: 'IN',
+          markets: [{ market: 'US', language: 'en' }],
+        },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
+        { market: 'US', language: 'en' },
+      ]);
+    });
+
+    it('should return 400 for invalid market code in markets[] (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{ market: 'usa', language: 'en' }] },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 for invalid language in markets[] (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{ market: 'US', language: 'EN' }] },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 for empty markets array (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = { ...onboardingContext, data: { ...onboardingContext.data, markets: [] } };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should not set markets when neither markets nor region is supplied (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const result = await ctrl.onboardCustomer(onboardingContext);
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub.firstCall.args[0]).to.not.have.property('markets');
+    });
   });
 
   describe('offboardCustomer', () => {

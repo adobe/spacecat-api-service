@@ -944,7 +944,7 @@ function LlmoController(ctx) {
       }
 
       const {
-        domain, brandName, imsOrgId: payloadImsOrgId, cadence, region,
+        domain, brandName, imsOrgId: payloadImsOrgId, cadence, region, markets,
       } = data;
       const tempOnboarding = data['temp-onboarding'] === true;
 
@@ -961,6 +961,36 @@ function LlmoController(ctx) {
       // Omitted → DRS client default ('US') applies, preserving prior behavior.
       if (region !== undefined && !/^[A-Z]{2}$/.test(region)) {
         return badRequest('Invalid region. Must be an ISO 3166-1 alpha-2 country code (e.g. US, IN, BR)');
+      }
+
+      // LLMO-5007: optional markets array for Semrush project fan-out.
+      // Each entry maps to one Semrush project. Controller enforces uppercase market
+      // codes (stricter than the AIO Proxy which accepts case-insensitive — intentional).
+      // Backward-compat: if markets is absent but region is present, synthesize a
+      // single-entry markets array so the serenity path has something to fan-out.
+      let resolvedMarkets;
+      if (markets !== undefined) {
+        if (!Array.isArray(markets) || markets.length === 0) {
+          return badRequest('markets must be a non-empty array');
+        }
+        for (const entry of markets) {
+          if (!entry || typeof entry !== 'object') {
+            return badRequest('Each markets entry must be an object with market and language');
+          }
+          if (!/^[A-Z]{2}$/.test(entry.market)) {
+            return badRequest(`Invalid market "${entry.market}". Must be an ISO 3166-1 alpha-2 uppercase code (e.g. US, DE)`);
+          }
+          if (!/^[a-z]{2,3}(-[a-z]{2,4})?$/.test(entry.language)) {
+            return badRequest(`Invalid language "${entry.language}". Must be a BCP-47 primary subtag (e.g. en, de, zh-hans)`);
+          }
+        }
+        if (region !== undefined) {
+          log.warn(`LLMO onboarding: both markets and region supplied for domain ${domain} — markets wins, region ignored`);
+        }
+        resolvedMarkets = markets;
+      } else if (region !== undefined) {
+        log.warn(`LLMO onboarding: markets absent, synthesizing from region "${region}" for domain ${domain}`);
+        resolvedMarkets = [{ market: region, language: 'en' }];
       }
 
       let imsOrgId;
@@ -1014,6 +1044,7 @@ function LlmoController(ctx) {
           cadence,
           tempOnboarding,
           ...(region ? { region } : {}),
+          ...(resolvedMarkets ? { markets: resolvedMarkets } : {}),
         },
         context,
       );
