@@ -27,6 +27,7 @@ import {
 import { convertV1ToV2, generateBrandId } from '../../support/customer-config-mapper.js';
 import {
   resolveLlmoOnboardingMode,
+  isSerenityOnboardingEnabled,
   LLMO_ONBOARDING_MODE_V1,
   LLMO_ONBOARDING_MODE_V2,
   LLMO_FEATURE_FLAG_PRODUCT,
@@ -1391,6 +1392,13 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
       } catch (brandError) {
         log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
+      }
+
+      if (isSerenityOnboardingEnabled(organization.getId(), imsOrgId, env)) {
+        // M5–M8: Semrush provisioning path (cohort gate — LLMO-5007).
+        // T3a (workspace check), T3b (fan-out), T3c (readiness validation)
+        // will be implemented here.
+        log.info(`Serenity onboarding enabled for org ${organization.getId()} — Semrush provisioning steps will run here (LLMO-5007)`);
       }
 
       // Trigger Brandalf immediately after the v2 config exists so downstream
