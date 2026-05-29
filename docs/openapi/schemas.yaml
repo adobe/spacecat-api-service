@@ -9960,76 +9960,57 @@ AiVisibilitySourceDomainsResponse:
 # Schemas for /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/*. See
 # docs/openapi/serenity-api.yaml for the operations.
 
-SemrushPrompt:
+SerenityPrompt:
   type: object
-  description: A single Semrush AIO prompt as exposed by the proxy.
-  required: [id, semrushId, semrushProjectId, semrushLocationId, language, text]
+  description: A single Serenity prompt.
+  required: [semrushPromptId, geoTargetId, languageCode, text]
   properties:
-    id:
+    semrushPromptId:
       type: string
-      description: |
-        Logical id stable across Semrush re-creates:
-        `base64url(JSON({b: brandId, l: semrushLocationId, lang: language, t: text}))`.
-    semrushId:
-      type: string
-      description: Semrush-side prompt id (changes if the prompt is re-created).
-    semrushProjectId:
-      type: string
-      description: Semrush AIO project this prompt lives in.
-    semrushLocationId:
+      description: Upstream prompt id. Changes whenever the prompt is re-created (e.g. on PATCH).
+    geoTargetId:
       type: integer
       minimum: 1
-      description: Google Ads Geo Target ID of the owning project.
-    language:
+      description: Google Ads Geo Target ID for the slice this prompt belongs to.
+    languageCode:
       type: string
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+      description: BCP-47 primary subtag (lowercase) for the slice.
     text:
       type: string
     tags:
       type: array
       items: { type: string }
 
-SemrushPromptListResponse:
+SerenityPromptListResponse:
   type: object
   required: [items, total, page, limit]
   properties:
     items:
       type: array
-      items: { $ref: '#/SemrushPrompt' }
+      items: { $ref: '#/SerenityPrompt' }
     total: { type: integer }
     page: { type: integer }
     limit: { type: integer }
-    errors:
-      type: array
-      description: |
-        Per-project upstream failures encountered while fanning out the list
-        across the brand's mapped Semrush projects. Present only when at
-        least one project failed; the `items` array contains the partial
-        successful results.
-      items:
-        type: object
-        required: [message]
-        properties:
-          message: { type: string }
 
-SemrushPromptInput:
+SerenityPromptInput:
   type: object
   description: One row in a bulk-create prompts request.
-  required: [text, semrushLocationId, language]
+  required: [text, geoTargetId, languageCode]
   properties:
     text: { type: string }
     tags:
       type: array
       items: { type: string }
       default: []
-    semrushLocationId:
+    geoTargetId:
       type: integer
       minimum: 1
-    language:
+    languageCode:
       type: string
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
 
-SemrushCreatePromptsRequest:
+SerenityCreatePromptsRequest:
   type: object
   required: [prompts]
   properties:
@@ -10037,18 +10018,18 @@ SemrushCreatePromptsRequest:
       type: array
       minItems: 1
       maxItems: 500
-      items: { $ref: '#/SemrushPromptInput' }
+      items: { $ref: '#/SerenityPromptInput' }
 
-SemrushCreatePromptsResponse:
+SerenityCreatePromptsResponse:
   type: object
   required: [created, skipped, failed]
   properties:
     created:
       type: array
-      items: { $ref: '#/SemrushPrompt' }
+      items: { $ref: '#/SerenityPrompt' }
     skipped:
       type: array
-      description: Prompts skipped (e.g. duplicate within the request).
+      description: Prompts skipped (e.g. unknown slice).
       items:
         type: object
         properties:
@@ -10056,41 +10037,57 @@ SemrushCreatePromptsResponse:
           reason: { type: string }
     failed:
       type: array
-      description: Prompts that hit a Semrush upstream error.
+      description: Prompts that hit an upstream error.
       items:
         type: object
         properties:
           text: { type: string }
-          semrushProjectId: { type: string }
+          geoTargetId: { type: integer }
+          languageCode: { type: string }
           status: { type: integer }
           message: { type: string }
 
-SemrushUpdatePromptRequest:
+SerenityUpdatePromptRequest:
   type: object
-  description: Partial update to a prompt; at least one field required.
-  minProperties: 1
+  description: |
+    Replace the prompt's text and tags. Carries the owning slice in
+    `geoTargetId` + `languageCode` so the server can resolve the upstream
+    project without scanning. All four fields are required — the upstream
+    provider's API has no in-place update or GET-by-id, so the server runs
+    DELETE-old + POST-new and treats the body as the full next state.
+    Pass `tags: []` to clear tags.
+  required: [geoTargetId, languageCode, text, tags]
   properties:
+    geoTargetId:
+      type: integer
+      minimum: 1
+    languageCode:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
     text: { type: string }
     tags:
       type: array
       items: { type: string }
 
-SemrushBulkDeletePromptsRequest:
+SerenityBulkDeletePromptsRequest:
   type: object
-  required: [semrushIds]
+  required: [prompts]
   properties:
-    semrushIds:
+    prompts:
       type: array
       minItems: 1
       maxItems: 500
       items:
         type: object
-        required: [semrushProjectId, semrushPromptId]
+        required: [semrushPromptId, geoTargetId, languageCode]
         properties:
-          semrushProjectId: { type: string }
           semrushPromptId: { type: string }
+          geoTargetId: { type: integer, minimum: 1 }
+          languageCode:
+            type: string
+            pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
 
-SemrushBulkDeletePromptsResponse:
+SerenityBulkDeletePromptsResponse:
   type: object
   required: [deleted, failed]
   properties:
@@ -10100,35 +10097,28 @@ SemrushBulkDeletePromptsResponse:
       items:
         type: object
         properties:
-          semrushProjectId: { type: string }
           semrushPromptId: { type: string }
+          geoTargetId: { type: integer }
+          languageCode: { type: string }
           status: { type: integer }
           message: { type: string }
 
-SemrushProjectRow:
+SerenityMarket:
   type: object
-  description: One row from brand_to_semrush_projects enriched with live Semrush metadata.
-  required: [brandId, semrushProjectId, semrushLocationId, language]
+  description: |
+    A (brandId, geoTargetId, languageCode) slice configured for a brand.
+    The row's existence is the contract that the market is active.
+  required: [brandId, geoTargetId, languageCode]
   properties:
     brandId:
       type: string
       format: uuid
-    semrushProjectId: { type: string }
-    semrushLocationId:
+    geoTargetId:
       type: integer
       minimum: 1
-    language:
+    languageCode:
       type: string
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
-    name:
-      type: [string, 'null']
-      description: Semrush project display name (from live lookup); null when enrichment fails.
-    domain:
-      type: [string, 'null']
-      description: Semrush project domain (from live lookup); null when enrichment fails.
-    workspaceId:
-      type: [string, 'null']
-      format: uuid
     createdAt:
       oneOf:
         - $ref: '#/DateTime'
@@ -10138,131 +10128,88 @@ SemrushProjectRow:
         - $ref: '#/DateTime'
         - type: 'null'
 
-SemrushProjectListResponse:
+SerenityMarketListResponse:
   type: object
   required: [items]
   properties:
     items:
       type: array
-      items: { $ref: '#/SemrushProjectRow' }
-    enrichment:
-      type: string
-      enum: [failed]
-      description: |
-        Present and set to `failed` when the live-metadata lookup against
-        Semrush couldn't be completed. The `items` array still carries the
-        authoritative DB rows; only the `name`/`domain` enrichment is null.
+      items: { $ref: '#/SerenityMarket' }
 
-SemrushCreateProjectRequest:
+SerenityCreateMarketRequest:
   type: object
-  required: [name, market, language, brandDomain, brandNames]
+  required: [market, languageCode, brandDomain, brandNames]
   properties:
     name:
       type: string
-      description: Display name of the new Semrush AIO project.
+      description: |
+        Display name of the new market. Optional — defaults server-side to
+        `<brandDisplayName>-<6 hex>` to disambiguate re-create-after-delete
+        and avoid collisions in shared workspaces.
+    brandDisplayName:
+      type: string
+      description: Used as the prefix for the default name when `name` is omitted.
     market:
       type: string
-      description: ISO 2-letter country code; api-service resolves to semrush_location_id via locations.json.
+      description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.
       pattern: '^[A-Za-z]{2}$'
-    language:
+    languageCode:
       type: string
-      description: Lowercase BCP 47-shaped language tag (e.g. en, de, de-ch).
+      description: Lowercase BCP-47 primary subtag (e.g. en, de, de-ch).
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
     brandDomain:
       type: string
-      description: Brand domain Semrush should track (e.g. adobe.com).
+      description: Brand domain the upstream should track (e.g. adobe.com).
     brandNames:
       type: array
       minItems: 1
       items: { type: string }
-      description: Brand-name variants Semrush should match in model answers.
-    projectType:
-      type: string
-      enum: [aio]
-      default: aio
+      description: Brand-name variants the upstream should match in model answers.
 
-SemrushCreateProjectResponse:
-  type: object
-  required: [semrushProjectId, semrushLocationId, language, name, workspaceId]
-  properties:
-    semrushProjectId: { type: string }
-    semrushLocationId:
-      type: integer
-      minimum: 1
-    language:
-      type: string
-      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
-    name: { type: string }
-    workspaceId:
-      type: string
-      format: uuid
-
-SemrushTag:
+SerenityTag:
   type: object
   required: [id, name]
   properties:
     id: { type: string }
     name: { type: string }
 
-SemrushTagListResponse:
+SerenityTagListResponse:
   type: object
   required: [items]
   properties:
     items:
       type: array
-      items: { $ref: '#/SemrushTag' }
+      items: { $ref: '#/SerenityTag' }
 
-SemrushModel:
+SerenityModel:
   type: object
   required: [id, key]
   properties:
     id: { type: string }
     key:
       type: string
-      description: CBF_model value the Semrush Reporting API expects.
+      description: CBF_model value the Reporting API expects.
     name:
       type: [string, 'null']
     icon:
       type: [string, 'null']
 
-SemrushModelListResponse:
-  type: object
-  required: [items]
-  description: |
-    All list responses on this surface use `items` for consistency; that
-    includes models (formerly `models`) and workspace projects (formerly
-    `projects`). Clients reading either of the prior shapes should migrate.
-  properties:
-    items:
-      type: array
-      items: { $ref: '#/SemrushModel' }
-
-SemrushWorkspaceProject:
-  type: object
-  required: [id]
-  properties:
-    id: { type: string }
-    name:
-      type: [string, 'null']
-    domain:
-      type: [string, 'null']
-
-SemrushWorkspaceProjectListResponse:
+SerenityModelListResponse:
   type: object
   required: [items]
   properties:
     items:
       type: array
-      items: { $ref: '#/SemrushWorkspaceProject' }
+      items: { $ref: '#/SerenityModel' }
 
-SemrushErrorResponse:
+SerenityErrorResponse:
   type: object
   description: |
     Unified error envelope for the /serenity/* surface. `error` is a stable
-    machine-readable token (`invalidRequest`, `semrushUpstreamError`,
+    machine-readable token (`invalidRequest`, `serenityUpstreamError`,
     `sliceExists`, etc.); `message` is a sanitized human-readable summary.
-    Provider-specific detail (Semrush HTTP status, raw upstream body) is
-    deliberately NOT exposed — it is logged server-side instead.
+    Provider-specific detail (upstream HTTP status, raw body) is deliberately
+    NOT exposed — it is logged server-side instead.
   required: [error, message]
   properties:
     error: { type: string }
