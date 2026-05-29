@@ -1398,7 +1398,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         // M5–M8: Semrush provisioning path (cohort gate — LLMO-5007).
         // T3a (workspace check), T3b (fan-out), T3c (readiness validation)
         // will be implemented here.
-        log.info(`Serenity onboarding enabled for org ${organization.getId()} — Semrush provisioning steps will run here (LLMO-5007)`);
+        log.info(`Serenity onboarding enabled for org ${organization.getId()} — ${markets?.length ?? 0} market(s) to provision (LLMO-5007)`);
       }
 
       // Trigger Brandalf immediately after the v2 config exists so downstream

@@ -31,7 +31,9 @@ export const SERENITY_SITE_ALLOWLIST = 'SERENITY_SITE_ALLOWLIST';
  */
 export function isSerenityOnboardingEnabled(organizationId, imsOrgId, env) {
   const allowlist = env?.[SERENITY_SITE_ALLOWLIST];
-  if (!allowlist) return false;
+  if (!allowlist) {
+    return false;
+  }
   const allowed = allowlist.split(',').map((s) => s.trim()).filter(Boolean);
   return allowed.includes(organizationId) || allowed.includes(imsOrgId);
 }
