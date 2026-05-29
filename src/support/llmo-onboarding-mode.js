@@ -17,6 +17,7 @@ export const LLMO_BRANDALF_FLAG = 'brandalf';
 export const LLMO_BRANDALF_MIGRATION_FLAG = 'brandalf_migration';
 export const LLMO_ONBOARDING_MODE_V1 = 'v1';
 export const LLMO_ONBOARDING_MODE_V2 = 'v2';
+export const SERENITY_SITE_ALLOWLIST = 'SERENITY_SITE_ALLOWLIST';
 
 /**
  * Returns true if the given org is in the SERENITY_SITE_ALLOWLIST env var, which
@@ -29,7 +30,7 @@ export const LLMO_ONBOARDING_MODE_V2 = 'v2';
  * @returns {boolean}
  */
 export function isSerenityOnboardingEnabled(organizationId, imsOrgId, env) {
-  const allowlist = env?.SERENITY_SITE_ALLOWLIST;
+  const allowlist = env?.[SERENITY_SITE_ALLOWLIST];
   if (!allowlist) return false;
   const allowed = allowlist.split(',').map((s) => s.trim()).filter(Boolean);
   return allowed.includes(organizationId) || allowed.includes(imsOrgId);
