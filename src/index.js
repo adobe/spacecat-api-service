@@ -364,9 +364,6 @@ async function run(request, context) {
       if (params.jobId && !isValidUUIDAnyVersion(params.jobId)) {
         return badRequest('Job Id is invalid. Please provide a valid UUID.');
       }
-      if (params.workspaceId && !isValidUUID(params.workspaceId)) {
-        return badRequest('Workspace Id is invalid. Please provide a valid UUID.');
-      }
       context.params = params;
       context.request = request;
 
