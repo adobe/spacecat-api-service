@@ -1272,6 +1272,11 @@ llmo-onboard:
           Partial success — LLMO onboarding completed but one or more Semrush project
           provisioning steps failed. Successfully created projects are not rolled back.
           Re-invoking with the same `markets[]` is safe (already-created slices are skipped).
+
+          The body carries the same onboarding fields as the 200 response (message,
+          domain, brandName, imsOrgId, organizationId, siteId, status, …) in addition
+          to the `requested`/`succeeded`/`failed` arrays below. Only cohort
+          (`SERENITY_SITE_ALLOWLIST`) onboardings can return 207; all others return 200.
         content:
           application/json:
             schema:

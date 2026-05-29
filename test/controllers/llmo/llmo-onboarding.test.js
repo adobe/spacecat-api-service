@@ -3837,6 +3837,133 @@ describe('LLMO Onboarding Functions', () => {
     });
   });
 
+  describe('reconcileSerenityProjects (LLMO-5205)', () => {
+    // resolveLocation: US → 2840, DE → 2276 (2000 + ISO 3166-1 numeric).
+    const dbRow = (locationId, language, projectId) => ({
+      getSemrushLocationId: () => locationId,
+      getLanguage: () => language,
+      getSemrushProjectId: () => projectId,
+    });
+
+    const makeContext = (rows, { throws = false } = {}) => ({
+      log: { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() },
+      dataAccess: {
+        BrandSemrushProject: {
+          allByBrandId: throws
+            ? sinon.stub().rejects(new Error('db down'))
+            : sinon.stub().resolves(rows),
+        },
+      },
+    });
+
+    const loadReconcile = async () => {
+      const mod = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+      return mod.reconcileSerenityProjects;
+    };
+
+    it('returns the fan-out result unchanged when nothing was requested', async () => {
+      const reconcileSerenityProjects = await loadReconcile();
+      const fanOut = { requested: [], succeeded: [], failed: [] };
+      const ctx = makeContext([]);
+      const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
+      expect(res).to.deep.equal(fanOut);
+      expect(ctx.dataAccess.BrandSemrushProject.allByBrandId).to.not.have.been.called;
+    });
+
+    it('returns the fan-out result unchanged when the brand id is missing', async () => {
+      const reconcileSerenityProjects = await loadReconcile();
+      const fanOut = {
+        requested: [{ market: 'US', language: 'en' }],
+        succeeded: [],
+        failed: [{
+          market: 'US', language: 'en', status: 500, error: 'brandNotCreated',
+        }],
+      };
+      const ctx = makeContext([]);
+      const res = await reconcileSerenityProjects(ctx, { brandId: undefined, fanOut });
+      expect(res).to.deep.equal(fanOut);
+      expect(ctx.dataAccess.BrandSemrushProject.allByBrandId).to.not.have.been.called;
+    });
+
+    it('marks every requested tuple with a DB row as succeeded', async () => {
+      const reconcileSerenityProjects = await loadReconcile();
+      const fanOut = {
+        requested: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
+        succeeded: [],
+        failed: [],
+      };
+      const ctx = makeContext([dbRow(2840, 'en', 'p-us'), dbRow(2276, 'de', 'p-de')]);
+      const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
+      expect(res.failed).to.be.empty;
+      expect(res.succeeded).to.deep.equal([
+        {
+          market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+        },
+        {
+          market: 'DE', language: 'de', semrushProjectId: 'p-de', semrushLocationId: 2276,
+        },
+      ]);
+    });
+
+    it('marks a tuple with no DB row as failed, enriched with the fan-out error', async () => {
+      const reconcileSerenityProjects = await loadReconcile();
+      const fanOut = {
+        requested: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
+        succeeded: [],
+        failed: [{
+          market: 'DE', language: 'de', status: 502, error: 'semrushUpstreamError',
+        }],
+      };
+      const ctx = makeContext([dbRow(2840, 'en', 'p-us')]); // DE row missing
+      const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
+      expect(res.succeeded).to.deep.equal([
+        {
+          market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+        },
+      ]);
+      expect(res.failed).to.deep.equal([
+        {
+          market: 'DE', language: 'de', status: 502, error: 'semrushUpstreamError',
+        },
+      ]);
+    });
+
+    it('flags a silently-missing row as projectRowMissing even when the fan-out reported success', async () => {
+      const reconcileSerenityProjects = await loadReconcile();
+      const fanOut = {
+        requested: [{ market: 'US', language: 'en' }],
+        // Fan-out thought it succeeded, but the row never landed (201-but-no-insert).
+        succeeded: [{
+          market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+        }],
+        failed: [],
+      };
+      const ctx = makeContext([]); // authoritative read-back: no rows
+      const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
+      expect(res.succeeded).to.be.empty;
+      expect(res.failed).to.deep.equal([
+        {
+          market: 'US', language: 'en', status: 500, error: 'projectRowMissing',
+        },
+      ]);
+    });
+
+    it('falls back to the fan-out result when the read-back throws', async () => {
+      const reconcileSerenityProjects = await loadReconcile();
+      const fanOut = {
+        requested: [{ market: 'US', language: 'en' }],
+        succeeded: [{
+          market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+        }],
+        failed: [],
+      };
+      const ctx = makeContext([], { throws: true });
+      const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
+      expect(res).to.deep.equal(fanOut);
+      expect(ctx.log.error).to.have.been.called;
+    });
+  });
+
   describe('buildInitialCustomerConfigV2', () => {
     it('builds a single active brand config for onboarding', async () => {
       const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});

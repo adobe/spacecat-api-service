@@ -3748,6 +3748,67 @@ describe('LlmoController', () => {
       const body = await result.json();
       expect(body.message).to.match(/Semrush workspace not bound to org org-1/);
     });
+
+    it('should return 207 when some Semrush projects failed to provision (LLMO-5205)', async () => {
+      const stub = sinon.stub().resolves({
+        siteId: 'new-site-id',
+        organizationId: 'new-org-id',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO onboarding completed successfully',
+        serenity: {
+          requested: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
+          succeeded: [{
+            market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+          }],
+          failed: [{
+            market: 'DE', language: 'de', status: 502, error: 'semrushUpstreamError',
+          }],
+        },
+      });
+      const ctrl = await makeOnboardController(stub);
+
+      const result = await ctrl.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(207);
+      const body = await result.json();
+      // Carries the standard onboarding fields plus the per-tuple arrays.
+      expect(body.siteId).to.equal('new-site-id');
+      expect(body.status).to.equal('completed');
+      expect(body.requested).to.have.length(2);
+      expect(body.succeeded).to.deep.equal([{
+        market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+      }]);
+      expect(body.failed).to.deep.equal([{
+        market: 'DE', language: 'de', status: 502, error: 'semrushUpstreamError',
+      }]);
+    });
+
+    it('should return 200 with the provisioning arrays when all Semrush projects succeeded (LLMO-5205)', async () => {
+      const stub = sinon.stub().resolves({
+        siteId: 'new-site-id',
+        organizationId: 'new-org-id',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO onboarding completed successfully',
+        serenity: {
+          requested: [{ market: 'US', language: 'en' }],
+          succeeded: [{
+            market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+          }],
+          failed: [],
+        },
+      });
+      const ctrl = await makeOnboardController(stub);
+
+      const result = await ctrl.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.failed).to.deep.equal([]);
+      expect(body.succeeded).to.have.length(1);
+      expect(body.status).to.equal('completed');
+    });
   });
 
   describe('offboardCustomer', () => {
