@@ -411,6 +411,19 @@ describe('SerenityController', () => {
       expect(handlers.handleGetMarket).not.to.have.been.called;
     });
 
+    it('getMarket forwards null for an empty languageCode path segment (handler 400s)', async () => {
+      handlers.handleGetMarket.rejects(
+        new ErrorWithStatusCode('languageCode must match', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: '' },
+      }));
+      expect(response.status).to.equal(400);
+      // Exercises the `: null` side of the `pLang ? ...toLowerCase() : null` guard.
+      expect(handlers.handleGetMarket.firstCall.args[3]).to.equal(null);
+    });
+
     it('upstream SerenityTransportError maps to 502 envelope without leaking provider detail', async () => {
       handlers.handleListMarkets.rejects(new MockTransportError(503, 'upstream down', { secret: 'leak' }));
       const controller = SerenityController({ env: {} }, fakeLog(), {});
