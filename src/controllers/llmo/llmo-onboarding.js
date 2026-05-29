@@ -1245,7 +1245,7 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
-    tempOnboarding, region,
+    tempOnboarding, region, markets,
   } = params;
   const { env, log } = context;
 
