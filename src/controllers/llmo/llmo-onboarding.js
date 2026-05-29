@@ -15,7 +15,9 @@ import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import {
+  composeBaseURL, tracingFetch as fetch, isNonEmptyArray, hasText,
+} from '@adobe/spacecat-shared-utils';
 import SeoClient from '@adobe/mysticat-shared-seo-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
@@ -36,6 +38,8 @@ import {
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
+import { handleCreateProject } from '../../support/serenity/handlers/projects.js';
+import { createSerenityTransport } from '../../support/serenity/rest-transport.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1227,6 +1231,150 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 }
 
 /**
+ * Extracts the IMS user bearer token from the request context, mirroring the
+ * Serenity controller's `requireImsBearer` but non-throwing — the fan-out is
+ * best-effort, so a missing/incompatible token is recorded as a per-tuple
+ * failure rather than aborting onboarding.
+ *
+ * @param {object} context - The request context.
+ * @returns {string|null} The bearer token, or null when absent / non-IMS auth.
+ */
+function extractImsBearer(context) {
+  // The Semrush gateway only understands IMS user tokens; anything else
+  // (scoped API key, S2S JWT) cannot be forwarded.
+  const authInfo = context?.attributes?.authInfo;
+  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+    return null;
+  }
+  const header = context?.pathInfo?.headers?.authorization;
+  if (!hasText(header) || !header.startsWith('Bearer ')) {
+    return null;
+  }
+  return header.substring('Bearer '.length);
+}
+
+/**
+ * M7 (LLMO-5204): fan out one Semrush project per (market, language) tuple by
+ * calling the already-shipped AIO Proxy handler (`handleCreateProject`)
+ * in-process, once per tuple, sequentially.
+ *
+ * Best-effort per LLMO-5007 §M7: a per-tuple failure is collected, not thrown,
+ * and does not abort the remaining tuples — there is no retry and no rollback.
+ * A 409 (slice already exists) counts as success so re-invoking onboarding with
+ * the same `markets[]` is idempotent (the proxy 409-dedupes via `findBySlice`).
+ *
+ * Returns `{ requested, succeeded, failed }`; the authoritative read-back and
+ * 200/207 response shaping happen in M8 (LLMO-5205, T3c).
+ *
+ * @param {object} context - The request context (env, log, dataAccess, auth).
+ * @param {object} args
+ * @param {string} args.brandId - The brand UUID (from M4 `upsertBrand`).
+ * @param {string} args.workspaceId - The org's Semrush workspace ID (M5-validated).
+ * @param {string} args.brandName - The brand name from the onboard request.
+ * @param {string} args.baseURL - The site base URL; its hostname is sent as `brandDomain`.
+ * @param {Array<{market: string, language: string}>} [args.markets] - Tuples to provision.
+ * @returns {Promise<{requested: object[], succeeded: object[], failed: object[]}>}
+ */
+export async function performSerenityFanOut(context, {
+  brandId, workspaceId, brandName, baseURL, markets,
+}) {
+  const { env, log } = context;
+  const requested = (Array.isArray(markets) ? markets : [])
+    .map(({ market, language }) => ({ market, language }));
+  const succeeded = [];
+  const failed = [];
+
+  if (requested.length === 0) {
+    return { requested, succeeded, failed };
+  }
+
+  const failAll = (status, error) => {
+    requested.forEach(({ market, language }) => failed.push({
+      market, language, status, error,
+    }));
+    return { requested, succeeded, failed };
+  };
+
+  // The brand row is M4's responsibility; if it failed to write we have no
+  // slice key to provision against. Surface, don't throw.
+  if (!hasText(brandId)) {
+    log.warn(`Serenity fan-out: brand row missing — cannot provision ${requested.length} market(s)`);
+    return failAll(500, 'brandNotCreated');
+  }
+
+  const imsToken = extractImsBearer(context);
+  if (!imsToken) {
+    log.warn(`Serenity fan-out: no IMS bearer on the onboarding request — cannot provision ${requested.length} market(s) for brand ${brandId}`);
+    return failAll(401, 'missingImsBearer');
+  }
+
+  let transport;
+  try {
+    transport = createSerenityTransport({ env, imsToken });
+  } catch (transportError) {
+    log.error(`Serenity fan-out: failed to build Semrush transport: ${transportError.message}`);
+    return failAll(transportError.status || 502, 'transportUnavailable');
+  }
+
+  const brandSlug = generateBrandId(brandName.trim());
+  const brandDomain = new URL(baseURL).hostname;
+
+  for (const { market, language } of requested) {
+    const body = {
+      name: `${brandSlug} · ${market} · ${language}`,
+      market,
+      language,
+      brandDomain,
+      brandNames: [brandName.trim()],
+      projectType: 'ai',
+    };
+
+    let outcome;
+    try {
+      // Sequential by design (prototype): one upstream create+publish at a time.
+      // eslint-disable-next-line no-await-in-loop
+      outcome = await handleCreateProject(
+        transport,
+        context.dataAccess,
+        brandId,
+        workspaceId,
+        body,
+        log,
+      );
+    } catch (e) {
+      // SerenityTransportError (upstream non-2xx) or an unexpected throw —
+      // record and continue with the next tuple.
+      failed.push({
+        market, language, status: e.status || 502, error: e.message,
+      });
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    // 201 = newly created; 409 = slice already exists (idempotent success).
+    if (outcome.status === 201 || outcome.status === 409) {
+      succeeded.push({
+        market,
+        language,
+        semrushProjectId: outcome.body?.semrushProjectId,
+        ...(outcome.body?.semrushLocationId !== undefined
+          ? { semrushLocationId: outcome.body.semrushLocationId }
+          : {}),
+      });
+    } else {
+      failed.push({
+        market,
+        language,
+        status: outcome.status,
+        error: outcome.body?.error || 'unknownError',
+      });
+    }
+  }
+
+  return { requested, succeeded, failed };
+}
+
+/**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
  * @param {string} [params.domain] - The domain name (alternative to baseURL)
@@ -1255,6 +1403,8 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
   let site;
   let detectedCdn = null;
+  // M7 fan-out result (LLMO-5204); consumed by the M8 response shaping (LLMO-5205).
+  let serenityProvisioning = null;
   try {
     log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, baseURL ${baseURL}, brand ${brandName}`);
 
@@ -1404,8 +1554,9 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
       // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
       // and would fail the exact-match lookup against the sites table.
+      let upsertedBrand;
       try {
-        await upsertBrand({
+        upsertedBrand = await upsertBrand({
           organizationId: organization.getId(),
           brand: {
             name: brandName.trim(),
@@ -1423,11 +1574,18 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       }
 
       if (serenityEnabled) {
-        // M6–M8: Semrush provisioning path (cohort gate — LLMO-5007).
-        // Workspace presence was already validated at M5 (fail-fast, above).
-        // T3b (fan-out — LLMO-5204) and T3c (readiness validation — LLMO-5205)
-        // will be implemented here.
+        // M6–M8 (LLMO-5007): Semrush provisioning path. M5 already validated the
+        // workspace presence above. T3b fans out one project per market tuple;
+        // T3c (LLMO-5205) will shape the 200/207 response from the result.
         log.info(`Serenity onboarding enabled for org ${organization.getId()} — ${markets?.length ?? 0} market(s) to provision (LLMO-5007)`);
+        serenityProvisioning = await performSerenityFanOut(context, {
+          brandId: upsertedBrand?.id,
+          workspaceId: organization.getSemrushWorkspaceId(),
+          brandName,
+          baseURL,
+          markets,
+        });
+        log.info(`Serenity fan-out for org ${organization.getId()}: ${serenityProvisioning.succeeded.length} of ${serenityProvisioning.requested.length} project(s) provisioned, ${serenityProvisioning.failed.length} failed (LLMO-5007)`);
       }
 
       // Trigger Brandalf immediately after the v2 config exists so downstream
@@ -1515,6 +1673,9 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       dataFolder,
       detectedCdn,
       message: 'LLMO onboarding completed successfully',
+      // M7 fan-out outcome for the cohort; absent for non-serenity onboardings.
+      // M8 (LLMO-5205) shapes this into the 200/207 response.
+      ...(serenityProvisioning ? { serenity: serenityProvisioning } : {}),
     };
   } catch (error) {
     // Pre-flight failures (e.g. the M5 missing-workspace 404) throw before any
