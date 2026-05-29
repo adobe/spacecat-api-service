@@ -4,7 +4,7 @@
 
 **Goal:** Make the GitHub PR-review trigger gate per-destination by threading a `reviewerLogin` from each `GITHUB_TARGETS` entry through the HMAC auth profile into `getSkipReason`, so a non-`default` (enterprise-matched) target like `ghec` reacts to its own reviewer account instead of the global `MysticatBot`.
 
-**Architecture:** The web tier classifies each signed webhook to a target (`parseTargets`/`classify`) and verifies HMAC in `GitHubWebhookHmacHandler`. This change adds a validated, required-for-non-`default` `reviewerLogin` field to each target, attaches the matched target's value onto the post-verify auth profile as `reviewer_login`, and has `WebhooksController` resolve `profile.reviewer_login || env.GITHUB_REVIEWER_LOGIN` and pass it as a 5th arg to `getSkipReason`. `getSkipReason` gains a 5th param defaulting to `env.GITHUB_REVIEWER_LOGIN`, so existing 3/4-arg callers and the legacy/`default` path are unchanged. The `${appSlug}[bot]` tail is retained as the extension point for a future App-bot destination.
+**Architecture:** The web tier classifies each signed webhook to a target (`parseTargets`/`classify`) and verifies HMAC in `GitHubWebhookHmacHandler`. This change adds a validated, required-for-non-`default` `reviewerLogin` field to each target, attaches the matched target's value onto the post-verify auth profile as `reviewer_login`, and has `WebhooksController` resolve `profile.reviewer_login || env.GITHUB_REVIEWER_LOGIN` and pass it as a 5th arg to `getSkipReason`. `getSkipReason` gains a 5th param defaulting to `env.GITHUB_REVIEWER_LOGIN`, so existing 3/4-arg callers and the legacy/`default` path are unchanged. The `${appSlug}[bot]` tail is retained as the extension point for a future App-bot destination. The env fallback appearing in both the controller and the `getSkipReason` default is intentional and mirrors the sibling `appSlug` handling (`profile.app_slug || env.GITHUB_APP_SLUG` plus a function default); because unset env vars are `undefined` (never `null`), the controller's `||` returns `undefined` and the function default fires correctly, so there is no null/undefined gap.
 
 **Tech Stack:** Node.js >=24 (ESM), Mocha 11 (`--parallel`), Chai 6 `expect`, Sinon 22 (sandboxes), `esmock` for module mocks, c8 coverage, ESLint 9 (`@adobe/eslint-config-helix`).
 
@@ -18,7 +18,7 @@
 
 | File | Status | Responsibility |
 |------|--------|----------------|
-| `src/support/github-targets.js` | modify | `parseTargets` validates a new per-entry `reviewerLogin`: required when the entry is non-`default` (matched by `match.enterpriseSlug`), optional on the `match.default === true` entry; when present must match `^[A-Za-z0-9][A-Za-z0-9-_]*(\[bot\])?$` and be <= 64 chars. |
+| `src/support/github-targets.js` | modify | `parseTargets` validates a new per-entry `reviewerLogin`: required when the entry is non-`default` (matched by `match.enterpriseSlug`), optional on the `match.default === true` entry; when present must match `^[A-Za-z0-9][A-Za-z0-9_-]*(\[bot\])?$` and be <= 64 chars. |
 | `test/support/github-targets.test.js` | modify | Tests: accept `reviewerLogin` on a non-`default` entry; allow omission on the `default` entry; throw when a non-`default` entry omits it; throw on bad charset; throw when too long. |
 | `src/support/github-webhook-hmac-handler.js` | modify | Registry path attaches the matched target's `reviewerLogin` to the auth profile as `reviewer_login`; legacy/no-match paths attach nothing (unchanged). |
 | `test/support/github-webhook-hmac-handler.test.js` | modify | Tests: profile carries `reviewer_login` on a matched target; legacy path profile has no `reviewer_login`. |
@@ -121,8 +121,8 @@ Steps:
     if (t.reviewerLogin !== undefined) {
       if (typeof t.reviewerLogin !== 'string'
         || t.reviewerLogin.length > 64
-        || !/^[A-Za-z0-9][A-Za-z0-9-_]*(\[bot\])?$/.test(t.reviewerLogin)) {
-        throw new Error(`GITHUB_TARGETS["${t.id}"].reviewerLogin must match ^[A-Za-z0-9][A-Za-z0-9-_]*(\\[bot\\])?$ and be at most 64 chars`);
+        || !/^[A-Za-z0-9][A-Za-z0-9_-]*(\[bot\])?$/.test(t.reviewerLogin)) {
+        throw new Error(`GITHUB_TARGETS["${t.id}"].reviewerLogin must match ^[A-Za-z0-9][A-Za-z0-9_-]*(\\[bot\\])?$ and be at most 64 chars`);
       }
     }
   ```
@@ -133,11 +133,9 @@ Steps:
   ```
   Expected: all `reviewerLogin` tests green.
 
-- [ ] **Step 5: Run the full file, expect PASS (no regressions).**
-  ```bash
-  npx mocha test/support/github-targets.test.js
-  ```
-  Expected: all `github-targets` tests green (existing `VALID_TARGETS` has no `reviewerLogin`, but its non-`default` `ghec` entry now requires one — see note). NOTE: the existing top-level `VALID_TARGETS` fixture has a `ghec` (non-`default`) entry WITHOUT `reviewerLogin`, so the existing `parseTargets`/`classify` tests that consume it would now throw. Before running, update `VALID_TARGETS` (top of file) to add `reviewerLogin` to its `ghec` entry only:
+- [ ] **Step 5: Patch existing fixtures FIRST (before the full-file run).** The required-for-non-`default` check makes any pre-existing non-`default` fixture that lacks a `reviewerLogin` throw, so patch these before running the file or the run goes red.
+
+  The top-level `VALID_TARGETS` fixture has a `ghec` (non-`default`) entry without `reviewerLogin` - add it to the `ghec` entry only:
   ```js
   const VALID_TARGETS = JSON.stringify([
     {
@@ -148,14 +146,21 @@ Steps:
     },
   ]);
   ```
-  Also update the in-file fixtures that build a non-`default` entry and are expected to PARSE SUCCESSFULLY: the `dup`, `defaultFirst`, and `enterpriseSlug contains non-string` fixtures all throw on an EARLIER check (duplicate id / must-be-last / non-string slug) than the new `reviewerLogin` check, so they are unaffected. The `noDefault` fixture (`throws when there is not exactly one`) builds a single non-`default` `ghec` entry and reaches the per-entry loop: it now throws `reviewerLogin` BEFORE the `exactly one` check. Add `reviewerLogin: 'r'` to that fixture's entry so it still reaches and asserts the `exactly one` throw:
+  The `noDefault` fixture (`throws when there is not exactly one`) builds a single non-`default` `ghec` entry and now reaches the per-entry loop, so it would throw on `reviewerLogin` BEFORE the `exactly one` check. Add `reviewerLogin: 'r'` so it still asserts the `exactly one` throw:
   ```js
     const noDefault = JSON.stringify([{
       id: 'ghec', match: { enterpriseSlug: ['a'] }, appSlug: 's', reviewerLogin: 'r', webhookSecretEnvVar: 'V',
     }]);
   ```
+  The `dup`, `defaultFirst`, and `enterpriseSlug contains non-string` fixtures each throw on an EARLIER check (duplicate id / must-be-last / non-string slug) than the new `reviewerLogin` check, so they need no change.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 6: Run the full file, expect PASS (no regressions).**
+  ```bash
+  npx mocha test/support/github-targets.test.js
+  ```
+  Expected: all `github-targets` tests green.
+
+- [ ] **Step 7: Commit.**
   ```bash
   git add src/support/github-targets.js test/support/github-targets.test.js && git commit -m "feat(github-targets): validate per-target reviewerLogin (required for non-default)"
   ```
@@ -366,7 +371,7 @@ Steps:
 
 ### Task 4: Controller resolves and passes `reviewerLogin`
 
-The controller already reads `profile` at `ctx.attributes?.authInfo?.getProfile?.() || {}`. Resolve `reviewerLogin` next to the existing `appSlug` resolution and pass it as the 5th arg to `getSkipReason`. Precedence: `profile.reviewer_login` (set for non-`default` targets) -> `env.GITHUB_REVIEWER_LOGIN` (the `default`/legacy path).
+The controller already reads `profile` at `ctx.attributes?.authInfo?.getProfile?.() || {}`. Resolve `reviewerLogin` next to the existing `appSlug` resolution and pass it as the 5th arg to `getSkipReason`. Precedence: `profile.reviewer_login` (set for non-`default` targets) -> `env.GITHUB_REVIEWER_LOGIN` (the `default`/legacy path). This is the same dual-fallback shape as the adjacent `appSlug` resolution and is safe: an unset env var is `undefined` (not `null`), so when the controller passes `undefined` the function-level default resolves it - one resolver for the webhook path here, the function default only for direct/legacy callers.
 
 **Files:**
 - `src/controllers/webhooks.js` (add the `reviewerLogin` resolution near the `appSlug` line at line 102; change the `getSkipReason` call at line 148)
