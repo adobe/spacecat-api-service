@@ -1,3 +1,17 @@
+# [1.526.0](https://github.com/adobe/spacecat-api-service/compare/v1.525.0...v1.526.0) (2026-05-29)
+
+
+### Features
+
+* **suggestions:** prefer x-promise-token header over IMS token creation in auto-fix flow ([#2507](https://github.com/adobe/spacecat-api-service/issues/2507)) ([643a08a](https://github.com/adobe/spacecat-api-service/commit/643a08a5f3efbfa53936cef31f772554a1b71c7c))
+
+# [1.525.0](https://github.com/adobe/spacecat-api-service/compare/v1.524.0...v1.525.0) (2026-05-28)
+
+
+### Features
+
+* auto-create org entitlement and site enrollment via x-product header upon new site/org creation ([#2432](https://github.com/adobe/spacecat-api-service/issues/2432)) ([acdcc1b](https://github.com/adobe/spacecat-api-service/commit/acdcc1bc8e6f3e1425900fab427affb4aa7ab7d6))
+
 # [1.524.0](https://github.com/adobe/spacecat-api-service/compare/v1.523.0...v1.524.0) (2026-05-28)
 
 
