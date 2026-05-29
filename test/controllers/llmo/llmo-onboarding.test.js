@@ -15,6 +15,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { testDetermineOverrideBaseURL } from './test-helpers.js';
+import { SERENITY_SITE_ALLOWLIST } from '../../../src/support/llmo-onboarding-mode.js';
 
 use(sinonChai);
 
@@ -3490,7 +3491,7 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: { ...mockEnv, SERENITY_SITE_ALLOWLIST: 'org-serenity-cohort,org-other' },
+        env: { ...mockEnv, [SERENITY_SITE_ALLOWLIST]: 'org-serenity-cohort,org-other' },
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
@@ -3568,7 +3569,7 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: { ...mockEnv, SERENITY_SITE_ALLOWLIST: 'org-other' },
+        env: { ...mockEnv, [SERENITY_SITE_ALLOWLIST]: 'org-other' },
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 

@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 
 import {
   LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT,
+  SERENITY_SITE_ALLOWLIST,
   hasPreBrandalfSites,
   isSerenityOnboardingEnabled,
   readBrandalfFlagOverride,
@@ -675,26 +676,26 @@ describe('llmo-onboarding-mode', () => {
   describe('isSerenityOnboardingEnabled', () => {
     it('returns false when SERENITY_SITE_ALLOWLIST is not set', () => {
       expect(isSerenityOnboardingEnabled('org-1', 'ims-1', {})).to.be.false;
-      expect(isSerenityOnboardingEnabled('org-1', 'ims-1', { SERENITY_SITE_ALLOWLIST: '' })).to.be.false;
+      expect(isSerenityOnboardingEnabled('org-1', 'ims-1', { [SERENITY_SITE_ALLOWLIST]: '' })).to.be.false;
     });
 
     it('returns true when SpaceCat org ID is in the allowlist', () => {
-      const env = { SERENITY_SITE_ALLOWLIST: 'org-1,org-2' };
+      const env = { [SERENITY_SITE_ALLOWLIST]: 'org-1,org-2' };
       expect(isSerenityOnboardingEnabled('org-1', 'other-ims', env)).to.be.true;
     });
 
     it('returns true when IMS org ID is in the allowlist', () => {
-      const env = { SERENITY_SITE_ALLOWLIST: 'ABC123@AdobeOrg' };
+      const env = { [SERENITY_SITE_ALLOWLIST]: 'ABC123@AdobeOrg' };
       expect(isSerenityOnboardingEnabled('other-org', 'ABC123@AdobeOrg', env)).to.be.true;
     });
 
     it('returns false when neither org ID matches the allowlist', () => {
-      const env = { SERENITY_SITE_ALLOWLIST: 'org-x,org-y' };
+      const env = { [SERENITY_SITE_ALLOWLIST]: 'org-x,org-y' };
       expect(isSerenityOnboardingEnabled('org-1', 'ims-1', env)).to.be.false;
     });
 
     it('trims whitespace around allowlist entries', () => {
-      const env = { SERENITY_SITE_ALLOWLIST: ' org-1 , org-2 ' };
+      const env = { [SERENITY_SITE_ALLOWLIST]: ' org-1 , org-2 ' };
       expect(isSerenityOnboardingEnabled('org-1', 'ims-1', env)).to.be.true;
     });
 
