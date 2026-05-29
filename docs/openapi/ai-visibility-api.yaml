@@ -1246,9 +1246,10 @@ ai-visibility-v1-topic-gap-topics-totals:
     summary: Get gap topics per-kind counts (Topic v2)
     description: |
       Returns only the per-kind totals for gap topics using Semrush `TopicService` v2
-      `GapTopicsTotals`. Accepts the same filter parameters as
-      `GET /llmo/ai-visibility/v1/topic/gap-topics` (`searchQuery`, `volumeFrom`/`volumeTo`,
-      `gapKinds`) but no pagination or sort parameters.
+      `GapTopicsTotals`. Accepts `searchQuery` and `volumeFrom`/`volumeTo` filter parameters
+      (same semantics as `GET /llmo/ai-visibility/v1/topic/gap-topics`) but no pagination,
+      sort, or `gapKinds` parameters. The response always includes totals for all gap kinds —
+      `GapTopicsTotals` returns a per-kind breakdown unconditionally.
 
       Use this endpoint to populate the Topic Opportunities tab badge count without fetching
       full paginated data.
@@ -1259,7 +1260,6 @@ ai-visibility-v1-topic-gap-topics-totals:
       - *countryParam
       - *regionParam
       - *engineParam
-      - *v1GapTopicsGapKindsParam
       - *v1BrandTopicsSearchQueryParam
       - *v1BrandTopicsVolumeFromParam
       - *v1BrandTopicsVolumeToParam
