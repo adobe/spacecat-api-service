@@ -19,6 +19,23 @@ export const LLMO_ONBOARDING_MODE_V1 = 'v1';
 export const LLMO_ONBOARDING_MODE_V2 = 'v2';
 
 /**
+ * Returns true if the given org is in the SERENITY_SITE_ALLOWLIST env var, which
+ * gates the Semrush provisioning path (M5–M8) during the cohort prototype phase.
+ * Matches against both the SpaceCat org ID and the IMS org ID.
+ *
+ * @param {string} organizationId - SpaceCat org ID
+ * @param {string} imsOrgId - IMS org ID
+ * @param {object} env - Environment variables object
+ * @returns {boolean}
+ */
+export function isSerenityOnboardingEnabled(organizationId, imsOrgId, env) {
+  const allowlist = env?.SERENITY_SITE_ALLOWLIST;
+  if (!allowlist) return false;
+  const allowed = allowlist.split(',').map((s) => s.trim()).filter(Boolean);
+  return allowed.includes(organizationId) || allowed.includes(imsOrgId);
+}
+
+/**
  * Brandalf GA cutoff in Unix epoch milliseconds (2026-04-01T00:00:00Z).
  * Any site whose createdAt is strictly before this value is treated as v1 (legacy).
  * Override per-environment via LLMO_BRANDALF_GA_CUTOFF_MS without a full redeploy.
