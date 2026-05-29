@@ -1109,7 +1109,10 @@ llmo-onboard:
                     language:
                       type: string
                       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
-                      description: BCP-47 primary language subtag (lowercase).
+                      description: |
+                        BCP-47 language tag (lowercase). Accepts a primary subtag
+                        or primary + script/region subtag (e.g. en, de, zh-hans).
+                        Lowercase is enforced as a normalization choice.
                       example: "en"
                 example:
                   - market: "US"
@@ -1223,95 +1226,12 @@ llmo-onboard:
                     the request body; omitted when the DRS default ('US')
                     applies.
                   example: "IN"
-                requested:
-                  type: array
-                  description: The markets tuples that were requested for Semrush provisioning. Present only for cohort orgs.
-                  items:
-                    type: object
-                    properties:
-                      market:
-                        type: string
-                      language:
-                        type: string
-                succeeded:
-                  type: array
-                  description: Tuples for which a Semrush project was successfully created.
-                  items:
-                    type: object
-                    properties:
-                      market:
-                        type: string
-                      language:
-                        type: string
-                      semrushProjectId:
-                        type: string
-                      semrushLocationId:
-                        type: integer
-                failed:
-                  type: array
-                  description: Tuples for which Semrush project creation failed. Present on 207 responses.
-                  items:
-                    type: object
-                    properties:
-                      market:
-                        type: string
-                      language:
-                        type: string
-                      status:
-                        type: integer
-                      error:
-                        type: string
               required:
                 - message
                 - domain
                 - brandName
                 - imsOrgId
                 - status
-      '207':
-        description: |
-          Partial success — LLMO onboarding completed but one or more Semrush project
-          provisioning steps failed. Successfully created projects are not rolled back.
-          Re-invoking with the same `markets[]` is safe (already-created slices are skipped).
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                requested:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      market:
-                        type: string
-                      language:
-                        type: string
-                succeeded:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      market:
-                        type: string
-                      language:
-                        type: string
-                      semrushProjectId:
-                        type: string
-                      semrushLocationId:
-                        type: integer
-                failed:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      market:
-                        type: string
-                      language:
-                        type: string
-                      status:
-                        type: integer
-                      error:
-                        type: string
       '400':
         $ref: './responses.yaml#/400'
       '401':

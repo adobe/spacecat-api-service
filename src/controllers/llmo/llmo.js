@@ -95,6 +95,10 @@ const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
 const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
+const ISO_ALPHA2_UPPER_REGEX = /^[A-Z]{2}$/;
+// BCP-47 primary + optional script/region subtag (all lowercase as a normalization choice;
+// real BCP-47 script subtags are title-case but we enforce lowercase to prevent drift).
+const BCP47_LANGUAGE_REGEX = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
 
 /** Site IDs for which HLX `brandpresence` sheet data is blocked (PG migration). */
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
@@ -959,7 +963,7 @@ function LlmoController(ctx) {
       // LLMO-4683: optional ISO 3166-1 alpha-2 region for V1 prompt generation.
       // Forwarded to DRS so the GPT prompt-gen job conditions on the brand's market.
       // Omitted → DRS client default ('US') applies, preserving prior behavior.
-      if (region !== undefined && !/^[A-Z]{2}$/.test(region)) {
+      if (region !== undefined && !ISO_ALPHA2_UPPER_REGEX.test(region)) {
         return badRequest('Invalid region. Must be an ISO 3166-1 alpha-2 country code (e.g. US, IN, BR)');
       }
 
@@ -977,11 +981,11 @@ function LlmoController(ctx) {
           if (!entry || typeof entry !== 'object') {
             return badRequest('Each markets entry must be an object with market and language');
           }
-          if (!/^[A-Z]{2}$/.test(entry.market)) {
+          if (!ISO_ALPHA2_UPPER_REGEX.test(entry.market)) {
             return badRequest(`Invalid market "${entry.market}". Must be an ISO 3166-1 alpha-2 uppercase code (e.g. US, DE)`);
           }
-          if (!/^[a-z]{2,3}(-[a-z]{2,4})?$/.test(entry.language)) {
-            return badRequest(`Invalid language "${entry.language}". Must be a BCP-47 primary subtag (e.g. en, de, zh-hans)`);
+          if (!BCP47_LANGUAGE_REGEX.test(entry.language)) {
+            return badRequest(`Invalid language "${entry.language}". Must be a BCP-47 lowercase language tag (e.g. en, de, zh-hans)`);
           }
         }
         if (region !== undefined) {
@@ -989,7 +993,7 @@ function LlmoController(ctx) {
         }
         resolvedMarkets = markets;
       } else if (region !== undefined) {
-        log.warn(`LLMO onboarding: markets absent, synthesizing from region "${region}" for domain ${domain}`);
+        log.debug(`LLMO onboarding: markets absent, synthesizing from region "${region}" for domain ${domain}`);
         resolvedMarkets = [{ market: region, language: 'en' }];
       }
 

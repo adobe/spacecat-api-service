@@ -3727,6 +3727,19 @@ describe('LlmoController', () => {
       expect(performLlmoOnboardingStub).to.not.have.been.called;
     });
 
+    it('should return 400 for non-object entry in markets[] (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      for (const bad of [null, 'US', 42]) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await ctrl.onboardCustomer({
+          ...onboardingContext,
+          data: { ...onboardingContext.data, markets: [bad] },
+        });
+        expect(result.status).to.equal(400);
+      }
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
     it('should not set markets when neither markets nor region is supplied (LLMO-5202)', async () => {
       const ctrl = await makeOnboardController(performLlmoOnboardingStub);
       const result = await ctrl.onboardCustomer(onboardingContext);

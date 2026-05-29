@@ -689,6 +689,11 @@ describe('llmo-onboarding-mode', () => {
       expect(isSerenityOnboardingEnabled('other-org', 'ABC123@AdobeOrg', env)).to.be.true;
     });
 
+    it('matches IMS org ID case-insensitively', () => {
+      const env = { [SERENITY_SITE_ALLOWLIST]: 'ABC123@AdobeOrg' };
+      expect(isSerenityOnboardingEnabled('other-org', 'abc123@adobeorg', env)).to.be.true;
+    });
+
     it('returns false when neither org ID matches the allowlist', () => {
       const env = { [SERENITY_SITE_ALLOWLIST]: 'org-x,org-y' };
       expect(isSerenityOnboardingEnabled('org-1', 'ims-1', env)).to.be.false;
