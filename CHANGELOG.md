@@ -1,3 +1,10 @@
+# [1.527.0](https://github.com/adobe/spacecat-api-service/compare/v1.526.1...v1.527.0) (2026-05-29)
+
+
+### Features
+
+* **serenity:** hide Semrush as implementation detail (LLMO-5190) ([#2506](https://github.com/adobe/spacecat-api-service/issues/2506)) ([459128e](https://github.com/adobe/spacecat-api-service/commit/459128e5b252739b02bf86dce21f680accf8a13a)), closes [adobe/project-elmo-ui#1815](https://github.com/adobe/project-elmo-ui/issues/1815) [#1815](https://github.com/adobe/spacecat-api-service/issues/1815)
+
 ## [1.526.1](https://github.com/adobe/spacecat-api-service/compare/v1.526.0...v1.526.1) (2026-05-29)
 
 
