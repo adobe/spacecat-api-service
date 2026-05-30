@@ -67,6 +67,16 @@ describe('GitHubWebhookHmacHandler', () => {
     expect(result.authenticated).to.be.true;
   });
 
+  it('attaches no reviewer_login in legacy mode (no GITHUB_TARGETS)', async () => {
+    const sig = computeSignature(validPayload);
+    const request = makeRequest({ 'x-hub-signature-256': sig });
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result.getProfile().reviewer_login).to.be.undefined;
+  });
+
   it('accepts webhook path without leading slash', async () => {
     const sig = computeSignature(validPayload);
     const request = makeRequest({ 'x-hub-signature-256': sig });
@@ -235,6 +245,7 @@ describe('GitHubWebhookHmacHandler', () => {
         id: 'ghec',
         match: { enterpriseSlug: ['adobe-prd'] },
         appSlug: 'mysticat-bot',
+        reviewerLogin: 'emu_reviewer',
         webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET_GHEC',
       },
       {
@@ -283,6 +294,18 @@ describe('GitHubWebhookHmacHandler', () => {
       const result = await handler.checkAuth(request, registryContext());
       expect(result).to.not.be.null;
       expect(result.getProfile().target_id).to.equal('ghec');
+    });
+
+    it('attaches reviewer_login from the matched ghec target to the profile', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghecBody, ghecSecret) }, ghecBody);
+      const result = await handler.checkAuth(request, registryContext());
+      expect(result.getProfile().reviewer_login).to.equal('emu_reviewer');
+    });
+
+    it('attaches no reviewer_login for the default (github-public) target', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
+      const result = await handler.checkAuth(request, registryContext());
+      expect(result.getProfile().reviewer_login).to.be.undefined;
     });
 
     it('rejects a GHEC body signed with the github-public secret (wrong secret)', async () => {

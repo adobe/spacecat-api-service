@@ -141,7 +141,14 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
     }
     return new AuthInfo()
       .withAuthenticated(true)
-      .withProfile({ user_id: 'github-webhook', target_id: result.id, app_slug: result.appSlug })
+      .withProfile({
+        user_id: 'github-webhook',
+        target_id: result.id,
+        app_slug: result.appSlug,
+        // Per-target reviewer-gate identity (undefined on the default entry,
+        // which falls back to env.GITHUB_REVIEWER_LOGIN in the controller).
+        reviewer_login: result.reviewerLogin,
+      })
       .withType('github_webhook');
   }
 }

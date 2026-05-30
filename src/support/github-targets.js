@@ -75,6 +75,23 @@ export function parseTargets(env) {
     if (isDefault && i !== parsed.length - 1) {
       throw new Error(`GITHUB_TARGETS default entry "${t.id}" must be last`);
     }
+    // reviewerLogin is the trigger-gate identity (the user we react to as the
+    // requested reviewer). REQUIRED on non-default (enterprise-matched) entries
+    // so a destination missing its reviewer fails loudly at config-load rather
+    // than silently falling back to the global GITHUB_REVIEWER_LOGIN (wrong for
+    // that destination). OPTIONAL on the default entry, which keeps the global
+    // fallback. When present, accept plain users (MysticatBot), EMU users
+    // (handle_shortcode), and App bots (slug[bot]).
+    if (!isDefault && (typeof t.reviewerLogin !== 'string' || !t.reviewerLogin.trim())) {
+      throw new Error(`GITHUB_TARGETS["${t.id}"] is missing a string "reviewerLogin" (required for non-default targets)`);
+    }
+    if (t.reviewerLogin !== undefined) {
+      if (typeof t.reviewerLogin !== 'string'
+        || t.reviewerLogin.length > 64
+        || !/^[A-Za-z0-9][A-Za-z0-9_-]*(\[bot\])?$/.test(t.reviewerLogin)) {
+        throw new Error(`GITHUB_TARGETS["${t.id}"].reviewerLogin must match ^[A-Za-z0-9][A-Za-z0-9_-]*(\\[bot\\])?$ and be at most 64 chars`);
+      }
+    }
   });
   const defaults = parsed.filter((t) => t.match?.default === true);
   if (defaults.length !== 1) {

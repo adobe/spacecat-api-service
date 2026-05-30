@@ -100,6 +100,9 @@ function WebhooksController(context) {
     const profile = ctx.attributes?.authInfo?.getProfile?.() || {};
     const targetId = profile.target_id;
     const appSlug = profile.app_slug || env.GITHUB_APP_SLUG;
+    // Per-target reviewer-gate identity. Set for non-default targets by the HMAC
+    // handler; the default/legacy path falls back to the global env knob.
+    const reviewerLogin = profile.reviewer_login || env.GITHUB_REVIEWER_LOGIN;
 
     // Security-relevant: which bot can trigger automated runs. In registry mode
     // this comes from the target's appSlug; in legacy mode from env. A missing
@@ -145,7 +148,7 @@ function WebhooksController(context) {
     }
 
     // Apply trigger rules (returns skip reason string or null)
-    const skipReason = getSkipReason(data, action, env, appSlug);
+    const skipReason = getSkipReason(data, action, env, appSlug, reviewerLogin);
     if (skipReason) {
       log.info('Skipping webhook', {
         skipReason,

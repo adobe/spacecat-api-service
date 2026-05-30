@@ -27,9 +27,18 @@ export const EVENT_JOB_MAP = {
  * @param {string} action - The event action (e.g. 'review_requested', 'labeled')
  * @param {object} env - Environment variables
  * @param {string} [appSlug] - Allowed-bot slug; defaults to env.GITHUB_APP_SLUG
+ * @param {string} [reviewerLogin] - Per-target reviewer login; defaults to
+ *   env.GITHUB_REVIEWER_LOGIN. The requested reviewer must equal this (or
+ *   `${appSlug}[bot]` when both are unset) for review_requested to proceed.
  * @returns {string|null} Skip reason or null
  */
-export function getSkipReason(data, action, env, appSlug = env.GITHUB_APP_SLUG) {
+export function getSkipReason(
+  data,
+  action,
+  env,
+  appSlug = env.GITHUB_APP_SLUG,
+  reviewerLogin = env.GITHUB_REVIEWER_LOGIN,
+) {
   const pr = data.pull_request;
   // appSlug is resolved by the caller: the per-target appSlug in registry mode,
   // else env.GITHUB_APP_SLUG (the default). Used to form the expected bot
@@ -46,7 +55,7 @@ export function getSkipReason(data, action, env, appSlug = env.GITHUB_APP_SLUG) 
   // rather than a GitHub App bot.
   if (action === 'review_requested') {
     const reviewer = data.requested_reviewer?.login;
-    const expectedReviewer = env.GITHUB_REVIEWER_LOGIN?.trim() || `${appSlug}[bot]`;
+    const expectedReviewer = reviewerLogin?.trim() || `${appSlug}[bot]`;
     if (reviewer !== expectedReviewer) {
       return `reviewer ${reviewer} is not ${expectedReviewer}`;
     }

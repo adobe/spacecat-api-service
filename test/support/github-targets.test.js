@@ -15,7 +15,7 @@ import { parseTargets, classify, extractClassificationMetadata } from '../../src
 
 const VALID_TARGETS = JSON.stringify([
   {
-    id: 'ghec', match: { enterpriseSlug: ['adobe-prd'] }, appSlug: 'mysticat-bot', webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET_GHEC',
+    id: 'ghec', match: { enterpriseSlug: ['adobe-prd'] }, appSlug: 'mysticat-bot', reviewerLogin: 'emu_reviewer', webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET_GHEC',
   },
   {
     id: 'github-public', match: { default: true }, appSlug: 'mysticat-bot', webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET',
@@ -46,7 +46,7 @@ describe('github-targets parseTargets', () => {
   it('throws on duplicate ids', () => {
     const dup = JSON.stringify([
       {
-        id: 'x', match: { enterpriseSlug: ['a'] }, appSlug: 's', webhookSecretEnvVar: 'V',
+        id: 'x', match: { enterpriseSlug: ['a'] }, appSlug: 's', reviewerLogin: 'r', webhookSecretEnvVar: 'V',
       },
       {
         id: 'x', match: { default: true }, appSlug: 's', webhookSecretEnvVar: 'W',
@@ -83,7 +83,7 @@ describe('github-targets parseTargets', () => {
 
   it('throws when there is not exactly one default', () => {
     const noDefault = JSON.stringify([{
-      id: 'ghec', match: { enterpriseSlug: ['a'] }, appSlug: 's', webhookSecretEnvVar: 'V',
+      id: 'ghec', match: { enterpriseSlug: ['a'] }, appSlug: 's', reviewerLogin: 'r', webhookSecretEnvVar: 'V',
     }]);
     expect(() => parseTargets({ GITHUB_TARGETS: noDefault })).to.throw('exactly one');
   });
@@ -119,6 +119,52 @@ describe('github-targets parseTargets', () => {
       id: 'GitHub_Public', match: { default: true }, appSlug: 's', webhookSecretEnvVar: 'V',
     }]);
     expect(() => parseTargets({ GITHUB_TARGETS: bad })).to.throw('target_id');
+  });
+});
+
+describe('github-targets parseTargets reviewerLogin', () => {
+  const withReviewer = (reviewerLogin) => JSON.stringify([
+    {
+      id: 'ghec', match: { enterpriseSlug: ['adobe-prd'] }, appSlug: 'mysticat-bot', reviewerLogin, webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET_GHEC',
+    },
+    {
+      id: 'github-public', match: { default: true }, appSlug: 'mysticat-bot', webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET',
+    },
+  ]);
+
+  it('parses reviewerLogin on a non-default entry', () => {
+    const targets = parseTargets({ GITHUB_TARGETS: withReviewer('emu_reviewer') });
+    expect(targets[0].reviewerLogin).to.equal('emu_reviewer');
+  });
+
+  it('accepts a slug[bot] reviewerLogin', () => {
+    const targets = parseTargets({ GITHUB_TARGETS: withReviewer('some-app[bot]') });
+    expect(targets[0].reviewerLogin).to.equal('some-app[bot]');
+  });
+
+  it('allows the default entry to omit reviewerLogin', () => {
+    const targets = parseTargets({ GITHUB_TARGETS: withReviewer('emu_reviewer') });
+    expect(targets[1].reviewerLogin).to.be.undefined;
+  });
+
+  it('throws when a non-default entry omits reviewerLogin', () => {
+    const noReviewer = JSON.stringify([
+      {
+        id: 'ghec', match: { enterpriseSlug: ['adobe-prd'] }, appSlug: 's', webhookSecretEnvVar: 'V',
+      },
+      {
+        id: 'github-public', match: { default: true }, appSlug: 's', webhookSecretEnvVar: 'W',
+      },
+    ]);
+    expect(() => parseTargets({ GITHUB_TARGETS: noReviewer })).to.throw('reviewerLogin');
+  });
+
+  it('throws when reviewerLogin has an invalid charset', () => {
+    expect(() => parseTargets({ GITHUB_TARGETS: withReviewer('bad login!') })).to.throw('reviewerLogin');
+  });
+
+  it('throws when reviewerLogin exceeds 64 chars', () => {
+    expect(() => parseTargets({ GITHUB_TARGETS: withReviewer('a'.repeat(65)) })).to.throw('reviewerLogin');
   });
 });
 

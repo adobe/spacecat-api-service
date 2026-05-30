@@ -400,6 +400,48 @@ describe('WebhooksController', () => {
       expect(mockSqs.sendMessage.calledOnce).to.be.true;
     });
 
+    it('uses the per-target reviewer_login from the profile to gate the trigger', async () => {
+      // Profile pins reviewer_login=emu_reviewer; requested reviewer matches ->
+      // enqueue (not skip), even though env.GITHUB_REVIEWER_LOGIN is unset and
+      // app_slug would otherwise expect mysticat-bot[bot].
+      const ctx = ghecAuthContext();
+      ctx.attributes.authInfo.getProfile = () => ({
+        user_id: 'github-webhook', target_id: 'ghec', app_slug: 'mysticat-bot', reviewer_login: 'emu_reviewer',
+      });
+      ctx.data = { ...ctx.data, requested_reviewer: { login: 'emu_reviewer' } };
+
+      const response = await controller.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage.calledOnce).to.be.true;
+    });
+
+    it('skips when the requested reviewer does not match the per-target reviewer_login', async () => {
+      const ctx = ghecAuthContext();
+      ctx.attributes.authInfo.getProfile = () => ({
+        user_id: 'github-webhook', target_id: 'ghec', app_slug: 'mysticat-bot', reviewer_login: 'emu_reviewer',
+      });
+      ctx.data = { ...ctx.data, requested_reviewer: { login: 'someone-else' } };
+
+      const response = await controller.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(204);
+      expect(mockSqs.sendMessage.called).to.be.false;
+    });
+
+    it('falls back to env.GITHUB_REVIEWER_LOGIN when the profile has no reviewer_login (legacy)', async () => {
+      controller = buildController({ GITHUB_REVIEWER_LOGIN: 'MysticatBot' });
+      const ctx = {
+        ...validContext,
+        data: { ...validContext.data, requested_reviewer: { login: 'MysticatBot' } },
+      };
+
+      const response = await controller.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage.calledOnce).to.be.true;
+    });
+
     it('omits target_id when no auth profile target_id is present (legacy)', async () => {
       const response = await controller.processGitHubWebhook(validContext);
       expect(response.status).to.equal(202);
