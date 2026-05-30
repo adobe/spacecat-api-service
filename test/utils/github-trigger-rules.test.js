@@ -102,6 +102,41 @@ describe('github-trigger-rules', () => {
       });
     });
 
+    describe('per-target reviewerLogin (5th arg)', () => {
+      const baseReq = {
+        pull_request: { draft: false, base: { ref: 'main' } },
+        repository: { default_branch: 'main' },
+        sender: { type: 'User' },
+        action: 'review_requested',
+      };
+
+      it('returns null when the requested reviewer equals the 5th-arg reviewerLogin', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot', GITHUB_REVIEWER_LOGIN: 'MysticatBot' };
+        const data = { ...baseReq, requested_reviewer: { login: 'emu_reviewer' } };
+        expect(getSkipReason(data, 'review_requested', env, 'mysticat-bot', 'emu_reviewer')).to.be.null;
+      });
+
+      it('returns the "is not" skip when the requested reviewer differs from the 5th-arg reviewerLogin', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot', GITHUB_REVIEWER_LOGIN: 'MysticatBot' };
+        const data = { ...baseReq, requested_reviewer: { login: 'MysticatBot' } };
+        const reason = getSkipReason(data, 'review_requested', env, 'mysticat-bot', 'emu_reviewer');
+        expect(reason).to.include('MysticatBot');
+        expect(reason).to.include('emu_reviewer');
+      });
+
+      it('defaults to env.GITHUB_REVIEWER_LOGIN when the 5th arg is omitted (back-compat)', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot', GITHUB_REVIEWER_LOGIN: 'MysticatBot' };
+        const data = { ...baseReq, requested_reviewer: { login: 'MysticatBot' } };
+        expect(getSkipReason(data, 'review_requested', env)).to.be.null;
+      });
+
+      it('falls back to appSlug[bot] when both the 5th arg and env are unset', () => {
+        const env = { GITHUB_APP_SLUG: 'mysticat-bot' };
+        const data = { ...baseReq, requested_reviewer: { login: 'mysticat-bot[bot]' } };
+        expect(getSkipReason(data, 'review_requested', env, 'mysticat-bot', undefined)).to.be.null;
+      });
+    });
+
     describe('labeled trigger (disabled)', () => {
       // Labeled triggers were disabled because GitHub does not count
       // label-triggered reviews toward branch protection / merge
