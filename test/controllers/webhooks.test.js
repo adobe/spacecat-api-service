@@ -442,6 +442,49 @@ describe('WebhooksController', () => {
       expect(mockSqs.sendMessage.calledOnce).to.be.true;
     });
 
+    it('enqueues with target_id and gates on reviewer_login for a consolidated (GITHUB_DESTINATIONS) profile', async () => {
+      // Mirrors what the HMAC handler attaches on the consolidated path: a
+      // profile with target_id + reviewer_login but NO app_slug. The controller
+      // must (a) satisfy its app-slug requirement from env.GITHUB_APP_SLUG,
+      // (b) gate on the profile reviewer_login, and (c) emit target_id.
+      const ctx = {
+        ...validContext,
+        attributes: {
+          authInfo: {
+            getProfile: () => ({
+              user_id: 'github-webhook', target_id: 'ghec', reviewer_login: 'emu_reviewer',
+            }),
+          },
+        },
+        data: { ...validContext.data, requested_reviewer: { login: 'emu_reviewer' } },
+      };
+
+      const response = await controller.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(202);
+      const [, payload] = mockSqs.sendMessage.firstCall.args;
+      expect(payload.target_id).to.equal('ghec');
+    });
+
+    it('skips a consolidated profile when the requested reviewer does not match its reviewer_login', async () => {
+      const ctx = {
+        ...validContext,
+        attributes: {
+          authInfo: {
+            getProfile: () => ({
+              user_id: 'github-webhook', target_id: 'ghec', reviewer_login: 'emu_reviewer',
+            }),
+          },
+        },
+        data: { ...validContext.data, requested_reviewer: { login: 'someone-else' } },
+      };
+
+      const response = await controller.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(204);
+      expect(mockSqs.sendMessage.called).to.be.false;
+    });
+
     it('omits target_id when no auth profile target_id is present (legacy)', async () => {
       const response = await controller.processGitHubWebhook(validContext);
       expect(response.status).to.equal(202);
