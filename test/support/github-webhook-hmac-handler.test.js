@@ -238,6 +238,135 @@ describe('GitHubWebhookHmacHandler', () => {
     expect(result).to.not.be.null;
   });
 
+  describe('GITHUB_DESTINATIONS registry path (consolidated)', () => {
+    const ghecSecret = 'ghec-webhook-secret';
+    const DESTINATIONS = JSON.stringify({
+      ghec: {
+        match: { enterprise_slug: ['adobe-prd'] },
+        webhook_secret: ghecSecret,
+        reviewer_login: 'emu_reviewer',
+      },
+      'github-public': {
+        match: { default: true },
+        webhook_secret: secret,
+        reviewer_login: 'MysticatBot',
+      },
+    });
+    const publicBody = JSON.stringify({
+      action: 'review_requested',
+      installation: { id: 1 },
+      repository: { html_url: 'https://github.com/adobe/spacecat-api-service' },
+    });
+    const ghecBody = JSON.stringify({
+      action: 'review_requested',
+      installation: { id: 1 },
+      enterprise: { slug: 'adobe-prd' },
+      repository: { html_url: 'https://github.com/Adobe-AEM-Sites/aem-sites-architecture' },
+    });
+    const ghesBody = JSON.stringify({
+      action: 'review_requested',
+      installation: { id: 1 },
+      repository: { html_url: 'https://git.corp.adobe.com/experience-platform/mystique' },
+    });
+    const pingBody = JSON.stringify({ zen: 'Keep it simple', hook_id: 1 });
+
+    function destContext(extraEnv = {}) {
+      return makeContext({ env: { GITHUB_DESTINATIONS: DESTINATIONS, ...extraEnv } });
+    }
+
+    it('authenticates a github.com (default) webhook and attaches target_id github-public', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.not.be.null;
+      expect(result.type).to.equal('github_webhook');
+      expect(result.getProfile().target_id).to.equal('github-public');
+    });
+
+    it('attaches reviewer_login for the default (github-public) destination (required now)', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result.getProfile().reviewer_login).to.equal('MysticatBot');
+    });
+
+    it('does not attach app_slug on the consolidated path', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result.getProfile().app_slug).to.be.undefined;
+    });
+
+    it('authenticates a GHEC webhook against the inline webhook_secret and attaches target_id ghec', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghecBody, ghecSecret) }, ghecBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.not.be.null;
+      expect(result.getProfile().target_id).to.equal('ghec');
+      expect(result.getProfile().reviewer_login).to.equal('emu_reviewer');
+    });
+
+    it('rejects a GHEC body signed with the github-public secret (wrong secret)', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghecBody, secret) }, ghecBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.be.null;
+      expect(mockLog.warn.calledWithMatch('HMAC signature mismatch')).to.be.true;
+    });
+
+    it('skips (null) a non-github.com host without computing HMAC', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghesBody, secret) }, ghesBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.be.null;
+      expect(mockLog.warn.calledWithMatch('Skipping webhook')).to.be.true;
+    });
+
+    it('treats a ping (no repository -> null host) as github-public, not skip', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(pingBody, secret) }, pingBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.not.be.null;
+      expect(result.getProfile().target_id).to.equal('github-public');
+    });
+
+    it('returns null + error on malformed GITHUB_DESTINATIONS', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
+      const result = await handler.checkAuth(request, destContext({ GITHUB_DESTINATIONS: 'not json' }));
+      expect(result).to.be.null;
+      expect(mockLog.error.calledWithMatch('Invalid GITHUB_DESTINATIONS')).to.be.true;
+    });
+
+    it('returns null + warn when the body is not valid JSON', async () => {
+      const malformed = 'not-json';
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(malformed, secret) }, malformed);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.be.null;
+      expect(mockLog.warn.calledWithMatch('not valid JSON')).to.be.true;
+    });
+
+    it('returns null + warn for an empty body', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature('', secret) }, '');
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.be.null;
+      expect(mockLog.warn.calledWithMatch('Empty')).to.be.true;
+    });
+
+    it('prefers GITHUB_DESTINATIONS over GITHUB_TARGETS when BOTH are set (dual-read precedence)', async () => {
+      // A legacy GITHUB_TARGETS that, if read, would route differently / use a
+      // different secret. The consolidated path must win, so the github-public
+      // inline secret authenticates and target_id is github-public.
+      const legacyTargets = JSON.stringify([
+        {
+          id: 'github-public', match: { default: true }, appSlug: 'mysticat', webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET',
+        },
+      ]);
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
+      const result = await handler.checkAuth(request, destContext({
+        GITHUB_TARGETS: legacyTargets,
+        GITHUB_WEBHOOK_SECRET: 'a-different-legacy-secret',
+      }));
+      expect(result).to.not.be.null;
+      expect(result.getProfile().target_id).to.equal('github-public');
+      // app_slug proves the consolidated path (not the GITHUB_TARGETS path) ran:
+      // the legacy path would have set app_slug 'mysticat'.
+      expect(result.getProfile().app_slug).to.be.undefined;
+    });
+  });
+
   describe('GITHUB_TARGETS registry path', () => {
     const ghecSecret = 'ghec-webhook-secret';
     const TARGETS = JSON.stringify([
@@ -266,7 +395,11 @@ describe('GitHubWebhookHmacHandler', () => {
       enterprise: { slug: 'adobe-prd' },
       repository: { html_url: 'https://github.com/Adobe-AEM-Sites/aem-sites-architecture' },
     });
-    const ghesBody = JSON.stringify({ action: 'review_requested', installation: { id: 1 }, repository: { html_url: 'https://git.corp.adobe.com/experience-platform/mystique' } });
+    const ghesBody = JSON.stringify({
+      action: 'review_requested',
+      installation: { id: 1 },
+      repository: { html_url: 'https://git.corp.adobe.com/experience-platform/mystique' },
+    });
     const pingBody = JSON.stringify({ zen: 'Keep it simple', hook_id: 1 });
 
     function registryContext(extraEnv = {}) {
