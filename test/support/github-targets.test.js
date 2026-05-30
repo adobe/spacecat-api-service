@@ -11,7 +11,14 @@
  */
 
 import { expect } from 'chai';
-import { parseTargets, classify, extractClassificationMetadata } from '../../src/support/github-targets.js';
+import {
+  parseTargets, classify, extractClassificationMetadata, parseDestinations, classifyDestination,
+} from '../../src/support/github-targets.js';
+
+const VALID_DESTINATIONS = JSON.stringify({
+  ghec: { match: { enterprise_slug: ['adobe-prd'] }, webhook_secret: 'whsec-ghec', reviewer_login: 'emu_reviewer' },
+  'github-public': { match: { default: true }, webhook_secret: 'whsec-public', reviewer_login: 'MysticatBot' },
+});
 
 const VALID_TARGETS = JSON.stringify([
   {
@@ -168,6 +175,114 @@ describe('github-targets parseTargets reviewerLogin', () => {
   });
 });
 
+describe('github-targets parseDestinations', () => {
+  it('returns null when GITHUB_DESTINATIONS is unset (legacy mode signal)', () => {
+    expect(parseDestinations({})).to.be.null;
+  });
+
+  it('parses a valid registry into a keyed object', () => {
+    const dests = parseDestinations({ GITHUB_DESTINATIONS: VALID_DESTINATIONS });
+    expect(dests).to.have.all.keys('ghec', 'github-public');
+    expect(dests.ghec.webhook_secret).to.equal('whsec-ghec');
+    expect(dests.ghec.reviewer_login).to.equal('emu_reviewer');
+    expect(dests['github-public'].match).to.deep.equal({ default: true });
+  });
+
+  it('throws on invalid JSON', () => {
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: 'not json' })).to.throw('not valid JSON');
+  });
+
+  it('throws when not a plain object (array)', () => {
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: '[]' })).to.throw('must be a non-empty JSON object');
+  });
+
+  it('throws when the object is empty', () => {
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: '{}' })).to.throw('must be a non-empty JSON object');
+  });
+
+  it('throws when a target_id key is not a valid worker target_id', () => {
+    const bad = JSON.stringify({
+      GitHub_Public: { match: { default: true }, webhook_secret: 's', reviewer_login: 'r' },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('target_id');
+  });
+
+  it('throws when an entry has both default and enterprise_slug', () => {
+    const bad = JSON.stringify({
+      x: { match: { default: true, enterprise_slug: ['a'] }, webhook_secret: 's', reviewer_login: 'r' },
+      'github-public': { match: { default: true }, webhook_secret: 's', reviewer_login: 'r' },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('exactly one');
+  });
+
+  it('throws when an entry has neither default nor a non-empty enterprise_slug', () => {
+    const bad = JSON.stringify({
+      x: { match: {}, webhook_secret: 's', reviewer_login: 'r' },
+      'github-public': { match: { default: true }, webhook_secret: 's', reviewer_login: 'r' },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('exactly one');
+  });
+
+  it('throws when enterprise_slug contains non-string entries', () => {
+    const bad = JSON.stringify({
+      ghec: { match: { enterprise_slug: [123, null] }, webhook_secret: 's', reviewer_login: 'r' },
+      'github-public': { match: { default: true }, webhook_secret: 's', reviewer_login: 'r' },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('strings');
+  });
+
+  it('throws when there is not exactly one default entry (zero)', () => {
+    const noDefault = JSON.stringify({
+      ghec: { match: { enterprise_slug: ['a'] }, webhook_secret: 's', reviewer_login: 'r' },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: noDefault })).to.throw('exactly one');
+  });
+
+  it('throws when there is more than one default entry', () => {
+    const twoDefaults = JSON.stringify({
+      a: { match: { default: true }, webhook_secret: 's', reviewer_login: 'r' },
+      b: { match: { default: true }, webhook_secret: 's', reviewer_login: 'r' },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: twoDefaults })).to.throw('exactly one');
+  });
+
+  it('throws when webhook_secret is missing or empty', () => {
+    const bad = JSON.stringify({
+      'github-public': { match: { default: true }, webhook_secret: '', reviewer_login: 'r' },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('webhook_secret');
+  });
+
+  it('throws when reviewer_login is missing', () => {
+    const bad = JSON.stringify({
+      'github-public': { match: { default: true }, webhook_secret: 's' },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('reviewer_login');
+  });
+
+  it('throws when reviewer_login has an invalid charset', () => {
+    const bad = JSON.stringify({
+      'github-public': { match: { default: true }, webhook_secret: 's', reviewer_login: 'bad login!' },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('reviewer_login');
+  });
+
+  it('throws when reviewer_login exceeds 64 chars', () => {
+    const bad = JSON.stringify({
+      'github-public': { match: { default: true }, webhook_secret: 's', reviewer_login: 'a'.repeat(65) },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('reviewer_login');
+  });
+
+  it('accepts a slug[bot] reviewer_login', () => {
+    const ok = JSON.stringify({
+      'github-public': { match: { default: true }, webhook_secret: 's', reviewer_login: 'some-app[bot]' },
+    });
+    const dests = parseDestinations({ GITHUB_DESTINATIONS: ok });
+    expect(dests['github-public'].reviewer_login).to.equal('some-app[bot]');
+  });
+});
+
 describe('github-targets extractClassificationMetadata', () => {
   it('returns null for non-JSON', () => {
     expect(extractClassificationMetadata('not json')).to.be.null;
@@ -199,6 +314,44 @@ describe('github-targets extractClassificationMetadata', () => {
   it('returns host=null for a malformed repository.html_url', () => {
     const body = JSON.stringify({ repository: { html_url: 'not-a-valid-url' } });
     expect(extractClassificationMetadata(body).host).to.be.null;
+  });
+});
+
+describe('github-targets classifyDestination', () => {
+  const destinations = parseDestinations({ GITHUB_DESTINATIONS: VALID_DESTINATIONS });
+
+  it('skips a positively non-github.com host', () => {
+    expect(classifyDestination({ host: 'git.corp.adobe.com', enterpriseSlug: null }, destinations))
+      .to.deep.equal({ skip: true });
+  });
+
+  it('routes an EMU enterprise slug to ghec with its inline secret + reviewer', () => {
+    const result = classifyDestination({ host: 'github.com', enterpriseSlug: 'adobe-prd' }, destinations);
+    expect(result).to.deep.include({
+      target_id: 'ghec', webhook_secret: 'whsec-ghec', reviewer_login: 'emu_reviewer',
+    });
+  });
+
+  it('routes a github.com body with no enterprise to github-public (default catch-all)', () => {
+    expect(classifyDestination({ host: 'github.com', enterpriseSlug: null }, destinations).target_id)
+      .to.equal('github-public');
+  });
+
+  it('routes a github.com body with a NON-EMU enterprise slug to github-public', () => {
+    expect(classifyDestination({ host: 'github.com', enterpriseSlug: 'some-other-enterprise' }, destinations).target_id)
+      .to.equal('github-public');
+  });
+
+  it('routes a null host (ping / no repository) to github-public, NOT skip', () => {
+    expect(classifyDestination({ host: null, enterpriseSlug: null }, destinations).target_id)
+      .to.equal('github-public');
+  });
+
+  it('prefers an enterprise match over the default even when both could apply', () => {
+    // Match rules are mutually exclusive by construction; this asserts the
+    // enterprise branch is evaluated before the default branch.
+    const result = classifyDestination({ host: 'github.com', enterpriseSlug: 'adobe-prd' }, destinations);
+    expect(result.target_id).to.equal('ghec');
   });
 });
 
