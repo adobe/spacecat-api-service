@@ -154,7 +154,6 @@ export function parseDestinations(env) {
     // consolidated registry). Accept plain users (MysticatBot), EMU users
     // (handle_shortcode), and App bots (slug[bot]).
     if (typeof entry.reviewer_login !== 'string'
-      || !entry.reviewer_login.trim()
       || entry.reviewer_login.length > 64
       || !/^[A-Za-z0-9][A-Za-z0-9_-]*(\[bot\])?$/.test(entry.reviewer_login)) {
       throw new Error(`GITHUB_DESTINATIONS["${targetId}"].reviewer_login must be a non-empty string matching ^[A-Za-z0-9][A-Za-z0-9_-]*(\\[bot\\])?$ and be at most 64 chars`);
@@ -227,8 +226,9 @@ export function classify(meta, targets) {
  * match, then the single default entry.
  * @param {{host: (string|null), enterpriseSlug: (string|null)}} meta
  * @param {object} destinations - validated keyed registry from parseDestinations
- * @returns {object|{skip: true}} { target_id, ...entry } of the matched
- *   destination, or { skip: true }.
+ * @returns {object|{skip: true}} { target_id, webhook_secret, reviewer_login }
+ *   of the matched destination, or { skip: true }. Only the fields the caller
+ *   needs are returned (match is not leaked alongside the secret).
  */
 export function classifyDestination(meta, destinations) {
   const { host, enterpriseSlug } = meta;
@@ -245,13 +245,21 @@ export function classifyDestination(meta, destinations) {
       && entry.match.enterprise_slug.includes(enterpriseSlug));
     if (enterprise) {
       const [targetId, entry] = enterprise;
-      return { target_id: targetId, ...entry };
+      return {
+        target_id: targetId,
+        webhook_secret: entry.webhook_secret,
+        reviewer_login: entry.reviewer_login,
+      };
     }
   }
   const fallback = entries.find(([, entry]) => entry.match?.default === true);
   if (fallback) {
     const [targetId, entry] = fallback;
-    return { target_id: targetId, ...entry };
+    return {
+      target_id: targetId,
+      webhook_secret: entry.webhook_secret,
+      reviewer_login: entry.reviewer_login,
+    };
   }
   return { skip: true };
 }

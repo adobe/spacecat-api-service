@@ -180,6 +180,10 @@ describe('github-targets parseDestinations', () => {
     expect(parseDestinations({})).to.be.null;
   });
 
+  it('returns null when env is null (optional-chaining guard)', () => {
+    expect(parseDestinations(null)).to.be.null;
+  });
+
   it('parses a valid registry into a keyed object', () => {
     const dests = parseDestinations({ GITHUB_DESTINATIONS: VALID_DESTINATIONS });
     expect(dests).to.have.all.keys('ghec', 'github-public');
