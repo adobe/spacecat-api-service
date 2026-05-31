@@ -130,6 +130,7 @@ describe('PLG onboarding helper dependency fallbacks', () => {
       getOrganizationId: sandbox.stub().returns(null),
       getSiteId: sandbox.stub().returns(null),
       getStatus: sandbox.stub().returns('ONBOARDED'),
+      getSteps: sandbox.stub().returns(null),
     };
     const context = {
       dataAccess: {},
