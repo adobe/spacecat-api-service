@@ -29,9 +29,17 @@ describe('WebhooksController', () => {
         'x-github-delivery': 'delivery-uuid-123',
       },
     },
+    // The HMAC handler attaches the resolved destination + reviewer identity to
+    // the auth profile; every authenticated webhook carries target_id +
+    // reviewer_login (the consolidated GITHUB_DESTINATIONS path).
+    attributes: {
+      authInfo: {
+        getProfile: () => ({ user_id: 'github-webhook', target_id: 'github-public', reviewer_login: 'MysticatBot' }),
+      },
+    },
     data: {
       action: 'review_requested',
-      requested_reviewer: { login: 'mysticat[bot]' },
+      requested_reviewer: { login: 'MysticatBot' },
       installation: { id: 12345678 },
       pull_request: {
         number: 456,
@@ -53,7 +61,6 @@ describe('WebhooksController', () => {
       log: mockLog,
       env: {
         MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
-        GITHUB_APP_SLUG: 'mysticat',
         ...envOverrides,
       },
     };
@@ -275,7 +282,7 @@ describe('WebhooksController', () => {
     WebhooksController({
       sqs: mockSqs,
       log: freshLog,
-      env: { MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl, GITHUB_APP_SLUG: 'mysticat' },
+      env: { MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl },
     });
     expect(freshLog.warn.called).to.be.false;
     expect(freshLog.debug.called).to.be.false;
@@ -332,14 +339,28 @@ describe('WebhooksController', () => {
     expect(fallbackWarn).to.not.be.undefined;
   });
 
-  it('returns 500 and logs error when GITHUB_APP_SLUG is not configured', async () => {
-    controller = buildController({ GITHUB_APP_SLUG: undefined });
+  it('enqueues without GITHUB_APP_SLUG configured (app-slug requirement removed)', async () => {
+    controller = buildController(); // env carries no GITHUB_APP_SLUG
 
     const response = await controller.processGitHubWebhook(validContext);
 
+    expect(response.status).to.equal(202);
+    expect(mockSqs.sendMessage.calledOnce).to.be.true;
+  });
+
+  it('returns 500 and logs error when the auth profile has no reviewer_login (fail closed)', async () => {
+    const ctx = {
+      ...validContext,
+      attributes: {
+        authInfo: { getProfile: () => ({ user_id: 'github-webhook', target_id: 'github-public' }) },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(ctx);
+
     expect(response.status).to.equal(500);
     const errorCall = mockLog.error.getCalls()
-      .find((c) => c.args[0].includes('No app slug resolved'));
+      .find((c) => c.args[0].includes('No reviewer login resolved'));
     expect(errorCall).to.not.be.undefined;
     expect(errorCall.args[1]).to.deep.include({ deliveryId: 'delivery-uuid-123' });
     expect(mockSqs.sendMessage.called).to.be.false;
@@ -364,15 +385,15 @@ describe('WebhooksController', () => {
 
   describe('multi-destination target_id', () => {
     function ghecAuthContext() {
-      // Mirrors what the HMAC handler attaches in registry mode.
+      // Mirrors what the HMAC handler attaches: target_id + reviewer_login.
       return {
         ...validContext,
         attributes: {
-          authInfo: { getProfile: () => ({ user_id: 'github-webhook', target_id: 'ghec', app_slug: 'mysticat-bot' }) },
+          authInfo: { getProfile: () => ({ user_id: 'github-webhook', target_id: 'ghec', reviewer_login: 'emu_reviewer' }) },
         },
         data: {
           ...validContext.data,
-          requested_reviewer: { login: 'mysticat-bot[bot]' },
+          requested_reviewer: { login: 'emu_reviewer' },
         },
       };
     }
@@ -391,82 +412,7 @@ describe('WebhooksController', () => {
       expect(enqueueLog.args[1]).to.include({ targetId: 'ghec' });
     });
 
-    it('uses the per-target app_slug for the reviewer check (mysticat-bot[bot])', async () => {
-      // env.GITHUB_APP_SLUG is 'mysticat', but the profile app_slug is
-      // 'mysticat-bot'; the requested reviewer mysticat-bot[bot] must match and
-      // the job must enqueue (not skip).
-      const response = await controller.processGitHubWebhook(ghecAuthContext());
-      expect(response.status).to.equal(202);
-      expect(mockSqs.sendMessage.calledOnce).to.be.true;
-    });
-
-    it('uses the per-target reviewer_login from the profile to gate the trigger', async () => {
-      // Profile pins reviewer_login=emu_reviewer; requested reviewer matches ->
-      // enqueue (not skip), even though env.GITHUB_REVIEWER_LOGIN is unset and
-      // app_slug would otherwise expect mysticat-bot[bot].
-      const ctx = ghecAuthContext();
-      ctx.attributes.authInfo.getProfile = () => ({
-        user_id: 'github-webhook', target_id: 'ghec', app_slug: 'mysticat-bot', reviewer_login: 'emu_reviewer',
-      });
-      ctx.data = { ...ctx.data, requested_reviewer: { login: 'emu_reviewer' } };
-
-      const response = await controller.processGitHubWebhook(ctx);
-
-      expect(response.status).to.equal(202);
-      expect(mockSqs.sendMessage.calledOnce).to.be.true;
-    });
-
-    it('skips when the requested reviewer does not match the per-target reviewer_login', async () => {
-      const ctx = ghecAuthContext();
-      ctx.attributes.authInfo.getProfile = () => ({
-        user_id: 'github-webhook', target_id: 'ghec', app_slug: 'mysticat-bot', reviewer_login: 'emu_reviewer',
-      });
-      ctx.data = { ...ctx.data, requested_reviewer: { login: 'someone-else' } };
-
-      const response = await controller.processGitHubWebhook(ctx);
-
-      expect(response.status).to.equal(204);
-      expect(mockSqs.sendMessage.called).to.be.false;
-    });
-
-    it('falls back to env.GITHUB_REVIEWER_LOGIN when the profile has no reviewer_login (legacy)', async () => {
-      controller = buildController({ GITHUB_REVIEWER_LOGIN: 'MysticatBot' });
-      const ctx = {
-        ...validContext,
-        data: { ...validContext.data, requested_reviewer: { login: 'MysticatBot' } },
-      };
-
-      const response = await controller.processGitHubWebhook(ctx);
-
-      expect(response.status).to.equal(202);
-      expect(mockSqs.sendMessage.calledOnce).to.be.true;
-    });
-
-    it('enqueues with target_id and gates on reviewer_login for a consolidated (GITHUB_DESTINATIONS) profile', async () => {
-      // Mirrors what the HMAC handler attaches on the consolidated path: a
-      // profile with target_id + reviewer_login but NO app_slug. The controller
-      // must (a) satisfy its app-slug requirement from env.GITHUB_APP_SLUG,
-      // (b) gate on the profile reviewer_login, and (c) emit target_id.
-      const ctx = {
-        ...validContext,
-        attributes: {
-          authInfo: {
-            getProfile: () => ({
-              user_id: 'github-webhook', target_id: 'ghec', reviewer_login: 'emu_reviewer',
-            }),
-          },
-        },
-        data: { ...validContext.data, requested_reviewer: { login: 'emu_reviewer' } },
-      };
-
-      const response = await controller.processGitHubWebhook(ctx);
-
-      expect(response.status).to.equal(202);
-      const [, payload] = mockSqs.sendMessage.firstCall.args;
-      expect(payload.target_id).to.equal('ghec');
-    });
-
-    it('skips a consolidated profile when the requested reviewer does not match its reviewer_login', async () => {
+    it('skips when the requested reviewer does not match the profile reviewer_login', async () => {
       const ctx = {
         ...validContext,
         attributes: {
@@ -483,20 +429,6 @@ describe('WebhooksController', () => {
 
       expect(response.status).to.equal(204);
       expect(mockSqs.sendMessage.called).to.be.false;
-    });
-
-    it('omits target_id when no auth profile target_id is present (legacy)', async () => {
-      const response = await controller.processGitHubWebhook(validContext);
-      expect(response.status).to.equal(202);
-      const [, payload] = mockSqs.sendMessage.firstCall.args;
-      expect(payload).to.not.have.property('target_id');
-    });
-
-    it('logs targetId "legacy" on the enqueue log when no target_id is present', async () => {
-      await controller.processGitHubWebhook(validContext);
-      const enqueueLog = mockLog.info.getCalls().find((c) => c.args[0] === 'Enqueued webhook job');
-      expect(enqueueLog, 'expected an "Enqueued webhook job" info log').to.exist;
-      expect(enqueueLog.args[1]).to.include({ targetId: 'legacy' });
     });
   });
 
@@ -537,7 +469,6 @@ describe('WebhooksController', () => {
         log: mockLog,
         env: {
           MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
-          GITHUB_APP_SLUG: 'mysticat',
           MYSTICAT_OBSERVABILITY_SLACK_TOKEN: 'xoxb-test',
           MYSTICAT_OBSERVABILITY_SLACK_CHANNEL: channel,
           ...envOverrides,
