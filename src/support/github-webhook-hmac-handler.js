@@ -13,7 +13,9 @@
 import crypto from 'crypto';
 import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { parseTargets, classify, extractClassificationMetadata } from './github-targets.js';
+import {
+  parseTargets, classify, extractClassificationMetadata, parseDestinations, classifyDestination,
+} from './github-targets.js';
 
 const SIGNATURE_PATTERN = /^sha256=[a-f0-9]{64}$/;
 const WEBHOOK_PATH_PATTERN = /^\/?webhooks\//;
@@ -75,6 +77,63 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
     if (!SIGNATURE_PATTERN.test(signature)) {
       this.log('Malformed X-Hub-Signature-256 header', 'warn');
       return null;
+    }
+
+    // ---- Consolidated path: GITHUB_DESTINATIONS (the new registry) takes
+    // precedence (dual-read). Classify from the SIGNED body, select the
+    // matched destination's INLINE webhook_secret, verify HMAC once. Parsing
+    // before verifying is safe: a forged body just selects a candidate whose
+    // secret it cannot forge. When GITHUB_DESTINATIONS is absent, fall through
+    // to the legacy GITHUB_TARGETS / GITHUB_WEBHOOK_SECRET paths below.
+    if (context.env?.GITHUB_DESTINATIONS) {
+      let destinations;
+      try {
+        destinations = parseDestinations(context.env);
+      } catch (e) {
+        // Malformed registry is a misconfiguration; null -> 401 (visible failed
+        // delivery). Do NOT interpolate the value (it is secret-bearing); the
+        // parser's message names only keys/fields, never secrets.
+        this.log(`Invalid GITHUB_DESTINATIONS config (misconfigured=true): ${e.message}`, 'error');
+        return null;
+      }
+      const rawBody = await this.readBodyWithLimits(request);
+      if (rawBody === null) {
+        return null;
+      }
+      const meta = extractClassificationMetadata(rawBody);
+      if (meta === null) {
+        this.log('Webhook body is not valid JSON', 'warn');
+        return null;
+      }
+      const result = classifyDestination(meta, destinations);
+      // host not an in-scope GitHub destination (e.g. a GHES host): skip + log,
+      // NO HMAC. The body is untrusted, so do not interpolate meta.host.
+      if (result.skip) {
+        this.log('Skipping webhook: host is not an in-scope GitHub destination', 'warn');
+        return null;
+      }
+      // webhook_secret is inline + validated non-empty at parse, so this is
+      // present on a validated registry; verify HMAC once.
+      if (!verifySignature(signature, rawBody, result.webhook_secret)) {
+        this.log('HMAC signature mismatch', 'warn');
+        return null;
+      }
+      return new AuthInfo()
+        .withAuthenticated(true)
+        .withProfile({
+          user_id: 'github-webhook',
+          target_id: result.target_id,
+          // app_slug is intentionally absent on the consolidated path:
+          // reviewer_login is explicit per the ADR, so the `${appSlug}[bot]`
+          // fallback is unused. The controller (webhooks.js) still falls back
+          // to env.GITHUB_APP_SLUG for its bot-identity gate, so
+          // GITHUB_APP_SLUG MUST remain set until the cleanup PR removes the
+          // controller's app_slug requirement.
+          // reviewer_login is required on every destination entry (no fallback
+          // in the consolidated registry), so it is always set here.
+          reviewer_login: result.reviewer_login,
+        })
+        .withType('github_webhook');
     }
 
     const targetsRaw = context.env?.GITHUB_TARGETS;
