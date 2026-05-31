@@ -20,6 +20,7 @@ import martechImpact from './commands/martech-impact.js';
 import runAudit from './commands/run-audit.js';
 import runImport from './commands/run-import.js';
 import runGlobalImport from './commands/run-global-import.js';
+import runCdnReportsBulkPublish from './commands/run-cdn-reports-bulk-publish.js';
 import runInternalReport from './commands/run-internal-report.js';
 import runReport from './commands/run-report.js';
 import runScrape from './commands/run-scrape.js';
@@ -54,6 +55,9 @@ import setLlmoCountryCodeIgnoreList from './commands/set-llmo-country-code-ignor
 import addDelegate from './commands/add-delegate.js';
 import listDelegates from './commands/list-delegates.js';
 import removeDelegate from './commands/remove-delegate.js';
+import checkAgenticTrafficDbStatus from './commands/check-agentic-traffic-db-status.js';
+import checkCdnLogsStatus from './commands/check-cdn-logs-status.js';
+import addOaeStageDomain from './commands/add-oae-stage-domain.js';
 
 /**
  * Returns all commands.
@@ -72,6 +76,7 @@ export default (context) => [
   runAudit(context),
   runImport(context),
   runGlobalImport(context),
+  runCdnReportsBulkPublish(context),
   runInternalReport(context),
   runReport(context),
   runScrape(context),
@@ -106,4 +111,7 @@ export default (context) => [
   addDelegate(context),
   listDelegates(context),
   removeDelegate(context),
+  checkAgenticTrafficDbStatus(context),
+  checkCdnLogsStatus(context),
+  addOaeStageDomain(context),
 ];

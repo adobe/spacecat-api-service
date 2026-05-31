@@ -352,6 +352,67 @@ export default function siteTests(getHttpClient, resetData) {
         });
         expect(res.status).to.equal(403);
       });
+
+      it('admin: returns 400 for invalid x-product header', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(
+          '/sites',
+          { baseURL: 'https://invalid-product-header.example.com' },
+          { 'x-product': 'NOT_A_PRODUCT' },
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/Unsupported product code/);
+      });
+
+      it('admin: x-product enrolls new site under existing ASO PAID entitlement', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://aso-trial-provisioned.example.com';
+        const createRes = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(createRes.status).to.equal(201);
+        expectSiteDto(createRes.body);
+
+        const listRes = await http.admin.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(listRes.status).to.equal(200);
+        const siteIds = listRes.body.map((s) => s.id);
+        expect(siteIds).to.include(createRes.body.id);
+
+        const entitlementsRes = await http.admin.get(`/organizations/${ORG_1_ID}/entitlements`);
+        const asoEntitlement = entitlementsRes.body.find((e) => e.productCode === 'ASO');
+        expect(asoEntitlement.tier).to.equal('PAID');
+      });
+
+      it('admin: without x-product header does not enroll site for ASO listing', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://no-write-time-product.example.com';
+        const createRes = await http.admin.post(
+          '/sites',
+          { baseURL },
+          { 'x-product': null },
+        );
+        expect(createRes.status).to.equal(201);
+
+        const listRes = await http.admin.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(listRes.status).to.equal(200);
+        const siteIds = listRes.body.map((s) => s.id);
+        expect(siteIds).to.not.include(createRes.body.id);
+      });
+
+      it('admin: idempotent re-POST with x-product returns 200', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://idempotent-x-product.example.com';
+        const first = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(first.status).to.equal(201);
+
+        const second = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(second.status).to.equal(200);
+        expect(second.body.id).to.equal(first.body.id);
+      });
     });
 
     describe('PATCH /sites/:siteId', () => {
@@ -412,6 +473,128 @@ export default function siteTests(getHttpClient, resetData) {
           organizationId: ORG_2_ID,
         });
         expect(res.status).to.equal(403);
+      });
+    });
+
+    describe('PATCH /sites/:siteId/config/scraper', () => {
+      let scraperSiteId;
+
+      before(async () => {
+        await resetData();
+        // Use a test-scoped site under ORG_1 so `user` has access via the
+        // org-membership rule. Avoids mutating baseline seed entities so
+        // failures here don't bleed into other tests.
+        const http = getHttpClient();
+        const res = await http.admin.post('/sites', {
+          baseURL: 'https://scraper-config-test-scoped.example.com',
+        });
+        expect(res.status).to.equal(201);
+        scraperSiteId = res.body.id;
+      });
+
+      // Cases that exercise the shared `siteConfig.updateScraperConfig(...)`
+      // are skipped until the `@adobe/spacecat-shared-data-access` dep is
+      // bumped to a version that includes the new getter/setter (introduced
+      // in adobe/spacecat-shared#1618). With the currently-pinned shared
+      // version the controller call resolves to `undefined`, throws a
+      // TypeError, and the catch block re-throws it as 500. The other
+      // cases below — 403, 404, missing-body, malformed-UUID — short-circuit
+      // before reaching the shared method and pass on the current dep pin.
+      describe('cases requiring @adobe/spacecat-shared-data-access >= 3.71.0', () => {
+        it('user: persists scraperConfig.headers and returns the narrow shape', async () => {
+          const http = getHttpClient();
+          const payload = {
+            scraperConfig: {
+              headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+            },
+          };
+          const res = await http.user.patch(
+            `/sites/${scraperSiteId}/config/scraper`,
+            payload,
+          );
+          expect(res.status).to.equal(200);
+          // Locks the contract: response carries only siteId + scraperConfig,
+          // not the full site (which may include unrelated secrets).
+          expect(res.body).to.have.all.keys('siteId', 'scraperConfig');
+          expect(res.body.siteId).to.equal(scraperSiteId);
+          expect(res.body.scraperConfig).to.deep.equal(payload.scraperConfig);
+
+          // Verify it actually persisted (not just echoed by the response).
+          const reread = await http.user.get(`/sites/${scraperSiteId}`);
+          expect(reread.status).to.equal(200);
+          expect(reread.body.config.scraperConfig).to.deep.equal(payload.scraperConfig);
+        });
+
+        it('user: replace semantics — partial body fully replaces stored value', async () => {
+          const http = getHttpClient();
+          // Seed an initial config first.
+          await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: { headers: { 'Accept-Language': 'fr-FR' } },
+          });
+          // PATCH with empty object should clear it.
+          const res = await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: {},
+          });
+          expect(res.status).to.equal(200);
+          expect(res.body.scraperConfig).to.deep.equal({});
+        });
+
+        it('user: rejects reserved header names', async () => {
+          const http = getHttpClient();
+          const res = await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: { headers: { Authorization: 'Bearer x' } },
+          });
+          expect(res.status).to.equal(400);
+          expect(res.body.message).to.match(/reserved scraper header/i);
+        });
+
+        it('user: rejects CRLF in header values', async () => {
+          const http = getHttpClient();
+          const res = await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: { headers: { 'X-Foo': 'a\r\nX-Bad: y' } },
+          });
+          expect(res.status).to.equal(400);
+        });
+      });
+
+      it('user: returns 403 for a denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_3_ID}/config/scraper`, {
+          scraperConfig: { headers: { 'Accept-Language': 'en-US' } },
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${NON_EXISTENT_SITE_ID}/config/scraper`, {
+          scraperConfig: { headers: { 'Accept-Language': 'en-US' } },
+        });
+        expect(res.status).to.equal(404);
+      });
+
+      it('admin: returns 400 when scraperConfig is missing from the body', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(
+          `/sites/${scraperSiteId}/config/scraper`,
+          {},
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.equal('Scraper config required');
+      });
+
+      it('admin: returns 400 when site ID is malformed', async () => {
+        // The framework's path-param middleware rejects malformed UUIDs in
+        // `src/index.js` via `isValidUUIDV4()` before the controller runs,
+        // so the message comes from the framework (not the controller's
+        // own `Invalid site ID` string, which is only reachable for the
+        // body-only validation cases).
+        const http = getHttpClient();
+        const res = await http.admin.patch('/sites/not-a-uuid/config/scraper', {
+          scraperConfig: { headers: { 'Accept-Language': 'en-US' } },
+        });
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/site id is invalid/i);
       });
     });
 

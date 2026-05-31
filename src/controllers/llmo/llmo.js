@@ -16,8 +16,6 @@ import {
   unauthorized,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  SPACECAT_USER_AGENT,
-  tracingFetch as fetch,
   hasText,
   isObject,
   isValidUUID,
@@ -55,6 +53,7 @@ import {
   applyExclusions,
   applyGroups,
   applyMappings,
+  CDN_TYPES,
   LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
@@ -68,16 +67,27 @@ import {
   previewAndPublishQueryIndex,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
+import {
+  patchSheetRows,
+  parseSheetRowPatch,
+  sharepointPathFor,
+  publishPathFor,
+  isSafePathSegment,
+} from './llmo-sheet-write.js';
+import {
+  fetchLlmoSource,
+  llmoSourceErrorResponse,
+  logNotProvisioned,
+  EMPTY_SHEET_PAYLOAD,
+  NOT_PROVISIONED_HEADER,
+  NOT_PROVISIONED_VALUE,
+} from './llmo-source.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
-import {
-  LLMO_CONFIG_DB_SYNC_TYPE,
-  isSyncEnabledForSite,
-} from './llmo-config-sync-constants.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
@@ -90,6 +100,7 @@ const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
   '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3', // adobe.com Prod
   'c2473d89-e997-458d-a86d-b4096649c12b', // adobe.com Stage
+  '59bdf35f-c0d4-4c51-9013-8a5b63d71eeb', // ekremney.com configured to use the adobe data folder for some reason
 ]);
 
 const HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE = 'Access to HLX sheet data has been blocked for this site due to PG migration';
@@ -188,7 +199,6 @@ function LlmoController(ctx) {
     const {
       siteId, dataSource, sheetType, week,
     } = context.params;
-    const { env } = context;
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
       if (siteValidation.status) {
@@ -224,28 +234,18 @@ function LlmoController(ctx) {
       }
 
       // Fetch data from the external endpoint using the dataFolder from config
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
-          'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'br',
-        },
-      });
-
-      if (!response.ok) {
-        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
-        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      const result = await fetchLlmoSource(context, url.toString());
+      if (result.noData) {
+        logNotProvisioned(log, siteId, llmoConfig.dataFolder);
+        return cachedOk(EMPTY_SHEET_PAYLOAD, { [NOT_PROVISIONED_HEADER]: NOT_PROVISIONED_VALUE });
       }
-
-      // Get the response data
-      const data = await response.json();
-
-      // Return the data, pass through any compression headers from upstream
-      return cachedOk(data, {
-        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
-      });
+      return cachedOk(result.data, { ...result.headers });
     } catch (error) {
       log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      const mapped = llmoSourceErrorResponse(error);
+      if (mapped) {
+        return mapped;
+      }
       return badRequest(cleanupHeaderValue(error.message));
     }
   };
@@ -257,7 +257,6 @@ function LlmoController(ctx) {
     const {
       siteId, dataSource, sheetType, week,
     } = context.params;
-    const { env } = context;
 
     // Start timing for the entire method
     const methodStartTime = Date.now();
@@ -327,21 +326,13 @@ function LlmoController(ctx) {
 
       // Fetch data from the external endpoint using the dataFolder from config
       const fetchStartTime = Date.now();
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
-          'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'br',
-        },
-      });
-
-      if (!response.ok) {
-        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
-        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      const fetchResult = await fetchLlmoSource(context, url.toString());
+      if (fetchResult.noData) {
+        logNotProvisioned(log, siteId, llmoConfig.dataFolder);
+        return ok(EMPTY_SHEET_PAYLOAD, { [NOT_PROVISIONED_HEADER]: NOT_PROVISIONED_VALUE });
       }
-
-      // Get the response data
-      let data = await response.json();
+      let { data } = fetchResult;
+      const responseHeaders = fetchResult.headers;
       const fetchEndTime = Date.now();
       const fetchDuration = fetchEndTime - fetchStartTime;
       log.info(`External API fetch completed - elapsed: ${fetchEndTime - methodStartTime}ms, duration: ${fetchDuration}ms`);
@@ -414,12 +405,14 @@ function LlmoController(ctx) {
       log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms, mapping: ${mappingDuration}ms)`);
 
       // Return the data, pass through any compression headers from upstream
-      return ok(data, {
-        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
-      });
+      return ok(data, { ...responseHeaders });
     } catch (error) {
       const errorTime = Date.now();
       log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
+      const mapped = llmoSourceErrorResponse(error);
+      if (mapped) {
+        return mapped;
+      }
       return badRequest(cleanupHeaderValue(error.message));
     }
   };
@@ -428,7 +421,6 @@ function LlmoController(ctx) {
   const getLlmoGlobalSheetData = async (context) => {
     const { log } = context;
     const { siteId, configName } = context.params;
-    const { env } = context;
     try {
       log.info(`validating LLMO global sheet data for siteId: ${siteId}, configName: ${configName}`);
       // Validate LLMO access but don't use the site-specific dataFolder
@@ -455,29 +447,19 @@ function LlmoController(ctx) {
       }
 
       // Fetch data from the external endpoint using the global llmo-global folder
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
-          'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'br',
-        },
-      });
-
-      if (!response.ok) {
-        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
-        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      const result = await fetchLlmoSource(context, url.toString());
+      if (result.noData) {
+        logNotProvisioned(log, siteId, 'llmo-global');
+        return cachedOk(EMPTY_SHEET_PAYLOAD, { [NOT_PROVISIONED_HEADER]: NOT_PROVISIONED_VALUE });
       }
-
-      // Get the response data
-      const data = await response.json();
-
       log.info(`Successfully proxied global data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
-      // Return the data and let the framework handle the compression
-      return cachedOk(data, {
-        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
-      });
+      return cachedOk(result.data, { ...result.headers });
     } catch (error) {
       log.error(`Error proxying global data for siteId: ${siteId}, error: ${error.message}`);
+      const mapped = llmoSourceErrorResponse(error);
+      if (mapped) {
+        return mapped;
+      }
       return badRequest(cleanupHeaderValue(error.message));
     }
   };
@@ -593,17 +575,6 @@ function LlmoController(ctx) {
               : /* c8 ignore next */ null,
           },
         });
-      }
-
-      if (isSyncEnabledForSite(siteId)) {
-        log.info(`[llmo-config-db-sync] Triggering S3-to-DB config sync for siteId: ${siteId} with dryRun: false`);
-        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
-          type: LLMO_CONFIG_DB_SYNC_TYPE,
-          siteId,
-          dryRun: false,
-        });
-      } else {
-        log.info(`[llmo-config-db-sync] Skipping S3-to-DB config sync for siteId: ${siteId} because it is not in ALLOWED_SITE_IDS`);
       }
 
       // Build config summary
@@ -1137,11 +1108,100 @@ function LlmoController(ctx) {
         return forbidden(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
       }
       const { llmoConfig } = siteValidation;
-      const { data, headers } = await queryLlmoFiles(context, llmoConfig);
-      return cachedOk(data, headers);
+      const queryResult = await queryLlmoFiles(context, llmoConfig);
+      if (queryResult.noData) {
+        logNotProvisioned(log, siteId, llmoConfig.dataFolder);
+        return cachedOk(EMPTY_SHEET_PAYLOAD, { [NOT_PROVISIONED_HEADER]: NOT_PROVISIONED_VALUE });
+      }
+      return cachedOk(queryResult.data, queryResult.headers);
     } catch (error) {
       log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
+      const mapped = llmoSourceErrorResponse(error);
+      if (mapped) {
+        return mapped;
+      }
       return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Updates a single row in an LLMO XLSX data sheet stored in SharePoint.
+  // Round-trips the workbook (read → modify → upload → publish), so this is
+  // intended for low-frequency UI edits (e.g. soft-delete on Strategic Recommendations).
+  const patchLlmoDataRow = async (context) => {
+    const { log, env } = context;
+    const { siteId, sheetType, dataSource } = context.params;
+    const { data } = context;
+
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) {
+        return siteValidation;
+      }
+      const { llmoConfig } = siteValidation;
+
+      if (!hasText(dataSource)) {
+        return badRequest('dataSource path parameter is required');
+      }
+      // Reject path-traversal attempts before concatenating into SharePoint or admin.hlx.page URLs.
+      if (!isSafePathSegment(dataSource)) {
+        return badRequest('dataSource must contain only alphanumerics, hyphen, and underscore');
+      }
+      if (sheetType !== undefined && !isSafePathSegment(sheetType)) {
+        return badRequest('sheetType must contain only alphanumerics, hyphen, and underscore');
+      }
+
+      const parsed = parseSheetRowPatch(data);
+      if (parsed.error) {
+        return badRequest(parsed.error);
+      }
+      const { updates, isBatch } = parsed;
+
+      const sharepointPath = sharepointPathFor(llmoConfig.dataFolder, sheetType, dataSource);
+      const publishPath = publishPathFor(llmoConfig.dataFolder, sheetType, dataSource);
+
+      log.info(`Patching LLMO sheet rows for site ${siteId} at ${sharepointPath} (${updates.length} update(s))`);
+      const { results } = await patchSheetRows(
+        { sharepointPath, publishPath, updates },
+        { env, log },
+      );
+
+      // Preserve the single-row response shape for back-compat with callers that
+      // posted the single-update body; emit a batch shape for callers using `updates`.
+      if (!isBatch) {
+        const [single] = results;
+        return ok({
+          siteId,
+          sheetType: sheetType || null,
+          dataSource,
+          sheet: single.sheet,
+          rowNumber: single.rowNumber,
+          updated: single.updated,
+        });
+      }
+      return ok({
+        siteId,
+        sheetType: sheetType || null,
+        dataSource,
+        updates: results,
+      });
+    } catch (error) {
+      log.error(`Error patching LLMO sheet row for site ${siteId}: ${error.message}`);
+      const status = error.statusCode;
+      if (status === 404) {
+        return notFound(cleanupHeaderValue(error.message));
+      }
+      if (status === 409) {
+        return createResponse(
+          { message: cleanupHeaderValue(error.message) },
+          409,
+        );
+      }
+      if (status === 400) {
+        return badRequest(cleanupHeaderValue(error.message));
+      }
+      // Unexpected errors (SDK failures, missing env, network) — full detail goes to
+      // the logs above; respond with a generic message so internals are not leaked.
+      return internalServerError('Failed to patch sheet row');
     }
   };
 
@@ -1311,6 +1371,23 @@ function LlmoController(ctx) {
       const currentConfig = site.getConfig();
       const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
       const isNewlyOpted = !existingEdgeConfig.opted;
+
+      // Kick off IMS + S3 in parallel with saveSiteConfig — all three are independent
+      let notificationPrep = null;
+      if (isNewlyOpted) {
+        const imsUserId = profile?.email;
+
+        const imsPromise = imsUserId && context.imsClient
+          ? Promise.resolve(context.imsClient.getImsAdminProfile(imsUserId))
+          : Promise.resolve(null);
+
+        const s3Promise = s3?.s3Client
+          ? Promise.resolve(readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket }))
+          : Promise.resolve(null);
+
+        notificationPrep = Promise.allSettled([imsPromise, s3Promise]);
+      }
+
       currentConfig.updateEdgeOptimizeConfig({
         ...existingEdgeConfig,
         opted: existingEdgeConfig.opted ?? Date.now(),
@@ -1339,53 +1416,39 @@ function LlmoController(ctx) {
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
         }
 
-        // Detached from the response path so the UI's enable click is not blocked
-        // by the IMS lookup, bot-blocker probe (5s timeout), S3 read, and email
-        // send. Lambda's default callbackWaitsForEmptyEventLoop=true keeps the
-        // invocation alive until this promise settles, so the email still goes out.
-        ((async () => {
-          // profile.email holds the IMS userId (sub claim) for IMS-authenticated
-          // callers, so we resolve the real email via IMS. Best-effort: non-IMS
-          // auth modes leave optedBy unset, which the email helper handles.
-          let optedBy;
-          const imsUserId = profile?.email;
-          if (imsUserId && context.imsClient) {
-            try {
-              const adminProfile = await context.imsClient.getImsAdminProfile(imsUserId);
-              optedBy = adminProfile?.email;
-            } catch (imsErr) {
-              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${imsErr.message}`);
-            }
-          }
-
-          /* CDN provider is managed by log-infra and stored in the S3 LLMO config
-          during provisioning. Site DynamoDB cdnBucketConfig does not store it,
-          so S3 is the primary source.
-          Fallback to request cdnType (e.g. AEM CS Fastly self-service)
-          when S3 config is not yet available. */
+        try {
+          const [adminProfile, llmoCfgResult] = await notificationPrep;
           let notificationCdnType;
-          try {
-            if (s3?.s3Client) {
-              const { config: llmoCfg } = await readConfig(siteId, s3.s3Client, {
-                s3Bucket: s3.s3Bucket,
-              });
-              notificationCdnType = llmoCfg?.cdnBucketConfig?.cdnProvider;
-            }
-          } catch (s3Err) {
-            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${s3Err.message}`);
+          if (llmoCfgResult.status === 'fulfilled') {
+            notificationCdnType = llmoCfgResult.value?.config?.cdnBucketConfig?.cdnProvider;
+          } else {
+            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${llmoCfgResult.reason?.message}`);
           }
           if (!hasText(notificationCdnType) && hasText(cdnType)) {
             notificationCdnType = cdnType;
           }
 
-          await notifyOptInIfNeeded(context, {
-            siteId,
-            siteBaseURL: baseURL,
-            cdnType: notificationCdnType,
-            orgId: site.getOrganizationId?.(),
-            optedBy,
-          });
-        })()).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
+          if (notificationCdnType === CDN_TYPES.AEM_CS_FASTLY) {
+            log.info(`[cdn-opt-in-notification] Email skipped for site=${siteId} reason=aem-cs-fastly`);
+          } else {
+            let optedBy;
+            if (adminProfile.status === 'fulfilled') {
+              optedBy = adminProfile.value?.email;
+            } else {
+              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${adminProfile.reason?.message}`);
+            }
+
+            await notifyOptInIfNeeded(context, {
+              siteId,
+              siteBaseURL: baseURL,
+              cdnType: notificationCdnType,
+              orgId: site.getOrganizationId?.(),
+              optedBy,
+            });
+          }
+        } catch (err) {
+          log.error('[cdn-opt-in-notification] Unhandled error:', err);
+        }
       }
 
       let cdnTypeNormalized = null;
@@ -2019,6 +2082,7 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryFiles,
+    patchLlmoDataRow,
     getLlmoRationale,
     getBrandClaims,
     getDemoBrandPresence,

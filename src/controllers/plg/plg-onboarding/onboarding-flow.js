@@ -13,11 +13,14 @@
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupPlgSiteSuggestionsAndFixes } from '../plg-onboarding-cleanup.js';
+import { updateRumConfig } from '../../../support/rum-config-service.js';
 import { hasActiveSuggestions } from './displacement.js';
 import {
-  AEM_CS_AUTHOR_URL_PATTERN, EDS_HOST_PATTERN, isSafeDomain, isValidHostname,
+  AEM_CS_AUTHOR_URL_PATTERN, EDS_HOST_PATTERN, isSafeDomain, isValidDomain, prepareDomain,
 } from './validation.js';
-import { isInternalOrg, isInternalOrgDemoSite } from './internal-org.js';
+import {
+  getReviewerIdentity, isFromAsoUI, isInternalOrg, isInternalOrgDemoSite,
+} from './internal-org.js';
 import {
   DOMAIN_ALREADY_ASSIGNED,
   DOMAIN_ALREADY_ONBOARDED_IN_ORG,
@@ -33,7 +36,7 @@ import {
 } from './entitlement.js';
 import { updateLaunchDarklyFlags } from './launchdarkly.js';
 import { createOrFindProject, enrollPlgConfigHandlers } from './site-setup.js';
-import { STATUSES } from './constants.js';
+import { STATUSES, REVIEW_DECISIONS } from './constants.js';
 
 const PLG_PROFILE_KEY = 'aso_plg';
 
@@ -46,13 +49,13 @@ const PLG_PROFILE_KEY = 'aso_plg';
  * @throws the original error in all other cases.
  */
 /* eslint-disable no-param-reassign */
-async function handleTerminalError(error, { onboarding, steps, updatedBy }, context) {
+async function handleTerminalError(error, { onboarding, steps }, context) {
   if (error instanceof EntitlementWaitlistError) {
     steps.entitlementFailed = true;
     onboarding.setStatus(STATUSES.WAITLISTED);
     onboarding.setWaitlistReason(error.message);
     onboarding.setSteps(steps);
-    await persistAndNotify(onboarding, { updatedBy }, context, {
+    await persistAndNotify(onboarding, context, {
       swallowSaveErrors: true, errorLabel: 'waitlist state',
     });
     return onboarding;
@@ -64,7 +67,7 @@ async function handleTerminalError(error, { onboarding, steps, updatedBy }, cont
     message: (error.clientError || error.conflict)
       ? error.message : 'An internal error occurred',
   });
-  await persistAndNotify(onboarding, { updatedBy }, context, {
+  await persistAndNotify(onboarding, context, {
     swallowSaveErrors: true, errorLabel: 'error state',
   });
   throw error;
@@ -92,6 +95,7 @@ async function applyDeliveryConfig({
 
       const existingDeliveryConfig = site.getDeliveryConfig() || {};
       if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
+        site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_CS);
         site.setDeliveryConfig({
           ...existingDeliveryConfig,
           authorURL: resolvedConfig.authorURL,
@@ -123,9 +127,9 @@ async function applyDeliveryConfig({
     site.setDeliveryConfig({
       ...existingDeliveryConfig,
       authorURL: presetAuthorUrl,
-      ...(programId && {
-        programId, environmentId, preferContentApi: true, enableDAMAltTextUpdate: true,
-      }),
+      preferContentApi: true,
+      enableDAMAltTextUpdate: true,
+      ...(programId && { programId, environmentId }),
       imsOrgId,
     });
     log.info(`Set AEM CS delivery config from preset author URL: ${presetAuthorUrl}`);
@@ -190,12 +194,42 @@ async function applyDeliveryConfig({
  * @returns {Promise<object|null>} the waitlisted onboarding to return, or null to continue.
  */
 async function handleExistingOnboardedDomain({
-  onboarding, domain, imsOrgId, updatedBy,
+  onboarding, domain, imsOrgId,
 }, context) {
   const { dataAccess, log } = context;
   const { Site, PlgOnboarding, Organization } = dataAccess;
 
   const existingRecords = await PlgOnboarding.allByImsOrgId(imsOrgId);
+
+  // Mark any WAITLISTED or WAITING_FOR_IP_ALLOWLISTING records for other domains in this org
+  // as OUTDATED — a new onboarding attempt supersedes these pending/blocked domains.
+  const waitlistedRecords = existingRecords.filter(
+    (r) => r.getDomain() !== domain && [
+      STATUSES.WAITLISTED,
+      STATUSES.WAITING_FOR_IP_ALLOWLISTING,
+    ].includes(r.getStatus()),
+  );
+  await Promise.allSettled(waitlistedRecords.map(async (r) => {
+    const waitlistReason = r.getWaitlistReason();
+    r.setStatus(STATUSES.OUTDATED);
+    r.setWaitlistReason(null);
+    r.setUpdatedBy('system');
+    const existingReviews = r.getReviews() || [];
+    r.setReviews([...existingReviews, {
+      reason: waitlistReason,
+      decision: REVIEW_DECISIONS.CLOSED,
+      reviewedBy: 'system',
+      reviewedAt: new Date().toISOString(),
+      justification: `Automatically closed by system — superseded by new onboarding for domain ${domain}.`,
+    }]);
+    await r.save();
+    try {
+      await postPlgOnboardingNotification(r, context);
+    } catch (notifyErr) {
+      log.warn(`Failed to post OUTDATED notification for domain ${r.getDomain()}: ${notifyErr.message}`);
+    }
+  }));
+
   const alreadyOnboarded = existingRecords
     .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
   if (!alreadyOnboarded) {
@@ -211,8 +245,17 @@ async function handleExistingOnboardedDomain({
 
   if (canDisplace) {
     log.info(`IMS org ${imsOrgId}: displacing domain ${alreadyOnboarded.getDomain()} (site ${alreadyOnboardedSiteId}) for new domain ${domain}`);
-    alreadyOnboarded.setStatus(STATUSES.WAITLISTED);
-    alreadyOnboarded.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} was replaced by ${domain} — it had no active suggestions and a new domain '${domain}' started onboarding for current org.`);
+    alreadyOnboarded.setStatus(STATUSES.OUTDATED);
+    alreadyOnboarded.setWaitlistReason(null);
+    alreadyOnboarded.setUpdatedBy('system');
+    const existingAlreadyOnboardedReviews = alreadyOnboarded.getReviews() || [];
+    alreadyOnboarded.setReviews([...existingAlreadyOnboardedReviews, {
+      reason: null,
+      decision: REVIEW_DECISIONS.OFFBOARDED,
+      reviewedBy: 'system',
+      reviewedAt: new Date().toISOString(),
+      justification: `Automatically offboarded by system — displaced by new onboarding for domain ${domain}.`,
+    }]);
     await alreadyOnboarded.save();
     await postPlgOnboardingNotification(alreadyOnboarded, context);
     // NOTE: the underlying Site record is intentionally left unchanged. The Site model does
@@ -255,7 +298,7 @@ async function handleExistingOnboardedDomain({
   }
   onboarding.setStatus(STATUSES.WAITLISTED);
   onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
-  await persistAndNotify(onboarding, { updatedBy }, context);
+  await persistAndNotify(onboarding, context);
   return onboarding;
 }
 
@@ -268,7 +311,7 @@ async function handleExistingOnboardedDomain({
  *   fall through to the full onboarding flow (e.g. site not found).
  */
 async function handlePreonboardedFastPath({
-  onboarding, domain, imsOrgId, updatedBy,
+  onboarding, domain, imsOrgId,
 }, context) {
   const {
     createOrFindOrganization, dataAccess, env, log,
@@ -276,6 +319,7 @@ async function handlePreonboardedFastPath({
   const { Site, Organization } = dataAccess;
 
   log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
+  onboarding.setSteps({ ...(onboarding.getSteps() || {}), preOnboarded: true });
   let site = await Site.findById(onboarding.getSiteId());
   if (!site) {
     log.warn(`Preonboarded site ${onboarding.getSiteId()} not found, falling through to full onboarding`);
@@ -321,7 +365,7 @@ async function handlePreonboardedFastPath({
         onboarding.setWaitlistReason(waitlistReason);
         const steps = { ...(onboarding.getSteps() || {}), orgResolutionFailed: true };
         onboarding.setSteps(steps);
-        await persistAndNotify(onboarding, { updatedBy }, context);
+        await persistAndNotify(onboarding, context);
         return onboarding;
       }
     }
@@ -348,14 +392,14 @@ async function handlePreonboardedFastPath({
     onboarding.setBotBlocker(null);
     onboarding.setSteps(steps);
     onboarding.setCompletedAt(new Date().toISOString());
-    await persistAndNotify(onboarding, { updatedBy }, context);
+    await persistAndNotify(onboarding, context, { hints: { fastOnboarded: true } });
     return onboarding;
   } catch (error) {
     if (error instanceof EntitlementWaitlistError) {
       onboarding.setStatus(STATUSES.WAITLISTED);
       onboarding.setWaitlistReason(error.message);
       onboarding.setSteps({ ...(onboarding.getSteps() || {}), entitlementFailed: true });
-      await persistAndNotify(onboarding, { updatedBy }, context, {
+      await persistAndNotify(onboarding, context, {
         swallowSaveErrors: true, errorLabel: 'waitlist state',
       });
       return onboarding;
@@ -378,8 +422,10 @@ async function handlePreonboardedFastPath({
  * @returns {Promise<object>} PlgOnboarding record
  */
 export async function performAsoPlgOnboarding({
-  domain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId, updatedBy,
+  domain: rawDomain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
 }, context) {
+  const domain = prepareDomain(rawDomain);
+  const callerIdentity = getReviewerIdentity(context);
   const {
     Config,
     RUMAPIClient,
@@ -403,15 +449,19 @@ export async function performAsoPlgOnboarding({
   } = context;
   const { Site, PlgOnboarding, Organization } = dataAccess;
 
-  /* c8 ignore next 7 */
-  if (!isValidHostname(domain)) {
+  // Defense-in-depth: outer entry points (onboard, alternateDomain bypass) already
+  // prepareDomain + isValidDomain + isSafeDomain. These inner checks guard against any
+  // future caller that constructs an unvalidated payload (admin tooling, backfill scripts).
+  if (!isValidDomain(domain)) {
+    /* c8 ignore next 5 */
     throw Object.assign(
-      new Error('Invalid domain: must be a valid hostname'),
+      new Error('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)'),
       { clientError: true },
     );
   }
 
   if (!isSafeDomain(domain)) {
+    /* c8 ignore next 5 */
     throw Object.assign(new Error('Invalid domain'), { clientError: true });
   }
 
@@ -428,7 +478,7 @@ export async function performAsoPlgOnboarding({
   if (!onboarding) {
     try {
       onboarding = await PlgOnboarding.create({
-        imsOrgId, domain, baseURL, status: STATUSES.IN_PROGRESS,
+        imsOrgId, domain, baseURL, status: STATUSES.IN_PROGRESS, createdBy: callerIdentity,
       });
       log.info(`Created PlgOnboarding record ${onboarding.getId()}`);
     } catch (createError) {
@@ -444,9 +494,13 @@ export async function performAsoPlgOnboarding({
       log.info(`Concurrent create detected, resuming PlgOnboarding record ${onboarding.getId()}`);
     }
   }
+  onboarding.setUpdatedBy(callerIdentity);
+  if (isFromAsoUI(context)) {
+    onboarding.setCreatedBy(callerIdentity);
+  }
 
   const terminalFromGuard = await handleExistingOnboardedDomain({
-    onboarding, domain, imsOrgId, updatedBy,
+    onboarding, domain, imsOrgId,
   }, context);
   if (terminalFromGuard) {
     return terminalFromGuard;
@@ -455,7 +509,7 @@ export async function performAsoPlgOnboarding({
   // Fast path: preonboarded sites just need enrollment + ONBOARDED.
   if (onboarding.getStatus() === STATUSES.PRE_ONBOARDING && onboarding.getSiteId()) {
     const fastPathResult = await handlePreonboardedFastPath({
-      onboarding, domain, imsOrgId, updatedBy,
+      onboarding, domain, imsOrgId,
     }, context);
     if (fastPathResult) {
       return fastPathResult;
@@ -501,7 +555,7 @@ export async function performAsoPlgOnboarding({
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
         onboarding.setSteps(steps);
-        await persistAndNotify(onboarding, { updatedBy }, context);
+        await persistAndNotify(onboarding, context);
         return onboarding;
       }
     }
@@ -532,7 +586,7 @@ export async function performAsoPlgOnboarding({
           onboarding.setWaitlistReason(waitlistReason);
           onboarding.setSiteId(site.getId());
           onboarding.setSteps(steps);
-          await persistAndNotify(onboarding, { updatedBy }, context);
+          await persistAndNotify(onboarding, context);
           return onboarding;
         }
       }
@@ -565,7 +619,7 @@ export async function performAsoPlgOnboarding({
       onboarding.setBotBlocker(botBlockerInfo);
       onboarding.setSiteId(site?.getId() || null);
       onboarding.setSteps(steps);
-      await persistAndNotify(onboarding, { updatedBy }, context);
+      await persistAndNotify(onboarding, context);
       return onboarding;
     }
 
@@ -667,6 +721,10 @@ export async function performAsoPlgOnboarding({
       site.setProjectId(project.getId());
     }
 
+    // Perform a live RUM domain-key check and persist the result.
+    const hasDomainKey = await updateRumConfig(site, context, { save: false });
+    siteConfig.updateRumConfig(hasDomainKey);
+
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
     steps.configUpdated = true;
@@ -730,9 +788,9 @@ export async function performAsoPlgOnboarding({
     onboarding.setBotBlocker(null);
     onboarding.setSteps(steps);
     onboarding.setCompletedAt(new Date().toISOString());
-    await persistAndNotify(onboarding, { updatedBy }, context);
+    await persistAndNotify(onboarding, context);
     return onboarding;
   } catch (error) {
-    return handleTerminalError(error, { onboarding, steps, updatedBy }, context);
+    return handleTerminalError(error, { onboarding, steps }, context);
   }
 }

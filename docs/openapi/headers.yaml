@@ -8,3 +8,13 @@ location:
   description: The redirect location
   schema:
     type: string
+
+xLlmoDataStatus:
+  description: |
+    Present with value `not-provisioned` when the site's LLMO data has not yet been
+    provisioned (the response body is an empty sheet envelope). Absent when data is
+    provisioned, including a provisioned-but-empty sheet.
+  schema:
+    type: string
+    enum:
+      - not-provisioned

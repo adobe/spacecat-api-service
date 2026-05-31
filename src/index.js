@@ -79,6 +79,7 @@ import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
+import FanoutReportController from './controllers/llmo/fanout-report.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
@@ -97,16 +98,31 @@ import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
-import routeRequiredCapabilities from './routes/required-capabilities.js';
+import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
+import AiVisibilityController from './controllers/ai-visibility.js';
+import SerenityController from './controllers/serenity.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
+import ApiKeyImsHandler from './support/api-key-ims-handler.js';
+import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
 
-const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Accept any RFC 4122 / 9562-defined UUID version (v1..v8) instead of
+// v4-only. Version nibble `[1-8]` covers all allocated versions; v0/nil
+// (reserved) and v9..vF (unallocated) are still rejected. The clock-seq
+// variant nibble is independently clamped to `[89ab]` (the `10xx` RFC
+// variant) so genuinely malformed strings still fail. Version and variant
+// are distinct UUID concepts — keeping that separation explicit in the regex.
+//
+// Why widen: producer-side IDs are progressively migrating to UUID v7 for
+// sortable keys (Mystique-allocated site/opportunity IDs already use v7),
+// and rejecting them at the API gateway breaks otherwise-valid routes
+// (e.g. GET /sites/{siteId}/opportunities returns 400 "Site Id is invalid").
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
+const isValidUUIDAnyVersion = (uuid) => uuidRegex.test(uuid);
 
 /**
  * LOCAL DEVELOPMENT ONLY - CORS middleware wrapper
@@ -132,7 +148,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product, x-promise-token',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -233,6 +249,7 @@ async function run(request, context) {
     const llmoController = LlmoController(context);
     const llmoMysticatController = LlmoMysticatController(context);
     const llmoOpportunitiesController = LlmoOpportunitiesController(context);
+    const fanoutReportController = FanoutReportController(context);
     const fixesController = new FixesController(context);
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
@@ -256,6 +273,8 @@ async function run(request, context) {
     const plgOnboardingController = PlgOnboardingController(context);
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
+    const aiVisibilityController = AiVisibilityController(context, log, context.env);
+    const serenityController = SerenityController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -310,6 +329,9 @@ async function run(request, context) {
       plgOnboardingController,
       drsBpPgAuditController,
       webhooksController,
+      aiVisibilityController,
+      fanoutReportController,
+      serenityController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -317,11 +339,11 @@ async function run(request, context) {
     if (routeMatch) {
       const { handler, params } = routeMatch;
 
-      if (params.siteId && !isValidUUIDV4(params.siteId)) {
+      if (params.siteId && !isValidUUIDAnyVersion(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
       if (params.organizationId
-        && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
+        && (!isValidUUIDAnyVersion(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
       if (params.spaceCatId && !isValidUUID(params.spaceCatId)) {
@@ -330,14 +352,17 @@ async function run(request, context) {
       if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
         return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
       }
-      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
+      if (params.plgOnboardingId && !isValidUUIDAnyVersion(params.plgOnboardingId)) {
         return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
-      if (params.onboardingId && !isValidUUIDV4(params.onboardingId)) {
+      if (params.onboardingId && !isValidUUIDAnyVersion(params.onboardingId)) {
         return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
       if (params.executionId && !isValidUUID(params.executionId)) {
         return badRequest('Execution Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.jobId && !isValidUUIDAnyVersion(params.jobId)) {
+        return badRequest('Job Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;
@@ -369,22 +394,42 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 //    for any other path, so non-webhook requests fall through cheaply. Must run
 //    BEFORE path-agnostic handlers so a webhook request does not reach JwtHandler
 //    / AdobeImsHandler and fail with a misleading 401 on a missing JWT.
-//  - JwtHandler / AdobeImsHandler / ScopedApiKeyHandler / LegacyApiKeyHandler:
-//    standard auth paths for the rest of the API surface.
+//  - JwtHandler: tried first for token-bearing requests (JWT path is the target
+//    end-state for all consumers).
+//  - ApiKeyImsHandler: route-scoped IMS handler (/tools/api-keys/*) for IaaS-only
+//    orgs that cannot acquire a JWT session token. Returns null for other paths,
+//    falling through to AdobeImsHandler. Once Auto-Fix (ASO-607) migrates and
+//    AdobeImsHandler is removed, this scoped handler keeps IaaS key management
+//    working without re-introducing a global IMS auth backdoor.
+//  - AdobeImsHandler: legacy global IMS path; kept for routes still on IMS auth
+//    (e.g. Auto-Fix). To be removed once all consumers are JWT-migrated.
+//  - ScopedApiKeyHandler: scoped API-key auth for Import-as-a-Service.
+//  - RouteScopedLegacyApiKeyHandler: route-scoped legacy API key handler for
+//    POST /event/fulfillment and POST /slack/channels/invite-by-user-id — the two
+//    admin endpoints whose callers cannot migrate to S2S. Returns null for all
+//    other routes. Must run BEFORE LegacyApiKeyHandler so the scoped handler owns
+//    those two routes explicitly. LegacyApiKeyHandler is kept for now and will be
+//    removed in a follow-up once all other consumers are confirmed migrated.
+//  - LegacyApiKeyHandler: legacy catch-all; to be removed in follow-up.
 // When adding a new path-scoped handler, place it in the same position (after
 // SkipAuthHandler, before the path-agnostic handlers) to preserve early-bail.
-// AUTH_HANDLERS order is enforced by test/auth-handlers.test.js.
+// AUTH_HANDLERS order is enforced by test/auth-handlers-order.test.js.
 const AUTH_HANDLERS = [
   SkipAuthHandler,
   GitHubWebhookHmacHandler,
   JwtHandler,
+  ApiKeyImsHandler,
   AdobeImsHandler,
   ScopedApiKeyHandler,
+  RouteScopedLegacyApiKeyHandler,
   LegacyApiKeyHandler,
 ];
 
 const wrappedMain = wrap(run)
-  .with(readOnlyAdminWrapper, { routeCapabilities: routeRequiredCapabilities })
+  .with(readOnlyAdminWrapper, {
+    routeCapabilities: routeRequiredCapabilities,
+    internalRoutes: INTERNAL_ROUTES,
+  })
   .with(authWrapper, { authHandlers: AUTH_HANDLERS })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 

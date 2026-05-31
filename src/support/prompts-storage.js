@@ -55,10 +55,14 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
 }
 
 /**
- * Resolves category business key to categories.id (uuid).
+ * Resolves category business key or UUID to categories.id (uuid).
+ * When categoryId is a UUID it is looked up by primary key scoped to the
+ * organization (consistent with resolveBrandUuid) — this validates org
+ * ownership rather than blindly trusting the caller-supplied UUID.
+ * When categoryId is a business key it is looked up by category_id as before.
  *
  * @param {string} organizationId - SpaceCat organization UUID
- * @param {string} categoryId - Business key (e.g. "photoshop-photo-editing")
+ * @param {string} categoryId - Business key or UUID
  * @param {object} postgrestClient - PostgREST client
  * @returns {Promise<string|null>} categories.id (uuid) or null
  */
@@ -66,20 +70,23 @@ export async function resolveCategoryUuid(organizationId, categoryId, postgrestC
   if (!hasText(categoryId) || !postgrestClient?.from) {
     return null;
   }
-  const { data, error } = await postgrestClient
-    .from('categories')
-    .select('id')
-    .eq('organization_id', organizationId)
-    .eq('category_id', categoryId)
-    .maybeSingle();
+  const query = postgrestClient.from('categories').select('id').eq('organization_id', organizationId);
+  const { data, error } = await (isValidUUID(categoryId)
+    ? query.eq('id', categoryId)
+    : query.eq('category_id', categoryId)
+  ).maybeSingle();
   return !error && data?.id ? data.id : null;
 }
 
 /**
- * Resolves topic business key to topics.id (uuid).
+ * Resolves topic business key or UUID to topics.id (uuid).
+ * When topicId is a UUID it is looked up by primary key scoped to the
+ * organization (consistent with resolveBrandUuid) — this validates org
+ * ownership rather than blindly trusting the caller-supplied UUID.
+ * When topicId is a business key it is looked up by topic_id as before.
  *
  * @param {string} organizationId - SpaceCat organization UUID
- * @param {string} topicId - Business key
+ * @param {string} topicId - Business key or UUID
  * @param {object} postgrestClient - PostgREST client
  * @returns {Promise<string|null>} topics.id (uuid) or null
  */
@@ -87,12 +94,11 @@ export async function resolveTopicUuid(organizationId, topicId, postgrestClient)
   if (!hasText(topicId) || !postgrestClient?.from) {
     return null;
   }
-  const { data, error } = await postgrestClient
-    .from('topics')
-    .select('id')
-    .eq('organization_id', organizationId)
-    .eq('topic_id', topicId)
-    .maybeSingle();
+  const query = postgrestClient.from('topics').select('id').eq('organization_id', organizationId);
+  const { data, error } = await (isValidUUID(topicId)
+    ? query.eq('id', topicId)
+    : query.eq('topic_id', topicId)
+  ).maybeSingle();
   return !error && data?.id ? data.id : null;
 }
 
@@ -507,10 +513,9 @@ export async function upsertPrompts({
 
   let existingQuery = postgrestClient
     .from('prompts')
-    .select('id,prompt_id,text,regions')
+    .select('id,prompt_id,text,regions,status')
     .eq('organization_id', organizationId)
-    .eq('brand_id', brandUuid)
-    .neq('status', 'deleted');
+    .eq('brand_id', brandUuid);
 
   if (incomingIds.length > 0) {
     existingQuery = existingQuery.in('prompt_id', incomingIds);
@@ -572,6 +577,11 @@ export async function upsertPrompts({
       updated_by: updatedBy,
     };
 
+    if (match && match.status !== 'active') {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
     if (match) {
       toUpdate.push({ ...row, id: match.id });
       processed.push({ ...row, prompt_id: promptId });
@@ -583,6 +593,7 @@ export async function upsertPrompts({
 
   let created = 0;
   let updated = 0;
+  const skipped = prompts.length - toInsert.length - toUpdate.length;
 
   if (toInsert.length > 0) {
     const { data: inserted, error } = await postgrestClient.from('prompts').insert(toInsert).select();
@@ -615,7 +626,9 @@ export async function upsertPrompts({
     updatedAt: r.updated_at,
   }));
 
-  return { created, updated, prompts: promptsOut };
+  return {
+    created, updated, skipped, prompts: promptsOut,
+  };
 }
 
 /**
@@ -784,4 +797,21 @@ export async function bulkDeletePrompts({
     metadata: { total, success, failure: failures.length },
     failures,
   };
+}
+
+export async function checkPromptsExist({ brandUuid, prompts, postgrestClient }) {
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient.rpc('rpc_check_prompts_exist', {
+    p_brand_id: brandUuid,
+    p_prompts: prompts,
+  });
+
+  if (error) {
+    throw new Error(`checkPromptsExist RPC failed: ${error.message}`);
+  }
+
+  return data ?? [];
 }

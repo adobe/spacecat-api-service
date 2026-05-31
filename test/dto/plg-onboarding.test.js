@@ -38,8 +38,8 @@ describe('PlgOnboardingDto', () => {
     getCompletedAt: () => '2026-03-09T15:00:00.000Z',
     getCreatedAt: () => '2026-03-09T12:00:00.000Z',
     getUpdatedAt: () => '2026-03-09T15:00:00.000Z',
+    getCreatedBy: () => 'system',
     getUpdatedBy: () => 'user@example.com',
-    getCreatedBy: () => 'creator@example.com',
   };
 
   describe('toJSON (public)', () => {
@@ -140,6 +140,17 @@ describe('PlgOnboardingDto', () => {
       const onboarding = { ...baseOnboarding, getReviews: () => null };
       const result = PlgOnboardingDto.toAdminJSON(onboarding);
       expect(result.reviews).to.deep.equal([]);
+    });
+
+    it('includes createdBy field', () => {
+      const result = PlgOnboardingDto.toAdminJSON(baseOnboarding);
+      expect(result.createdBy).to.equal('system');
+    });
+
+    it('includes createdBy when set to a user identity', () => {
+      const onboarding = { ...baseOnboarding, getCreatedBy: () => 'admin@adobe.com' };
+      const result = PlgOnboardingDto.toAdminJSON(onboarding);
+      expect(result.createdBy).to.equal('admin@adobe.com');
     });
   });
 });

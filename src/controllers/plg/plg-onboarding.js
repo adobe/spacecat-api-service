@@ -47,7 +47,7 @@ import {
 import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { ASO_PRODUCT_CODE, STATUSES, REVIEW_DECISIONS } from './plg-onboarding/constants.js';
-import { isValidHostname } from './plg-onboarding/validation.js';
+import { isValidDomain, prepareDomain } from './plg-onboarding/validation.js';
 import { performAsoPlgOnboarding } from './plg-onboarding/onboarding-flow.js';
 import { revokeAsoSiteEnrollments } from './plg-onboarding/entitlement.js';
 import {
@@ -61,6 +61,10 @@ import {
   bypassDomainAlreadyAssigned,
 } from './plg-onboarding/bypass-handlers.js';
 import { getReviewerIdentity, isInternalOrg } from './plg-onboarding/internal-org.js';
+
+// Re-exported for tests and external callers that validated domains via this controller
+// before the validation helpers were extracted into ./plg-onboarding/validation.js.
+export { isSafeDomain } from './plg-onboarding/validation.js';
 
 function withFlowDeps(context) {
   // Keep request-context identity while giving extracted helpers the monolith's deps.
@@ -197,7 +201,7 @@ const PLG_REJECTION_MESSAGES = {
   'paid-customer': { emoji: ':no_entry:', label: 'Rejected — Paid Customer' },
 };
 
-async function postPlgRejectionNotification(domain, imsOrgId, reason, context) {
+async function postPlgRejectionNotification(domain, imsOrgId, reason, context, org) {
   const { env, log } = context;
   const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
   const token = env.SLACK_BOT_TOKEN;
@@ -212,9 +216,14 @@ async function postPlgRejectionNotification(domain, imsOrgId, reason, context) {
     return;
   }
 
-  const message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+  let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
     + `• *Domain:* \`${domain}\`\n`
-    + `• *IMS Org:* \`${imsOrgId}\``;
+    + `• *Onboarding requested on IMS Org:* \`${imsOrgId}\``;
+
+  const orgName = org?.getName?.();
+  if (orgName) {
+    message += `\n• *IMS Org Name:* ${orgName}`;
+  }
 
   try {
     await postSlackMessage(channelId, message, token);
@@ -238,11 +247,13 @@ function PlgOnboardingController(ctx) {
       return badRequest('Request body is required');
     }
 
-    const { domain, imsOrgId: requestedImsOrgId } = data;
+    const { domain: rawDomain, imsOrgId: requestedImsOrgId } = data;
 
-    if (!hasText(domain)) {
+    if (!hasText(rawDomain)) {
       return badRequest('domain is required');
     }
+
+    const domain = prepareDomain(rawDomain);
 
     const { authInfo } = attributes;
     if (!authInfo) {
@@ -251,7 +262,6 @@ function PlgOnboardingController(ctx) {
 
     const accessControlUtil = AccessControlUtil.fromContext(context);
     const isAdmin = accessControlUtil.hasAdminAccess();
-    const isInternalCall = data.fromBackoffice === true || isAdmin;
 
     let imsOrgId;
     if (isAdmin) {
@@ -275,10 +285,9 @@ function PlgOnboardingController(ctx) {
       }
     }
 
-    const updatedBy = isInternalCall ? null : (authInfo?.getProfile()?.email || 'system');
-
-    if (!isValidHostname(domain)) {
-      return badRequest('Invalid domain: must be a valid hostname');
+    if (!isValidDomain(domain)) {
+      log.warn(`PLG onboard rejected — invalid domain syntax. rawDomain=${JSON.stringify(rawDomain)} normalized=${JSON.stringify(domain)} imsOrgId=${imsOrgId}`);
+      return badRequest('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)');
     }
 
     try {
@@ -286,7 +295,7 @@ function PlgOnboardingController(ctx) {
       const existingOrg = await Organization.findByImsOrgId(imsOrgId);
       if (existingOrg) {
         if (isInternalOrg(existingOrg.getId(), context.env)) {
-          await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context);
+          await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context, existingOrg);
           return badRequest('PLG onboarding is not available for internal organizations');
         }
 
@@ -296,13 +305,13 @@ function PlgOnboardingController(ctx) {
             && e.getTier() === EntitlementModel.TIERS.PAID,
         );
         if (hasPaidEntitlement) {
-          await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context);
+          await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context, existingOrg);
           return badRequest('PLG onboarding is not available for paid customers');
         }
       }
 
       const onboarding = await performAsoPlgOnboarding(
-        { domain, imsOrgId, updatedBy },
+        { domain, imsOrgId },
         withFlowDeps(context),
       );
       return ok(PlgOnboardingDto.toJSON(onboarding));
@@ -418,8 +427,15 @@ function PlgOnboardingController(ctx) {
 
   /**
    * PATCH /plg/onboard/:onboardingId
-   * Admin-only: review a waitlisted onboarding (BYPASS or UPHOLD), or record a review on an
-   * ONBOARDED record and transition it to WAITLISTED.
+   * Admin-only: review a WAITLISTED onboarding record. Accepted decisions:
+   * - BYPASSED: re-run the PLG flow to attempt onboarding again
+   * - UPHELD: transition to REJECTED (terminal)
+   * - CLOSED: retire the current domain to OUTDATED and onboard an alternate domain
+   *           (requires siteConfig.alternateDomain for DOMAIN_ALREADY_ASSIGNED reason)
+   * - PENDING: record that an ESE is actively working on this (e.g. emailed customer)
+   *            without changing the status; reviewedBy identifies who is handling it
+   * REOPENED and OFFBOARDED are handled by transitionStatus
+   * (PATCH /plg/onboard/:onboardingId/status).
    */
   const update = async (context) => {
     const { dataAccess: da, params, data } = context;
@@ -441,8 +457,12 @@ function PlgOnboardingController(ctx) {
 
     const { decision, justification, siteConfig } = data;
 
-    if (!hasText(decision) || !Object.values(REVIEW_DECISIONS).includes(decision)) {
-      return badRequest(`decision is required and must be one of: ${Object.values(REVIEW_DECISIONS).join(', ')}`);
+    const allowedDecisions = [
+      REVIEW_DECISIONS.BYPASSED, REVIEW_DECISIONS.UPHELD, REVIEW_DECISIONS.CLOSED,
+      REVIEW_DECISIONS.PENDING,
+    ];
+    if (!hasText(decision) || !allowedDecisions.includes(decision)) {
+      return badRequest(`decision must be one of: ${allowedDecisions.join(', ')}`);
     }
 
     if (!hasText(justification)) {
@@ -457,8 +477,8 @@ function PlgOnboardingController(ctx) {
     }
 
     const status = onboarding.getStatus();
-    if (status !== STATUSES.WAITLISTED && status !== STATUSES.ONBOARDED) {
-      return badRequest('Onboarding record must be in WAITLISTED or ONBOARDED state');
+    if (status !== STATUSES.WAITLISTED) {
+      return badRequest('Onboarding record must be in WAITLISTED state');
     }
 
     /* c8 ignore next */
@@ -475,19 +495,11 @@ function PlgOnboardingController(ctx) {
     const existingReviews = onboarding.getReviews() || [];
     onboarding.setReviews([...existingReviews, reviewEntry]);
 
-    // ONBOARDED: revoke ASO enrollments, mark WAITLISTED, persist review (no bypass / re-run)
-    if (status === STATUSES.ONBOARDED) {
-      try {
-        await revokeAsoSiteEnrollments(onboarding, flowContext);
-        onboarding.setStatus(STATUSES.WAITLISTED);
-        onboarding.setWaitlistReason(justification);
-        await onboarding.save();
-        await postPlgOnboardingNotification(onboarding, flowContext);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Failed to waitlist onboarded PLG domain ${onboarding.getDomain()}: ${msg}`, err);
-        return internalServerError('Failed to waitlist onboarding. Please try again later.');
-      }
+    onboarding.setUpdatedBy(reviewedBy);
+
+    // PENDING: record ESE action without changing status (e.g. emailed customer)
+    if (decision === REVIEW_DECISIONS.PENDING) {
+      await onboarding.save();
       return ok(PlgOnboardingDto.toAdminJSON(onboarding));
     }
 
@@ -496,8 +508,12 @@ function PlgOnboardingController(ctx) {
       return badRequest('Unable to determine the review reason from the onboarding record');
     }
 
+    // UPHOLD: reject the domain — transition to REJECTED (terminal)
     if (decision === REVIEW_DECISIONS.UPHELD) {
+      onboarding.setStatus(STATUSES.REJECTED);
+      onboarding.setWaitlistReason(null);
       await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, flowContext);
       return ok(PlgOnboardingDto.toAdminJSON(onboarding));
     }
 
@@ -572,7 +588,7 @@ function PlgOnboardingController(ctx) {
 
     const baseURL = composeBaseURL(domain);
     const onboarding = await PlgOnboarding.create({
-      imsOrgId, domain, baseURL, status,
+      imsOrgId, domain, baseURL, status, createdBy: getReviewerIdentity(context),
     });
 
     if (siteId) {
@@ -591,6 +607,7 @@ function PlgOnboardingController(ctx) {
       onboarding.setCompletedAt(completedAt);
     }
 
+    onboarding.setUpdatedBy(getReviewerIdentity(context));
     await onboarding.save();
     return created(PlgOnboardingDto.toAdminJSON(onboarding));
   };
@@ -672,7 +689,7 @@ function PlgOnboardingController(ctx) {
         'orgResolved', 'rumVerified', 'siteCreated', 'siteResolved', 'siteOrgReassigned',
         'authorUrlResolved', 'hlxConfigSet', 'codeConfigResolved', 'configUpdated',
         'auditsEnabled', 'deliveryConfigQueued', 'entitlementCreated', 'entitlementFailed',
-        'orgResolutionFailed',
+        'orgResolutionFailed', 'preOnboarded',
       ]);
       const invalidKeys = Object.keys(steps).filter((k) => !VALID_STEP_KEYS.has(k));
       if (invalidKeys.length > 0) {
@@ -682,6 +699,88 @@ function PlgOnboardingController(ctx) {
     }
 
     await onboarding.save();
+    return ok(PlgOnboardingDto.toAdminJSON(onboarding));
+  };
+
+  /**
+   * PATCH /plg/onboard/:onboardingId/status
+   * Admin: transition a WAITLISTED, ONBOARDED, or REJECTED record to OUTDATED.
+   * For ONBOARDED records, revokes ASO site enrollments before transitioning.
+   * Appends a system-generated review entry: OFFBOARDED for ONBOARDED, CLOSED for WAITLISTED,
+   * REOPENED for REJECTED.
+   * Body: { status, justification }
+   */
+  const transitionStatus = async (context) => {
+    const flowContext = withFlowDeps(context);
+
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can transition onboarding status');
+    }
+
+    const { params, data } = context;
+    const { onboardingId } = params;
+    const { status: targetStatus, justification } = data || {};
+
+    const allowedTargetStatuses = [STATUSES.OUTDATED];
+    if (!hasText(targetStatus) || !allowedTargetStatuses.includes(targetStatus)) {
+      return badRequest(`status is required and must be one of: ${allowedTargetStatuses.join(', ')}`);
+    }
+
+    if (!hasText(justification)) {
+      return badRequest('justification is required');
+    }
+
+    const { PlgOnboarding } = context.dataAccess;
+    const onboarding = await PlgOnboarding.findById(onboardingId);
+    if (!onboarding) {
+      return notFound(`PLG onboarding record ${onboardingId} not found`);
+    }
+
+    const currentStatus = onboarding.getStatus();
+    const allowedSourceStatuses = [STATUSES.WAITLISTED, STATUSES.ONBOARDED, STATUSES.REJECTED];
+    if (!allowedSourceStatuses.includes(currentStatus)) {
+      return badRequest(`Only WAITLISTED, ONBOARDED, or REJECTED records can be transitioned to ${targetStatus}, current status: ${currentStatus}`);
+    }
+
+    // System-generated review: decision is derived from the source status
+    let decision;
+    if (currentStatus === STATUSES.REJECTED) {
+      decision = REVIEW_DECISIONS.REOPENED;
+    } else if (currentStatus === STATUSES.ONBOARDED) {
+      decision = REVIEW_DECISIONS.OFFBOARDED;
+    } else {
+      decision = REVIEW_DECISIONS.CLOSED;
+    }
+    const adminIdentity = getReviewerIdentity(context);
+    const reviewEntry = {
+      reason: null,
+      decision,
+      reviewedBy: adminIdentity,
+      reviewedAt: new Date().toISOString(),
+      justification,
+    };
+    const existingReviews = onboarding.getReviews() || [];
+    onboarding.setReviews([...existingReviews, reviewEntry]);
+
+    onboarding.setStatus(targetStatus);
+    onboarding.setWaitlistReason(null);
+    onboarding.setUpdatedBy(adminIdentity);
+    await onboarding.save();
+
+    // Revoke after save: a stale active enrollment is recoverable on retry;
+    // a saved OUTDATED record with entitlements still active is preferable to
+    // revoked entitlements with the record still showing ONBOARDED.
+    if (currentStatus === STATUSES.ONBOARDED) {
+      try {
+        await revokeAsoSiteEnrollments(onboarding, flowContext);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(`Failed to revoke ASO enrollments for onboarding ${onboardingId}: ${msg}`, err);
+      }
+    }
+
+    await postPlgOnboardingNotification(onboarding, flowContext);
     return ok(PlgOnboardingDto.toAdminJSON(onboarding));
   };
 
@@ -715,6 +814,7 @@ function PlgOnboardingController(ctx) {
     update,
     createOnboarding,
     updateOnboarding,
+    transitionStatus,
     deleteOnboarding,
   };
 }

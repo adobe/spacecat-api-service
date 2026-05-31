@@ -77,6 +77,8 @@ tags:
     description: Site URL tracking and management operations
   - name: sentiment
     description: Brand sentiment analysis topics and guidelines management
+  - name: ai-visibility
+    description: AI Visibility endpoints – proxy to Semrush gRPC for brand visibility, competitor gaps, topic research, and prompt analysis
 
 paths:
   /audits/latest/{auditType}:
@@ -141,6 +143,20 @@ paths:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-and-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/{semrushPromptId}:
+    $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets:
+    $ref: './serenity-api.yaml#/v2-serenity-markets'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/{geoTargetId}/{languageCode}:
+    $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
+    $ref: './serenity-api.yaml#/v2-serenity-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:
+    $ref: './serenity-api.yaml#/v2-serenity-models'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -236,6 +252,8 @@ paths:
     $ref: './sites-api.yaml#/site-brand-profile'
   /sites/{siteId}/config/cdn-logs:
     $ref: './site-api.yaml#/site-cdn-logs-config'
+  /sites/{siteId}/config/scraper:
+    $ref: './site-api.yaml#/site-scraper-config'
   /sites/{siteId}/page-relationships/search:
     $ref: './site-api.yaml#/site-page-relationships-search'
   /sites/{siteId}/opportunities:
@@ -466,6 +484,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-data-with-type'
   /sites/{siteId}/llmo/data/{sheetType}/{week}/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-data-with-type-and-week'
+  /sites/{siteId}/llmo/data/{dataSource}/row:
+    $ref: './llmo-api.yaml#/llmo-data-row-with-datasource'
+  /sites/{siteId}/llmo/data/{sheetType}/{dataSource}/row:
+    $ref: './llmo-api.yaml#/llmo-data-row-with-type'
   /sites/{siteId}/llmo/sheet-data/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
   /sites/{siteId}/llmo/sheet-data/{sheetType}/{dataSource}:
@@ -492,12 +514,20 @@ paths:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-user-agent'
   /sites/{siteId}/agentic-traffic/by-url:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-url'
+  /sites/{siteId}/agentic-traffic/urls/export:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-urls-export'
+  /sites/{siteId}/agentic-traffic/urls/export/{exportId}:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-urls-export-status'
   /sites/{siteId}/agentic-traffic/filter-dimensions:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-filter-dimensions'
   /sites/{siteId}/agentic-traffic/weeks:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
   /sites/{siteId}/agentic-traffic/movers:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  /org/{spaceCatId}/brands/{brandId}/fanout-report:
+    $ref: './fanout-report-api.yaml#/fanout-report'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/filter-dimensions:
+    $ref: './llmo-api.yaml#/brand-presence-filter-dimensions'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/prompt-execution-status:
     $ref: './llmo-api.yaml#/brand-presence-prompt-execution-status'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/stats:
@@ -578,6 +608,62 @@ paths:
     $ref: './guidelines-api.yaml#/sentiment-config'
   /sites/{siteId}/tokens/by-type/{tokenType}:
     $ref: './tokens-api.yaml#/site-token-by-type'
+
+  # AI Visibility
+  /llmo/ai-visibility/brands/stats:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-stats'
+  /llmo/ai-visibility/brands/topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-topics'
+  /llmo/ai-visibility/brands/prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-prompts'
+  /llmo/ai-visibility/brands/cited-pages:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-cited-pages'
+  /llmo/ai-visibility/brands/topic-opportunities:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-topic-opportunities'
+  /llmo/ai-visibility/brands/top-brands:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-top-brands'
+  /llmo/ai-visibility/brands/cited-sources:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-cited-sources'
+  /llmo/ai-visibility/brands/source-opportunities:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-source-opportunities'
+  /llmo/ai-visibility/brands/competitors:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-competitors'
+  /llmo/ai-visibility/competitors/metrics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-metrics'
+  /llmo/ai-visibility/competitors/gap-topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-gap-topics'
+  /llmo/ai-visibility/competitors/gap-source-domains:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-gap-source-domains'
+  /llmo/ai-visibility/competitors/gap-prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-gap-prompts'
+  /llmo/ai-visibility/meta:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-meta'
+  /llmo/ai-visibility/prompts/responses/latest:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-prompts-responses-latest'
+  /llmo/ai-visibility/prompts/responses:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-prompts-responses'
+  /llmo/ai-visibility/topics/research/stats:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-stats'
+  /llmo/ai-visibility/topics/research:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research'
+  /llmo/ai-visibility/topics/stats:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-stats'
+  /llmo/ai-visibility/topics/research/prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-prompts'
+  /llmo/ai-visibility/topics/research/brands:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-brands'
+  /llmo/ai-visibility/topics/research/source-domains:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
+  /llmo/ai-visibility/v1/topic/brand-topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
+  /llmo/ai-visibility/v1/topic/gap-topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics'
+  /llmo/ai-visibility/v1/prompt/brand-prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts'
+  /llmo/ai-visibility/v1/prompt/gap-prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts'
+  /llmo/ai-visibility/v1/prompt/prompt-response:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
 
 components:
   securitySchemes:

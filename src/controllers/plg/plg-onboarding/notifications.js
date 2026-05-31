@@ -49,13 +49,15 @@ const PLG_STATUS_NOTIFICATION_CONFIG = {
   [STATUSES.WAITING_FOR_IP_ALLOWLISTING]: { emoji: ':warning:', label: 'Waiting for IP Allowlisting' },
   [STATUSES.ERROR]: { emoji: ':red_circle:', label: 'Error' },
   [STATUSES.INACTIVE]: { emoji: ':zzz:', label: 'Inactive' },
+  [STATUSES.REJECTED]: { emoji: ':x:', label: 'Rejected' },
+  [STATUSES.OUTDATED]: { emoji: ':arrow_heading_down:', label: 'Outdated' },
 };
 
 /**
  * Posts a PLG onboarding status notification to the configured ESE Slack channel.
  * Fires on terminal/actionable status transitions. Fails gracefully.
  */
-export async function postPlgOnboardingNotification(onboarding, context) {
+export async function postPlgOnboardingNotification(onboarding, context, hints = {}) {
   const { env, log } = context;
   const sendSlackMessage = context.postSlackMessage || postSlackMessage;
   const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
@@ -100,6 +102,15 @@ export async function postPlgOnboardingNotification(onboarding, context) {
   if (siteId) {
     message += `\n• *Site ID:* \`${siteId}\``;
   }
+  if (organizationId && siteId) {
+    const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
+    if (status === STATUSES.ONBOARDED) {
+      const asoUrl = `${experienceUrl}/?organizationId=${organizationId}#/sites-optimizer/sites/${siteId}`;
+      message += `\n• *ASO Link:* ${asoUrl}`;
+    }
+    const backofficeUrl = `${experienceUrl}/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${siteId}`;
+    message += `\n• *Backoffice Link:* ${backofficeUrl}`;
+  }
 
   if ([STATUSES.WAITLISTED, STATUSES.WAITING_FOR_IP_ALLOWLISTING].includes(status)) {
     const waitlistReason = onboarding.getWaitlistReason();
@@ -116,9 +127,32 @@ export async function postPlgOnboardingNotification(onboarding, context) {
     }
   }
 
+  if ([STATUSES.REJECTED, STATUSES.OUTDATED].includes(status)) {
+    const reviews = onboarding.getReviews();
+    const lastReview = reviews?.length ? reviews[reviews.length - 1] : null;
+    if (lastReview?.justification) {
+      message += `\n• *Justification:* ${lastReview.justification}`;
+    }
+  }
+
   const error = onboarding.getError();
   if (error?.message) {
     message += `\n• *Error:* ${error.message}`;
+  }
+
+  const steps = onboarding.getSteps() || {};
+  const notes = [];
+  if (hints.fastOnboarded) {
+    notes.push(':rocket: Fast onboarding (pre-onboarded site)');
+  }
+  if (steps.siteOrgReassigned) {
+    notes.push(':arrows_counterclockwise: Site moved from internal org to customer org');
+  }
+  if (steps.authorUrlResolved) {
+    notes.push(':link: Author URL auto-resolved (AEM CS)');
+  }
+  if (notes.length > 0) {
+    message += `\n• *Notes:* ${notes.join(' · ')}`;
   }
 
   try {
@@ -129,27 +163,25 @@ export async function postPlgOnboardingNotification(onboarding, context) {
 }
 
 /**
- * Persists the onboarding record (with optional updatedBy stamp) and posts the Slack
- * notification. The caller is responsible for setting status, waitlistReason, steps, etc.
- * before calling.
+ * Persists the onboarding record and posts the Slack notification. The caller is responsible
+ * for setting status, waitlistReason, steps, updatedBy, etc. before calling.
  *
- * @param {{ swallowSaveErrors?: boolean, errorLabel?: string }} [opts]
+ * @param {{ swallowSaveErrors?: boolean, errorLabel?: string, hints?: object }} [opts]
  *   When `swallowSaveErrors` is true, save+notify failures are logged with `errorLabel`
  *   and not rethrown — used in catch handlers where we must not lose the original error.
+ *   `hints` is forwarded to postPlgOnboardingNotification (e.g. { fastOnboarded: true }).
  */
-export async function persistAndNotify(onboarding, { updatedBy }, context, opts = {}) {
-  if (updatedBy) {
-    onboarding.setUpdatedBy(updatedBy);
-  }
+export async function persistAndNotify(onboarding, context, opts = {}) {
+  const { hints = {} } = opts;
   if (opts.swallowSaveErrors) {
     try {
       await onboarding.save();
-      await postPlgOnboardingNotification(onboarding, context);
+      await postPlgOnboardingNotification(onboarding, context, hints);
     } catch (saveError) {
       context.log.error(`Failed to persist ${opts.errorLabel} for onboarding ${onboarding.getId()}: ${saveError.message}`);
     }
     return;
   }
   await onboarding.save();
-  await postPlgOnboardingNotification(onboarding, context);
+  await postPlgOnboardingNotification(onboarding, context, hints);
 }

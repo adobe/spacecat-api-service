@@ -1,0 +1,136 @@
+fanout-report:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: Organization (SpaceCat) ID
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: brandId
+      in: path
+      required: true
+      description: |
+        Brand UUID to scope the report to. Unlike the brand-presence endpoints,
+        the literal string `all` is **not** supported here — a fan-out report
+        is always per-brand.
+      schema:
+        type: string
+        format: uuid
+        example: 'b2c3d4e5-6789-01ab-cdef-1234567890ab'
+  get:
+    tags:
+      - llmo
+    summary: Retrieve the Query Fan-Out report for a brand
+    description: |
+      Returns a 302 redirect to a presigned S3 URL when a report exists for
+      the given `(organization, brand)`. The Lambda does not load the report
+      body — the client follows the redirect straight to S3 and receives the
+      gzipped JSON whose schema is documented as `FanoutReport`.
+
+      When no report has been generated yet, returns 404. The UI is expected
+      to handle the 404 by surfacing an empty-state view (e.g. "no report
+      available — trigger one with POST").
+
+      ### Report contents (S3 object)
+
+      `Content-Type: application/json`, `Content-Encoding: gzip`. The
+      decompressed body conforms to the `FanoutReport` schema and contains:
+
+      * Brand metadata: `orgId`, `brandId`, `brandName`, `brandDomains`, `country`, `llm`.
+      * Up to **5 topics**, ranked by `priorityScore = volume × (1 − citation_rate)`.
+      * For each topic: search volume, mention rate, citation rate over the
+        last `windowDays` (7 in MVP), and the deduplicated fan-out sub-queries
+        with their top-10 SERP rankings.
+
+      Path parameters are not echoed in the response — see the redirect target
+      for full report content.
+    operationId: getFanoutReport
+    responses:
+      '302':
+        description: Report exists; redirect to the presigned S3 URL.
+        headers:
+          Location:
+            description: |
+              Presigned S3 URL pointing at the gzipped JSON report. Valid for
+              **1 hour** from the moment the redirect is issued. Clients should
+              follow the redirect immediately and stream the response body.
+            schema:
+              type: string
+              format: uri
+              example: 'https://spacecat-prod.s3.amazonaws.com/fanout/llmo/<spaceCatId>/<brandId>/data.json.gz?X-Amz-Algorithm=...'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: User does not belong to the organization or lacks the LLMO entitlement.
+      '404':
+        description: No report has been generated yet for this brand.
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: S3 storage is not configured for this environment.
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+  post:
+    tags:
+      - llmo
+    summary: Trigger generation of the Query Fan-Out report for a brand
+    description: |
+      Synchronously regenerates the Query Fan-Out report for the given
+      `(organization, brand)`. The handler:
+
+      1. Loads the brand's tracked topics (most-recently-added first), capped
+         at the first 1,000.
+      2. Reads mention rate and citation rate per topic from the last 7 days
+         of `chatgpt` executions in the `US` region.
+      3. Calls Semrush's Query Fan-Out service for those topics, with
+         `country=US` and `llm=chatgpt`.
+      4. Drops topics whose Semrush `similarityScore < 0.70`.
+      5. Sorts the survivors by `priorityScore = volume × (1 − citation_rate)`
+         and keeps the top 5.
+      6. Writes the report to S3 at `fanout/llmo/{spaceCatId}/{brandId}/data.json.gz`,
+         overwriting any prior copy.
+
+      The response body is empty (`201 Created`). Callers fetch the actual
+      report contents with a subsequent `GET` on the same path, which will
+      302-redirect to the presigned S3 URL.
+
+      ### Behaviour notes
+      * **Topic-count cap.** Brands with more than 1,000 tracked topics have
+        the surplus silently dropped from this run. Slice is by `topic.id DESC`
+        (newest first).
+      * **Empty reports.** If the brand has zero tracked topics, or every
+        topic falls below the `0.70` similarity threshold, the resulting
+        report is written with `topics: []`. The endpoint still returns `201`.
+      * **Concurrency.** If two callers POST at roughly the same time, both
+        regenerations run. Last writer wins on S3; the duplicate Semrush spend
+        is accepted (the customer set is small enough that this is rare).
+      * **Country / LLM.** Hard-coded to `US` / `chatgpt` for the initial
+        version. The request body and query string take no overrides.
+    operationId: triggerFanoutReport
+    responses:
+      '201':
+        description: Report generated and written to S3. Body is empty.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: User does not belong to the organization or lacks the LLMO entitlement.
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: |
+          External dependency unavailable — Semrush gRPC or PostgREST cannot
+          be reached, or S3 storage is not configured for this environment.
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []

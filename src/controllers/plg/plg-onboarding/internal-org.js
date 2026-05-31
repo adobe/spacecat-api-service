@@ -34,3 +34,12 @@ export function getReviewerIdentity(context) {
   const profile = authInfo?.getProfile?.() ?? authInfo?.profile;
   return hasText(profile?.email) ? profile.email : 'admin';
 }
+
+/**
+ * True when the request originated from the Sites Optimizer customer UI, identified by the
+ * `x-client-type` header. Used to decide whether to stamp the caller identity as createdBy
+ * when resuming a pre-seeded onboarding record.
+ */
+export function isFromAsoUI(context) {
+  return context?.pathInfo?.headers?.['x-client-type'] === 'sites-optimizer-ui';
+}

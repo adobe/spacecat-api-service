@@ -1,0 +1,453 @@
+# ── Serenity API ──
+# Public surface for AI-visibility prompts and markets. The upstream is
+# currently Semrush AIO (proxied via adobe-hackathon.semrush.com); upstream
+# routing details (`workspaceId`, internal project ids) are NOT exposed.
+#
+# The client sends its IMS user token; api-service forwards it; the upstream
+# gateway exchanges IMS → upstream-internal server-side.
+#
+# Slice key for everything below is (brandId, geoTargetId, languageCode).
+# `:brandId` MUST be a UUID — the controller rejects name-based ids with 400.
+#
+# All operations are tagged `serenity` so the OpenAPI contract test suite can
+# enumerate them. See test/openapi-contract/serenity-api.test.js.
+
+# ─── Shared path parameters ───────────────────────────────────────────────────
+
+v2-serenity-prompts:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List Serenity prompts for one slice
+    description: |
+      Returns the prompts for a single (brandId, geoTargetId, languageCode)
+      slice. Both `geoTargetId` and `languageCode` are required — the request
+      always resolves to exactly one upstream project. Pagination is real
+      upstream pagination (no fan-out, no merged-and-sliced shimming).
+    operationId: listSerenityPrompts
+    security:
+      - ims_key: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: true
+        schema: { type: integer, minimum: 1 }
+        description: Google Ads Geo Target ID for the slice.
+      - name: languageCode
+        in: query
+        required: true
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+        description: BCP-47 primary subtag (lowercase) for the slice.
+      - name: page
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, default: 1 }
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+      - name: search
+        in: query
+        required: false
+        schema: { type: string }
+        description: Free-text match against prompt text.
+    responses:
+      '200':
+        description: Prompts retrieved successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityPromptListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  post:
+    tags: [serenity]
+    summary: Bulk-create Serenity prompts
+    description: |
+      Creates up to 500 prompts in one call. Each input must carry
+      (geoTargetId, languageCode, text, tags?). Inputs are grouped by slice;
+      each affected upstream project is published once at the end.
+    operationId: createSerenityPrompts
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityCreatePromptsRequest' }
+    responses:
+      '200':
+        description: Bulk create completed (mixed success allowed).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityCreatePromptsResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-prompt-by-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: semrushPromptId
+      in: path
+      required: true
+      description: Upstream prompt id.
+      schema: { type: string }
+  patch:
+    tags: [serenity]
+    summary: Update a Serenity prompt
+    description: |
+      Body carries `{geoTargetId, languageCode, text, tags}`. All four fields
+      are required — the upstream provider has no in-place update (and no
+      GET-by-id), so the implementation is DELETE-old + POST-new + publish
+      and the payload is treated as the full next state. Clients always
+      have `text`/`tags` available locally (from the list call that
+      rendered the edit form), which keeps this endpoint a single straight
+      line and avoids the per-request pagination "preserve-on-omit"
+      semantics would force.
+
+      An explicit empty `tags: []` clears tags. The response carries the
+      new `semrushPromptId` (the value changes on every upstream
+      re-create).
+    operationId: updateSerenityPrompt
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityUpdatePromptRequest' }
+    responses:
+      '200':
+        description: Prompt updated successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityPrompt' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, slice, or prompt not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-prompts-bulk-delete:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags: [serenity]
+    summary: Bulk-delete Serenity prompts
+    description: |
+      Body shape:
+      `{ prompts: [{semrushPromptId, geoTargetId, languageCode}, ...] }`.
+      The server resolves each row's owning upstream project from the slice
+      and batches deletes per project. Upstream 404 is idempotent success.
+      Uses POST instead of DELETE because the body-data middleware does not
+      parse DELETE request bodies (see ADR-001).
+    operationId: bulkDeleteSerenityPrompts
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityBulkDeletePromptsRequest' }
+    responses:
+      '200':
+        description: Bulk-delete completed.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityBulkDeletePromptsResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+# ─── Markets ──────────────────────────────────────────────────────────────────
+
+v2-serenity-markets:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List markets configured for a brand
+    description: |
+      Returns the brand's (geoTargetId, languageCode) slices. The presence
+      of a row is the contract that the market is active.
+    operationId: listSerenityMarkets
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Markets retrieved successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityMarketListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  post:
+    tags: [serenity]
+    summary: Add a new market to a brand
+    description: |
+      Onboards a new (brandId, geoTargetId, languageCode) slice. `market` is
+      an ISO 3166-1 alpha-2 country code resolved server-side to a Geo Target
+      ID; `languageCode` is a BCP-47 primary subtag. The optional `name` is
+      forwarded to the upstream project; it is not echoed back. Strict
+      ordering: upstream create → publish → DB row. A row is written only
+      on full success.
+    operationId: createSerenityMarket
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityCreateMarketRequest' }
+    responses:
+      '201':
+        description: Market created — upstream project published, DB row written.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityMarket' }
+      '400':
+        description: Bad request (unknown market, malformed languageCode, missing field).
+      '404':
+        description: Organization has no workspace.
+      '409':
+        description: A market already exists for this (brandId, geoTargetId, languageCode) slice.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-market-by-slice:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: geoTargetId
+      in: path
+      required: true
+      description: Google Ads Geo Target ID for the slice.
+      schema: { type: integer, minimum: 1 }
+    - name: languageCode
+      in: path
+      required: true
+      description: BCP-47 primary subtag (lowercase) for the slice.
+      schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+  delete:
+    tags: [serenity]
+    summary: Remove a market from a brand
+    description: |
+      Idempotent: missing slice returns 204. Ordering: upstream DELETE (404
+      treated as already-gone success) → DB row delete → 204. Upstream
+      non-404 failure → 502, row stays. **Caller responsibility:** confirm
+      with the user before invoking — the linked upstream project (and all
+      its prompts) are permanently destroyed.
+    operationId: deleteSerenityMarket
+    security:
+      - ims_key: []
+    responses:
+      '204':
+        description: Market removed (or never existed; idempotent).
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found.
+      '500': { $ref: './responses.yaml#/500' }
+      '502':
+        description: Upstream non-404 failure; DB row was NOT removed.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+
+# ─── Tags & Models (per-slice) ────────────────────────────────────────────────
+
+v2-serenity-tags:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List tags for one slice
+    description: Unique tag set across the slice's prompts.
+    operationId: listSerenityTags
+    security:
+      - ims_key: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: true
+        schema: { type: integer, minimum: 1 }
+      - name: languageCode
+        in: query
+        required: true
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+    responses:
+      '200':
+        description: Tags retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityTagListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-models:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List AI models for one slice
+    description: |
+      Returns the AI models configured for the slice's upstream project.
+      `key` is the value the Reporting API expects as `CBF_model`.
+    operationId: listSerenityModels
+    security:
+      - ims_key: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: true
+        schema: { type: integer, minimum: 1 }
+      - name: languageCode
+        in: query
+        required: true
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+    responses:
+      '200':
+        description: Models retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityModelListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }

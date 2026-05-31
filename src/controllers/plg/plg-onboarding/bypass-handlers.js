@@ -14,7 +14,9 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { PlgOnboardingDto } from '../../../dto/plg-onboarding.js';
-import { AEM_CS_AUTHOR_URL_PATTERN, EDS_HOST_PATTERN, isSafeDomain } from './validation.js';
+import {
+  AEM_CS_AUTHOR_URL_PATTERN, EDS_HOST_PATTERN, isSafeDomain, isValidDomain, prepareDomain,
+} from './validation.js';
 import { postPlgOnboardingNotification } from './notifications.js';
 import { revokeAsoSiteEnrollments, reassignSiteOrganization } from './entitlement.js';
 import { performAsoPlgOnboarding } from './onboarding-flow.js';
@@ -36,12 +38,13 @@ export async function bypassDisplaceOnboarded({ onboarding, reviewedBy, reviewed
       && r.getStatus() === STATUSES.ONBOARDED,
   );
   if (oldOnboarded) {
-    oldOnboarded.setStatus(STATUSES.WAITLISTED);
-    oldOnboarded.setWaitlistReason(`Domain ${oldOnboarded.getDomain()} was displaced by ${onboarding.getDomain()} for IMS org ${imsOrgId}.`);
+    oldOnboarded.setStatus(STATUSES.OUTDATED);
+    oldOnboarded.setWaitlistReason(null);
+    oldOnboarded.setUpdatedBy('system');
     const oldReviews = oldOnboarded.getReviews() || [];
     oldOnboarded.setReviews([...oldReviews, {
-      reason: `Offboarded to onboard ${onboarding.getDomain()} for same IMS org`,
-      decision: REVIEW_DECISIONS.BYPASSED,
+      reason: null,
+      decision: REVIEW_DECISIONS.OFFBOARDED,
       reviewedBy,
       reviewedAt,
       justification: 'System action to start onboarding for new domain in the same IMS org.',
@@ -140,16 +143,22 @@ export async function bypassDomainAlreadyAssigned({ onboarding, siteConfig }, co
   }
 
   if (hasText(siteConfig?.alternateDomain)) {
-    if (!isSafeDomain(siteConfig.alternateDomain)) {
-      return badRequest(`Invalid alternate domain: ${siteConfig.alternateDomain}`);
+    const altDomain = prepareDomain(siteConfig.alternateDomain);
+    if (!isValidDomain(altDomain)) {
+      log.warn(`PLG bypass rejected — invalid alternate domain syntax. raw=${JSON.stringify(siteConfig.alternateDomain)} normalized=${JSON.stringify(altDomain)} onboardingId=${onboarding.getId?.()}`);
+      return badRequest(`Invalid alternate domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings): ${altDomain}`);
     }
-    onboarding.setStatus(STATUSES.WAITLISTED);
-    onboarding.setWaitlistReason(`Domain ${domain} was replaced by alternate domain ${siteConfig.alternateDomain}.`);
+    if (!isSafeDomain(altDomain)) {
+      log.warn(`PLG bypass rejected — unsafe alternate domain (SSRF gate). normalized=${JSON.stringify(altDomain)} onboardingId=${onboarding.getId?.()}`);
+      return badRequest(`Invalid alternate domain: ${altDomain}`);
+    }
+    onboarding.setStatus(STATUSES.OUTDATED);
+    onboarding.setWaitlistReason(null);
     await onboarding.save();
     await postPlgOnboardingNotification(onboarding, context);
-    log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${siteConfig.alternateDomain}`);
+    log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${altDomain}`);
     const result = await performAsoPlgOnboarding(
-      { domain: siteConfig.alternateDomain, imsOrgId: onboarding.getImsOrgId() },
+      { domain: altDomain, imsOrgId: onboarding.getImsOrgId() },
       context,
     );
     return ok(PlgOnboardingDto.toAdminJSON(result));

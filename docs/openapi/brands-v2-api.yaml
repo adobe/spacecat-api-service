@@ -257,8 +257,7 @@ v2-brand-for-org-site:
       '403':
         description: |
           User does not have access to this organization, OR the site does not
-          belong to the organization (tenant isolation — matches the same
-          check on `POST /v2/orgs/{spaceCatId}/sites/{siteId}/sync-config`).
+          belong to the organization (tenant isolation).
       '404':
         description: |
           Organization not found, site not found, organization is not in v2

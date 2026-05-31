@@ -25,38 +25,45 @@ export const EVENT_JOB_MAP = {
  *
  * @param {object} data - Parsed webhook payload
  * @param {string} action - The event action (e.g. 'review_requested', 'labeled')
- * @param {object} env - Environment variables
+ * @param {string} reviewerLogin - The destination's reviewer login, attached to
+ *   the auth profile by GitHubWebhookHmacHandler from the consolidated
+ *   GITHUB_DESTINATIONS registry. The requested reviewer must equal this for
+ *   review_requested to proceed. Required: the controller resolves and validates
+ *   it before calling (a missing reviewer identity is a 5xx, not a silent skip).
  * @returns {string|null} Skip reason or null
  */
-export function getSkipReason(data, action, env) {
+export function getSkipReason(data, action, reviewerLogin) {
   const pr = data.pull_request;
-  // Caller must validate env.GITHUB_APP_SLUG before invoking (the controller
-  // returns 500 on missing config so GitHub retries, rather than 204 from a skip).
-  const appSlug = env.GITHUB_APP_SLUG;
 
   // Unsupported actions (auto-triggers deferred to Phase 3)
   if (action === 'opened' || action === 'ready_for_review') {
     return `auto-trigger not yet supported: ${action}`;
   }
 
-  // Invite-based trigger: reviewer must be the app
+  // Invite-based trigger: the requested reviewer must be the destination's
+  // configured reviewer login (a plain user, EMU user, or App bot - whatever
+  // the registry pins per destination).
   if (action === 'review_requested') {
     const reviewer = data.requested_reviewer?.login;
-    if (reviewer !== `${appSlug}[bot]`) {
-      return `reviewer ${reviewer} is not ${appSlug}`;
+    if (reviewer !== reviewerLogin) {
+      return `reviewer ${reviewer} is not ${reviewerLogin}`;
     }
   }
 
-  // Label-based trigger: label must match
-  if (action === 'labeled') {
-    const label = data.label?.name;
-    if (label !== 'mysticat:review-requested') {
-      return `label ${label} does not match trigger`;
-    }
-  }
-
-  // Only review_requested and labeled are supported in Phase 2
-  if (action !== 'review_requested' && action !== 'labeled') {
+  // Only review_requested is supported. Label-based triggers were disabled
+  // because GitHub does not count label-triggered reviews toward branch
+  // protection / merge requirements: an approval only counts when the
+  // reviewer was explicitly *requested* (Reviewers panel) or is listed in
+  // CODEOWNERS for the changed paths. A bot that posts a review off the
+  // back of a label add appears under "Reviewers whose approvals may not
+  // affect merge requirements" — visible but non-binding.
+  //
+  // The env-configurable label hook (env.MYSTICAT_REVIEW_LABEL) and its
+  // dev/prod-specific Vault values were left in place for now. If we ever
+  // re-enable label triggers (e.g., a "comment-only / advisory" mode that
+  // does not pretend to count), restore the matching block here without
+  // re-doing the env-separation work.
+  if (action !== 'review_requested') {
     return `unsupported action: ${action}`;
   }
 
@@ -74,4 +81,27 @@ export function getSkipReason(data, action, env) {
   }
 
   return null;
+}
+
+/**
+ * Classifies a skip reason from getSkipReason as one that should post a
+ * standalone Slack observability note. Only skips where Mysticat WAS the
+ * requested reviewer (draft PR / bot sender / non-default branch) are
+ * interesting; foreign-reviewer, unsupported-action, and auto-trigger skips
+ * stay silent to avoid flooding the channel.
+ *
+ * Keep in lockstep with getSkipReason: these literals/prefix mirror the strings
+ * it returns AFTER the reviewer check passes. The drift-guard tests in
+ * test/utils/github-trigger-rules.test.js fail if the two diverge.
+ *
+ * @param {string} reason - The skip reason string returned by getSkipReason
+ * @returns {boolean} true if a standalone Slack note should be posted
+ */
+export function isMysticatTargetedSkip(reason) {
+  if (!reason) {
+    return false;
+  }
+  return reason === 'draft PR'
+    || reason === 'bot sender'
+    || reason.startsWith('non-default branch:');
 }
