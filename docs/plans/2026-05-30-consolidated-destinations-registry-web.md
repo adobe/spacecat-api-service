@@ -1,14 +1,3 @@
-I have everything I need. Key findings to ground the plan:
-
-- The ESLint config uses `@adobe/eslint-config-helix` (airbnb-based). `for...of` over `Object.entries(...)` is used freely in `src/support/` (e.g. `audit-target-urls-validation.js:141`, `ephemeral-run-service.js:499`), and `Object.entries(...).forEach(...)` is also common (`customer-config-mapper.js`). The airbnb `no-restricted-syntax` rule does flag bare `for...in`/`for...of` in some helix presets, so to be safe I'll use `Object.entries(...).forEach(...)` / `.find(...)` / `.filter(...)` (functional style, definitely lint-clean and matching the existing `classify`/`parseTargets` style which uses `.forEach`/`.find`/`.filter`).
-- The `default:true` "exactly one" validation in legacy `parseTargets` uses `.filter(...).length`. I'll mirror that.
-- Test command for a single file: `npx mocha test/path -g 'pattern'`. Full suite: `npm test`. Lint: `npm run lint`.
-- The handler imports `parseTargets, classify, extractClassificationMetadata` from `./github-targets.js`. I'll add `parseDestinations` and `classifyDestination` to the same module and import them.
-
-The plan is complete in my analysis. Here is the deliverable.
-
----
-
 # Consolidated Destinations Registry (Web Tier, Phase 1 — Dual-Read) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

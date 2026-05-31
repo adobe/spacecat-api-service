@@ -211,10 +211,11 @@ describe('github-targets parseDestinations', () => {
     expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('target_id');
   });
 
-  it('throws when an entry has both default and enterprise_slug', () => {
+  it('throws when an entry has both default and enterprise_slug (per-entry check)', () => {
+    // Only one entry total, so the registry-level "exactly one default" check
+    // does NOT fire first. The per-entry "exactly one of" check must catch it.
     const bad = JSON.stringify({
       x: { match: { default: true, enterprise_slug: ['a'] }, webhook_secret: 's', reviewer_login: 'r' },
-      'github-public': { match: { default: true }, webhook_secret: 's', reviewer_login: 'r' },
     });
     expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('exactly one');
   });
@@ -276,6 +277,15 @@ describe('github-targets parseDestinations', () => {
       'github-public': { match: { default: true }, webhook_secret: 's', reviewer_login: 'a'.repeat(65) },
     });
     expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('reviewer_login');
+  });
+
+  it('throws when two entries share the same enterprise_slug value', () => {
+    const dupSlug = JSON.stringify({
+      ghec1: { match: { enterprise_slug: ['adobe-prd', 'shared-slug'] }, webhook_secret: 's1', reviewer_login: 'r1' },
+      ghec2: { match: { enterprise_slug: ['shared-slug'] }, webhook_secret: 's2', reviewer_login: 'r2' },
+      'github-public': { match: { default: true }, webhook_secret: 's3', reviewer_login: 'r3' },
+    });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: dupSlug })).to.throw('shared-slug');
   });
 
   it('accepts a slug[bot] reviewer_login', () => {
@@ -356,6 +366,13 @@ describe('github-targets classifyDestination', () => {
     // enterprise branch is evaluated before the default branch.
     const result = classifyDestination({ host: 'github.com', enterpriseSlug: 'adobe-prd' }, destinations);
     expect(result.target_id).to.equal('ghec');
+  });
+
+  it('returns an object with exactly the keys target_id, webhook_secret, reviewer_login (no leakage)', () => {
+    // Contract lock: a successful classification MUST NOT leak internal fields
+    // such as match or any future entry property. Sorted comparison is stable.
+    const result = classifyDestination({ host: 'github.com', enterpriseSlug: 'adobe-prd' }, destinations);
+    expect(Object.keys(result).sort()).to.deep.equal(['reviewer_login', 'target_id', 'webhook_secret']);
   });
 });
 

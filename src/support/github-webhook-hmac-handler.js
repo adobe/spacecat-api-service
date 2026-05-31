@@ -123,6 +123,12 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
         .withProfile({
           user_id: 'github-webhook',
           target_id: result.target_id,
+          // app_slug is intentionally absent on the consolidated path:
+          // reviewer_login is explicit per the ADR, so the `${appSlug}[bot]`
+          // fallback is unused. The controller (webhooks.js) still falls back
+          // to env.GITHUB_APP_SLUG for its bot-identity gate, so
+          // GITHUB_APP_SLUG MUST remain set until the cleanup PR removes the
+          // controller's app_slug requirement.
           // reviewer_login is required on every destination entry (no fallback
           // in the consolidated registry), so it is always set here.
           reviewer_login: result.reviewer_login,

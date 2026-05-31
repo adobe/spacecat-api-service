@@ -13,8 +13,10 @@
 // GitHub destination registry + classifier. The web tier classifies each
 // inbound webhook to a destination ("target") from the SIGNED body, so the
 // worker can select per-destination credentials by a non-secret target_id.
-// Secrets are NOT in this registry: webhookSecretEnvVar names the env var that
-// carries the secret (loaded at runtime from Vault into context.env).
+// Secrets are NOT in the legacy GITHUB_TARGETS registry: webhookSecretEnvVar
+// names the env var that carries the secret (loaded at runtime from Vault into
+// context.env). The consolidated GITHUB_DESTINATIONS registry carries
+// webhook_secret INLINE in each entry.
 
 /**
  * Parse + validate the GITHUB_TARGETS env var.
@@ -163,6 +165,18 @@ export function parseDestinations(env) {
   if (defaults.length !== 1) {
     throw new Error(`GITHUB_DESTINATIONS must have exactly one match.default:true entry (found ${defaults.length})`);
   }
+  // The ADR requires match rules to be mutually exclusive. Duplicate
+  // enterprise_slug values across entries would cause classifyDestination's
+  // .find to silently pick the first match, hiding the misconfiguration.
+  const slugSeen = new Map();
+  Object.entries(parsed).forEach(([targetId, entry]) => {
+    (entry.match?.enterprise_slug || []).forEach((slug) => {
+      if (slugSeen.has(slug)) {
+        throw new Error(`GITHUB_DESTINATIONS has duplicate enterprise_slug "${slug}" (in "${targetId}" and "${slugSeen.get(slug)}")`);
+      }
+      slugSeen.set(slug, targetId);
+    });
+  });
   return parsed;
 }
 
