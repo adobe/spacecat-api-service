@@ -321,12 +321,4 @@ All gates must pass before the PR is opened (ADR Validation Phase 4 — Web).
 - Ops: delete the now-vestigial legacy Vault keys (`GITHUB_TARGETS`, `GITHUB_WEBHOOK_SECRET*`, `GITHUB_REVIEWER_LOGIN`, `GITHUB_APP_SLUG`) from `dx_mysticat/{dev,prod}/api-service` **after** this release is deployed to both envs.
 - Regression: confirm a live `github-public` review still triggers + posts in dev after deploy (ADR Phase 4 acceptance).
 
-### Critical Files for Implementation
-- /Users/dj/work/github/adobe/spacecat-api-service/src/support/github-targets.js
-- /Users/dj/work/github/adobe/spacecat-api-service/src/support/github-webhook-hmac-handler.js
-- /Users/dj/work/github/adobe/spacecat-api-service/src/utils/github-trigger-rules.js
-- /Users/dj/work/github/adobe/spacecat-api-service/src/controllers/webhooks.js
-- /Users/dj/work/github/adobe/spacecat-api-service/test/support/github-targets.test.js
-- /Users/dj/work/github/adobe/spacecat-api-service/test/support/github-webhook-hmac-handler.test.js
-- /Users/dj/work/github/adobe/spacecat-api-service/test/utils/github-trigger-rules.test.js
-- /Users/dj/work/github/adobe/spacecat-api-service/test/controllers/webhooks.test.js
+(Files touched are listed repo-relative in the File Structure table above.)
