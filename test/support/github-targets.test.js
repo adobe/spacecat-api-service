@@ -21,7 +21,7 @@ const VALID_DESTINATIONS = JSON.stringify({
 });
 
 describe('github-targets parseDestinations', () => {
-  it('returns null when GITHUB_DESTINATIONS is unset (legacy mode signal)', () => {
+  it('returns null when GITHUB_DESTINATIONS is unset (handler treats this as a misconfiguration and fails closed)', () => {
     expect(parseDestinations({})).to.be.null;
   });
 

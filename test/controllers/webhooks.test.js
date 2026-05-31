@@ -105,6 +105,8 @@ describe('WebhooksController', () => {
       'Adobe-AEM-Sites/aem-sites-architecture',
     ]);
     expect(payload.retry_count).to.equal(0);
+    // Every authenticated webhook now carries the resolved destination id.
+    expect(payload.target_id).to.equal('github-public');
   });
 
   it('returns 204 for non-pull_request event', async () => {
@@ -403,6 +405,15 @@ describe('WebhooksController', () => {
       expect(response.status).to.equal(202);
       const [, payload] = mockSqs.sendMessage.firstCall.args;
       expect(payload.target_id).to.equal('ghec');
+    });
+
+    it('enqueues a non-default destination when the requested reviewer matches its reviewer_login', async () => {
+      // Positive per-destination gate: the profile reviewer_login (emu_reviewer)
+      // matches the requested reviewer, so the trigger fires (202). This is the
+      // successor to the removed global/app-slug reviewer resolution.
+      const response = await controller.processGitHubWebhook(ghecAuthContext());
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage.calledOnce).to.be.true;
     });
 
     it('logs the resolved target id on the enqueue log', async () => {
