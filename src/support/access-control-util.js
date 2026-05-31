@@ -196,7 +196,7 @@ export default class AccessControlUtil {
       return validated.result;
     }
     const { fresh, clientId } = validated;
-    if (fresh.getAdminGrants()?.[operationKey] !== true) {
+    if (fresh.getAdminGrants?.()?.[operationKey] !== true) {
       return {
         allowed: false, reason: 'missing-grant', clientId, consumerId: fresh.getId(),
       };

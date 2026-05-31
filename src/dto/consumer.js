@@ -26,7 +26,7 @@ export const ConsumerDto = {
     imsOrgId: consumer.getImsOrgId(),
     consumerName: consumer.getConsumerName(),
     capabilities: consumer.getCapabilities(),
-    adminGrants: consumer.getAdminGrants(),
+    adminGrants: consumer.getAdminGrants?.() ?? null,
     status: consumer.getStatus(),
     revokedAt: consumer.getRevokedAt(),
     createdAt: consumer.getCreatedAt(),

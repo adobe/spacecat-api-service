@@ -419,10 +419,10 @@ function ConsumersController(ctx) {
 
       if (data.adminGrants !== undefined) {
         validateAdminGrants(Consumer, data.adminGrants);
-        const oldGrants = consumer.getAdminGrants();
+        const oldGrants = consumer.getAdminGrants?.() ?? null;
         const newGrants = data.adminGrants;
-        changes.push(`  › *adminGrants:* \`${JSON.stringify(oldGrants ?? null)}\` → \`${JSON.stringify(newGrants ?? null)}\``);
-        consumer.setAdminGrants(newGrants ?? null);
+        changes.push(`  › *adminGrants:* \`${JSON.stringify(oldGrants)}\` → \`${JSON.stringify(newGrants ?? null)}\``);
+        consumer.setAdminGrants?.(newGrants ?? null);
       }
 
       const updatedBy = getUpdatedBy();
