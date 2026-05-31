@@ -21,3 +21,4 @@
 
 export const CAP_SITE_READ_ALL = 'site:readAll';
 export const CAP_ORG_READ_ALL = 'organization:readAll';
+export const ADMIN_GRANT_CREATE_SITE = 'CREATE_SITE';

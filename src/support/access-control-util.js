@@ -155,6 +155,54 @@ export default class AccessControlUtil {
   }
 
   /**
+   * Verifies the requesting S2S consumer holds the specified admin grant by issuing
+   * a fresh DB fetch. Follows the same fresh-DB-fetch TOCTOU pattern as hasS2SCapability:
+   * uses `context.s2sConsumer` only as an identity source and re-queries the Consumer table.
+   * The `adminGrants` map is NOT read from the in-context object.
+   *
+   * Returns a result object so controllers can audit-log without re-reading context.
+   * The `reason` discriminates denial paths: `not-s2s`, `not-found`, `revoked`,
+   * `not-active`, `missing-grant`, `granted`.
+   *
+   * @param {string} operationKey - The operation key to check, e.g. 'CREATE_SITE'.
+   * @returns {Promise<{ allowed: boolean, reason: string,
+   *   consumerId: (string|undefined), clientId: (string|undefined) }>}
+   */
+  async hasAdminGrant(operationKey) {
+    const { s2sConsumer } = this.context;
+    if (!s2sConsumer) {
+      return { allowed: false, reason: 'not-s2s' };
+    }
+
+    const clientId = s2sConsumer.getClientId();
+    const fresh = await this.context.dataAccess.Consumer.findByClientIdAndImsOrgId(
+      clientId,
+      s2sConsumer.getImsOrgId(),
+    );
+    if (!fresh) {
+      return { allowed: false, reason: 'not-found', clientId };
+    }
+    if (fresh.isRevoked()) {
+      return {
+        allowed: false, reason: 'revoked', clientId, consumerId: fresh.getId(),
+      };
+    }
+    if (fresh.getStatus() !== ConsumerModel.STATUS.ACTIVE) {
+      return {
+        allowed: false, reason: 'not-active', clientId, consumerId: fresh.getId(),
+      };
+    }
+    if (fresh.getAdminGrants()?.[operationKey] !== true) {
+      return {
+        allowed: false, reason: 'missing-grant', clientId, consumerId: fresh.getId(),
+      };
+    }
+    return {
+      allowed: true, reason: 'granted', clientId, consumerId: fresh.getId(),
+    };
+  }
+
+  /**
    * Returns true if the authenticated user holds the LLMO administrator role
    * AND the last {@link hasAccess} check did not resolve via a delegation grant.
    *

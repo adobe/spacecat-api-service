@@ -61,6 +61,17 @@ function validateCapabilities(Consumer, capabilities) {
   }
 }
 
+function validateAdminGrants(Consumer, adminGrants) {
+  if (adminGrants == null) {
+    return;
+  }
+  try {
+    Consumer.validateAdminGrants(adminGrants);
+  } catch (validationErr) {
+    throw new ErrorWithStatusCode(validationErr.message, STATUS_BAD_REQUEST);
+  }
+}
+
 function createErrorResponse(error) {
   const statusCode = error.status || STATUS_INTERNAL_SERVER_ERROR;
   return createResponse(
@@ -404,6 +415,14 @@ function ConsumersController(ctx) {
       if (hasText(data.status)) {
         changes.push(`  › *status:* \`${consumer.getStatus()}\` → \`${data.status}\``);
         consumer.setStatus(data.status);
+      }
+
+      if (data.adminGrants !== undefined) {
+        validateAdminGrants(Consumer, data.adminGrants);
+        const oldGrants = consumer.getAdminGrants();
+        const newGrants = data.adminGrants;
+        changes.push(`  › *adminGrants:* \`${JSON.stringify(oldGrants ?? null)}\` → \`${JSON.stringify(newGrants ?? null)}\``);
+        consumer.setAdminGrants(newGrants ?? null);
       }
 
       const updatedBy = getUpdatedBy();

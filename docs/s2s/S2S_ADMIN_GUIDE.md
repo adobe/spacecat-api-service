@@ -235,6 +235,51 @@ Headers:
 }
 ```
 
+### 2b. Grant / Revoke Admin Operation Access
+
+#### When to Use
+
+Use this operation when an S2S consumer needs to bypass the admin gate on a specific write operation (e.g., `POST /sites` / `createSite`). Admin grants are distinct from capabilities: capabilities govern route-level access (Layer 1); admin grants govern controller-level admin-bypass for specific high-privilege operations (Layer 2).
+
+Valid operation keys: `CREATE_SITE`
+
+> ⚠️ **IMPORTANT**: This operation requires the same S2S admin credentials as capability grants.
+
+#### Grant `CREATE_SITE`
+
+```bash
+PATCH /consumers/{consumerId}
+Headers:
+  Authorization: Bearer <S2S_ADMIN_SESSION_TOKEN>
+  Content-Type: application/json
+
+{
+  "adminGrants": {
+    "CREATE_SITE": true
+  }
+}
+```
+
+#### Revoke All Admin Grants
+
+```bash
+PATCH /consumers/{consumerId}
+Headers:
+  Authorization: Bearer <S2S_ADMIN_SESSION_TOKEN>
+  Content-Type: application/json
+
+{
+  "adminGrants": null
+}
+```
+
+#### Additional Notes
+
+- Admin grant values must be boolean `true`. No other value types are accepted.
+- Revoking admin grants requires only setting `adminGrants` to `null` via the same PATCH endpoint — no separate revoke endpoint is needed.
+- The current `adminGrants` map is returned in `GET /consumers/{consumerId}` for auditability.
+- See the ADR for design rationale: `platform/decisions/s2s-admin-grants-write-endpoints.md`
+
 ---
 
 ### 3. Suspend Consumer
