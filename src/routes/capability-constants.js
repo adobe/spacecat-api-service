@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-import { Consumer as ConsumerModel } from '@adobe/spacecat-shared-data-access';
-
 /**
  * Single source of truth for capability strings shared between
  * `routes/required-capabilities.js` (Layer 1, s2sAuthWrapper) and the controller-level
@@ -25,7 +23,8 @@ export const CAP_SITE_READ_ALL = 'site:readAll';
 export const CAP_ORG_READ_ALL = 'organization:readAll';
 
 /**
- * Admin grant keys re-exported from spacecat-shared-data-access so that the
- * canonical string definition lives in one place (Consumer.ADMIN_GRANTS).
+ * Admin grant operation keys used by `hasAdminGrant()` at Layer 2.
+ * Must match `Consumer.ADMIN_GRANTS` in spacecat-shared-data-access.
+ * TODO: import directly from Consumer.ADMIN_GRANTS once spacecat-shared PR #1644 is released.
  */
-export const { ADMIN_GRANT_CREATE_SITE } = ConsumerModel.ADMIN_GRANTS;
+export const ADMIN_GRANT_CREATE_SITE = 'CREATE_SITE';

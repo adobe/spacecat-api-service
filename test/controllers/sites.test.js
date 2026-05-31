@@ -370,6 +370,46 @@ describe('Sites Controller', () => {
         /\[acl\] Denied POST \/sites - reason=not-s2s/,
       );
     });
+
+    it('admin user bypasses grant check entirely → 201', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.not.have.been.called;
+    });
+
+    it('denies revoked S2S consumer (revoked) → 403', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ revoked: true }));
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Only admins can create new sites');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/sites - reason=revoked/,
+      );
+    });
+
+    it('denies suspended S2S consumer (not-active) → 403', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ status: 'SUSPENDED' }));
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Only admins can create new sites');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/sites - reason=not-active/,
+      );
+    });
   });
 
   it('returns bad request when creating a site without baseURL', async () => {

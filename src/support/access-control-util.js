@@ -120,30 +120,53 @@ export default class AccessControlUtil {
    * @returns {Promise<{ allowed: boolean, reason: string,
    *   consumerId: (string|undefined), clientId: (string|undefined) }>}
    */
-  async hasS2SCapability(capability) {
+  /**
+   * Fetches and validates the S2S consumer identity from the DB, covering the shared
+   * denial paths (not-s2s, not-found, revoked, not-active) used by both
+   * `hasS2SCapability` and `hasAdminGrant`. Returns either a denial result or the
+   * validated consumer ready for domain-specific checks.
+   *
+   * @returns {Promise<{ denied: true, result: object }
+   *   | { denied: false, fresh: object, clientId: string }>}
+   */
+  async _fetchAndValidateConsumer() {
     const { s2sConsumer } = this.context;
     if (!s2sConsumer) {
-      return { allowed: false, reason: 'not-s2s' };
+      return { denied: true, result: { allowed: false, reason: 'not-s2s' } };
     }
-
     const clientId = s2sConsumer.getClientId();
     const fresh = await this.context.dataAccess.Consumer.findByClientIdAndImsOrgId(
       clientId,
       s2sConsumer.getImsOrgId(),
     );
     if (!fresh) {
-      return { allowed: false, reason: 'not-found', clientId };
+      return { denied: true, result: { allowed: false, reason: 'not-found', clientId } };
     }
     if (fresh.isRevoked()) {
       return {
-        allowed: false, reason: 'revoked', clientId, consumerId: fresh.getId(),
+        denied: true,
+        result: {
+          allowed: false, reason: 'revoked', clientId, consumerId: fresh.getId(),
+        },
       };
     }
     if (fresh.getStatus() !== ConsumerModel.STATUS.ACTIVE) {
       return {
-        allowed: false, reason: 'not-active', clientId, consumerId: fresh.getId(),
+        denied: true,
+        result: {
+          allowed: false, reason: 'not-active', clientId, consumerId: fresh.getId(),
+        },
       };
     }
+    return { denied: false, fresh, clientId };
+  }
+
+  async hasS2SCapability(capability) {
+    const validated = await this._fetchAndValidateConsumer();
+    if (validated.denied) {
+      return validated.result;
+    }
+    const { fresh, clientId } = validated;
     if (!fresh.getCapabilities()?.includes(capability)) {
       return {
         allowed: false, reason: 'missing-capability', clientId, consumerId: fresh.getId(),
@@ -156,8 +179,7 @@ export default class AccessControlUtil {
 
   /**
    * Verifies the requesting S2S consumer holds the specified admin grant by issuing
-   * a fresh DB fetch. Follows the same fresh-DB-fetch TOCTOU pattern as hasS2SCapability:
-   * uses `context.s2sConsumer` only as an identity source and re-queries the Consumer table.
+   * a fresh DB fetch. Follows the same fresh-DB-fetch TOCTOU pattern as hasS2SCapability.
    * The `adminGrants` map is NOT read from the in-context object.
    *
    * Returns a result object so controllers can audit-log without re-reading context.
@@ -169,29 +191,11 @@ export default class AccessControlUtil {
    *   consumerId: (string|undefined), clientId: (string|undefined) }>}
    */
   async hasAdminGrant(operationKey) {
-    const { s2sConsumer } = this.context;
-    if (!s2sConsumer) {
-      return { allowed: false, reason: 'not-s2s' };
+    const validated = await this._fetchAndValidateConsumer();
+    if (validated.denied) {
+      return validated.result;
     }
-
-    const clientId = s2sConsumer.getClientId();
-    const fresh = await this.context.dataAccess.Consumer.findByClientIdAndImsOrgId(
-      clientId,
-      s2sConsumer.getImsOrgId(),
-    );
-    if (!fresh) {
-      return { allowed: false, reason: 'not-found', clientId };
-    }
-    if (fresh.isRevoked()) {
-      return {
-        allowed: false, reason: 'revoked', clientId, consumerId: fresh.getId(),
-      };
-    }
-    if (fresh.getStatus() !== ConsumerModel.STATUS.ACTIVE) {
-      return {
-        allowed: false, reason: 'not-active', clientId, consumerId: fresh.getId(),
-      };
-    }
+    const { fresh, clientId } = validated;
     if (fresh.getAdminGrants()?.[operationKey] !== true) {
       return {
         allowed: false, reason: 'missing-grant', clientId, consumerId: fresh.getId(),
