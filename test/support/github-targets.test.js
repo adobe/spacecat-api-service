@@ -295,6 +295,11 @@ describe('github-targets parseDestinations', () => {
     const dests = parseDestinations({ GITHUB_DESTINATIONS: ok });
     expect(dests['github-public'].reviewer_login).to.equal('some-app[bot]');
   });
+
+  it('throws when an entry is not an object', () => {
+    const bad = JSON.stringify({ 'github-public': 'not-an-object' });
+    expect(() => parseDestinations({ GITHUB_DESTINATIONS: bad })).to.throw('must be an object');
+  });
 });
 
 describe('github-targets extractClassificationMetadata', () => {
@@ -373,6 +378,15 @@ describe('github-targets classifyDestination', () => {
     // such as match or any future entry property. Sorted comparison is stable.
     const result = classifyDestination({ host: 'github.com', enterpriseSlug: 'adobe-prd' }, destinations);
     expect(Object.keys(result).sort()).to.deep.equal(['reviewer_login', 'target_id', 'webhook_secret']);
+  });
+
+  it('returns { skip: true } when no default entry exists (defensive backstop for an unvalidated registry)', () => {
+    // parseDestinations guarantees exactly one default, so this only happens
+    // when classifyDestination is handed a hand-built registry. A github.com
+    // host with no enterprise match and no default must skip, not throw.
+    const noDefault = { ghec: { match: { enterprise_slug: ['adobe-prd'] }, webhook_secret: 's', reviewer_login: 'r' } };
+    expect(classifyDestination({ host: 'github.com', enterpriseSlug: null }, noDefault))
+      .to.deep.equal({ skip: true });
   });
 });
 
