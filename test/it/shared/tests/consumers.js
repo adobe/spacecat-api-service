@@ -129,6 +129,38 @@ export default function consumerTests(getHttpClient, resetData) {
         expect(res.body.consumerName).to.equal('Updated IT Consumer');
       });
 
+      it('admin: sets adminGrants and verifies persistence via GET', async () => {
+        const http = getHttpClient();
+
+        const patch = await http.admin.patch(`/consumers/${CONSUMER_1_ID}`, {
+          adminGrants: { CREATE_SITE: true },
+        });
+        expect(patch.status).to.equal(200);
+        expect(patch.body.adminGrants).to.deep.equal({ CREATE_SITE: true });
+
+        const get = await http.admin.get(`/consumers/${CONSUMER_1_ID}`);
+        expect(get.status).to.equal(200);
+        expect(get.body.adminGrants).to.deep.equal({ CREATE_SITE: true });
+      });
+
+      it('admin: clears adminGrants with null and verifies via GET', async () => {
+        const http = getHttpClient();
+
+        await http.admin.patch(`/consumers/${CONSUMER_1_ID}`, {
+          adminGrants: { CREATE_SITE: true },
+        });
+
+        const clear = await http.admin.patch(`/consumers/${CONSUMER_1_ID}`, {
+          adminGrants: null,
+        });
+        expect(clear.status).to.equal(200);
+        expect(clear.body.adminGrants).to.be.null;
+
+        const get = await http.admin.get(`/consumers/${CONSUMER_1_ID}`);
+        expect(get.status).to.equal(200);
+        expect(get.body.adminGrants).to.be.null;
+      });
+
       it('user: returns 403 (requires S2S admin)', async () => {
         const http = getHttpClient();
         const res = await http.user.patch(`/consumers/${CONSUMER_1_ID}`, {

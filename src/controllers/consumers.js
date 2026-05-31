@@ -419,10 +419,16 @@ function ConsumersController(ctx) {
 
       if (data.adminGrants !== undefined) {
         validateAdminGrants(Consumer, data.adminGrants);
+        if (typeof consumer.setAdminGrants !== 'function') {
+          throw new ErrorWithStatusCode(
+            'adminGrants is not supported by the current entity version; upgrade spacecat-shared-data-access',
+            501,
+          );
+        }
         const oldGrants = consumer.getAdminGrants?.() ?? null;
         const newGrants = data.adminGrants;
         changes.push(`  › *adminGrants:* \`${JSON.stringify(oldGrants)}\` → \`${JSON.stringify(newGrants ?? null)}\``);
-        consumer.setAdminGrants?.(newGrants ?? null);
+        consumer.setAdminGrants(newGrants ?? null);
       }
 
       const updatedBy = getUpdatedBy();

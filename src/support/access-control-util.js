@@ -103,24 +103,6 @@ export default class AccessControlUtil {
   }
 
   /**
-   * Verifies the requesting S2S consumer holds the given capability by issuing
-   * a fresh DB fetch. Uses `context.s2sConsumer` (set by s2sAuthWrapper) only as
-   * an identity source - extracts `clientId` and `imsOrgId` and re-queries the
-   * Consumer table. Capabilities are NOT read from the in-context object: a stale
-   * or tampered context cannot grant access.
-   *
-   * Returns a result object so controllers can audit-log without re-reading
-   * context. The `reason` discriminates denial paths for SOC investigation:
-   * `not-s2s`, `not-found`, `revoked`, `not-active`, `missing-capability`,
-   * `granted`.
-   *
-   * See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the trust-boundary analysis.
-   *
-   * @param {string} capability - Full capability string, e.g. 'site:readAll'.
-   * @returns {Promise<{ allowed: boolean, reason: string,
-   *   consumerId: (string|undefined), clientId: (string|undefined) }>}
-   */
-  /**
    * Fetches and validates the S2S consumer identity from the DB, covering the shared
    * denial paths (not-s2s, not-found, revoked, not-active) used by both
    * `hasS2SCapability` and `hasAdminGrant`. Returns either a denial result or the
@@ -161,6 +143,24 @@ export default class AccessControlUtil {
     return { denied: false, fresh, clientId };
   }
 
+  /**
+   * Verifies the requesting S2S consumer holds the given capability by issuing
+   * a fresh DB fetch. Uses `context.s2sConsumer` (set by s2sAuthWrapper) only as
+   * an identity source — extracts `clientId` and `imsOrgId` and re-queries the
+   * Consumer table. Capabilities are NOT read from the in-context object: a stale
+   * or tampered context cannot grant access.
+   *
+   * Returns a result object so controllers can audit-log without re-reading
+   * context. The `reason` discriminates denial paths for SOC investigation:
+   * `not-s2s`, `not-found`, `revoked`, `not-active`, `missing-capability`,
+   * `granted`.
+   *
+   * See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the trust-boundary analysis.
+   *
+   * @param {string} capability - Full capability string, e.g. 'site:readAll'.
+   * @returns {Promise<{ allowed: boolean, reason: string,
+   *   consumerId: (string|undefined), clientId: (string|undefined) }>}
+   */
   async hasS2SCapability(capability) {
     const validated = await this._fetchAndValidateConsumer();
     if (validated.denied) {
