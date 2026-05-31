@@ -770,6 +770,22 @@ describe('ConsumersController', () => {
       expect(mockConsumer.save).not.to.have.been.called;
     });
 
+    it('returns 501 when adminGrants is requested but setAdminGrants is absent (old shared version)', async () => {
+      const oldConsumer = createMockConsumerEntity();
+      delete oldConsumer.setAdminGrants;
+      context.dataAccess.Consumer.findById.resolves(oldConsumer);
+
+      const controller = ConsumersController(context);
+      const response = await controller.update({
+        ...context,
+        params: { consumerId: 'test-consumer-id' },
+        data: { adminGrants: { CREATE_SITE: true } },
+      });
+
+      expect(response.status).to.equal(501);
+      expect(response.headers.get('x-error')).to.include('adminGrants is not supported');
+    });
+
     it('rejects revokedAt in update payload', async () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
