@@ -129,7 +129,10 @@ export default function consumerTests(getHttpClient, resetData) {
         expect(res.body.consumerName).to.equal('Updated IT Consumer');
       });
 
-      it('admin: sets adminGrants and verifies persistence via GET', async () => {
+      // TODO: unskip once spacecat-shared PR #1644 is merged and the package bumped.
+      // These tests require Consumer.validateAdminGrants (collection) and
+      // consumer.setAdminGrants (entity) which land in that release.
+      it.skip('admin: sets adminGrants and verifies persistence via GET', async () => {
         const http = getHttpClient();
 
         const patch = await http.admin.patch(`/consumers/${CONSUMER_1_ID}`, {
@@ -143,7 +146,7 @@ export default function consumerTests(getHttpClient, resetData) {
         expect(get.body.adminGrants).to.deep.equal({ CREATE_SITE: true });
       });
 
-      it('admin: clears adminGrants with null and verifies via GET', async () => {
+      it.skip('admin: clears adminGrants with null and verifies via GET', async () => {
         const http = getHttpClient();
 
         await http.admin.patch(`/consumers/${CONSUMER_1_ID}`, {
