@@ -20,9 +20,9 @@
 /**
  * Parse + validate the GITHUB_DESTINATIONS env var (the consolidated registry).
  * A keyed object by target_id; each entry is { match, webhook_secret,
- * reviewer_login } with snake_case keys. The webhook secret is INLINE (no
- * webhookSecretEnvVar indirection). Loaded at runtime from Vault into
- * context.env (secret-bearing - do not log the value).
+ * reviewer_login } with snake_case keys. The webhook secret is INLINE in each
+ * entry. Loaded at runtime from Vault into context.env (secret-bearing - do not
+ * log the value).
  * @param {object} env - context.env
  * @returns {object|null} the keyed destinations object, or null when
  *   GITHUB_DESTINATIONS is unset (the handler treats unset as a misconfiguration
