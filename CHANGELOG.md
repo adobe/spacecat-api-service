@@ -1,3 +1,10 @@
+# [1.530.0](https://github.com/adobe/spacecat-api-service/compare/v1.529.0...v1.530.0) (2026-05-31)
+
+
+### Features
+
+* **webhooks:** dual-read consolidated GITHUB_DESTINATIONS registry (Phase 1) ([#2522](https://github.com/adobe/spacecat-api-service/issues/2522)) ([6402c90](https://github.com/adobe/spacecat-api-service/commit/6402c909f436b17445b42da4877648eb57de86f5))
+
 # [1.529.0](https://github.com/adobe/spacecat-api-service/compare/v1.528.0...v1.529.0) (2026-05-30)
 
 
