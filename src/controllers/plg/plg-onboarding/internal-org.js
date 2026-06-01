@@ -11,14 +11,9 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { isInternalOrg, parseCommaSeparatedEnvList } from '../../../support/utils.js';
 
-function parseCommaSeparatedEnvList(value) {
-  return (value || '').split(',').map((id) => id.trim()).filter(Boolean);
-}
-
-export function isInternalOrg(orgId, env) {
-  return parseCommaSeparatedEnvList(env.ASO_PLG_EXCLUDED_ORGS).includes(orgId);
-}
+export { isInternalOrg };
 
 /**
  * Site IDs that must not use the internal-org waitlist bypass, even when the site lives in an

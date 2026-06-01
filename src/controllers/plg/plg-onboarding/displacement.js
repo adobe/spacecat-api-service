@@ -11,7 +11,7 @@
  */
 
 // The PLG opportunity types that are relevant for the displacement check.
-// Must stay in sync with LD_AUTO_FIX_FLAGS in plg-onboarding.js, which enables auto-fix for the
+// Must stay in sync with LD_AUTO_FIX_FLAGS in launchdarkly.js, which enables auto-fix for the
 // same types.
 export const PLG_OPPORTUNITY_TYPES = ['cwv', 'alt-text', 'broken-backlinks'];
 
