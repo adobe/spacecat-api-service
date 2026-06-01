@@ -28,7 +28,7 @@ const ANONYMOUS_ENDPOINTS = [
   /^POST \/hooks\/site-detection.+/,
 ];
 const SERVICE_CODE = 'dx_aem_perf';
-const X_PRODUCT_HEADER = 'x-product';
+export const X_PRODUCT_HEADER = 'x-product';
 
 function isAnonymous(endpoint) {
   return ANONYMOUS_ENDPOINTS.some((rgx) => rgx.test(endpoint));

@@ -157,8 +157,8 @@ function enc(segment) {
   return encodeURIComponent(String(segment ?? ''));
 }
 
-function aioPromptsPath(workspaceId, projectId, suffix) {
-  return `${API_PREFIX}/v2/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/aio/prompts${suffix}`;
+function aioPromptsPath(semrushWorkspaceId, projectId, suffix) {
+  return `${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/aio/prompts${suffix}`;
 }
 
 /**
@@ -182,8 +182,8 @@ export function createSerenityTransport({ env, imsToken }) {
      * commit history on the prior `serenity` handler). Body is restricted to
      * the fields the upstream documents as accepted.
      */
-    async listPromptsByTags(workspaceId, projectId, body) {
-      const url = `${root}${aioPromptsPath(workspaceId, projectId, '/by_tags')}`;
+    async listPromptsByTags(semrushWorkspaceId, projectId, body) {
+      const url = `${root}${aioPromptsPath(semrushWorkspaceId, projectId, '/by_tags')}`;
       return request('POST', url, imsToken, {
         tag_ids: body?.tag_ids ?? [],
         page: body?.page ?? 1,
@@ -197,8 +197,8 @@ export function createSerenityTransport({ env, imsToken }) {
      * POST /v2/.../aio/prompts/tagged — creates prompts grouped by tag names.
      * Body shape: { prompts: { [tagName]: [promptText, ...] } }.
      */
-    async createTaggedPrompts(workspaceId, projectId, promptsByTag) {
-      const url = `${root}${aioPromptsPath(workspaceId, projectId, '/tagged')}`;
+    async createTaggedPrompts(semrushWorkspaceId, projectId, promptsByTag) {
+      const url = `${root}${aioPromptsPath(semrushWorkspaceId, projectId, '/tagged')}`;
       return request('POST', url, imsToken, { prompts: promptsByTag });
     },
 
@@ -206,8 +206,8 @@ export function createSerenityTransport({ env, imsToken }) {
      * DELETE /v2/.../aio/prompts — deletes prompts by their Semrush ids in
      * this project. Body shape: { ids: [...] }.
      */
-    async deletePromptsByIds(workspaceId, projectId, ids) {
-      const url = `${root}${aioPromptsPath(workspaceId, projectId, '')}`;
+    async deletePromptsByIds(semrushWorkspaceId, projectId, ids) {
+      const url = `${root}${aioPromptsPath(semrushWorkspaceId, projectId, '')}`;
       return request('DELETE', url, imsToken, { ids });
     },
 
@@ -216,25 +216,9 @@ export function createSerenityTransport({ env, imsToken }) {
      * live. Semrush publishes asynchronously; mutations land in draft until
      * this is called.
      */
-    async publishProject(workspaceId, projectId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/publish`;
+    async publishProject(semrushWorkspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/publish`;
       return request('POST', url, imsToken, undefined);
-    },
-
-    /**
-     * GET /v2/workspaces/{ws}/projects?type=AIO&publish_status=live,…
-     * Lists published AIO projects in a workspace. Drafts and failed
-     * publishes are omitted. Paginated — yields the full set across pages.
-     */
-    async listWorkspaceProjects(workspaceId, { page = 1, limit = 100 } = {}) {
-      const params = new URLSearchParams({
-        type: 'AIO',
-        publish_status: 'live,live_with_unpublished_updates',
-        page: String(page),
-        limit: String(limit),
-      });
-      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(workspaceId)}/projects?${params.toString()}`;
-      return request('GET', url, imsToken, undefined);
     },
 
     /**
@@ -242,21 +226,36 @@ export function createSerenityTransport({ env, imsToken }) {
      * configured for a project. `model.key` is the value the Reporting API
      * expects as `CBF_model`.
      */
-    async listAiModels(workspaceId, projectId, { page = 1, limit = 100 } = {}) {
+    async listAiModels(semrushWorkspaceId, projectId, { page = 1, limit = 100 } = {}) {
       const params = new URLSearchParams({
         page: String(page),
         limit: String(limit),
       });
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models?${params.toString()}`;
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models?${params.toString()}`;
       return request('GET', url, imsToken, undefined);
     },
 
     /**
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
      */
-    async createProject(workspaceId, body) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects`;
+    async createProject(semrushWorkspaceId, body) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects`;
       return request('POST', url, imsToken, body);
+    },
+
+    /**
+     * DELETE /v1/workspaces/{ws}/projects/{pid} — removes an upstream
+     * project. Upstream support verified 2026-05-28 against
+     * adobe-hackathon.semrush.com:
+     *
+     *   OPTIONS /v1/workspaces/{ws}/projects/{pid} → 405, allow: DELETE, GET, PATCH
+     *   DELETE  /v1/workspaces/{ws}/projects/<bogus> → 404 {"message":"not found"}
+     *
+     * Callers (handleDeleteMarket) treat upstream 404 as idempotent success.
+     */
+    async deleteProject(semrushWorkspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}`;
+      return request('DELETE', url, imsToken, undefined);
     },
 
     /**

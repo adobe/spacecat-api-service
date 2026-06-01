@@ -203,6 +203,7 @@ describe('Sites Controller', () => {
       SiteEnrollment: {
         allByEntitlementId: sandbox.stub().resolves([]),
         allBySiteId: sandbox.stub().resolves([]),
+        create: sandbox.stub().resolves({ getId: () => 'enrollment-created' }),
       },
     };
 
@@ -397,6 +398,135 @@ describe('Sites Controller', () => {
 
     const error = await response.json();
     expect(error).to.have.property('message', 'Failed to create site');
+  });
+
+  describe('createSite auto-enrollment via x-product header', () => {
+    let tierClientStub;
+
+    beforeEach(() => {
+      tierClientStub = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: null,
+          siteEnrollment: null,
+        }),
+        createEntitlement: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+          siteEnrollment: { getId: () => 'enrollment-123' },
+        }),
+      };
+      sandbox.stub(TierClient, 'createForSite').resolves(tierClientStub);
+    });
+
+    it('creates entitlement and enrollment for a newly created site when x-product header is set', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(201);
+      expect(TierClient.createForSite).to.have.been.calledOnce;
+      expect(TierClient.createForSite).to.have.been.calledWith(
+        sinon.match.object,
+        sinon.match.object,
+        'ASO',
+      );
+      expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('FREE_TRIAL');
+      expect(loggerStub.info).to.have.been.calledWithMatch(/Ensured ASO entitlement entitlement-123 and enrollment enrollment-123/);
+    });
+
+    it('skips auto-enrollment for an existing site when x-product header is set', async () => {
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockDataAccess.Site.create).to.have.not.been.called;
+      expect(TierClient.createForSite).to.have.not.been.called;
+    });
+
+    it('skips auto-enrollment when x-product header is missing', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: {} },
+      });
+
+      expect(response.status).to.equal(201);
+      expect(TierClient.createForSite).to.have.not.been.called;
+    });
+
+    it('skips auto-enrollment when x-product header is an empty string', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': '' } },
+      });
+
+      expect(response.status).to.equal(201);
+      expect(TierClient.createForSite).to.have.not.been.called;
+    });
+
+    it('returns 400 for an invalid x-product header', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'NOT_A_PRODUCT' } },
+      });
+
+      expect(response.status).to.equal(400);
+      expect(TierClient.createForSite).to.have.not.been.called;
+      const body = await response.json();
+      expect(body.message).to.match(/Unsupported product code/);
+    });
+
+    it('does not call TierClient for non-admin callers even when x-product is set', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(TierClient.createForSite).to.have.not.been.called;
+    });
+
+    it('uses existing PRE_ONBOARD tier when provisioning a newly created site', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      tierClientStub.checkValidEntitlement.resolves({
+        entitlement: { getId: () => 'entitlement-pre', getTier: () => 'PRE_ONBOARD' },
+        siteEnrollment: null,
+      });
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(201);
+      expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('PRE_ONBOARD');
+    });
+
+    it('returns 500 when TierClient.createEntitlement throws for a newly created site', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      tierClientStub.createEntitlement.rejects(new Error('Database error'));
+
+      const response = await sitesController.createSite({
+        data: { baseURL: 'https://site1.com' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Failed to ensure entitlement/enrollment for site');
+      expect(loggerStub.error).to.have.been.calledWithMatch(/event=site_orphaned_after_create/);
+    });
   });
 
   it('updates a site', async () => {
