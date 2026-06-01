@@ -1,3 +1,10 @@
+## [1.535.2](https://github.com/adobe/spacecat-api-service/compare/v1.535.1...v1.535.2) (2026-06-01)
+
+
+### Bug Fixes
+
+* enable get geoexperiments endpoint for geo experiment read with s2s token ([#2530](https://github.com/adobe/spacecat-api-service/issues/2530)) ([2144b55](https://github.com/adobe/spacecat-api-service/commit/2144b552ddfdf778ed721c57c639ec49309443d4))
+
 ## [1.535.1](https://github.com/adobe/spacecat-api-service/compare/v1.535.0...v1.535.1) (2026-06-01)
 
 
