@@ -66,8 +66,9 @@ import { getReviewerIdentity, isInternalOrg } from './plg-onboarding/internal-or
 // before the validation helpers were extracted into ./plg-onboarding/validation.js.
 export { isSafeDomain } from './plg-onboarding/validation.js';
 
-function withFlowDeps(context) {
-  // Keep request-context identity while giving extracted helpers the monolith's deps.
+function injectFlowDeps(context) {
+  // Mutates the request context in-place (safe: controllers are per-request).
+  // Named inject* to signal mutation; context.X overrides exist solely for esmock testability.
   Object.assign(context, {
     badRequest,
     ok,
@@ -312,7 +313,7 @@ function PlgOnboardingController(ctx) {
 
       const onboarding = await performAsoPlgOnboarding(
         { domain, imsOrgId },
-        withFlowDeps(context),
+        injectFlowDeps(context),
       );
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
@@ -439,7 +440,7 @@ function PlgOnboardingController(ctx) {
    */
   const update = async (context) => {
     const { dataAccess: da, params, data } = context;
-    const flowContext = withFlowDeps(context);
+    const flowContext = injectFlowDeps(context);
 
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
@@ -711,7 +712,7 @@ function PlgOnboardingController(ctx) {
    * Body: { status, justification }
    */
   const transitionStatus = async (context) => {
-    const flowContext = withFlowDeps(context);
+    const flowContext = injectFlowDeps(context);
 
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
