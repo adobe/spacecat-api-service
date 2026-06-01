@@ -1,3 +1,17 @@
+## [1.532.1](https://github.com/adobe/spacecat-api-service/compare/v1.532.0...v1.532.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* **fixes:** replace N+1 getSuggestions loop with batch query ([#2512](https://github.com/adobe/spacecat-api-service/issues/2512)) ([941c01f](https://github.com/adobe/spacecat-api-service/commit/941c01f283a103b768a7183c335b079baafdd666))
+
+# [1.532.0](https://github.com/adobe/spacecat-api-service/compare/v1.531.0...v1.532.0) (2026-06-01)
+
+
+### Features
+
+* lazy-load tab data, eager badge counts via totals endpoints | LLMO-5218 ([#2514](https://github.com/adobe/spacecat-api-service/issues/2514)) ([8afd6d6](https://github.com/adobe/spacecat-api-service/commit/8afd6d65a948613a1fcd5f300229e454de05d108))
+
 # [1.531.0](https://github.com/adobe/spacecat-api-service/compare/v1.530.1...v1.531.0) (2026-06-01)
 
 
