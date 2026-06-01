@@ -769,7 +769,11 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
           // Fast path: sign worker-written files[] directly. Validated first.
           if (metadata?.status === 'success'
             && Array.isArray(metadata.files) && metadata.files.length > 0) {
-            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId);
+            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId)
+              .sort((a, b) => {
+                const partNum = (k) => Number(k.match(PART_SUFFIX_PATTERN)?.[1] ?? 0);
+                return partNum(a) - partNum(b);
+              });
             if (safeFiles.length === metadata.files.length) {
               return buildExportReadyResponse(ctx, s3Bucket, exportId, safeFiles, metadata);
             }
@@ -873,7 +877,11 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
           // Fast path: sign worker-written files[] directly. Validated first.
           if (metadata?.status === 'success'
             && Array.isArray(metadata.files) && metadata.files.length > 0) {
-            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId);
+            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId)
+              .sort((a, b) => {
+                const partNum = (k) => Number(k.match(PART_SUFFIX_PATTERN)?.[1] ?? 0);
+                return partNum(a) - partNum(b);
+              });
             if (safeFiles.length === metadata.files.length) {
               return buildExportReadyResponse(ctx, s3Bucket, exportId, safeFiles, metadata);
             }
