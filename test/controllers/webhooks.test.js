@@ -29,9 +29,17 @@ describe('WebhooksController', () => {
         'x-github-delivery': 'delivery-uuid-123',
       },
     },
+    // The HMAC handler attaches the resolved destination + reviewer identity to
+    // the auth profile; every authenticated webhook carries target_id +
+    // reviewer_login (the consolidated GITHUB_DESTINATIONS path).
+    attributes: {
+      authInfo: {
+        getProfile: () => ({ user_id: 'github-webhook', target_id: 'github-public', reviewer_login: 'MysticatBot' }),
+      },
+    },
     data: {
       action: 'review_requested',
-      requested_reviewer: { login: 'mysticat[bot]' },
+      requested_reviewer: { login: 'MysticatBot' },
       installation: { id: 12345678 },
       pull_request: {
         number: 456,
@@ -53,7 +61,6 @@ describe('WebhooksController', () => {
       log: mockLog,
       env: {
         MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
-        GITHUB_APP_SLUG: 'mysticat',
         ...envOverrides,
       },
     };
@@ -98,6 +105,8 @@ describe('WebhooksController', () => {
       'Adobe-AEM-Sites/aem-sites-architecture',
     ]);
     expect(payload.retry_count).to.equal(0);
+    // Every authenticated webhook now carries the resolved destination id.
+    expect(payload.target_id).to.equal('github-public');
   });
 
   it('returns 204 for non-pull_request event', async () => {
@@ -275,7 +284,7 @@ describe('WebhooksController', () => {
     WebhooksController({
       sqs: mockSqs,
       log: freshLog,
-      env: { MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl, GITHUB_APP_SLUG: 'mysticat' },
+      env: { MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl },
     });
     expect(freshLog.warn.called).to.be.false;
     expect(freshLog.debug.called).to.be.false;
@@ -332,14 +341,28 @@ describe('WebhooksController', () => {
     expect(fallbackWarn).to.not.be.undefined;
   });
 
-  it('returns 500 and logs error when GITHUB_APP_SLUG is not configured', async () => {
-    controller = buildController({ GITHUB_APP_SLUG: undefined });
+  it('enqueues without GITHUB_APP_SLUG configured (app-slug requirement removed)', async () => {
+    controller = buildController(); // env carries no GITHUB_APP_SLUG
 
     const response = await controller.processGitHubWebhook(validContext);
 
+    expect(response.status).to.equal(202);
+    expect(mockSqs.sendMessage.calledOnce).to.be.true;
+  });
+
+  it('returns 500 and logs error when the auth profile has no reviewer_login (fail closed)', async () => {
+    const ctx = {
+      ...validContext,
+      attributes: {
+        authInfo: { getProfile: () => ({ user_id: 'github-webhook', target_id: 'github-public' }) },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(ctx);
+
     expect(response.status).to.equal(500);
     const errorCall = mockLog.error.getCalls()
-      .find((c) => c.args[0].includes('GITHUB_APP_SLUG not configured'));
+      .find((c) => c.args[0].includes('No reviewer login resolved'));
     expect(errorCall).to.not.be.undefined;
     expect(errorCall.args[1]).to.deep.include({ deliveryId: 'delivery-uuid-123' });
     expect(mockSqs.sendMessage.called).to.be.false;
@@ -360,6 +383,64 @@ describe('WebhooksController', () => {
     expect(mockLog.info.firstCall.args[0]).to.equal('Skipping unmapped event');
     // Injected value goes to structured context, not message
     expect(mockLog.info.firstCall.args[1]).to.deep.include({ event: 'evil\ninjected' });
+  });
+
+  describe('multi-destination target_id', () => {
+    function ghecAuthContext() {
+      // Mirrors what the HMAC handler attaches: target_id + reviewer_login.
+      return {
+        ...validContext,
+        attributes: {
+          authInfo: { getProfile: () => ({ user_id: 'github-webhook', target_id: 'ghec', reviewer_login: 'emu_reviewer' }) },
+        },
+        data: {
+          ...validContext.data,
+          requested_reviewer: { login: 'emu_reviewer' },
+        },
+      };
+    }
+
+    it('adds target_id from the auth profile to the SQS payload', async () => {
+      const response = await controller.processGitHubWebhook(ghecAuthContext());
+      expect(response.status).to.equal(202);
+      const [, payload] = mockSqs.sendMessage.firstCall.args;
+      expect(payload.target_id).to.equal('ghec');
+    });
+
+    it('enqueues a non-default destination when the requested reviewer matches its reviewer_login', async () => {
+      // Positive per-destination gate: the profile reviewer_login (emu_reviewer)
+      // matches the requested reviewer, so the trigger fires (202). This is the
+      // successor to the removed global/app-slug reviewer resolution.
+      const response = await controller.processGitHubWebhook(ghecAuthContext());
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage.calledOnce).to.be.true;
+    });
+
+    it('logs the resolved target id on the enqueue log', async () => {
+      await controller.processGitHubWebhook(ghecAuthContext());
+      const enqueueLog = mockLog.info.getCalls().find((c) => c.args[0] === 'Enqueued webhook job');
+      expect(enqueueLog, 'expected an "Enqueued webhook job" info log').to.exist;
+      expect(enqueueLog.args[1]).to.include({ targetId: 'ghec' });
+    });
+
+    it('skips when the requested reviewer does not match the profile reviewer_login', async () => {
+      const ctx = {
+        ...validContext,
+        attributes: {
+          authInfo: {
+            getProfile: () => ({
+              user_id: 'github-webhook', target_id: 'ghec', reviewer_login: 'emu_reviewer',
+            }),
+          },
+        },
+        data: { ...validContext.data, requested_reviewer: { login: 'someone-else' } },
+      };
+
+      const response = await controller.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(204);
+      expect(mockSqs.sendMessage.called).to.be.false;
+    });
   });
 
   describe('Slack observability', () => {
@@ -399,7 +480,6 @@ describe('WebhooksController', () => {
         log: mockLog,
         env: {
           MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
-          GITHUB_APP_SLUG: 'mysticat',
           MYSTICAT_OBSERVABILITY_SLACK_TOKEN: 'xoxb-test',
           MYSTICAT_OBSERVABILITY_SLACK_CHANNEL: channel,
           ...envOverrides,

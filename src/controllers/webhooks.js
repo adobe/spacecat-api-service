@@ -94,26 +94,31 @@ function WebhooksController(context) {
     const deliveryId = ctx.pathInfo?.headers?.['x-github-delivery'];
     const { data } = ctx;
 
-    // Validate required config up front. GITHUB_APP_SLUG is a security-relevant
-    // decision (which bot can trigger automated runs). Missing config must be
-    // a 5xx so GitHub retries once it is fixed — returning 204 here would
-    // mean GitHub treats the delivery as succeeded and never redelivers,
-    // permanently losing every webhook during the misconfiguration window.
-    if (!env.GITHUB_APP_SLUG) {
-      log.error('GITHUB_APP_SLUG not configured', { deliveryId });
-      return internalServerError('GITHUB_APP_SLUG not configured');
-    }
-
-    // Filter on event type BEFORE validating payload fields. Unmapped events
-    // (ping, push, issues, ...) do not necessarily carry `action` or
-    // `installation.id`. GitHub's app-install ping has neither — validating
-    // first would 400 the install handshake and surface as red Xs in the
-    // app's "Recent Deliveries" UI. Mapped events still get full validation
-    // below.
+    // Filter on event type BEFORE validating payload fields or requiring a
+    // reviewer identity. Unmapped events (ping, push, issues, ...) do not
+    // necessarily carry `action`/`installation.id` — GitHub's app-install ping
+    // has neither — and must 204, not 400/500, or they surface as red Xs in the
+    // app's "Recent Deliveries" UI. Mapped events get full validation below.
     const jobType = EVENT_JOB_MAP[event];
     if (!jobType) {
       log.info('Skipping unmapped event', { event, deliveryId });
       return noContent();
+    }
+
+    // Destination + reviewer identity resolved by the HMAC handler from the
+    // consolidated GITHUB_DESTINATIONS registry (every authenticated webhook
+    // carries target_id + reviewer_login).
+    const profile = ctx.attributes?.authInfo?.getProfile?.() || {};
+    const targetId = profile.target_id;
+    const reviewerLogin = profile.reviewer_login;
+
+    // Security-relevant: which login may trigger automated runs. reviewer_login
+    // is required on every destination entry, so a missing value means a
+    // misconfigured registry or a request that bypassed the handler. Fail closed
+    // with a 5xx (GitHub retries; visible failed delivery), not a 204 (lost).
+    if (!reviewerLogin) {
+      log.error('No reviewer login resolved (auth profile missing reviewer_login)', { deliveryId });
+      return internalServerError('reviewer login not configured');
     }
 
     // Validate required payload fields (mapped events only)
@@ -140,7 +145,7 @@ function WebhooksController(context) {
     }
 
     // Apply trigger rules (returns skip reason string or null)
-    const skipReason = getSkipReason(data, action, env);
+    const skipReason = getSkipReason(data, action, reviewerLogin);
     if (skipReason) {
       log.info('Skipping webhook', {
         skipReason,
@@ -214,6 +219,7 @@ function WebhooksController(context) {
       job_type: jobType,
       workspace_repos: workspaceRepos,
       retry_count: 0,
+      ...(targetId ? { target_id: targetId } : {}),
       ...(observability ? { observability } : {}),
     };
 
@@ -229,6 +235,9 @@ function WebhooksController(context) {
       repo: jobPayload.repo,
       prNumber: pr.number,
       installationId: jobPayload.installation_id,
+      // Resolved destination id, for traffic-distribution observability (per the
+      // PR #2503 review recommendation).
+      targetId,
     });
 
     return accepted({ status: 'accepted' });

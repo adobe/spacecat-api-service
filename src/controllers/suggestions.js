@@ -40,7 +40,6 @@ import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
 import {
   sendAutofixMessage,
-  getCookieValue,
   getIMSPromiseToken,
   ErrorWithStatusCode,
   getHostName,
@@ -896,6 +895,7 @@ function SuggestionsController(ctx, sqs, env) {
             suggestion.setUpdatedBy(profile.email);
           } else {
             context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+            suggestion.setUpdatedBy(profile.email);
           }
         } else {
           return {
@@ -1256,10 +1256,12 @@ function SuggestionsController(ctx, sqs, env) {
     let promiseTokenResponse;
     const skipPromiseToken = isAssessAction && precheckOnly === true;
     if (!skipPromiseToken) {
-      const cookieToken = getCookieValue(context, 'promiseToken');
-      if (hasText(cookieToken)) {
-        promiseTokenResponse = { promise_token: cookieToken };
+      const headerToken = context.pathInfo?.headers?.['x-promise-token'];
+      if (hasText(headerToken)) {
+        context.log.info('[autofix] using promise token from x-promise-token header');
+        promiseTokenResponse = { promise_token: headerToken };
       } else {
+        context.log.info('[autofix] no x-promise-token header, creating promise token via IMS');
         try {
           promiseTokenResponse = await getIMSPromiseToken(context);
         } catch (e) {
