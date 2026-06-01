@@ -8404,7 +8404,7 @@ describe('Suggestions Controller', () => {
       AccessControlUtil.prototype.hasAccess.restore();
       const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
       const s2sStub = sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({
-        allowed: true, reason: 'granted', clientId: 'mystique', consumerId: 'c1',
+        allowed: true, reason: 'granted', clientId: 's2s-client', consumerId: 'c1',
       });
       mockSuggestionDataAccess.GeoExperiment.allBySiteId = sandbox.stub().resolves({
         data: [],
@@ -8558,7 +8558,7 @@ describe('Suggestions Controller', () => {
       AccessControlUtil.prototype.hasAccess.restore();
       const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
       const s2sStub = sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({
-        allowed: true, reason: 'granted', clientId: 'mystique', consumerId: 'c1',
+        allowed: true, reason: 'granted', clientId: 's2s-client', consumerId: 'c1',
       });
       context.s3.s3Client.send.rejects(new Error('no prompts'));
       const response = await suggestionsController.getGeoExperiment({
@@ -8731,22 +8731,6 @@ describe('Suggestions Controller', () => {
         data: { name: 'New Name' },
       });
       expect(response.status).to.equal(403);
-    });
-
-    it('allows S2S consumer with geoExperiment:write when org access is missing', async () => {
-      AccessControlUtil.prototype.hasAccess.restore();
-      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
-      const s2sStub = sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({
-        allowed: true, reason: 'granted', clientId: 'mystique', consumerId: 'c1',
-      });
-      const response = await suggestionsController.patchGeoExperiment({
-        ...context,
-        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
-        data: { name: 'Updated by mystique' },
-      });
-      expect(response.status).to.equal(200);
-      expect(s2sStub).to.have.been.calledWith('geoExperiment:write');
-      expect(hasAccessStub).to.not.have.been.called;
     });
 
     it('returns 404 when GeoExperiment not found', async () => {
@@ -8929,22 +8913,6 @@ describe('Suggestions Controller', () => {
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
       expect(response.status).to.equal(403);
-    });
-
-    it('allows S2S consumer with geoExperiment:write when org access is missing', async () => {
-      AccessControlUtil.prototype.hasAccess.restore();
-      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
-      const s2sStub = sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({
-        allowed: true, reason: 'granted', clientId: 'mystique', consumerId: 'c1',
-      });
-      const response = await suggestionsController.deleteGeoExperiment({
-        ...context,
-        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
-      });
-      expect(response.status).to.equal(204);
-      expect(s2sStub).to.have.been.calledWith('geoExperiment:write');
-      expect(hasAccessStub).to.not.have.been.called;
-      expect(mockGeoExperiment.remove).to.have.been.calledOnce;
     });
 
     it('returns 404 when GeoExperiment not found', async () => {

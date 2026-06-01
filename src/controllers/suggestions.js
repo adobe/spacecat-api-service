@@ -2081,9 +2081,10 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    // S2S consumers (e.g. Mystique) bypass org-membership when granted geoExperiment:read.
-    // The Layer 1 s2sAuthWrapper has already verified the route capability; this Layer 2
-    // re-fetches the consumer to defend against a stale/tampered context.
+    // S2S consumers (e.g. project-elmo-ui server flow) bypass org-membership when granted
+    // geoExperiment:read. The Layer 1 s2sAuthWrapper has already verified the route
+    // capability; this Layer 2 re-fetches the consumer to defend against a stale/tampered
+    // context. End-user (IMS/JWT) callers continue through hasAccess(site).
     const s2sResult = await accessControlUtil.hasS2SCapability('geoExperiment:read');
     if (!s2sResult.allowed && !await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
@@ -2112,7 +2113,8 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    // S2S consumers (e.g. Mystique) bypass org-membership when granted geoExperiment:read.
+    // S2S consumers bypass org-membership when granted geoExperiment:read. See
+    // listGeoExperiments above for the full rationale.
     const s2sResult = await accessControlUtil.hasS2SCapability('geoExperiment:read');
     if (!s2sResult.allowed && !await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
@@ -2170,9 +2172,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    // S2S consumers (e.g. Mystique) bypass org-membership when granted geoExperiment:write.
-    const s2sResult = await accessControlUtil.hasS2SCapability('geoExperiment:write');
-    if (!s2sResult.allowed && !await accessControlUtil.hasAccess(site)) {
+    if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
     }
 
@@ -2232,9 +2232,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    // S2S consumers (e.g. Mystique) bypass org-membership when granted geoExperiment:write.
-    const s2sResult = await accessControlUtil.hasS2SCapability('geoExperiment:write');
-    if (!s2sResult.allowed && !await accessControlUtil.hasAccess(site)) {
+    if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
     }
 
