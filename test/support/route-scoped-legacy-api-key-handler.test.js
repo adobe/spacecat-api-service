@@ -134,6 +134,22 @@ describe('RouteScopedLegacyApiKeyHandler', () => {
     expect(superCheckAuthStub).to.not.have.been.called;
   });
 
+  it('delegates to LegacyApiKeyHandler.checkAuth for POST /event/fulfillment with a sub-path', async () => {
+    const req = {};
+    const ctx = { pathInfo: { method: 'POST', suffix: '/event/fulfillment/acom_commerce_products' }, log: logStubs };
+    const result = await handler.checkAuth(req, ctx);
+    expect(result).to.equal('SUPER_RESULT');
+    expect(superCheckAuthStub).to.have.been.calledOnceWith(req, ctx);
+  });
+
+  it('delegates to LegacyApiKeyHandler.checkAuth for POST /event/fulfillment with query params', async () => {
+    const req = {};
+    const ctx = { pathInfo: { method: 'POST', suffix: '/event/fulfillment?eventType=acom_commerce_products' }, log: logStubs };
+    const result = await handler.checkAuth(req, ctx);
+    expect(result).to.equal('SUPER_RESULT');
+    expect(superCheckAuthStub).to.have.been.calledOnceWith(req, ctx);
+  });
+
   it('returns null for GET /event/fulfillment (wrong method, same path)', async () => {
     const ctx = { pathInfo: { method: 'GET', suffix: '/event/fulfillment' } };
     const result = await handler.checkAuth({}, ctx);

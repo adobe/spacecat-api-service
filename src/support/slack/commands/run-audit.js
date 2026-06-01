@@ -150,18 +150,10 @@ function RunAuditCommand(context) {
       }
 
       if (auditType === 'all') {
-        // const enabledAudits = configuration.getEnabledAuditsForSite(site);
-        const enabledAudits = ALL_AUDITS.filter(
-          (audit) => configuration.isHandlerEnabledForSite(audit, site),
-        );
-
-        if (!isNonEmptyArray(enabledAudits)) {
-          await say(`:warning: No audits configured for site \`${baseURL}\``);
-          return;
-        }
+        const auditTypesToRun = ALL_AUDITS;
 
         await Promise.all(
-          enabledAudits.map(async (enabledAuditType) => {
+          auditTypesToRun.map(async (enabledAuditType) => {
             try {
               await triggerAuditForSite(site, enabledAuditType, undefined, slackContext, context);
             } catch (error) {
@@ -171,10 +163,6 @@ function RunAuditCommand(context) {
           }),
         );
       } else {
-        if (!configuration.isHandlerEnabledForSite(auditType, site)) {
-          await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-          return;
-        }
         const handler = configuration.getHandlers()?.[auditType];
         // Exit early with error if handler has no product codes configured
         if (!isNonEmptyArray(handler?.productCodes)) {

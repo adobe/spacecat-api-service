@@ -12,13 +12,26 @@
 
 import { LegacyApiKeyHandler } from '@adobe/spacecat-shared-http-utils';
 
-// Routes whose callers cannot be migrated to S2S auth. Per the decision doc
+// Route prefixes whose callers cannot be migrated to S2S auth. Per the decision doc
 // (platform/decisions/route-scoped-legacy-api-key-handler.md), these are the
 // only routes this handler is authorised to authenticate.
-const SCOPED_ROUTES = new Set([
+// Prefix matching: a request matches if its METHOD + path equals the prefix
+// or starts with the prefix followed by '/'.
+const SCOPED_ROUTE_PREFIXES = [
   'POST /event/fulfillment',
   'POST /slack/channels/invite-by-user-id',
-]);
+];
+
+function isScopedRoute(method, suffix) {
+  if (!method || !suffix) {
+    return false;
+  }
+  const path = suffix.split('?')[0];
+  const routeKey = `${method} ${path}`;
+  return SCOPED_ROUTE_PREFIXES.some(
+    (prefix) => routeKey === prefix || routeKey.startsWith(`${prefix}/`),
+  );
+}
 
 /**
  * Route-scoped legacy API key handler for endpoints that cannot migrate to S2S.
@@ -27,8 +40,9 @@ const SCOPED_ROUTES = new Set([
  * `platform/decisions/route-scoped-legacy-api-key-handler.md`), two admin
  * endpoints are called by external systems that cannot be provisioned as IMS
  * S2S consumers: POST /event/fulfillment and POST /slack/channels/invite-by-user-id.
- * This subclass limits legacy API key auth to exactly those two routes. All other
- * requests receive null and fall through to the next handler in the chain.
+ * This subclass limits legacy API key auth to exactly those two routes and their
+ * sub-paths (e.g. POST /event/fulfillment/xxxx). All other requests receive null
+ * and fall through to the next handler in the chain.
  *
  * No constructor override — LegacyApiKeyHandler sets the handler name to
  * 'legacyApiKey', so authInfo.getType() returns 'legacyApiKey' here too.
@@ -41,10 +55,10 @@ const SCOPED_ROUTES = new Set([
 export default class RouteScopedLegacyApiKeyHandler extends LegacyApiKeyHandler {
   async checkAuth(request, context) {
     const { method, suffix } = context?.pathInfo || {};
-    const routeKey = method && suffix ? `${method} ${suffix}` : null;
-    if (!SCOPED_ROUTES.has(routeKey)) {
+    if (!isScopedRoute(method, suffix)) {
       return null;
     }
+    const routeKey = `${method} ${suffix.split('?')[0]}`;
     const result = await super.checkAuth(request, context);
     if (result) {
       context.log.info(`[legacyApiKey] request authenticated via route-scoped legacy API key handler [${routeKey}]`);
