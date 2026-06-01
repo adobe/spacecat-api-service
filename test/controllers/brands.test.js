@@ -2129,6 +2129,28 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(404);
     });
 
+    it('returns 403 when user lacks access to the organization', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+      const response = await unauthorizedController.getPromptStatsByBrand({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
     it('returns 503 when postgrestClient is not available', async () => {
       mockDataAccess.services.postgrestClient = null;
       const response = await brandsController.getPromptStatsByBrand({
