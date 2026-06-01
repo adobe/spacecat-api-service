@@ -322,3 +322,85 @@ v2-prompts-by-brand-bulk-delete:
         description: PostgREST unavailable
       '500':
         $ref: './responses.yaml#/500'
+
+v2-prompts-by-brand-check:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+  post:
+    tags:
+      - customer-config
+    summary: Batch prompt existence check
+    description: |
+      Given a list of {text, region} pairs, returns the subset that already
+      exist in the prompts table for the given brand with status active,
+      deleted, or ignored. Used by the UI to filter suggestion panels without
+      fetching all paginated prompt pages client-side. Max 500 pairs per request.
+      Region values are normalized to lowercase 2-char codes before comparison.
+    operationId: checkPromptsByBrand
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - prompts
+            properties:
+              prompts:
+                type: array
+                minItems: 1
+                maxItems: 500
+                items:
+                  type: object
+                  required:
+                    - text
+                    - region
+                  properties:
+                    text:
+                      type: string
+                      maxLength: 2000
+                      description: Prompt text to look up
+                    region:
+                      type: string
+                      description: Region code (e.g. "US", "gb"). Normalized to lowercase 2-char before comparison.
+    responses:
+      '200':
+        description: Existence check completed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                results:
+                  type: array
+                  description: Subset of the input pairs that already exist in the DB
+                  items:
+                    type: object
+                    properties:
+                      text:
+                        type: string
+                      region:
+                        type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Organization or brand not found
+      '503':
+        description: PostgREST unavailable
+      '500':
+        $ref: './responses.yaml#/500'

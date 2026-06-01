@@ -109,8 +109,21 @@ export class FixesController {
     let fixes = [];
 
     if (hasText(fixCreatedDate)) {
-      const fixEntitiesWithSuggestions = await this.#FixEntity
-        .getAllFixesWithSuggestionByCreatedAt(opportunityId, fixCreatedDate);
+      // Fetch all fixes with suggestions then filter in-memory by
+      // executedAt ?? createdAt date. The previous approach used the junction
+      // table (getAllFixesWithSuggestionByCreatedAt) which stores the date at
+      // fix-creation time when executedAt is still null. Once the deploy
+      // completes and executedAt is updated, the junction date no longer
+      // matches the UI accordion key (which uses executedAt), causing the
+      // accordion to show empty even though fixes exist.
+      const allFixesWithSuggestions = await this.#FixEntity
+        .getAllFixesWithSuggestionsByOpportunityId(opportunityId);
+
+      const fixEntitiesWithSuggestions = allFixesWithSuggestions.filter(({ fixEntity }) => {
+        const ts = fixEntity.getExecutedAt() ?? fixEntity.getCreatedAt();
+        const d = ts ? new Date(ts) : null;
+        return d && !Number.isNaN(d.getTime()) && d.toISOString().split('T')[0] === fixCreatedDate;
+      });
 
       if (fixEntitiesWithSuggestions.length === 0) {
         return ok([]);
@@ -144,6 +157,18 @@ export class FixesController {
     if (res) {
       return res;
     }
+
+    // SITES-45274: attach suggestions to each fix entity so FixDto.toJSON
+    // includes them in the response. Without this, the UI's DeployedViewTable
+    // renders 0 rows (it iterates fixEntity.suggestions) even though the tab
+    // counter correctly counts the fix entities.
+    // The fixCreatedDate path above (lines 112-126) already does this via
+    // getAllFixesWithSuggestionByCreatedAt; this path was missing it.
+    await Promise.all(fixEntities.map(async (fixEntity) => {
+      const suggestions = await fixEntity.getSuggestions();
+      // eslint-disable-next-line no-underscore-dangle,no-param-reassign
+      fixEntity._suggestions = suggestions;
+    }));
 
     fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);

@@ -388,6 +388,21 @@ CdnLogsConfig:
     bucketName: 'test-bucket'
     filters: [{ key: 'test-key', value: ['test-value'] }]
     outputLocation: 'test-output-location'
+ScraperConfig:
+  type: object
+  description: |
+    Per-site configuration consumed by the content scraper. Use `headers`
+    to attach request headers (for example, Accept-Language) when fetching pages
+    for sites behind bot-protection rules.
+  properties:
+    headers:
+      description: Map of HTTP header name to value. Forwarded by the scraper to the upstream request.
+      type: object
+      additionalProperties:
+        type: string
+  example:
+    headers:
+      Accept-Language: 'en-US,en;q=0.9'
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -837,6 +852,36 @@ CdnLogsConfigUpdate:
       bucketName: 'test-bucket'
       outputLocation: 'test-output-location'
       filters: [{ key: 'test-key', value: ['test-value'] }]
+ScraperConfigUpdate:
+  type: object
+  required:
+    - scraperConfig
+  properties:
+    scraperConfig:
+      description: The scraper configuration to update
+      $ref: '#/ScraperConfig'
+  example:
+    scraperConfig:
+      headers:
+        Accept-Language: 'en-US,en;q=0.9'
+ScraperConfigResponse:
+  type: object
+  description: |
+    Response body returned by `PATCH /sites/{siteId}/config/scraper`.
+    Intentionally narrow: returns only the affected site ID and the persisted
+    scraper configuration, not the rest of the site's configuration.
+  properties:
+    siteId:
+      description: The site ID
+      $ref: '#/Id'
+    scraperConfig:
+      description: The persisted scraper configuration
+      $ref: '#/ScraperConfig'
+  example:
+    siteId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    scraperConfig:
+      headers:
+        Accept-Language: 'en-US,en;q=0.9'
 UpdateHandlerTypeConfig:
   type: object
   properties:
@@ -4680,6 +4725,130 @@ LlmoCustomerIntentUpdate:
       type: string
       example: 'enterprise customers'
   additionalProperties: false
+
+LlmoSheetRowUpdate:
+  type: object
+  description: |
+    A single row update against an LLMO XLSX data sheet. The `match` keys identify
+    exactly one row in the named worksheet; the `values` keys are written to that
+    row. All keys in `match` and `values` must correspond to columns in the
+    worksheet header row.
+  required:
+    - sheet
+    - match
+    - values
+  properties:
+    sheet:
+      type: string
+      description: Worksheet name within the XLSX (e.g. 'Semrush')
+      example: 'Semrush'
+    match:
+      type: object
+      description: Column-value pairs that must all match exactly one row
+      additionalProperties:
+        type: string
+      example:
+        topic_id: '14239648398373927587'
+        prompt: "What's the best free online photo editor for non-designers?"
+    values:
+      type: object
+      description: Column-value pairs to write to the matched row
+      additionalProperties:
+        type: string
+      example:
+        deleted: 'true'
+  additionalProperties: false
+
+LlmoSheetRowPatch:
+  description: |
+    Request body for a sheet-row PATCH. Either a single update at the top level, or
+    a batch as `{ "updates": [...] }`. The batch form applies all updates against a
+    single workbook download / upload / republish cycle and is strictly all-or-nothing:
+    if any entry fails to match exactly one row, no rows are written.
+  oneOf:
+    - $ref: '#/LlmoSheetRowUpdate'
+    - type: object
+      required:
+        - updates
+      properties:
+        updates:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/LlmoSheetRowUpdate'
+      additionalProperties: false
+
+LlmoSheetRowResult:
+  type: object
+  description: A single per-row result inside a sheet-row PATCH response.
+  properties:
+    sheet:
+      type: string
+      example: 'Semrush'
+    rowNumber:
+      type: integer
+      description: 1-based Excel row number that was updated (header row is row 1)
+      example: 42
+    updated:
+      type: object
+      description: The column-value pairs that were written
+      additionalProperties:
+        type: string
+
+LlmoSheetRowPatchResult:
+  description: |
+    Successful sheet-row PATCH response. For a single-update body, the row
+    information is inlined at the top level (preserved for back-compat). For a
+    batch body (`{ "updates": [...] }`), per-row results are returned in an
+    `updates` array in input order.
+  oneOf:
+    - type: object
+      required:
+        - siteId
+        - dataSource
+        - sheet
+        - rowNumber
+      properties:
+        siteId:
+          type: string
+          format: uuid
+        sheetType:
+          type: [string, 'null']
+          description: Sheet type path segment, or null if the dataSource sits directly under dataFolder
+          example: 'strategic-recommendations'
+        dataSource:
+          type: string
+          example: 'strategic-recommendations-template'
+        sheet:
+          type: string
+          example: 'Semrush'
+        rowNumber:
+          type: integer
+          example: 42
+        updated:
+          type: object
+          additionalProperties:
+            type: string
+    - type: object
+      required:
+        - siteId
+        - dataSource
+        - updates
+      properties:
+        siteId:
+          type: string
+          format: uuid
+        sheetType:
+          type: [string, 'null']
+          example: 'strategic-recommendations'
+        dataSource:
+          type: string
+          example: 'strategic-recommendations-template'
+        updates:
+          type: array
+          items:
+            $ref: '#/LlmoSheetRowResult'
 
 LlmoCdnLogsFilter:
   type: array
@@ -9117,6 +9286,107 @@ AiVisibilityPaginatedResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilitySemrushCountry:
+  type: string
+  description: COUNTRY enum from ai-seo-ts common/types_pb
+  enum:
+    - UNKNOWN
+    - AE
+    - AU
+    - BR
+    - CA
+    - DE
+    - ES
+    - FR
+    - IN
+    - IT
+    - JP
+    - MX
+    - NL
+    - SE
+    - UK
+    - US
+    - AR
+    - AT
+    - BE
+    - CH
+    - CL
+    - CO
+    - DK
+    - FI
+    - IE
+    - IL
+    - NO
+    - PA
+    - PE
+    - PL
+    - UY
+    - ZA
+    - SA
+    - WORLDWIDE
+
+AiVisibilitySemrushTopicIntent:
+  type: string
+  description: TOPIC_INTENT from ai-seo-ts common/types_pb
+  enum:
+    - UNSPECIFIED
+    - TASK
+    - INFORMATIONAL
+    - NAVIGATIONAL
+    - COMMERCIAL
+    - TRANSACTIONAL
+
+AiVisibilitySemrushLlm:
+  type: string
+  description: LLM enum from ai-seo-ts common/types_pb (response fields; query engine uses UI slugs).
+  enum:
+    - UNSPECIFIED
+    - CHAT_GPT
+    - GOOGLE_AI_OVERVIEW
+    - GOOGLE_AI_MODE
+    - GEMINI
+    - ALL
+
+AiVisibilitySemrushPromptCategory:
+  type: string
+  description: PROMPT_CATEGORY from ai-seo-ts v2/prompt/enums_pb
+  enum:
+    - UNSPECIFIED
+    - MENTIONS_TARGET
+    - MISSES_TARGET
+    - CITES_TARGET
+
+AiVisibilitySemrushBrand:
+  type: object
+  description: Brand from ai-seo-ts common/types_pb
+  properties:
+    domain:
+      type: string
+    name:
+      type: string
+  additionalProperties: true
+
+AiVisibilitySemrushSource:
+  type: object
+  description: Source from ai-seo-ts common/types_pb
+  properties:
+    url:
+      type: string
+    title:
+      type: string
+  additionalProperties: true
+
+AiVisibilitySemrushTopicIntentEntry:
+  type: object
+  description: Intent distribution entry on a topic or prompt row
+  properties:
+    intent:
+      $ref: '#/AiVisibilitySemrushTopicIntent'
+    weight:
+      type: integer
+      description: Intent weight within the distribution (0–100 scale per Semrush)
+  additionalProperties: true
+
 AiVisibilityV1TopicBrandTopicRow:
   type: object
   description: |
@@ -9124,7 +9394,7 @@ AiVisibilityV1TopicBrandTopicRow:
     UInt64 fields may be serialized as JSON strings.
   properties:
     id:
-      description: Topic identifier
+      description: Topic identifier (`uint64`)
       oneOf:
         - type: string
         - type: integer
@@ -9132,28 +9402,33 @@ AiVisibilityV1TopicBrandTopicRow:
       type: string
     visibility:
       type: integer
+      description: AI Visibility score (0–100)
     difficulty:
       type: integer
+      description: Topic difficulty (0–100)
     mentions:
+      description: Prompt responses mentioning the target brand in this topic
       oneOf:
         - type: string
         - type: integer
     volume:
+      description: Topic search volume
       oneOf:
         - type: string
         - type: integer
     volumeTrend:
       type: array
+      description: Historical volume scores (0.0–1.0 scale as uint32 per Semrush)
       items:
         type: integer
     intents:
       type: array
       items:
-        type: object
-        additionalProperties: true
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
     country:
+      description: Market (COUNTRY enum name or integer)
       oneOf:
-        - type: string
+        - $ref: '#/AiVisibilitySemrushCountry'
         - type: integer
   additionalProperties: true
 
@@ -9176,11 +9451,201 @@ AiVisibilityV1TopicBrandTopicsResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1TopicGapTopicMentionsByBrand:
+  type: object
+  description: |
+    One brand's mention count within a gap-topic row, from Semrush
+    `GapTopicsResponse.Topic.MentionsByBrand` as protobuf JSON (camelCase).
+  properties:
+    brand:
+      $ref: '#/AiVisibilitySemrushBrand'
+    mentions:
+      type: integer
+      description: Number of mentions for the given brand within the topic
+  additionalProperties: true
+
+AiVisibilityV1TopicGapTopicRow:
+  type: object
+  description: |
+    One topic from Semrush `GapTopicsResponse.Topic` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    hash:
+      description: Topic identifier (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    name:
+      type: string
+    gapMentions:
+      type: array
+      description: Per-brand mention counts included in the gap for this topic
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicMentionsByBrand'
+    visibility:
+      type: integer
+      description: AI Visibility score (0–100)
+    mentions:
+      type: integer
+      description: Prompt responses mentioning the target brand in this topic
+    volume:
+      description: Topic search volume (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    difficulty:
+      type: integer
+      description: Topic difficulty (0–100)
+    volumeTrend:
+      type: array
+      description: Historical volume scores per Semrush
+      items:
+        oneOf:
+          - type: string
+          - type: integer
+    intents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1TopicGapTopicsTotalRow:
+  type: object
+  description: |
+    One row from Semrush `GapTopicsTotalsResponse.TotalByKind` as protobuf JSON (camelCase).
+  properties:
+    kind:
+      description: Gap kind (`GAP_KIND` enum name or integer)
+      oneOf:
+        - type: string
+          enum:
+            - UNSPECIFIED
+            - ALL
+            - MISSING
+            - WEAK
+            - SHARED
+            - STRONG
+            - UNIQUE
+        - type: integer
+          enum: [0, 1, 2, 3, 4, 5, 6]
+    count:
+      description: Total topics for this gap kind (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1TopicGapTopicsResponse:
+  type: object
+  description: |
+    Gap topics list from `GET /llmo/ai-visibility/v1/topic/gap-topics`.
+    Wraps Semrush v2 topic `GapTopics` / `GapTopicsTotals` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicRow'
+    totals:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicsTotalRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityV1PromptBrandPromptRow:
   type: object
   description: |
-    One prompt from Semrush `PromptsResponse.prompts` as protobuf JSON (camelCase).
-    UInt64 and other wide numeric fields may be serialized as JSON strings.
+    One prompt from Semrush v2 `PromptsResponse.Prompt` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      description: Prompt hash (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    briefResponse:
+      type: string
+    category:
+      description: Deprecated; use `categories`
+      $ref: '#/AiVisibilitySemrushPromptCategory'
+    mentionedBrandsCount:
+      type: integer
+    sourcesCount:
+      type: integer
+    serpId:
+      type: string
+    topicId:
+      oneOf:
+        - type: string
+        - type: integer
+    topicName:
+      type: string
+    topicVolume:
+      oneOf:
+        - type: string
+        - type: integer
+    topicIntents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    country:
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+    categories:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushPromptCategory'
+  additionalProperties: true
+
+AiVisibilityV1PromptPromptResponseValue:
+  type: object
+  description: PromptResponse.Value from Semrush pr.v1 Relations
+  properties:
+    date:
+      type: object
+      additionalProperties: true
+      description: Snapshot date components from `common.v1.Date`
+    prompt:
+      type: string
+    response:
+      type: string
+      description: Full LLM response in Markdown
+    mentionedBrands:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushBrand'
+    sources:
+      type: array
+      items:
+        type: string
+    isoDate:
+      type: string
+      description: Normalized date (`YYYY-MM` or `YYYY-MM-DD`)
+  additionalProperties: true
+
+AiVisibilityV1PromptPromptResponse:
+  type: object
+  description: |
+    Full prompt response from `GET /llmo/ai-visibility/v1/prompt/prompt-response`.
+    Native `PromptResponse` protobuf JSON (camelCase) from Semrush `Relations/Prompt`.
+  properties:
+    value:
+      $ref: '#/AiVisibilityV1PromptPromptResponseValue'
+    sourcesWithTitles:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushSource'
   additionalProperties: true
 
 AiVisibilityV1PromptBrandPromptsResponse:
@@ -9198,6 +9663,98 @@ AiVisibilityV1PromptBrandPromptsResponse:
       oneOf:
         - type: integer
         - type: string
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1PromptGapPromptRow:
+  type: object
+  description: |
+    One prompt from Semrush v2 `GapPromptsResponse.PromptEntry` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      description: Prompt hash (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    briefResponse:
+      type: string
+    gapMentions:
+      type: array
+      description: Per-brand mention counts included in the gap for this prompt
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicMentionsByBrand'
+    mentionedBrandsCount:
+      type: integer
+    sourcesCount:
+      type: integer
+    serpId:
+      type: string
+    topicId:
+      description: Topic identifier (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    topicName:
+      type: string
+    topicVolume:
+      description: Topic search volume (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1PromptGapPromptsTotalRow:
+  type: object
+  description: |
+    One row from Semrush `GapPromptsTotalsResponse.TotalByKind` as protobuf JSON (camelCase).
+    Structurally identical to `AiVisibilityV1TopicGapTopicsTotalRow`.
+  properties:
+    kind:
+      description: Gap kind (`GAP_KIND` enum name or integer)
+      oneOf:
+        - type: string
+          enum:
+            - UNSPECIFIED
+            - ALL
+            - MISSING
+            - WEAK
+            - SHARED
+            - STRONG
+            - UNIQUE
+        - type: integer
+          enum: [0, 1, 2, 3, 4, 5, 6]
+    count:
+      description: Total prompts for this gap kind (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1PromptGapPromptsResponse:
+  type: object
+  description: |
+    Gap prompts list from `GET /llmo/ai-visibility/v1/prompt/gap-prompts`.
+    Wraps Semrush v2 prompt `GapPrompts` / `GapPromptsTotals` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptGapPromptRow'
+    totals:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptGapPromptsTotalRow'
     srFilters:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
@@ -9376,3 +9933,262 @@ AiVisibilitySourceDomainsResponse:
     srFilters:
       $ref: '#/AiVisibilitySrFilters'
   required: [data, total, offset, limit]
+
+# ── Semrush AIO proxy ─────────────────────────────────────────────────────────
+# Schemas for /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/*. See
+# docs/openapi/serenity-api.yaml for the operations.
+
+SerenityPrompt:
+  type: object
+  description: A single Serenity prompt.
+  required: [semrushPromptId, geoTargetId, languageCode, text]
+  properties:
+    semrushPromptId:
+      type: string
+      description: Upstream prompt id. Changes whenever the prompt is re-created (e.g. on PATCH).
+    geoTargetId:
+      type: integer
+      minimum: 1
+      description: Google Ads Geo Target ID for the slice this prompt belongs to.
+    languageCode:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+      description: BCP-47 primary subtag (lowercase) for the slice.
+    text:
+      type: string
+    tags:
+      type: array
+      items: { type: string }
+
+SerenityPromptListResponse:
+  type: object
+  required: [items, total, page, limit]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityPrompt' }
+    total: { type: integer }
+    page: { type: integer }
+    limit: { type: integer }
+
+SerenityPromptInput:
+  type: object
+  description: One row in a bulk-create prompts request.
+  required: [text, geoTargetId, languageCode]
+  properties:
+    text: { type: string }
+    tags:
+      type: array
+      items: { type: string }
+      default: []
+    geoTargetId:
+      type: integer
+      minimum: 1
+    languageCode:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+
+SerenityCreatePromptsRequest:
+  type: object
+  required: [prompts]
+  properties:
+    prompts:
+      type: array
+      minItems: 1
+      maxItems: 500
+      items: { $ref: '#/SerenityPromptInput' }
+
+SerenityCreatePromptsResponse:
+  type: object
+  required: [created, skipped, failed]
+  properties:
+    created:
+      type: array
+      items: { $ref: '#/SerenityPrompt' }
+    skipped:
+      type: array
+      description: Prompts skipped (e.g. unknown slice).
+      items:
+        type: object
+        properties:
+          text: { type: string }
+          reason: { type: string }
+    failed:
+      type: array
+      description: Prompts that hit an upstream error.
+      items:
+        type: object
+        properties:
+          text: { type: string }
+          geoTargetId: { type: integer }
+          languageCode: { type: string }
+          status: { type: integer }
+          message: { type: string }
+
+SerenityUpdatePromptRequest:
+  type: object
+  description: |
+    Replace the prompt's text and tags. Carries the owning slice in
+    `geoTargetId` + `languageCode` so the server can resolve the upstream
+    project without scanning. All four fields are required — the upstream
+    provider's API has no in-place update or GET-by-id, so the server runs
+    DELETE-old + POST-new and treats the body as the full next state.
+    Pass `tags: []` to clear tags.
+  required: [geoTargetId, languageCode, text, tags]
+  properties:
+    geoTargetId:
+      type: integer
+      minimum: 1
+    languageCode:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    text: { type: string }
+    tags:
+      type: array
+      items: { type: string }
+
+SerenityBulkDeletePromptsRequest:
+  type: object
+  required: [prompts]
+  properties:
+    prompts:
+      type: array
+      minItems: 1
+      maxItems: 500
+      items:
+        type: object
+        required: [semrushPromptId, geoTargetId, languageCode]
+        properties:
+          semrushPromptId: { type: string }
+          geoTargetId: { type: integer, minimum: 1 }
+          languageCode:
+            type: string
+            pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+
+SerenityBulkDeletePromptsResponse:
+  type: object
+  required: [deleted, failed]
+  properties:
+    deleted: { type: integer }
+    failed:
+      type: array
+      items:
+        type: object
+        properties:
+          semrushPromptId: { type: string }
+          geoTargetId: { type: integer }
+          languageCode: { type: string }
+          status: { type: integer }
+          message: { type: string }
+
+SerenityMarket:
+  type: object
+  description: |
+    A (brandId, geoTargetId, languageCode) slice configured for a brand.
+    The row's existence is the contract that the market is active.
+  required: [brandId, geoTargetId, languageCode]
+  properties:
+    brandId:
+      type: string
+      format: uuid
+    geoTargetId:
+      type: integer
+      minimum: 1
+    languageCode:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    createdAt:
+      oneOf:
+        - $ref: '#/DateTime'
+        - type: 'null'
+    updatedAt:
+      oneOf:
+        - $ref: '#/DateTime'
+        - type: 'null'
+
+SerenityMarketListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityMarket' }
+
+SerenityCreateMarketRequest:
+  type: object
+  required: [market, languageCode, brandDomain, brandNames]
+  properties:
+    name:
+      type: string
+      description: |
+        Display name of the new market. Optional — defaults server-side to
+        `<brandDisplayName>-<6 hex>` to disambiguate re-create-after-delete
+        and avoid collisions in shared workspaces.
+    brandDisplayName:
+      type: string
+      description: Used as the prefix for the default name when `name` is omitted.
+    market:
+      type: string
+      description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.
+      pattern: '^[A-Za-z]{2}$'
+    languageCode:
+      type: string
+      description: Lowercase BCP-47 primary subtag (e.g. en, de, de-ch).
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    brandDomain:
+      type: string
+      description: Brand domain the upstream should track (e.g. adobe.com).
+    brandNames:
+      type: array
+      minItems: 1
+      items: { type: string }
+      description: Brand-name variants the upstream should match in model answers.
+
+SerenityTag:
+  type: object
+  required: [id, name]
+  properties:
+    id: { type: string }
+    name: { type: string }
+
+SerenityTagListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityTag' }
+
+SerenityModel:
+  type: object
+  required: [id, key]
+  properties:
+    id: { type: string }
+    key:
+      type: string
+      description: CBF_model value the Reporting API expects.
+    name:
+      type: [string, 'null']
+    icon:
+      type: [string, 'null']
+
+SerenityModelListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityModel' }
+
+SerenityErrorResponse:
+  type: object
+  description: |
+    Unified error envelope for the /serenity/* surface. `error` is a stable
+    machine-readable token (`invalidRequest`, `serenityUpstreamError`,
+    `sliceExists`, etc.); `message` is a sanitized human-readable summary.
+    Provider-specific detail (upstream HTTP status, raw body) is deliberately
+    NOT exposed — it is logged server-side instead.
+  required: [error, message]
+  properties:
+    error: { type: string }
+    message: { type: string }

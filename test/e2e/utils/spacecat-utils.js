@@ -74,14 +74,16 @@ export async function makeSpacecatRequest({
 }
 
 /**
- * Validate that a string is a valid UUID v4
+ * Validate that a string is a valid UUID — any RFC 4122 / 9562 version
+ * (v1..v8). The data layer mints v7 ids (sortable) while the ORM still
+ * stamps v4 in places (see SITES-45653); both must validate.
  * @param {string} uuid - String to validate
  */
 export function expectValidUUID(uuid) {
   expect(uuid).to.be.a('string');
   expect(uuid).to.match(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    `Expected valid UUID v4, got: ${uuid}`,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    `Expected valid UUID (any RFC 4122/9562 version), got: ${uuid}`,
   );
 }
 

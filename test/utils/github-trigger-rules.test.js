@@ -11,7 +11,7 @@
  */
 
 import { expect } from 'chai';
-import { getSkipReason, EVENT_JOB_MAP } from '../../src/utils/github-trigger-rules.js';
+import { getSkipReason, EVENT_JOB_MAP, isMysticatTargetedSkip } from '../../src/utils/github-trigger-rules.js';
 
 describe('github-trigger-rules', () => {
   describe('EVENT_JOB_MAP', () => {
@@ -25,7 +25,10 @@ describe('github-trigger-rules', () => {
   });
 
   describe('getSkipReason', () => {
-    const defaultEnv = { GITHUB_APP_SLUG: 'mysticat' };
+    // The reviewer login is resolved per destination from the consolidated
+    // GITHUB_DESTINATIONS registry and passed by the controller. It can be a
+    // plain user, an EMU user, or an App bot (slug[bot]).
+    const REVIEWER = 'MysticatBot';
 
     const baseData = {
       pull_request: {
@@ -37,68 +40,33 @@ describe('github-trigger-rules', () => {
     };
 
     describe('review_requested trigger', () => {
-      it('returns null when reviewer is the app', () => {
+      it('returns null when the requested reviewer matches reviewerLogin', () => {
         const data = {
           ...baseData,
           action: 'review_requested',
-          requested_reviewer: { login: 'mysticat[bot]' },
+          requested_reviewer: { login: REVIEWER },
         };
-        expect(getSkipReason(data, 'review_requested', defaultEnv)).to.be.null;
+        expect(getSkipReason(data, 'review_requested', REVIEWER)).to.be.null;
       });
 
-      it('returns skip reason when reviewer is not the app', () => {
+      it('returns a skip reason when the requested reviewer differs from reviewerLogin', () => {
         const data = {
           ...baseData,
           action: 'review_requested',
           requested_reviewer: { login: 'some-human' },
         };
-        const reason = getSkipReason(data, 'review_requested', defaultEnv);
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
         expect(reason).to.include('some-human');
-        expect(reason).to.include('mysticat');
+        expect(reason).to.include(REVIEWER);
       });
-    });
 
-    describe('GITHUB_REVIEWER_LOGIN override', () => {
-      it('returns null when reviewer matches GITHUB_REVIEWER_LOGIN (plain user)', () => {
-        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev', GITHUB_REVIEWER_LOGIN: 'aighagent' };
+      it('accepts an App-bot reviewer login (slug[bot])', () => {
         const data = {
           ...baseData,
           action: 'review_requested',
-          requested_reviewer: { login: 'aighagent' },
+          requested_reviewer: { login: 'mysticat-bot[bot]' },
         };
-        expect(getSkipReason(data, 'review_requested', env)).to.be.null;
-      });
-
-      it('returns skip reason when reviewer does not match GITHUB_REVIEWER_LOGIN', () => {
-        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev', GITHUB_REVIEWER_LOGIN: 'aighagent' };
-        const data = {
-          ...baseData,
-          action: 'review_requested',
-          requested_reviewer: { login: 'mysticat-bot-dev[bot]' },
-        };
-        const reason = getSkipReason(data, 'review_requested', env);
-        expect(reason).to.include('mysticat-bot-dev[bot]');
-        expect(reason).to.include('aighagent');
-      });
-
-      it('falls back to [bot] suffix when GITHUB_REVIEWER_LOGIN is absent', () => {
-        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev' };
-        const data = {
-          ...baseData,
-          action: 'review_requested',
-          requested_reviewer: { login: 'mysticat-bot-dev[bot]' },
-        };
-        expect(getSkipReason(data, 'review_requested', env)).to.be.null;
-      });
-
-      it('falls back to [bot] suffix when GITHUB_REVIEWER_LOGIN is empty string', () => {
-        const env = { GITHUB_APP_SLUG: 'mysticat-bot-dev', GITHUB_REVIEWER_LOGIN: '' };
-        const data = {
-          ...baseData,
-          action: 'review_requested',
-          requested_reviewer: { login: 'mysticat-bot-dev[bot]' },
-        };
-        expect(getSkipReason(data, 'review_requested', env)).to.be.null;
+        expect(getSkipReason(data, 'review_requested', 'mysticat-bot[bot]')).to.be.null;
       });
     });
 
@@ -113,89 +81,145 @@ describe('github-trigger-rules', () => {
           action: 'labeled',
           label: { name: 'mysticat:review-requested' },
         };
-        expect(getSkipReason(data, 'labeled', defaultEnv)).to.include('unsupported action');
-      });
-
-      it('ignores MYSTICAT_REVIEW_LABEL env override', () => {
-        // The env hook is left in place for future re-enable but is
-        // currently a no-op.
-        const devEnv = {
-          ...defaultEnv,
-          MYSTICAT_REVIEW_LABEL: 'mysticat-dev:review-requested',
-        };
-        const data = {
-          ...baseData,
-          action: 'labeled',
-          label: { name: 'mysticat-dev:review-requested' },
-        };
-        expect(getSkipReason(data, 'labeled', devEnv)).to.include('unsupported action');
+        expect(getSkipReason(data, 'labeled', REVIEWER)).to.include('unsupported action');
       });
     });
 
     describe('unsupported actions', () => {
       it('returns skip reason for opened (auto-trigger deferred)', () => {
         const data = { ...baseData, action: 'opened' };
-        expect(getSkipReason(data, 'opened', defaultEnv)).to.include('auto-trigger');
+        expect(getSkipReason(data, 'opened', REVIEWER)).to.include('auto-trigger');
       });
 
       it('returns skip reason for ready_for_review (auto-trigger deferred)', () => {
         const data = { ...baseData, action: 'ready_for_review' };
-        expect(getSkipReason(data, 'ready_for_review', defaultEnv)).to.include('auto-trigger');
+        expect(getSkipReason(data, 'ready_for_review', REVIEWER)).to.include('auto-trigger');
       });
 
       it('returns skip reason for closed', () => {
         const data = { ...baseData, action: 'closed' };
-        expect(getSkipReason(data, 'closed', defaultEnv)).to.include('unsupported action');
+        expect(getSkipReason(data, 'closed', REVIEWER)).to.include('unsupported action');
       });
     });
 
     describe('skip rules (review_requested only — labeled is disabled)', () => {
-      const scenarios = [
-        {
-          name: 'review_requested',
+      // The reviewer matches, so each case reaches its draft / bot / branch rule.
+      const matchFields = { requested_reviewer: { login: REVIEWER } };
+
+      it('returns skip reason for draft PR', () => {
+        const data = {
+          ...baseData,
           action: 'review_requested',
-          matchFields: { requested_reviewer: { login: 'mysticat[bot]' } },
-        },
-      ];
+          ...matchFields,
+          pull_request: { ...baseData.pull_request, draft: true },
+        };
+        expect(getSkipReason(data, 'review_requested', REVIEWER)).to.equal('draft PR');
+      });
 
-      scenarios.forEach(({ name, action, matchFields }) => {
-        describe(`for action ${name}`, () => {
-          it('returns skip reason for draft PR', () => {
-            const data = {
-              ...baseData,
-              action,
-              ...matchFields,
-              pull_request: { ...baseData.pull_request, draft: true },
-            };
-            expect(getSkipReason(data, action, defaultEnv)).to.equal('draft PR');
-          });
+      it('returns skip reason for bot sender', () => {
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          ...matchFields,
+          sender: { type: 'Bot' },
+        };
+        expect(getSkipReason(data, 'review_requested', REVIEWER)).to.equal('bot sender');
+      });
 
-          it('returns skip reason for bot sender', () => {
-            const data = {
-              ...baseData,
-              action,
-              ...matchFields,
-              sender: { type: 'Bot' },
-            };
-            expect(getSkipReason(data, action, defaultEnv)).to.equal('bot sender');
-          });
-
-          it('returns skip reason for non-default branch', () => {
-            const data = {
-              ...baseData,
-              action,
-              ...matchFields,
-              pull_request: { ...baseData.pull_request, base: { ref: 'release/v2' } },
-            };
-            const reason = getSkipReason(data, action, defaultEnv);
-            expect(reason).to.include('non-default branch');
-          });
-        });
+      it('returns skip reason for non-default branch', () => {
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          ...matchFields,
+          pull_request: { ...baseData.pull_request, base: { ref: 'release/v2' } },
+        };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(reason).to.include('non-default branch');
       });
     });
+  });
 
-    // Note: missing GITHUB_APP_SLUG is validated at controller entry (returns 500),
-    // not by getSkipReason. The controller is the gate; this function only sees
-    // calls with a validated appSlug.
+  describe('isMysticatTargetedSkip', () => {
+    it('returns false for null', () => {
+      expect(isMysticatTargetedSkip(null)).to.be.false;
+    });
+
+    it('returns false for undefined', () => {
+      expect(isMysticatTargetedSkip(undefined)).to.be.false;
+    });
+
+    it('returns true for draft PR', () => {
+      expect(isMysticatTargetedSkip('draft PR')).to.be.true;
+    });
+
+    it('returns true for bot sender', () => {
+      expect(isMysticatTargetedSkip('bot sender')).to.be.true;
+    });
+
+    it('returns true for non-default branch (with ref suffix)', () => {
+      expect(isMysticatTargetedSkip('non-default branch: release/v2')).to.be.true;
+    });
+
+    it('returns false for foreign reviewer', () => {
+      expect(isMysticatTargetedSkip('reviewer some-human is not mysticat[bot]')).to.be.false;
+    });
+
+    it('returns false for unsupported action', () => {
+      expect(isMysticatTargetedSkip('unsupported action: closed')).to.be.false;
+    });
+
+    it('returns false for auto-trigger', () => {
+      expect(isMysticatTargetedSkip('auto-trigger not yet supported: opened')).to.be.false;
+    });
+
+    // Drift guard: the classifier must agree with what getSkipReason actually emits.
+    describe('stays in lockstep with getSkipReason', () => {
+      const REVIEWER = 'mysticat[bot]';
+      const base = {
+        action: 'review_requested',
+        requested_reviewer: { login: REVIEWER },
+        repository: { default_branch: 'main' },
+        sender: { type: 'User' },
+        pull_request: { draft: false, base: { ref: 'main' } },
+      };
+
+      it('classifies the draft-PR reason as postable', () => {
+        const data = { ...base, pull_request: { draft: true, base: { ref: 'main' } } };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(isMysticatTargetedSkip(reason)).to.be.true;
+      });
+
+      it('classifies the bot-sender reason as postable', () => {
+        const data = { ...base, sender: { type: 'Bot' } };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(isMysticatTargetedSkip(reason)).to.be.true;
+      });
+
+      it('classifies the non-default-branch reason as postable', () => {
+        const data = { ...base, pull_request: { draft: false, base: { ref: 'release/v2' } } };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(isMysticatTargetedSkip(reason)).to.be.true;
+      });
+
+      it('classifies the foreign-reviewer reason as silent', () => {
+        const data = { ...base, requested_reviewer: { login: 'some-human' } };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(isMysticatTargetedSkip(reason)).to.be.false;
+      });
+
+      it('classifies the unsupported-action reason as silent', () => {
+        const data = { ...base, action: 'closed' };
+        const reason = getSkipReason(data, 'closed', REVIEWER);
+        expect(reason).to.include('unsupported action');
+        expect(isMysticatTargetedSkip(reason)).to.be.false;
+      });
+
+      it('classifies the auto-trigger reason as silent', () => {
+        const data = { ...base, action: 'opened' };
+        const reason = getSkipReason(data, 'opened', REVIEWER);
+        expect(reason).to.include('auto-trigger');
+        expect(isMysticatTargetedSkip(reason)).to.be.false;
+      });
+    });
   });
 });
