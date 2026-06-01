@@ -46,12 +46,6 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
 
-  // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
-  'GET /sites/:siteId/geo-experiments',
-  'GET /sites/:siteId/geo-experiments/:geoExperimentId',
-  'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
-  'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
-
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
   'POST /slack/events',
@@ -386,6 +380,14 @@ const routeRequiredCapabilities = {
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': 'suggestion:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
+
+  // Geo experiments — used by Mystique (S2S) to poll/manage experiments initiated by edge-deploy.
+  // Scoped to a dedicated `geoExperiment` entity (not `experiment`) to avoid silently broadening
+  // the regular experiments capability. See LLMO-5142.
+  'GET /sites/:siteId/geo-experiments': 'geoExperiment:read',
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'geoExperiment:read',
+  'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': 'geoExperiment:write',
+  'DELETE /sites/:siteId/geo-experiments/:geoExperimentId': 'geoExperiment:write',
 
   // Traffic
   'GET /sites/:siteId/traffic/paid': 'site:read',

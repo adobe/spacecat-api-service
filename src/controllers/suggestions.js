@@ -2081,7 +2081,11 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!await accessControlUtil.hasAccess(site)) {
+    // S2S consumers (e.g. Mystique) bypass org-membership when granted geoExperiment:read.
+    // The Layer 1 s2sAuthWrapper has already verified the route capability; this Layer 2
+    // re-fetches the consumer to defend against a stale/tampered context.
+    const s2sResult = await accessControlUtil.hasS2SCapability('geoExperiment:read');
+    if (!s2sResult.allowed && !await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
     }
 
@@ -2108,7 +2112,9 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!await accessControlUtil.hasAccess(site)) {
+    // S2S consumers (e.g. Mystique) bypass org-membership when granted geoExperiment:read.
+    const s2sResult = await accessControlUtil.hasS2SCapability('geoExperiment:read');
+    if (!s2sResult.allowed && !await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
     }
 
@@ -2164,7 +2170,9 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!await accessControlUtil.hasAccess(site)) {
+    // S2S consumers (e.g. Mystique) bypass org-membership when granted geoExperiment:write.
+    const s2sResult = await accessControlUtil.hasS2SCapability('geoExperiment:write');
+    if (!s2sResult.allowed && !await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
     }
 
@@ -2224,7 +2232,9 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!await accessControlUtil.hasAccess(site)) {
+    // S2S consumers (e.g. Mystique) bypass org-membership when granted geoExperiment:write.
+    const s2sResult = await accessControlUtil.hasS2SCapability('geoExperiment:write');
+    if (!s2sResult.allowed && !await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
     }
 
