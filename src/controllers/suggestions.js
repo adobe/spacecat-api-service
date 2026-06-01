@@ -900,6 +900,7 @@ function SuggestionsController(ctx, sqs, env) {
             suggestion.setUpdatedBy(profile.email);
           } else {
             context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+            suggestion.setUpdatedBy(profile.email);
           }
         } else {
           return {
