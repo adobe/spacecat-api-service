@@ -836,7 +836,9 @@ export async function getPromptStats({ organizationId, brandUuid, postgrestClien
   const intents = Object.fromEntries(INTENT_VALUES.map((k) => [k, 0]));
   if (row.intents && typeof row.intents === 'object') {
     for (const [k, v] of Object.entries(row.intents)) {
-      if (INTENT_VALUES.includes(k)) { intents[k] = Number(v) || 0; }
+      if (INTENT_VALUES.includes(k)) {
+        intents[k] = Number(v) || 0;
+      }
     }
   }
 
