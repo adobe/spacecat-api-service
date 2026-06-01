@@ -14,69 +14,31 @@ import { fromJson, toJson } from '@bufbuild/protobuf';
 import {
   COUNTRY_ENUM,
   LLM_ENUM,
-  ORDER_DIRECTION_ENUM,
-  GAP_KIND_ENUM,
 } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
-  GapTopicsRequestSchema,
-  GapTopicsResponseSchema,
+  GapTopicsTotalsRequestSchema,
+  GapTopicsTotalsResponseSchema,
 } from '@quazar/ai-seo-ts/v2/topic/messages_pb.js';
-import { TOPICS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
 import {
-  parseLimitOffset,
   resolveCountry,
   engineToLlm,
   brandTarget,
   parseCompetitorDomainsList,
   responseFromGrpcError,
-  buildRangeExpr,
-  escapeQlString,
-  isValidVolume,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
+import {
+  buildGapTopicsDimensionFilterQl,
+  buildGapTopicsMetricFilterQl,
+} from './gap-topics.js';
 
 /* c8 ignore start */
-export function buildGapTopicsDimensionFilterQl(sp) {
-  const q = sp.get('searchQuery');
-  if (!q) {
-    return '';
-  }
-  return `topic CONTAINS "${escapeQlString(q)}"`;
-}
-
-/**
- * @returns {{ ok: true, metricFilterQl: string } | { ok: false, status: number, body: object }}
- */
-export function buildGapTopicsMetricFilterQl(sp) {
-  const volFrom = sp.get('volumeFrom');
-  const volTo = sp.get('volumeTo');
-  if (!isValidVolume(volFrom) || !isValidVolume(volTo)) {
-    return {
-      ok: false,
-      status: 400,
-      body: {
-        error: 'invalid_volume',
-        message: 'volumeFrom and volumeTo must be non-negative integers',
-      },
-    };
-  }
-
-  const volExpr = buildRangeExpr('volume', volFrom, volTo);
-  return { ok: true, metricFilterQl: volExpr };
-}
-
-export async function handleGapTopics(sp, clients) {
+export async function handleGapTopicsTotals(sp, clients) {
   const domain = sp.get('domain');
   const competitorDomains = parseCompetitorDomainsList(sp);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
-  const sortBy = sp.get('sortBy') || TOPICS_REQUEST_ORDER_BY_ENUM.TOTAL_COMPETITOR_MENTIONS;
-  const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
-  const { limit, offset } = parseLimitOffset(sp);
-
-  const gapKindsRaw = sp.get('gapKinds');
-  const kinds = gapKindsRaw ? gapKindsRaw.split(',') : [GAP_KIND_ENUM.ALL];
 
   const dimensionFilterQl = buildGapTopicsDimensionFilterQl(sp);
   const metricFilterResult = buildGapTopicsMetricFilterQl(sp);
@@ -84,28 +46,22 @@ export async function handleGapTopics(sp, clients) {
     return { status: metricFilterResult.status, body: metricFilterResult.body };
   }
 
-  let listRequest;
+  let totalsRequest;
   try {
-    listRequest = fromJson(
-      GapTopicsRequestSchema,
+    totalsRequest = fromJson(
+      GapTopicsTotalsRequestSchema,
       {
         country,
         llm: engine,
         target: { domain, name: domain },
         competitors: competitorDomains.map(brandTarget),
-        kind: kinds,
-        order: {
-          by: sortBy,
-          direction: sortDirection,
-        },
-        range: { limit, offset },
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
       },
       PROTO_FROM_JSON,
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Invalid gap topics request';
+    const message = error instanceof Error ? error.message : 'Invalid gap topics totals request';
     return {
       status: 400,
       body: { error: 'invalid_request', message },
@@ -113,16 +69,16 @@ export async function handleGapTopics(sp, clients) {
   }
 
   try {
-    const topicsMessage = await clients.topicClient.gapTopics(listRequest);
+    const totalsMessage = await clients.topicClient.gapTopicsTotals(totalsRequest);
 
-    const topicsJson = /** @type {{ topics?: object[] }} */ (
-      toJson(GapTopicsResponseSchema, topicsMessage, PROTO_TO_JSON)
+    const totalsJson = /** @type {{ totals?: object[] }} */ (
+      toJson(GapTopicsTotalsResponseSchema, totalsMessage, PROTO_TO_JSON)
     );
 
     return {
       status: 200,
       body: {
-        data: topicsJson.topics ?? [],
+        totals: totalsJson.totals ?? [],
       },
     };
   } catch (error) {

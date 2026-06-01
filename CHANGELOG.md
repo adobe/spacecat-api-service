@@ -1,3 +1,17 @@
+# [1.532.0](https://github.com/adobe/spacecat-api-service/compare/v1.531.0...v1.532.0) (2026-06-01)
+
+
+### Features
+
+* lazy-load tab data, eager badge counts via totals endpoints | LLMO-5218 ([#2514](https://github.com/adobe/spacecat-api-service/issues/2514)) ([8afd6d6](https://github.com/adobe/spacecat-api-service/commit/8afd6d65a948613a1fcd5f300229e454de05d108))
+
+# [1.531.0](https://github.com/adobe/spacecat-api-service/compare/v1.530.1...v1.531.0) (2026-06-01)
+
+
+### Features
+
+* **auth:** remove catch-all LegacyApiKeyHandler; S2S is the replacement (SITES-34224) ([#2524](https://github.com/adobe/spacecat-api-service/issues/2524)) ([1c59169](https://github.com/adobe/spacecat-api-service/commit/1c591691ad69f2784f1eee4470857fc25a17df9c))
+
 ## [1.530.1](https://github.com/adobe/spacecat-api-service/compare/v1.530.0...v1.530.1) (2026-05-31)
 
 
