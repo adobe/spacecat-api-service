@@ -1,3 +1,10 @@
+# [1.533.0](https://github.com/adobe/spacecat-api-service/compare/v1.532.1...v1.533.0) (2026-06-01)
+
+
+### Features
+
+* **routes:** expose consent-banner routes to S2S consumers via organization capabilities ([#2531](https://github.com/adobe/spacecat-api-service/issues/2531)) ([ed168dd](https://github.com/adobe/spacecat-api-service/commit/ed168dd291e8c86bcea2c769384ac9f7cc32c97c))
+
 ## [1.532.1](https://github.com/adobe/spacecat-api-service/compare/v1.532.0...v1.532.1) (2026-06-01)
 
 
