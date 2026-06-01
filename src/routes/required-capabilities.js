@@ -55,10 +55,6 @@ export const INTERNAL_ROUTES = [
   'POST /slack/events',
   'POST /slack/channels/invite-by-user-id',
 
-  // Consent banner - screenshot tooling, end-user/internal use only
-  'POST /consent-banner',
-  'GET /consent-banner/:jobId',
-
   // Brand Presence stats - org-scoped, LLMO product; not yet required by S2S consumers
   'GET /org/:spaceCatId/brands/all/brand-presence/stats',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
@@ -218,6 +214,10 @@ export const INTERNAL_ROUTES = [
 const routeRequiredCapabilities = {
   // Audits
   'GET /audits/latest/:auditType': 'audit:read',
+
+  // Consent Banner
+  'POST /consent-banner': 'organization:write',
+  'GET /consent-banner/:jobId': 'organization:read',
 
   // Configuration
   'GET /configurations/latest': 'configuration:read',
