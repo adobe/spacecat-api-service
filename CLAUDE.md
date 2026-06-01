@@ -202,7 +202,7 @@ const hasAccess = await accessControlUtil.hasAccess(
 1. JWT with scopes
 2. Adobe IMS
 3. Scoped API Key (fine-grained permissions)
-4. Legacy API Key (backward compatibility)
+4. Route-Scoped Legacy API Key (`POST /event/fulfillment` and `POST /slack/channels/invite-by-user-id` only — frozen list, SITES-34224)
 
 ### Queue-Based Async Pattern
 

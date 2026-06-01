@@ -44,13 +44,9 @@ function isScopedRoute(method, suffix) {
  * sub-paths (e.g. POST /event/fulfillment/xxxx). All other requests receive null
  * and fall through to the next handler in the chain.
  *
- * No constructor override — LegacyApiKeyHandler sets the handler name to
- * 'legacyApiKey', so authInfo.getType() returns 'legacyApiKey' here too.
- * Controllers that branch on auth type behave identically regardless of which
- * handler in the legacy-key family authenticated the request.
- *
- * TODO: Once the parent LegacyApiKeyHandler is removed from AUTH_HANDLERS
- * (planned follow-up), delete that removal note from src/index.js.
+ * No constructor override — the parent class `LegacyApiKeyHandler` sets the
+ * handler name to 'legacyApiKey', so authInfo.getType() returns 'legacyApiKey'
+ * here too. Controllers that branch on auth type behave identically.
  */
 export default class RouteScopedLegacyApiKeyHandler extends LegacyApiKeyHandler {
   async checkAuth(request, context) {

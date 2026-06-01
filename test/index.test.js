@@ -21,6 +21,7 @@ import AccessControlUtil from '../src/support/access-control-util.js';
 use(sinonChai);
 
 const s2sAuthWrapperStub = (fn) => fn;
+const authWrapperStub = (fn) => fn;
 
 const tokowakaTestShim = {
   default: class TokowakaClientStub {
@@ -51,6 +52,7 @@ const { main } = await esmock(
   {
     '@adobe/spacecat-shared-http-utils': {
       s2sAuthWrapper: s2sAuthWrapperStub,
+      authWrapper: authWrapperStub,
     },
   },
   {
