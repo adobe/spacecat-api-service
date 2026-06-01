@@ -815,3 +815,36 @@ export async function checkPromptsExist({ brandUuid, prompts, postgrestClient })
 
   return data ?? [];
 }
+
+const INTENT_VALUES = ['informational', 'instructional', 'comparative', 'transactional', 'planning', 'delegation'];
+
+export async function getPromptStats({ organizationId, brandUuid, postgrestClient }) {
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient.rpc('rpc_brand_prompt_stats', {
+    p_organization_id: organizationId,
+    p_brand_id: brandUuid,
+  });
+
+  if (error) {
+    throw new Error(`getPromptStats RPC failed: ${error.message}`);
+  }
+
+  const row = Array.isArray(data) && data.length > 0 ? data[0] : (data ?? {});
+  const intents = Object.fromEntries(INTENT_VALUES.map((k) => [k, 0]));
+  if (row.intents && typeof row.intents === 'object') {
+    for (const [k, v] of Object.entries(row.intents)) {
+      if (INTENT_VALUES.includes(k)) {
+        intents[k] = Number(v) || 0;
+      }
+    }
+  }
+
+  return {
+    branded: Number(row.branded) || 0,
+    unbranded: Number(row.unbranded) || 0,
+    intents,
+  };
+}
