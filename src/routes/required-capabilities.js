@@ -57,10 +57,6 @@ export const INTERNAL_ROUTES = [
   'POST /slack/events',
   'POST /slack/channels/invite-by-user-id',
 
-  // Consent banner - screenshot tooling, end-user/internal use only
-  'POST /consent-banner',
-  'GET /consent-banner/:jobId',
-
   // Brand Presence stats - org-scoped, LLMO product; not yet required by S2S consumers
   'GET /org/:spaceCatId/brands/all/brand-presence/stats',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
@@ -221,6 +217,10 @@ const routeRequiredCapabilities = {
   // Audits
   'GET /audits/latest/:auditType': 'audit:read',
 
+  // Consent Banner
+  'POST /consent-banner': 'organization:write',
+  'GET /consent-banner/:jobId': 'organization:read',
+
   // Configuration
   'GET /configurations/latest': 'configuration:read',
   'PATCH /configurations/latest': 'configuration:write',
@@ -257,6 +257,7 @@ const routeRequiredCapabilities = {
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
