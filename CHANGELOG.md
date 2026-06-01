@@ -1,3 +1,10 @@
+# [1.534.0](https://github.com/adobe/spacecat-api-service/compare/v1.533.0...v1.534.0) (2026-06-01)
+
+
+### Features
+
+* **prompts:** add GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats endpoint ([#2528](https://github.com/adobe/spacecat-api-service/issues/2528)) ([e25d9be](https://github.com/adobe/spacecat-api-service/commit/e25d9be2f526a1f4d41b23d82425917bd5e92cc8))
+
 # [1.533.0](https://github.com/adobe/spacecat-api-service/compare/v1.532.1...v1.533.0) (2026-06-01)
 
 
