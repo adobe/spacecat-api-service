@@ -237,6 +237,7 @@ function mapRowToPrompt(row) {
     regions: row.regions || [],
     status: row.status || 'active',
     origin: row.origin || 'human',
+    intent: row.intent || null,
     source: row.source || 'config',
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -283,6 +284,7 @@ function mapRowToPrompt(row) {
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
  * @param {string} [params.origin] - Filter by origin (ai, human)
+ * @param {string} [params.intent] - Filter by intent (informational, instructional, etc.)
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
  * status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
@@ -300,6 +302,7 @@ export async function listPrompts({
   search,
   region,
   origin,
+  intent,
   sort,
   order,
   limit = 100,
@@ -334,6 +337,7 @@ export async function listPrompts({
     regions,
     status,
     origin,
+    intent,
     source,
     category_id,
     topic_id,
@@ -380,6 +384,10 @@ export async function listPrompts({
 
   if (hasText(origin)) {
     baseQuery = baseQuery.eq('origin', origin);
+  }
+
+  if (hasText(intent)) {
+    baseQuery = baseQuery.eq('intent', intent);
   }
 
   if (hasText(region)) {
@@ -573,6 +581,7 @@ export async function upsertPrompts({
       topic_id: topicUuid,
       status: p.status || 'active',
       origin: p.origin || 'human',
+      intent: p.intent || null,
       source: p.source || 'config',
       updated_by: updatedBy,
     };
@@ -670,6 +679,9 @@ export async function updatePromptById({
   }
   if (updates.origin !== undefined) {
     patch.origin = updates.origin;
+  }
+  if (updates.intent !== undefined) {
+    patch.intent = updates.intent || null;
   }
   if (updates.categoryId !== undefined) {
     patch.category_id = hasText(updates.categoryId)

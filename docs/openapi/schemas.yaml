@@ -6194,6 +6194,11 @@ V2Prompt:
       type: string
       enum: [ai, human]
       default: human
+    intent:
+      type: [string, 'null']
+      enum: [informational, instructional, comparative, transactional, planning, delegation, null]
+      description: Search intent assigned during AI prompt generation. Null for human-created prompts.
+      example: informational
     source:
       type: string
       description: The source system or process that created the prompt
@@ -6274,6 +6279,11 @@ V2PromptInput:
       type: string
       enum: [ai, human]
       default: human
+    intent:
+      type: [string, 'null']
+      enum: [informational, instructional, comparative, transactional, planning, delegation, null]
+      description: Search intent assigned during AI prompt generation. Null for human-created prompts.
+      example: informational
     source:
       type: string
       description: The source system or process that created the prompt

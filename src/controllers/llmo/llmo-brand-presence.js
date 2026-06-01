@@ -644,6 +644,12 @@ const CONFIG_FILTER_ORIGINS = Object.freeze([
   toFilterOption('ai', 'ai'),
 ]);
 
+/** Hardcoded prompt intent options for filter-dimensions. */
+const CONFIG_PROMPT_INTENTS = Object.freeze([
+  'informational', 'instructional', 'comparative',
+  'transactional', 'planning', 'delegation',
+].map((v) => toFilterOption(v, v)));
+
 /**
  * Optional query params: siteId / site_id, categoryId / category_id.
  * @param {Object} context
@@ -1101,6 +1107,7 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         regions,
         stats,
         page_intents: pageIntents,
+        prompt_intents: CONFIG_PROMPT_INTENTS,
       });
     },
   );

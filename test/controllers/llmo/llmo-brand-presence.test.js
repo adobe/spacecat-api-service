@@ -1198,6 +1198,14 @@ describe('llmo-brand-presence', () => {
       expect(body.categories).to.deep.equal([{ id: '0178a3f0-1234-7000-8000-0000000000ee', label: 'Books' }]);
       expect(body.topics).to.deep.equal([{ id: '0178a3f0-1234-7000-8000-0000000000cc', label: 'Topic A' }]);
       expect(body.page_intents).to.deep.equal([{ id: 'informational', label: 'informational' }]);
+      expect(body.prompt_intents).to.deep.equal([
+        { id: 'informational', label: 'informational' },
+        { id: 'instructional', label: 'instructional' },
+        { id: 'comparative', label: 'comparative' },
+        { id: 'transactional', label: 'transactional' },
+        { id: 'planning', label: 'planning' },
+        { id: 'delegation', label: 'delegation' },
+      ]);
       expect(tableMock.rpc).not.to.have.been.called;
       // cachedOk wraps ok() with the default 2h browser-cache directive.
       expect(result.headers.get('Cache-Control')).to.equal('private, max-age=7200');
