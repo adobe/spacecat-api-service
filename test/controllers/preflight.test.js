@@ -1235,7 +1235,7 @@ describe('Preflight Controller', () => {
       expect(body.mode).to.equal('suggest');
       expect(body.site_id).to.equal('test-site-123');
       expect(body.url).to.equal('https://main--example-site.aem.page/test.html');
-      expect(body.audits).to.deep.equal(['alt-text', 'headings', 'links']);
+      expect(body.audits).to.be.undefined;
     });
 
     it('does not include Authorization header when HEAD returns 200 (no auth needed)', async () => {
@@ -1273,7 +1273,6 @@ describe('Preflight Controller', () => {
           payload: {
             siteId: 'test-site-123',
             url: 'https://main--example-site.aem.page/test.html',
-            audits: ['alt-text', 'headings', 'links'],
           },
           jobType: 'preflight',
           tags: ['preflight'],

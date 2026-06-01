@@ -331,7 +331,6 @@ function PreflightController(ctx, log, env) {
    * @param {string} url - The page URL to analyze.
    * @param {string} step - The audit step (identify or suggest).
    * @param {string} [authorizationHeader] - Optional auth header forwarded to Mysticat.
-   * @param {string[]} [audits] - Optional list of audit names to run.
    */
   async function callMysticatAnalyze(
     mysticatBaseUrl,
@@ -340,7 +339,6 @@ function PreflightController(ctx, log, env) {
     url,
     step,
     authorizationHeader,
-    audits,
   ) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -359,7 +357,6 @@ function PreflightController(ctx, log, env) {
           mode: step,
           scan_id: scanId,
           persist: true,
-          ...(audits !== undefined && { audits }),
         }),
       });
     } finally {
@@ -438,11 +435,6 @@ function PreflightController(ctx, log, env) {
       return preflightError('PREFLIGHT_NOT_ENABLED', 'Preflight is not enabled for this site', 403);
     }
 
-    const enabledAudits = configuration.getEnabledAuditsForSite(site);
-    const preflightAudits = enabledAudits
-      .filter((type) => type.endsWith('-preflight'))
-      .map((type) => type.replace(/-preflight$/, ''));
-
     // Resolve page authentication if required
     const enableAuthentication = await checkEnableAuthentication(previewBaseURL);
     let authorizationHeader;
@@ -482,7 +474,7 @@ function PreflightController(ctx, log, env) {
       asyncJob = await dataAccess.AsyncJob.create({
         status: AsyncJob.Status.IN_PROGRESS,
         metadata: {
-          payload: { siteId, url, audits: preflightAudits },
+          payload: { siteId, url },
           jobType: 'preflight',
           tags: ['preflight'],
         },
@@ -516,7 +508,6 @@ function PreflightController(ctx, log, env) {
         url,
         'suggest',
         authorizationHeader,
-        preflightAudits,
       );
     } catch (mysticatError) {
       log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);
