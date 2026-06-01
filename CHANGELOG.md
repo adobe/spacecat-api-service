@@ -1,3 +1,10 @@
+## [1.535.1](https://github.com/adobe/spacecat-api-service/compare/v1.535.0...v1.535.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* **prompts:** transform flat intent_* RPC fields into nested intents object ([#2532](https://github.com/adobe/spacecat-api-service/issues/2532)) ([920eca5](https://github.com/adobe/spacecat-api-service/commit/920eca5f53575eb729d88a6d989a0b988bffafb2))
+
 # [1.535.0](https://github.com/adobe/spacecat-api-service/compare/v1.534.0...v1.535.0) (2026-06-01)
 
 
