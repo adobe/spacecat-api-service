@@ -40,7 +40,9 @@ const ALL_METHOD_NAMES = [
   'getTopicsResearch',
   'getTopicsStats',
   'getV1TopicBrandTopics',
+  'getV1TopicBrandTopicsTotals',
   'getV1TopicGapTopics',
+  'getV1TopicGapTopicsTotals',
   'getV1PromptBrandPrompts',
   'getV1PromptGapPrompts',
   'getV1PromptPromptResponse',
@@ -78,7 +80,9 @@ describe('AiVisibilityController', () => {
   let mockHandleTopicsResearchBrands;
   let mockHandleTopicsResearchSourceDomains;
   let mockHandleV1TopicBrandTopics;
+  let mockHandleV1TopicBrandTopicsTotals;
   let mockHandleV1TopicGapTopics;
+  let mockHandleV1TopicGapTopicsTotals;
   let mockHandleV1PromptBrandPrompts;
   let mockHandleV1PromptGapPrompts;
   let mockHandleV1PromptPromptResponse;
@@ -168,7 +172,13 @@ describe('AiVisibilityController', () => {
     mockHandleV1TopicBrandTopics = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1TopicBrandTopicsTotals = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1TopicGapTopics = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1TopicGapTopicsTotals = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
     mockHandleV1PromptBrandPrompts = sandbox
@@ -227,9 +237,19 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/v1/topic/brand-topics.js': {
         handleBrandTopics: mockHandleV1TopicBrandTopics,
+        buildBrandTopicsDimensionFilterQl: sandbox.stub().returns(''),
+        buildBrandTopicsMetricFilterQl: sandbox.stub().returns({ ok: true, metricFilterQl: '' }),
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/brand-topics-totals.js': {
+        handleBrandTopicsTotals: mockHandleV1TopicBrandTopicsTotals,
       },
       '../../src/support/ai-visibility/handlers/v1/topic/gap-topics.js': {
         handleGapTopics: mockHandleV1TopicGapTopics,
+        buildGapTopicsDimensionFilterQl: sandbox.stub().returns(''),
+        buildGapTopicsMetricFilterQl: sandbox.stub().returns({ ok: true, metricFilterQl: '' }),
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/gap-topics-totals.js': {
+        handleGapTopicsTotals: mockHandleV1TopicGapTopicsTotals,
       },
       '../../src/support/ai-visibility/handlers/v1/prompt/brand-prompts.js': {
         handleBrandPrompts: mockHandleV1PromptBrandPrompts,
@@ -307,9 +327,9 @@ describe('AiVisibilityController', () => {
   });
 
   describe('returned handler object', () => {
-    it('returns an object with all 27 method names', () => {
+    it('returns an object with all 29 method names', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      expect(Object.keys(handlers)).to.have.lengthOf(27);
+      expect(Object.keys(handlers)).to.have.lengthOf(29);
       for (const name of ALL_METHOD_NAMES) {
         expect(handlers).to.have.property(name).that.is.a('function');
       }
