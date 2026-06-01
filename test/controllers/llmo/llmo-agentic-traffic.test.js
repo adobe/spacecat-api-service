@@ -1291,6 +1291,40 @@ describe('llmo-agentic-traffic', () => {
       expect(listCalls).to.have.length(0);
     });
 
+    it('sorts metadata.files by part number in fast path (out-of-order worker writes)', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.getSignedUrl = sinon.stub()
+        .onFirstCall()
+        .resolves('https://signed.example.com/part1')
+        .onSecondCall()
+        .resolves('https://signed.example.com/part2');
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.reject(new Error('should not be called'));
+        }
+        const prefix = command.input.Key.replace(/\/metadata\.json$/, '');
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 20,
+              // Worker wrote part2 before part1 — fast path must sort before signing.
+              files: [`${prefix}/urls.csv_part2`, `${prefix}/urls.csv_part1`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      const calls = ctx.s3.getSignedUrl.getCalls();
+      // After sorting, part1 key must be signed first.
+      expect(calls[0].args[1].input).to.include({ ResponseContentDisposition: 'attachment; filename="urls_part1.csv"' });
+      expect(calls[1].args[1].input).to.include({ ResponseContentDisposition: 'attachment; filename="urls_part2.csv"' });
+    });
+
     it('falls back to ListObjectsV2 when metadata.files contains out-of-prefix keys', async () => {
       // Defense in depth: worker bug / compromise writes wrong keys in files[];
       // producer must not sign URLs against them — falls back to ListObjectsV2
