@@ -2969,6 +2969,7 @@ describe('Suggestions Controller', () => {
         ...context,
         dataAccess: da,
       });
+      await new Promise(setImmediate);
 
       expect(response.status).to.equal(200);
       expect(postSlackMessageStub).to.have.been.calledOnce;
@@ -3070,6 +3071,7 @@ describe('Suggestions Controller', () => {
         ...context,
         dataAccess: da,
       });
+      await new Promise(setImmediate);
 
       expect(response.status).to.equal(200);
       expect(context.log.error).to.have.been.calledWithMatch('Failed to send PLG suggestion skip Slack alert');
@@ -3123,6 +3125,7 @@ describe('Suggestions Controller', () => {
         ...context,
         dataAccess: da,
       });
+      await new Promise(setImmediate);
 
       expect(response.status).to.equal(200);
       expect(postSlackMessageStub).to.have.been.calledOnce;
