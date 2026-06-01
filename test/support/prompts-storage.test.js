@@ -2116,8 +2116,34 @@ describe('prompts-storage', () => {
       expect(result).to.deep.equal({ branded: 0, unbranded: 0, intents: ALL_ZERO_INTENTS });
     });
 
-    it('returns correct counts from a single-object RPC response', async () => {
+    it('returns all-zero shape when RPC returns an empty array', async () => {
+      const client = { rpc: sandbox.stub().resolves({ data: [], error: null }) };
+      const result = await getPromptStats({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal({ branded: 0, unbranded: 0, intents: ALL_ZERO_INTENTS });
+    });
+
+    it('transforms flat intent_* RPC fields into nested intents object', async () => {
       const row = {
+        branded: 42,
+        unbranded: 1208,
+        intent_informational: 410,
+        intent_instructional: 180,
+        intent_comparative: 95,
+        intent_transactional: 250,
+        intent_planning: 60,
+        intent_delegation: 15,
+      };
+      const client = { rpc: sandbox.stub().resolves({ data: row, error: null }) };
+      const result = await getPromptStats({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal({
         branded: 42,
         unbranded: 1208,
         intents: {
@@ -2128,22 +2154,31 @@ describe('prompts-storage', () => {
           planning: 60,
           delegation: 15,
         },
-      };
-      const client = { rpc: sandbox.stub().resolves({ data: row, error: null }) };
-      const result = await getPromptStats({
-        organizationId: ORG_ID,
-        brandUuid: BRAND_UUID,
-        postgrestClient: client,
       });
-      expect(result).to.deep.equal({ branded: 42, unbranded: 1208, intents: row.intents });
       const [rpcName, rpcArgs] = client.rpc.firstCall.args;
       expect(rpcName).to.equal('rpc_brand_prompt_stats');
       expect(rpcArgs.p_organization_id).to.equal(ORG_ID);
       expect(rpcArgs.p_brand_id).to.equal(BRAND_UUID);
     });
 
-    it('returns correct counts from an array RPC response', async () => {
+    it('transforms flat intent_* fields from an array RPC response', async () => {
       const row = {
+        branded: 5,
+        unbranded: 10,
+        intent_informational: 3,
+        intent_instructional: 2,
+        intent_comparative: 0,
+        intent_transactional: 0,
+        intent_planning: 0,
+        intent_delegation: 0,
+      };
+      const client = { rpc: sandbox.stub().resolves({ data: [row], error: null }) };
+      const result = await getPromptStats({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal({
         branded: 5,
         unbranded: 10,
         intents: {
@@ -2154,17 +2189,10 @@ describe('prompts-storage', () => {
           planning: 0,
           delegation: 0,
         },
-      };
-      const client = { rpc: sandbox.stub().resolves({ data: [row], error: null }) };
-      const result = await getPromptStats({
-        organizationId: ORG_ID,
-        brandUuid: BRAND_UUID,
-        postgrestClient: client,
       });
-      expect(result).to.deep.equal({ branded: 5, unbranded: 10, intents: row.intents });
     });
 
-    it('defaults all intent keys to 0 when intents field is absent', async () => {
+    it('defaults all intent keys to 0 when intent fields are absent', async () => {
       const client = {
         rpc: sandbox.stub().resolves({ data: { branded: 3, unbranded: 7 }, error: null }),
       };
@@ -2176,13 +2204,14 @@ describe('prompts-storage', () => {
       expect(result).to.deep.equal({ branded: 3, unbranded: 7, intents: ALL_ZERO_INTENTS });
     });
 
-    it('filters out unknown intent keys returned by the RPC', async () => {
+    it('ignores unknown intent_* fields from the RPC', async () => {
       const client = {
         rpc: sandbox.stub().resolves({
           data: {
             branded: 1,
             unbranded: 1,
-            intents: { informational: 5, unknown_future_intent: 99 },
+            intent_informational: 5,
+            intent_unknown_future: 99,
           },
           error: null,
         }),
@@ -2192,8 +2221,25 @@ describe('prompts-storage', () => {
         brandUuid: BRAND_UUID,
         postgrestClient: client,
       });
-      expect(result.intents).to.not.have.property('unknown_future_intent');
+      expect(result.intents).to.not.have.property('unknown_future');
       expect(result.intents.informational).to.equal(5);
+    });
+
+    it('correctly coerces stringified bigint values returned by PostgREST', async () => {
+      const client = {
+        rpc: sandbox.stub().resolves({
+          data: { branded: '42', unbranded: '1208', intent_informational: '410' },
+          error: null,
+        }),
+      };
+      const result = await getPromptStats({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(result.branded).to.equal(42);
+      expect(result.unbranded).to.equal(1208);
+      expect(result.intents.informational).to.equal(410);
     });
   });
 });

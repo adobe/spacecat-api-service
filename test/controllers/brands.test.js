@@ -2062,17 +2062,16 @@ describe('Brands Controller', () => {
 
   describe('getPromptStatsByBrand', () => {
     const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
-    const STATS_RESPONSE = {
+    // RPC returns flat intent_* fields; the storage layer transforms them to nested intents
+    const STATS_RPC_ROW = {
       branded: 42,
       unbranded: 1208,
-      intents: {
-        informational: 410,
-        instructional: 180,
-        comparative: 95,
-        transactional: 250,
-        planning: 60,
-        delegation: 15,
-      },
+      intent_informational: 410,
+      intent_instructional: 180,
+      intent_comparative: 95,
+      intent_transactional: 250,
+      intent_planning: 60,
+      intent_delegation: 15,
     };
 
     beforeEach(() => {
@@ -2087,7 +2086,7 @@ describe('Brands Controller', () => {
             return Promise.resolve({ data: null, error: null });
           }),
         })),
-        rpc: sandbox.stub().resolves({ data: STATS_RESPONSE, error: null }),
+        rpc: sandbox.stub().resolves({ data: STATS_RPC_ROW, error: null }),
       };
       brandsController = BrandsController(context, loggerStub, mockEnv);
     });
@@ -2185,7 +2184,7 @@ describe('Brands Controller', () => {
       const body = await response.json();
       expect(body).to.have.property('branded', 42);
       expect(body).to.have.property('unbranded', 1208);
-      expect(body).to.have.property('intents').that.includes({ informational: 410, delegation: 15 });
+      expect(body.intents).to.deep.include({ informational: 410, delegation: 15 });
     });
 
     it('returns 500 when storage throws and logs the error', async () => {

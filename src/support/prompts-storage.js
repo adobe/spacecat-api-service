@@ -832,15 +832,10 @@ export async function getPromptStats({ organizationId, brandUuid, postgrestClien
     throw new Error(`getPromptStats RPC failed: ${error.message}`);
   }
 
-  const row = Array.isArray(data) && data.length > 0 ? data[0] : (data ?? {});
-  const intents = Object.fromEntries(INTENT_VALUES.map((k) => [k, 0]));
-  if (row.intents && typeof row.intents === 'object') {
-    for (const [k, v] of Object.entries(row.intents)) {
-      if (INTENT_VALUES.includes(k)) {
-        intents[k] = Number(v) || 0;
-      }
-    }
-  }
+  const row = Array.isArray(data) ? (data[0] ?? {}) : (data ?? {});
+  const intents = Object.fromEntries(
+    INTENT_VALUES.map((k) => [k, Number(row[`intent_${k}`]) || 0]),
+  );
 
   return {
     branded: Number(row.branded) || 0,
