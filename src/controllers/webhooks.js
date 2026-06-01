@@ -94,31 +94,31 @@ function WebhooksController(context) {
     const deliveryId = ctx.pathInfo?.headers?.['x-github-delivery'];
     const { data } = ctx;
 
-    // Destination resolved by the HMAC handler (registry mode). Legacy mode has
-    // no profile target_id/app_slug -> fall back to env.GITHUB_APP_SLUG and emit
-    // no target_id (worker then resolves its flat keys).
-    const profile = ctx.attributes?.authInfo?.getProfile?.() || {};
-    const targetId = profile.target_id;
-    const appSlug = profile.app_slug || env.GITHUB_APP_SLUG;
-
-    // Security-relevant: which bot can trigger automated runs. In registry mode
-    // this comes from the target's appSlug; in legacy mode from env. A missing
-    // value must be a 5xx (GitHub retries) rather than a 204 (delivery lost).
-    if (!appSlug) {
-      log.error('No app slug resolved (GITHUB_APP_SLUG unset and no target app_slug)', { deliveryId });
-      return internalServerError('app slug not configured');
-    }
-
-    // Filter on event type BEFORE validating payload fields. Unmapped events
-    // (ping, push, issues, ...) do not necessarily carry `action` or
-    // `installation.id`. GitHub's app-install ping has neither — validating
-    // first would 400 the install handshake and surface as red Xs in the
-    // app's "Recent Deliveries" UI. Mapped events still get full validation
-    // below.
+    // Filter on event type BEFORE validating payload fields or requiring a
+    // reviewer identity. Unmapped events (ping, push, issues, ...) do not
+    // necessarily carry `action`/`installation.id` — GitHub's app-install ping
+    // has neither — and must 204, not 400/500, or they surface as red Xs in the
+    // app's "Recent Deliveries" UI. Mapped events get full validation below.
     const jobType = EVENT_JOB_MAP[event];
     if (!jobType) {
       log.info('Skipping unmapped event', { event, deliveryId });
       return noContent();
+    }
+
+    // Destination + reviewer identity resolved by the HMAC handler from the
+    // consolidated GITHUB_DESTINATIONS registry (every authenticated webhook
+    // carries target_id + reviewer_login).
+    const profile = ctx.attributes?.authInfo?.getProfile?.() || {};
+    const targetId = profile.target_id;
+    const reviewerLogin = profile.reviewer_login;
+
+    // Security-relevant: which login may trigger automated runs. reviewer_login
+    // is required on every destination entry, so a missing value means a
+    // misconfigured registry or a request that bypassed the handler. Fail closed
+    // with a 5xx (GitHub retries; visible failed delivery), not a 204 (lost).
+    if (!reviewerLogin) {
+      log.error('No reviewer login resolved (auth profile missing reviewer_login)', { deliveryId });
+      return internalServerError('reviewer login not configured');
     }
 
     // Validate required payload fields (mapped events only)
@@ -145,7 +145,7 @@ function WebhooksController(context) {
     }
 
     // Apply trigger rules (returns skip reason string or null)
-    const skipReason = getSkipReason(data, action, env, appSlug);
+    const skipReason = getSkipReason(data, action, reviewerLogin);
     if (skipReason) {
       log.info('Skipping webhook', {
         skipReason,
@@ -235,10 +235,9 @@ function WebhooksController(context) {
       repo: jobPayload.repo,
       prNumber: pr.number,
       installationId: jobPayload.installation_id,
-      // Classification outcome, for traffic-distribution observability (per the
-      // PR #2503 review recommendation). 'legacy' = GITHUB_TARGETS unset, so the
-      // worker resolves its flat keys; otherwise the resolved destination id.
-      targetId: targetId || 'legacy',
+      // Resolved destination id, for traffic-distribution observability (per the
+      // PR #2503 review recommendation).
+      targetId,
     });
 
     return accepted({ status: 'accepted' });
