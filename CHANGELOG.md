@@ -1,3 +1,10 @@
+# [1.535.0](https://github.com/adobe/spacecat-api-service/compare/v1.534.0...v1.535.0) (2026-06-01)
+
+
+### Features
+
+* route path-level prerender suggestions through deploy and rollback ([#2383](https://github.com/adobe/spacecat-api-service/issues/2383)) ([9f04beb](https://github.com/adobe/spacecat-api-service/commit/9f04bebd49778390a9ae2642f1fa83c0d13bbb02)), closes [adobe/spacecat-shared#1598](https://github.com/adobe/spacecat-shared/issues/1598)
+
 # [1.534.0](https://github.com/adobe/spacecat-api-service/compare/v1.533.0...v1.534.0) (2026-06-01)
 
 
