@@ -53,17 +53,18 @@ import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-st
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
-async function isSitePlgTier(site) {
+async function isSitePlgTier(site, log) {
   try {
     const enrollments = await site.getSiteEnrollments();
     const entitlements = await Promise.all((enrollments ?? []).map((e) => e.getEntitlement()));
     return entitlements.some((e) => e?.getProductCode() === 'ASO' && e.getTier() === 'PLG');
-  } catch {
+  } catch (err) {
+    log.warn(`Failed to determine PLG tier for site ${site.getId()}: ${err.message}`);
     return false;
   }
 }
 
-async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context) {
+async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context, isPlgTier) {
   const { env, log } = context;
   const channelId = env?.SLACK_PLG_SKIP_CHANNEL_ID;
   const token = env?.SLACK_BOT_TOKEN;
@@ -72,7 +73,8 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
   }
 
   try {
-    if (!await isSitePlgTier(site)) {
+    const plg = isPlgTier !== undefined ? isPlgTier : await isSitePlgTier(site, log);
+    if (!plg) {
       return;
     }
 
@@ -94,12 +96,16 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
       message += `\n• *Skip Reason:* \`${skipReason}\``;
     }
     if (skipDetail) {
-      message += `\n• *Skip Detail:* ${skipDetail}`;
+      message += `\n• *Skip Detail:* \`${skipDetail}\``;
     }
 
     await postSlackMessage(channelId, message, token);
   } catch (alertError) {
-    log.error(`Failed to send PLG suggestion skip Slack alert: ${alertError.message}`);
+    log.error('Failed to send PLG suggestion skip Slack alert', {
+      error: alertError,
+      suggestionId: suggestion.getId?.(),
+      siteId: site.getId?.(),
+    });
   }
 }
 
@@ -764,7 +770,8 @@ function SuggestionsController(ctx, sqs, env) {
         suggestion.setUpdatedBy(profile.email || 'system');
         const updatedSuggestion = await suggestion.save();
         if (isNewSkipTransition) {
-          await postPlgSuggestionSkipAlert(site, opportunity, updatedSuggestion, context);
+          postPlgSuggestionSkipAlert(site, opportunity, updatedSuggestion, context)
+            .catch((err) => context.log.error(`PLG skip alert failed: ${err.message}`));
         }
         return ok(SuggestionDto.toJSON(updatedSuggestion));
       }
@@ -851,6 +858,8 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isArray(context.data)) {
       return badRequest('Request body must be an array of [{ id: <suggestion id>, status: <suggestion status> },...]');
     }
+
+    const isPlgSite = await isSitePlgTier(site, context.log);
 
     const suggestionPromises = context.data.map(async (item, index) => {
       const {
@@ -976,7 +985,8 @@ function SuggestionsController(ctx, sqs, env) {
         const updatedSuggestion = await suggestion.save();
         if (isNewSkipTransition) {
           const opp = await suggestion.getOpportunity();
-          await postPlgSuggestionSkipAlert(site, opp, updatedSuggestion, context);
+          postPlgSuggestionSkipAlert(site, opp, updatedSuggestion, context, isPlgSite)
+            .catch((err) => context.log.error(`PLG skip alert failed: ${err.message}`));
         }
         return {
           index,
