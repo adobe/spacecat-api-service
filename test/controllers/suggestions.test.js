@@ -3241,6 +3241,75 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'APPROVED-updated');
   });
 
+  it('bulk patches suggestion status sets updatedBy to caller profile email on status change', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [{ id: SUGGESTION_IDS[0], status: 'NEW-updated' }],
+      ...context,
+    });
+
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('updatedBy', 'test@test.com');
+    expect(suggs[0].updatedBy).to.equal('test@test.com');
+  });
+
+  it('bulk patches suggestion status sets updatedBy to caller profile email when updating skip fields on already-SKIPPED suggestion', async () => {
+    suggs[0].status = 'SKIPPED';
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [{ id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'TOO_RISKY', skipDetail: 'Updated detail' }],
+      ...context,
+    });
+
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('updatedBy', 'test@test.com');
+    expect(suggs[0].updatedBy).to.equal('test@test.com');
+  });
+
+  it('bulk patches suggestion status sets updatedBy even when model does not support skip fields on already-SKIPPED suggestion', async () => {
+    suggs[0].status = 'SKIPPED';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [{ id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'TOO_RISKY', skipDetail: 'Updated detail' }],
+      ...context,
+    });
+
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('updatedBy', 'test@test.com');
+    expect(suggs[0].updatedBy).to.equal('test@test.com');
+
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
   it('bulk patches suggestion for non existing site ', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: { siteId: SITE_ID_NOT_FOUND, opportunityId: OPPORTUNITY_ID },
@@ -5967,6 +6036,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
       });
 
       expect(response.status).to.equal(400);
@@ -6009,13 +6079,14 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
       });
       expect(response.status).to.equal(500);
       const error = await response.json();
       expect(error).to.have.property('message', 'Error getting promise token');
     });
 
-    it('uses promiseToken cookie when present instead of IMS', async () => {
+    it('uses x-promise-token header when present instead of IMS', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -6045,7 +6116,7 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-            cookie: 'promiseToken=promiseToken123',
+            'x-promise-token': 'promiseToken123',
           },
         },
         params: {
@@ -6063,7 +6134,7 @@ describe('Suggestions Controller', () => {
       expect(getIMSPromiseTokenStub).to.not.have.been.called;
     });
 
-    it('falls back to IMS when promiseToken cookie is absent', async () => {
+    it('falls back to IMS when x-promise-token header is absent', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -6075,35 +6146,6 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-          },
-        },
-        params: {
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-        },
-        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
-        log: context.log,
-        ...authContext,
-      });
-
-      expect(response.status).to.equal(207);
-      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
-      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
-    });
-
-    it('falls back to IMS when promiseToken cookie is not present among other cookies', async () => {
-      mockSuggestion.allByOpportunityId.resolves(
-        [mockSuggestionEntity(suggs[0]),
-          mockSuggestionEntity(suggs[2]),
-        ],
-      );
-      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
-      const response = await suggestionsControllerWithIms.autofixSuggestions({
-        pathInfo: {
-          headers: {
-            authorization: 'Bearer token123',
-            cookie: 'otherCookie=abc',
           },
         },
         params: {

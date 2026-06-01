@@ -1237,6 +1237,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockSite = {
         getOrganizationId: sinon.stub().returns('old-org-123'),
         setOrganizationId: sinon.stub(),
+        getSiteEnrollments: sinon.stub().resolves([]),
         save: sinon.stub().resolves(),
       };
 
@@ -1256,6 +1257,70 @@ describe('LLMO Onboarding Functions', () => {
       // queries Site.allByOrganizationId, otherwise a legacy site moved into a
       // brand-new org would be misclassified as v2.
       expect(mockSite.save).to.have.been.calledOnce;
+    }).timeout(5000);
+
+    it('should throw when existing site has different org and active enrollments', async () => {
+      const { createOrFindSite } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: sinon.stub(),
+        },
+      });
+
+      const mockSite = {
+        getOrganizationId: sinon.stub().returns('other-org-789'),
+        setOrganizationId: sinon.stub(),
+        getSiteEnrollments: sinon.stub().resolves([{ getId: () => 'enroll-1' }]),
+        save: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+
+      const context = { dataAccess: mockDataAccess };
+
+      await expect(
+        createOrFindSite('https://example.com', 'new-org-456', context),
+      ).to.be.rejectedWith('belongs to org other-org-789 with active enrollments and cannot be moved to org new-org-456');
+
+      expect(mockSite.setOrganizationId).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+    });
+
+    it('should throw when getSiteEnrollments returns non-array', async () => {
+      const { createOrFindSite } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: sinon.stub(),
+        },
+      });
+
+      const mockSite = {
+        getOrganizationId: sinon.stub().returns('other-org-789'),
+        setOrganizationId: sinon.stub(),
+        getSiteEnrollments: sinon.stub().resolves(null),
+        save: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+
+      const context = { dataAccess: mockDataAccess };
+
+      await expect(
+        createOrFindSite('https://example.com', 'new-org-456', context),
+      ).to.be.rejectedWith('Unable to verify enrollments for site https://example.com');
+
+      expect(mockSite.setOrganizationId).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
     });
 
     it('should not update organization ID when existing site has same organization', async () => {
