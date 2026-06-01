@@ -920,6 +920,20 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(res.value).to.include('internal organizations');
     });
 
+    it('returns 400 for frescopa domain', async () => {
+      const context = buildContext({ domain: 'frescopa.com' });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.include('not available for frescopa domains');
+    });
+
+    it('returns 400 for frescopa subdomain', async () => {
+      const context = buildContext({ domain: 'shop.frescopa.com' });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.include('not available for frescopa domains');
+    });
+
     it('returns 400 when org already has a non-PLG ASO entitlement (paid customer)', async () => {
       const paidEntitlement = {
         getProductCode: sandbox.stub().returns('aso_optimizer'),
@@ -3350,13 +3364,14 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // delivery type should NOT be fetched again at site creation (cached)
-      expect(findDeliveryTypeStub).to.have.been.calledOnce;
+      // called twice: once in the RUM-fail path, once in Step 5b.5 to validate delivery type
+      expect(findDeliveryTypeStub).to.have.been.calledTwice;
     });
 
-    it('prefers existing site delivery type over findDeliveryType when RUM fails', async () => {
+    it('calls findDeliveryType for existing site and updates delivery type when detected type differs', async () => {
       rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
       findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.resolves('aem_edge');
       const existingSite = createMockSite({ deliveryType: 'aem_cs', orgId: TEST_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -3366,8 +3381,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      expect(findDeliveryTypeStub).to.not.have.been.called;
-      expect(mockLog.info).to.have.been.calledWithMatch(/Using existing site delivery type aem_cs/);
+      expect(findDeliveryTypeStub).to.have.been.calledOnceWith(TEST_BASE_URL);
+      expect(existingSite.setDeliveryType).to.have.been.calledWith('aem_edge');
+      expect(mockLog.info).to.have.been.calledWithMatch(/Updated delivery type.*aem_cs.*aem_edge/);
     });
 
     it('does not use site delivery type OTHER — calls findDeliveryType when RUM fails', async () => {
@@ -3383,7 +3399,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      expect(findDeliveryTypeStub).to.have.been.calledOnceWith(TEST_BASE_URL);
+      // called twice: once in the RUM-fail path (type is OTHER) and once in Step 5b.5
+      expect(findDeliveryTypeStub).to.have.been.calledTwice;
+      expect(findDeliveryTypeStub).to.have.been.calledWith(TEST_BASE_URL);
       expect(mockLog.info).to.not.have.been.calledWithMatch(/Using existing site delivery type/);
     });
   });
