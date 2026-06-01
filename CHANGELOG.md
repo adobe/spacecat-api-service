@@ -1,3 +1,52 @@
+## [1.530.1](https://github.com/adobe/spacecat-api-service/compare/v1.530.0...v1.530.1) (2026-05-31)
+
+
+### Bug Fixes
+
+* **webhooks:** GITHUB_DESTINATIONS is the only webhook routing path (Phase 4 cleanup) ([#2525](https://github.com/adobe/spacecat-api-service/issues/2525)) ([14c420e](https://github.com/adobe/spacecat-api-service/commit/14c420e3152d9d51dc86eda55c58da4a26a1a0db))
+
+# [1.530.0](https://github.com/adobe/spacecat-api-service/compare/v1.529.0...v1.530.0) (2026-05-31)
+
+
+### Features
+
+* **webhooks:** dual-read consolidated GITHUB_DESTINATIONS registry (Phase 1) ([#2522](https://github.com/adobe/spacecat-api-service/issues/2522)) ([6402c90](https://github.com/adobe/spacecat-api-service/commit/6402c909f436b17445b42da4877648eb57de86f5))
+
+# [1.529.0](https://github.com/adobe/spacecat-api-service/compare/v1.528.0...v1.529.0) (2026-05-30)
+
+
+### Features
+
+* per-target reviewer login (web tier) ([#2520](https://github.com/adobe/spacecat-api-service/issues/2520)) ([0803aef](https://github.com/adobe/spacecat-api-service/commit/0803aef204d4cad8147153e99dda31f7d8be959e))
+
+# [1.528.0](https://github.com/adobe/spacecat-api-service/compare/v1.527.1...v1.528.0) (2026-05-29)
+
+
+### Features
+
+* decouple Slack one-off audit execution from site enablement ([#1674](https://github.com/adobe/spacecat-api-service/issues/1674)) ([2e6d503](https://github.com/adobe/spacecat-api-service/commit/2e6d503ddcbd4608fee5a71a905c541d484cb334))
+
+## [1.527.1](https://github.com/adobe/spacecat-api-service/compare/v1.527.0...v1.527.1) (2026-05-29)
+
+
+### Bug Fixes
+
+* **auth:** extend RouteScopedLegacyApiKeyHandler to match sub-paths of scoped routes ([#2518](https://github.com/adobe/spacecat-api-service/issues/2518)) ([cda6274](https://github.com/adobe/spacecat-api-service/commit/cda6274261b3e10a832a568e9a109c877d81b40a))
+
+# [1.527.0](https://github.com/adobe/spacecat-api-service/compare/v1.526.1...v1.527.0) (2026-05-29)
+
+
+### Features
+
+* **serenity:** hide Semrush as implementation detail (LLMO-5190) ([#2506](https://github.com/adobe/spacecat-api-service/issues/2506)) ([459128e](https://github.com/adobe/spacecat-api-service/commit/459128e5b252739b02bf86dce21f680accf8a13a)), closes [adobe/project-elmo-ui#1815](https://github.com/adobe/project-elmo-ui/issues/1815) [#1815](https://github.com/adobe/spacecat-api-service/issues/1815)
+
+## [1.526.1](https://github.com/adobe/spacecat-api-service/compare/v1.526.0...v1.526.1) (2026-05-29)
+
+
+### Bug Fixes
+
+* **llmo:** guard createOrFindSite from moving site with active enroll… ([#2491](https://github.com/adobe/spacecat-api-service/issues/2491)) ([9218437](https://github.com/adobe/spacecat-api-service/commit/92184377a2c3b97a0d8549311b049962d91ea72d))
+
 # [1.526.0](https://github.com/adobe/spacecat-api-service/compare/v1.525.0...v1.526.0) (2026-05-29)
 
 
