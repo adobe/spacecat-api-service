@@ -1,3 +1,87 @@
+## [1.535.2](https://github.com/adobe/spacecat-api-service/compare/v1.535.1...v1.535.2) (2026-06-01)
+
+
+### Bug Fixes
+
+* enable get geoexperiments endpoint for geo experiment read with s2s token ([#2530](https://github.com/adobe/spacecat-api-service/issues/2530)) ([2144b55](https://github.com/adobe/spacecat-api-service/commit/2144b552ddfdf778ed721c57c639ec49309443d4))
+
+## [1.535.1](https://github.com/adobe/spacecat-api-service/compare/v1.535.0...v1.535.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* **prompts:** transform flat intent_* RPC fields into nested intents object ([#2532](https://github.com/adobe/spacecat-api-service/issues/2532)) ([920eca5](https://github.com/adobe/spacecat-api-service/commit/920eca5f53575eb729d88a6d989a0b988bffafb2))
+
+# [1.535.0](https://github.com/adobe/spacecat-api-service/compare/v1.534.0...v1.535.0) (2026-06-01)
+
+
+### Features
+
+* route path-level prerender suggestions through deploy and rollback ([#2383](https://github.com/adobe/spacecat-api-service/issues/2383)) ([9f04beb](https://github.com/adobe/spacecat-api-service/commit/9f04bebd49778390a9ae2642f1fa83c0d13bbb02)), closes [adobe/spacecat-shared#1598](https://github.com/adobe/spacecat-shared/issues/1598)
+
+# [1.534.0](https://github.com/adobe/spacecat-api-service/compare/v1.533.0...v1.534.0) (2026-06-01)
+
+
+### Features
+
+* **prompts:** add GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats endpoint ([#2528](https://github.com/adobe/spacecat-api-service/issues/2528)) ([e25d9be](https://github.com/adobe/spacecat-api-service/commit/e25d9be2f526a1f4d41b23d82425917bd5e92cc8))
+
+# [1.533.0](https://github.com/adobe/spacecat-api-service/compare/v1.532.1...v1.533.0) (2026-06-01)
+
+
+### Features
+
+* **routes:** expose consent-banner routes to S2S consumers via organization capabilities ([#2531](https://github.com/adobe/spacecat-api-service/issues/2531)) ([ed168dd](https://github.com/adobe/spacecat-api-service/commit/ed168dd291e8c86bcea2c769384ac9f7cc32c97c))
+
+## [1.532.1](https://github.com/adobe/spacecat-api-service/compare/v1.532.0...v1.532.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* **fixes:** replace N+1 getSuggestions loop with batch query ([#2512](https://github.com/adobe/spacecat-api-service/issues/2512)) ([941c01f](https://github.com/adobe/spacecat-api-service/commit/941c01f283a103b768a7183c335b079baafdd666))
+
+# [1.532.0](https://github.com/adobe/spacecat-api-service/compare/v1.531.0...v1.532.0) (2026-06-01)
+
+
+### Features
+
+* lazy-load tab data, eager badge counts via totals endpoints | LLMO-5218 ([#2514](https://github.com/adobe/spacecat-api-service/issues/2514)) ([8afd6d6](https://github.com/adobe/spacecat-api-service/commit/8afd6d65a948613a1fcd5f300229e454de05d108))
+
+# [1.531.0](https://github.com/adobe/spacecat-api-service/compare/v1.530.1...v1.531.0) (2026-06-01)
+
+
+### Features
+
+* **auth:** remove catch-all LegacyApiKeyHandler; S2S is the replacement (SITES-34224) ([#2524](https://github.com/adobe/spacecat-api-service/issues/2524)) ([1c59169](https://github.com/adobe/spacecat-api-service/commit/1c591691ad69f2784f1eee4470857fc25a17df9c))
+
+## [1.530.1](https://github.com/adobe/spacecat-api-service/compare/v1.530.0...v1.530.1) (2026-05-31)
+
+
+### Bug Fixes
+
+* **webhooks:** GITHUB_DESTINATIONS is the only webhook routing path (Phase 4 cleanup) ([#2525](https://github.com/adobe/spacecat-api-service/issues/2525)) ([14c420e](https://github.com/adobe/spacecat-api-service/commit/14c420e3152d9d51dc86eda55c58da4a26a1a0db))
+
+# [1.530.0](https://github.com/adobe/spacecat-api-service/compare/v1.529.0...v1.530.0) (2026-05-31)
+
+
+### Features
+
+* **webhooks:** dual-read consolidated GITHUB_DESTINATIONS registry (Phase 1) ([#2522](https://github.com/adobe/spacecat-api-service/issues/2522)) ([6402c90](https://github.com/adobe/spacecat-api-service/commit/6402c909f436b17445b42da4877648eb57de86f5))
+
+# [1.529.0](https://github.com/adobe/spacecat-api-service/compare/v1.528.0...v1.529.0) (2026-05-30)
+
+
+### Features
+
+* per-target reviewer login (web tier) ([#2520](https://github.com/adobe/spacecat-api-service/issues/2520)) ([0803aef](https://github.com/adobe/spacecat-api-service/commit/0803aef204d4cad8147153e99dda31f7d8be959e))
+
+# [1.528.0](https://github.com/adobe/spacecat-api-service/compare/v1.527.1...v1.528.0) (2026-05-29)
+
+
+### Features
+
+* decouple Slack one-off audit execution from site enablement ([#1674](https://github.com/adobe/spacecat-api-service/issues/1674)) ([2e6d503](https://github.com/adobe/spacecat-api-service/commit/2e6d503ddcbd4608fee5a71a905c541d484cb334))
+
 ## [1.527.1](https://github.com/adobe/spacecat-api-service/compare/v1.527.0...v1.527.1) (2026-05-29)
 
 

@@ -191,6 +191,11 @@ function SuggestionsController(ctx, sqs, env) {
     return data?.isDomainWide === true;
   };
 
+  const isPathSuggestion = (suggestion) => {
+    const data = suggestion.getData();
+    return Array.isArray(data?.allowedRegexPatterns) && !data?.isDomainWide;
+  };
+
   const {
     Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
   } = dataAccess;
@@ -895,6 +900,7 @@ function SuggestionsController(ctx, sqs, env) {
             suggestion.setUpdatedBy(profile.email);
           } else {
             context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+            suggestion.setUpdatedBy(profile.email);
           }
         } else {
           return {
@@ -1685,6 +1691,7 @@ function SuggestionsController(ctx, sqs, env) {
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
     const domainWideSuggestions = [];
+    const pathSuggestions = [];
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
     // Check each requested suggestion (basic validation only)
@@ -1700,6 +1707,7 @@ function SuggestionsController(ctx, sqs, env) {
           statusCode: 404,
         });
       } else if (isDomainWideSuggestion(suggestion)) {
+        context.log.info(`[edge-deploy] ${suggestionId} → DOMAIN-WIDE`);
         const data = suggestion.getData();
         if (isNonEmptyArray(data.allowedRegexPatterns)) {
           domainWideSuggestions.push({
@@ -1712,6 +1720,28 @@ function SuggestionsController(ctx, sqs, env) {
             uuid: suggestionId,
             index,
             message: 'Domain-wide suggestion missing allowedRegexPatterns',
+            statusCode: 400,
+          });
+        }
+      } else if (isPathSuggestion(suggestion)) {
+        context.log.info(`[edge-deploy] ${suggestionId} → PATH (patterns=${JSON.stringify(suggestion.getData()?.allowedRegexPatterns)})`);
+        const data = suggestion.getData();
+        if (data?.edgeDeployed) {
+          context.log.warn(`[edge-deploy] site: ${apexBaseUrl}, path suggestion ${suggestionId} is already deployed`);
+          failedSuggestions.push({
+            uuid: suggestionId,
+            index,
+            message: 'Path suggestion already deployed',
+            statusCode: 400,
+          });
+        } else if (isNonEmptyArray(data.allowedRegexPatterns)) {
+          pathSuggestions.push({ suggestion, allowedRegexPatterns: data.allowedRegexPatterns });
+        } else {
+          context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, path suggestion ${suggestionId} missing allowedRegexPatterns`);
+          failedSuggestions.push({
+            uuid: suggestionId,
+            index,
+            message: 'Path suggestion missing allowedRegexPatterns',
             statusCode: 400,
           });
         }
@@ -1733,6 +1763,7 @@ function SuggestionsController(ctx, sqs, env) {
     const validSuggestionIds = [
       ...validSuggestions.map((s) => s.getId()),
       ...domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
+      ...pathSuggestions.map(({ suggestion }) => suggestion.getId()),
     ];
 
     if (validSuggestionIds.length === 0) {
@@ -1894,6 +1925,7 @@ function SuggestionsController(ctx, sqs, env) {
         const validSuggestionEntities = [
           ...validSuggestions,
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+          ...pathSuggestions.map(({ suggestion }) => suggestion),
         ];
 
         const markResults = await Promise.allSettled(
@@ -1964,6 +1996,7 @@ function SuggestionsController(ctx, sqs, env) {
         const allSuggestionEntities = [
           ...validSuggestions,
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+          ...pathSuggestions.map(({ suggestion }) => suggestion),
         ];
         await Promise.allSettled(
           allSuggestionEntities
@@ -1997,12 +2030,14 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    // Deploy all suggestions (regular + domain-wide) via tokowaka client
+    // Deploy all suggestions (regular + domain-wide + path-level) via tokowaka client
     let succeededSuggestions = [];
     const allTargetSuggestions = [
       ...validSuggestions,
       ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+      ...pathSuggestions.map(({ suggestion }) => suggestion),
     ];
+    context.log.info(`[edge-deploy] Summary: valid=${validSuggestions.length}, domainWide=${domainWideSuggestions.length}, path=${pathSuggestions.length}, failed=${failedSuggestions.length}, targets=${allTargetSuggestions.length}`);
 
     try {
       const tokowakaClient = TokowakaClient.createFrom(context);
@@ -2056,7 +2091,7 @@ function SuggestionsController(ctx, sqs, env) {
         failed: failedSuggestions.length,
         ...(coveredSuggestionsCount > 0 && {
           autoCovered: coveredSuggestionsCount,
-          message: `${coveredSuggestionsCount} additional suggestion(s) automatically marked as deployed (covered by domain-wide configuration)`,
+          message: `${coveredSuggestionsCount} additional suggestion(s) automatically marked as deployed (covered by ${domainWideSuggestions.length > 0 ? 'domain-wide' : 'path-level'} configuration)`,
         }),
       },
     };
@@ -2326,130 +2361,52 @@ function SuggestionsController(ctx, sqs, env) {
         }
       }
     });
-    context.log.info(`[edge-rollback] validSuggestions count: ${validSuggestions.length},
-      failedSuggestions count: ${failedSuggestions.length}`);
+    const validPatterns = validSuggestions.filter(
+      (s) => Array.isArray(s.getData()?.allowedRegexPatterns),
+    );
+    const validPerUrl = validSuggestions.filter(
+      (s) => !Array.isArray(s.getData()?.allowedRegexPatterns),
+    );
+    context.log.info(
+      `[edge-rollback] valid: ${validSuggestions.length}`
+      + ` (pattern=${validPatterns.length}, perUrl=${validPerUrl.length}),`
+      + ` failed: ${failedSuggestions.length},`
+      + ` allSuggestions: ${allSuggestions.length}`,
+    );
+    validPatterns.forEach((s) => {
+      const d = s.getData();
+      context.log.info(
+        `[edge-rollback] Pattern: ${s.getId()}`
+        + ` patterns=${JSON.stringify(d?.allowedRegexPatterns)}`
+        + ` isDomainWide=${d?.isDomainWide}`,
+      );
+    });
     let succeededSuggestions = [];
 
-    // Separate domain-wide from regular suggestions
-    const domainWideSuggestions = validSuggestions.filter((s) => isDomainWideSuggestion(s));
-    const regularSuggestions = validSuggestions.filter((s) => !isDomainWideSuggestion(s));
-
-    // Handle domain-wide rollbacks separately (for prerender)
-    if (isNonEmptyArray(domainWideSuggestions)) {
-      try {
-        const tokowakaClient = TokowakaClient.createFrom(context);
-        const baseURL = site.getBaseURL();
-
-        for (const suggestion of domainWideSuggestions) {
-          try {
-            // Fetch existing metaconfig
-            // eslint-disable-next-line no-await-in-loop
-            const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
-
-            if (metaconfig && metaconfig.prerender) {
-              // Remove prerender configuration from metaconfig
-              delete metaconfig.prerender;
-
-              // Upload updated metaconfig
-              // eslint-disable-next-line no-await-in-loop
-              await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
-
-              context.log.info(`Removed prerender config from metaconfig for domain-wide suggestion ${suggestion.getId()}`);
-            }
-
-            // Remove edgeDeployed (and legacy tokowakaDeployed) from the domain-wide suggestion
-            const currentData = suggestion.getData();
-            delete currentData.edgeDeployed;
-            // TODO: To be removed, kept for backward compatibility
-            delete currentData.tokowakaDeployed;
-            delete currentData.edgeDeployed;
-            suggestion.setData(currentData);
-            suggestion.setUpdatedBy(profile?.email || 'tokowaka-rollback');
-            // eslint-disable-next-line no-await-in-loop
-            await suggestion.save();
-
-            succeededSuggestions.push(suggestion);
-
-            // Find and update all suggestions that were covered by this domain-wide deployment
-            const coveredSuggestions = allSuggestions.filter(
-              (s) => s.getData()?.coveredByDomainWide === suggestion.getId(),
-            );
-
-            if (isNonEmptyArray(coveredSuggestions)) {
-              context.log.info(`Rolling back ${coveredSuggestions.length} suggestions covered by domain-wide deployment`);
-
-              // eslint-disable-next-line no-await-in-loop
-              await Promise.all(
-                coveredSuggestions.map(async (coveredSuggestion) => {
-                  const coveredData = coveredSuggestion.getData();
-                  delete coveredData.edgeDeployed;
-                  // TODO: To be removed, kept for backward compatibility
-                  delete coveredData.tokowakaDeployed;
-                  delete coveredData.edgeDeployed;
-                  delete coveredData.coveredByDomainWide;
-                  coveredSuggestion.setData(coveredData);
-                  coveredSuggestion.setUpdatedBy(profile?.email || 'domain-wide-rollback');
-                  return coveredSuggestion.save();
-                }),
-              );
-            }
-          } catch (error) {
-            context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error rolling back domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
-            failedSuggestions.push({
-              uuid: suggestion.getId(),
-              index: suggestionIds.indexOf(suggestion.getId()),
-              message: `Rollback failed: ${error.message}`,
-              statusCode: 500,
-            });
-          }
-        }
-      } catch (error) {
-        context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during domain-wide rollback: ${error.message}`, error);
-        domainWideSuggestions.forEach((suggestion) => {
-          failedSuggestions.push({
-            uuid: suggestion.getId(),
-            index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Rollback failed: Internal server error',
-            statusCode: 500,
-          });
-        });
-      }
-    }
-
-    // Only attempt rollback if we have regular (non-domain-wide) suggestions
-    if (isNonEmptyArray(regularSuggestions)) {
+    // Delegate all rollback to the tokowaka client — domain-wide, path-level, and per-URL
+    // suggestions are all handled uniformly. The client also cleans up suggestions that were
+    // covered by a domain-wide or path-level pattern deployment.
+    if (isNonEmptyArray(validSuggestions)) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
 
-        // Rollback suggestions
         const result = await tokowakaClient.rollbackSuggestions(
           site,
           opportunity,
-          regularSuggestions,
+          validSuggestions,
+          {
+            allSuggestions,
+            updatedBy: profile?.email,
+          },
         );
 
-        // Process results
         const {
           succeededSuggestions: processedSuggestions,
           failedSuggestions: ineligibleSuggestions,
         } = result;
 
-        // Update successfully rolled back suggestions
-        // - remove edgeDeployed (and legacy tokowakaDeployed) timestamp
-        succeededSuggestions = await Promise.all(
-          processedSuggestions.map(async (suggestion) => {
-            const currentData = suggestion.getData();
-            delete currentData.edgeDeployed;
-            // TODO: To be removed, kept for backward compatibility
-            delete currentData.tokowakaDeployed;
-            delete currentData.edgeDeployed;
-            suggestion.setData(currentData);
-            suggestion.setUpdatedBy(profile?.email || 'tokowaka-rollback');
-            return suggestion.save();
-          }),
-        );
+        succeededSuggestions = processedSuggestions;
 
-        // Add ineligible suggestions to failed list
         ineligibleSuggestions.forEach((item) => {
           context.log.info(`[edge-rollback-failed] site: ${apexBaseUrl}, ${opportunity.getType()}`
           + ` suggestion ${item.suggestion.getId()} is ineligible: ${item.reason}`);
@@ -2457,14 +2414,13 @@ function SuggestionsController(ctx, sqs, env) {
             uuid: item.suggestion.getId(),
             index: suggestionIds.indexOf(item.suggestion.getId()),
             message: item.reason,
-            statusCode: 400,
+            statusCode: item.statusCode || 400,
           });
         });
 
         context.log.info(`[edge-rollback] Successfully rolled back ${succeededSuggestions.length} suggestions from Edge by ${profile?.email || 'tokowaka-rollback'}`);
       } catch (error) {
-        context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during Tokowaka rollback: ${error.message}`, error);
-        // If rollback fails, mark all valid suggestions as failed
+        context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during rollback: ${error.message}`, error);
         validSuggestions.forEach((suggestion) => {
           failedSuggestions.push({
             uuid: suggestion.getId(),
