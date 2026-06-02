@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { CAP_ORG_READ_ALL, CAP_SITE_READ_ALL } from './capability-constants.js';
+import { CAP_ORG_READ_ALL, CAP_SITE_CREATE, CAP_SITE_READ_ALL } from './capability-constants.js';
 
 /**
  * Routes that are intentionally excluded from S2S consumer access.
@@ -330,7 +330,7 @@ const routeRequiredCapabilities = {
   // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
   // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
   'GET /sites': CAP_SITE_READ_ALL,
-  'POST /sites': 'site:write',
+  'POST /sites': CAP_SITE_CREATE,
   'POST /sites/detect/jobs': 'site:write',
   'GET /sites/detect/jobs/:jobId': 'site:read',
   'GET /sites.csv': 'site:read',

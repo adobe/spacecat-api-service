@@ -308,6 +308,109 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only admins can create new sites');
   });
 
+  describe('POST /sites - S2S site:create capability', () => {
+    function makeS2SConsumer({ clientId = 'svc-sandbox', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
+      return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
+    }
+
+    function makeFreshConsumer({
+      id = 'consumer-id-sandbox',
+      capabilities = ['site:write'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) {
+      return {
+        getId: () => id,
+        getCapabilities: () => capabilities,
+        getStatus: () => status,
+        isRevoked: () => revoked,
+      };
+    }
+
+    beforeEach(() => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      mockDataAccess.Consumer = { findByClientIdAndImsOrgId: sandbox.stub() };
+    });
+
+    it('grants access to S2S consumer with capabilities: [site:create]', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:create'] }));
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    });
+
+    it('denies S2S consumer without capability (missing-capability) → 403', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: [] }));
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Only admins can create new sites');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/sites - reason=missing-capability/,
+      );
+    });
+
+    it('denies non-S2S non-admin caller (not-s2s) → 403', async () => {
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Only admins can create new sites');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/sites - reason=not-s2s/,
+      );
+    });
+
+    it('admin user bypasses capability check entirely → 201', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.not.have.been.called;
+    });
+
+    it('denies revoked S2S consumer (revoked) → 403', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ revoked: true }));
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Only admins can create new sites');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/sites - reason=revoked/,
+      );
+    });
+
+    it('denies suspended S2S consumer (not-active) → 403', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ status: 'SUSPENDED' }));
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Only admins can create new sites');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/sites - reason=not-active/,
+      );
+    });
+  });
+
   it('returns bad request when creating a site without baseURL', async () => {
     const response = await sitesController.createSite({ data: {} });
 
