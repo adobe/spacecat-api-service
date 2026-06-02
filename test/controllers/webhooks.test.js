@@ -592,4 +592,98 @@ describe('WebhooksController', () => {
       expect(text).to.include('author <https://github.com/bob|bob>');
     });
   });
+
+  describe('EMF metrics', () => {
+    let emitMetricStub;
+    let MockedEmfController;
+
+    before(async () => {
+      emitMetricStub = sinon.stub();
+      const mod = await esmock('../../src/controllers/webhooks.js', {
+        '../../src/support/metrics-emf.js': {
+          emitMetric: emitMetricStub,
+          resolveEnvironment: () => 'dev',
+        },
+      });
+      MockedEmfController = mod.default;
+    });
+
+    beforeEach(() => {
+      emitMetricStub.reset();
+    });
+
+    function buildEmfController(envOverrides = {}) {
+      return MockedEmfController({
+        sqs: mockSqs,
+        log: mockLog,
+        env: {
+          MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
+          ...envOverrides,
+        },
+      });
+    }
+
+    it('success path emits WebhookReceived, WebhookEnqueued, and WebhookProcessingMillis', async () => {
+      const emfController = buildEmfController();
+      const response = await emfController.processGitHubWebhook(validContext);
+
+      expect(response.status).to.equal(202);
+
+      const names = emitMetricStub.getCalls().map((c) => c.args[0].name);
+      expect(names).to.include('WebhookReceived');
+      expect(names).to.include('WebhookEnqueued');
+      expect(names).to.include('WebhookProcessingMillis');
+
+      const enqueued = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookEnqueued');
+      expect(enqueued.args[0].dimensions).to.deep.include({
+        JobType: 'pr-review',
+        TargetId: 'github-public',
+      });
+
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'enqueued' });
+      expect(millis.args[0].unit).to.equal('Milliseconds');
+    });
+
+    it('draft PR skip emits WebhookSkipped with SkipReason draft_pr', async () => {
+      const emfController = buildEmfController();
+      const ctx = {
+        ...validContext,
+        data: {
+          ...validContext.data,
+          pull_request: { ...validContext.data.pull_request, draft: true },
+        },
+      };
+      const response = await emfController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(204);
+      const skipped = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookSkipped');
+      expect(skipped).to.exist;
+      expect(skipped.args[0].dimensions).to.deep.include({ SkipReason: 'draft_pr' });
+    });
+
+    it('SQS failure emits WebhookEnqueueFailure and returns 500', async () => {
+      mockSqs.sendMessage.rejects(new Error('SQS timeout'));
+      const emfController = buildEmfController();
+      const response = await emfController.processGitHubWebhook(validContext);
+
+      expect(response.status).to.equal(500);
+      const failure = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookEnqueueFailure');
+      expect(failure).to.exist;
+    });
+
+    it('missing action field emits WebhookBadRequest with MissingField action', async () => {
+      const emfController = buildEmfController();
+      const ctx = {
+        ...validContext,
+        data: { ...validContext.data, action: undefined },
+      };
+      const response = await emfController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(400);
+      const bad = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookBadRequest');
+      expect(bad).to.exist;
+      expect(bad.args[0].dimensions).to.deep.include({ MissingField: 'action' });
+    });
+  });
 });
