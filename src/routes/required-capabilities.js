@@ -582,6 +582,7 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/topic/gap-topics': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
 

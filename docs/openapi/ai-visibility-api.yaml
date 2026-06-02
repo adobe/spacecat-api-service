@@ -1309,6 +1309,40 @@ ai-visibility-v1-prompt-brand-prompts:
     security:
       - api_key: []
 
+ai-visibility-v1-prompt-brand-prompts-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export brand prompts as CSV (Prompt v2 JSON)
+    description: |
+      Exports prompts for the target domain using Semrush `PromptService` v2 `PromptsExport`.
+      The nested `PromptsRequest` uses the same filters and sorting as
+      `/llmo/ai-visibility/v1/prompt/brand-prompts`: fixed prompt categories
+      `MENTIONS_TARGET` and `CITES_TARGET`, optional `topicId` as
+      `topic_hash = <topicId>`, `PROMPTS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`.
+      The response is the native Semrush `ExportResponse` protobuf JSON with CSV
+      `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1PromptBrandPromptsExport
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1PromptsSortByParam
+      - *sortDirectionParam
+      - *topicIdOptionalParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Brand prompts CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptBrandPromptsExportResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-v1-prompt-gap-prompts:
   get:
     tags: [ai-visibility]

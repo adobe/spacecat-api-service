@@ -44,6 +44,7 @@ const ALL_METHOD_NAMES = [
   'getV1TopicGapTopics',
   'getV1TopicGapTopicsTotals',
   'getV1PromptBrandPrompts',
+  'getV1PromptBrandPromptsExport',
   'getV1PromptGapPrompts',
   'getV1PromptPromptResponse',
 ];
@@ -84,6 +85,7 @@ describe('AiVisibilityController', () => {
   let mockHandleV1TopicGapTopics;
   let mockHandleV1TopicGapTopicsTotals;
   let mockHandleV1PromptBrandPrompts;
+  let mockHandleV1PromptBrandPromptsExport;
   let mockHandleV1PromptGapPrompts;
   let mockHandleV1PromptPromptResponse;
 
@@ -184,6 +186,9 @@ describe('AiVisibilityController', () => {
     mockHandleV1PromptBrandPrompts = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1PromptBrandPromptsExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1PromptGapPrompts = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
@@ -253,6 +258,9 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/v1/prompt/brand-prompts.js': {
         handleBrandPrompts: mockHandleV1PromptBrandPrompts,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/brand-prompts-export.js': {
+        handleBrandPromptsExport: mockHandleV1PromptBrandPromptsExport,
       },
       '../../src/support/ai-visibility/handlers/v1/prompt/gap-prompts.js': {
         handleGapPrompts: mockHandleV1PromptGapPrompts,
@@ -327,9 +335,9 @@ describe('AiVisibilityController', () => {
   });
 
   describe('returned handler object', () => {
-    it('returns an object with all 29 method names', () => {
+    it('returns an object with all 30 method names', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      expect(Object.keys(handlers)).to.have.lengthOf(29);
+      expect(Object.keys(handlers)).to.have.lengthOf(30);
       for (const name of ALL_METHOD_NAMES) {
         expect(handlers).to.have.property(name).that.is.a('function');
       }
@@ -586,6 +594,7 @@ describe('AiVisibilityController', () => {
       getV1TopicBrandTopics: mockHandleV1TopicBrandTopics,
       getV1TopicGapTopics: mockHandleV1TopicGapTopics,
       getV1PromptBrandPrompts: mockHandleV1PromptBrandPrompts,
+      getV1PromptBrandPromptsExport: mockHandleV1PromptBrandPromptsExport,
       getV1PromptGapPrompts: mockHandleV1PromptGapPrompts,
       getV1PromptPromptResponse: mockHandleV1PromptPromptResponse,
     });

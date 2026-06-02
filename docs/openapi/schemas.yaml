@@ -9689,6 +9689,28 @@ AiVisibilityV1PromptBrandPromptsResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1PromptBrandPromptsExportResponse:
+  type: object
+  description: |
+    Brand prompts CSV export from `GET /llmo/ai-visibility/v1/prompt/brand-prompts-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: brand-prompts.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityV1PromptGapPromptRow:
   type: object
   description: |
