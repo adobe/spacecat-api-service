@@ -14,6 +14,7 @@ import crypto from 'crypto';
 import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { extractClassificationMetadata, parseDestinations, classifyDestination } from './github-targets.js';
+import { emitMetric, resolveEnvironment } from './metrics-emf.js';
 
 const SIGNATURE_PATTERN = /^sha256=[a-f0-9]{64}$/;
 const WEBHOOK_PATH_PATTERN = /^\/?webhooks\//;
@@ -38,20 +39,26 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
   // (already logged) on empty / oversized. Two-tier: a Content-Length precheck
   // (honest-client-only; attacker can omit the header) then the post-read byte
   // length (the real enforcement). request.text() returns the cached body.
-  async readBodyWithLimits(request) {
+  // The `rejected` callback receives a stable reason label and emits a metric;
+  // it is provided by checkAuth once context.env is available. Defaults to a
+  // no-op so a standalone call (e.g. a direct unit test) cannot throw on reject.
+  async readBodyWithLimits(request, rejected = () => {}) {
     const contentLength = Number(request.headers.get('content-length'));
     if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
       this.log(`Payload too large: ${contentLength} bytes`, 'warn');
+      rejected('body_too_large');
       return null;
     }
     const rawBody = await request.text();
     if (!rawBody) {
       this.log('Empty request body for webhook', 'warn');
+      rejected('empty_body');
       return null;
     }
     const byteLength = Buffer.byteLength(rawBody, 'utf8');
     if (byteLength > MAX_BODY_BYTES) {
       this.log(`Payload too large after read: ${byteLength} bytes`, 'warn');
+      rejected('body_too_large');
       return null;
     }
     return rawBody;
@@ -69,11 +76,26 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
     if (!signature) {
       return null;
     }
+
+    // Best-effort metric helpers — defined here so context.env is in scope.
+    // Both swallow errors (emitMetric is itself best-effort, and these are
+    // called on auth-rejection paths where we must never throw).
+    const environment = resolveEnvironment(context.env);
+    const rejected = (reason) => emitMetric(
+      { name: 'WebhookRejected', dimensions: { Reason: reason } },
+      { environment },
+    );
+    const misconfigured = () => emitMetric(
+      { name: 'WebhookDestinationsMisconfigured' },
+      { environment },
+    );
+
     // Validate signature format FIRST: structural check, no I/O, no config.
     // Runs before any secret/registry work to prevent error-log amplification on
     // pre-auth malformed requests, and before timingSafeEqual to avoid a throw.
     if (!SIGNATURE_PATTERN.test(signature)) {
       this.log('Malformed X-Hub-Signature-256 header', 'warn');
+      rejected('malformed_signature');
       return null;
     }
 
@@ -85,6 +107,7 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
     // secret it cannot forge.
     if (!context.env?.GITHUB_DESTINATIONS) {
       this.log('GITHUB_DESTINATIONS not configured (misconfigured=true)', 'error');
+      misconfigured();
       return null;
     }
     let destinations;
@@ -95,15 +118,17 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
       // delivery). Do NOT interpolate the value (it is secret-bearing); the
       // parser's message names only keys/fields, never secrets.
       this.log(`Invalid GITHUB_DESTINATIONS config (misconfigured=true): ${e.message}`, 'error');
+      misconfigured();
       return null;
     }
-    const rawBody = await this.readBodyWithLimits(request);
+    const rawBody = await this.readBodyWithLimits(request, rejected);
     if (rawBody === null) {
       return null;
     }
     const meta = extractClassificationMetadata(rawBody);
     if (meta === null) {
       this.log('Webhook body is not valid JSON', 'warn');
+      rejected('not_json');
       return null;
     }
     const result = classifyDestination(meta, destinations);
@@ -111,12 +136,14 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
     // NO HMAC. The body is untrusted, so do not interpolate meta.host.
     if (result.skip) {
       this.log('Skipping webhook: host is not an in-scope GitHub destination', 'warn');
+      rejected('non_inscope_host');
       return null;
     }
     // webhook_secret is inline + validated non-empty at parse, so it is present
     // on a validated registry; verify HMAC once.
     if (!verifySignature(signature, rawBody, result.webhook_secret)) {
       this.log('HMAC signature mismatch', 'warn');
+      rejected('hmac_mismatch');
       return null;
     }
     return new AuthInfo()

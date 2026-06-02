@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -11,15 +11,18 @@
  */
 
 /**
- * Single source of truth for capability strings shared between
- * `routes/required-capabilities.js` (Layer 1, s2sAuthWrapper) and the controller-level
- * `hasS2SCapability` checks (Layer 2). Both layers must use the same string for the same
- * route - drift is caught by `test/routes/capability-constants.test.js`.
- *
- * See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the design.
+ * Canonical list of CloudWatch EMF metric names emitted by the GitHub webhook
+ * pipeline (auth handler + controller). Used as a drift-guard: the metrics.yaml
+ * catalog must reference exactly these names. Import here to avoid typos.
  */
-
-export const CAP_SITE_READ_ALL = 'site:readAll';
-export const CAP_ORG_READ_ALL = 'organization:readAll';
-
-export const CAP_SITE_CREATE = 'site:create';
+export const WEBHOOK_METRICS = Object.freeze([
+  'WebhookReceived',
+  'WebhookRejected',
+  'WebhookDestinationsMisconfigured',
+  'WebhookBadRequest',
+  'WebhookSkipped',
+  'WebhookEnqueued',
+  'WebhookEnqueueFailure',
+  'WebhookHandlerError',
+  'WebhookProcessingMillis',
+]);

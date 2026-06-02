@@ -374,3 +374,21 @@ None. Previously-open items resolved:
 - [ ] spacecat-shared PR — owner: TBD, ticket: TBD
 - [ ] api-service PR (blocked on spacecat-shared release) — owner: TBD, ticket: TBD
 - [ ] project-elmo-ui PR (blocked on api-service `ci` deploy) — owner: TBD, ticket: TBD
+
+## 11. Agreed deviation — market detail endpoint exposing `semrushProjectId` (2026-05-29)
+
+§1/§2 of this spec drop `semrushProjectId` from public DTOs as a routing detail.
+A follow-up requirement not anticipated here — embedding the **Semrush AIO renderer
+MFE** in the UI — genuinely needs the upstream project id to mount the dashboard
+for the selected market. Embedding the provider's own widget cannot fully hide the
+provider's id at that one bridge point.
+
+Agreed deviation (owner: Rainer Friederich): re-expose `semrushProjectId` at a
+single, explicit detail route rather than on the list. The `/serenity/markets`
+list stays provider-free; the id surfaces only via
+`GET /serenity/markets/:geoTargetId/:languageCode` → `SerenityMarketDetail`. This
+contains the leak to one named route and one consumer, which is deprecable/swappable
+in isolation if the upstream provider changes. The field keeps the honest
+`semrushProjectId` name (same rule as `semrushPromptId`).
+
+Full analysis, contract, and validation gates: `docs/specs/2026-05-29-serenity-market-detail-endpoint.md`.
