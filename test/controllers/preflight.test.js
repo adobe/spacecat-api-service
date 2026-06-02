@@ -1232,9 +1232,9 @@ describe('Preflight Controller', () => {
       const [calledUrl, calledOptions] = fetchStub.secondCall.args;
       expect(calledUrl).to.equal('https://mysticat.example.com/v1/preflight/analyze');
       const body = JSON.parse(calledOptions.body);
-      expect(body.mode).to.equal('suggest');
       expect(body.site_id).to.equal('test-site-123');
       expect(body.url).to.equal('https://main--example-site.aem.page/test.html');
+      expect(body.mode).to.be.undefined;
       expect(body.audits).to.be.undefined;
     });
 

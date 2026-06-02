@@ -329,7 +329,6 @@ function PreflightController(ctx, log, env) {
    * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
    * @param {string} siteId - The site ID.
    * @param {string} url - The page URL to analyze.
-   * @param {string} step - The audit step (identify or suggest).
    * @param {string} [authorizationHeader] - Optional auth header forwarded to Mysticat.
    */
   async function callMysticatAnalyze(
@@ -337,7 +336,6 @@ function PreflightController(ctx, log, env) {
     scanId,
     siteId,
     url,
-    step,
     authorizationHeader,
   ) {
     const controller = new AbortController();
@@ -354,7 +352,6 @@ function PreflightController(ctx, log, env) {
         body: JSON.stringify({
           site_id: siteId,
           url,
-          mode: step,
           scan_id: scanId,
           persist: true,
         }),
@@ -506,7 +503,6 @@ function PreflightController(ctx, log, env) {
         asyncJob.getId(),
         siteId,
         url,
-        'suggest',
         authorizationHeader,
       );
     } catch (mysticatError) {
