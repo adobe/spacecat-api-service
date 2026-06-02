@@ -1115,20 +1115,25 @@ async function performAsoPlgOnboarding({
     onboarding.setSiteId(site.getId());
     steps.siteResolved = true;
 
-    // Step 5a: Validate and correct delivery type for both new and existing sites
-    if (!presetDeliveryType) {
+    // Step 5a: Validate and correct delivery type for existing sites.
+    // Skip for newly created sites — delivery type was just set from findDeliveryType in Step 5.
+    if (!presetDeliveryType && !steps.siteCreated) {
       const existingDeliveryType = site.getDeliveryType();
-      const detectedDeliveryType = await findDeliveryType(baseURL);
+      let detectedDeliveryType;
+      try {
+        detectedDeliveryType = await findDeliveryType(baseURL);
+      } catch (e) {
+        log.warn(`Failed to detect delivery type for ${baseURL}: ${e.message}`);
+      }
       if (
         detectedDeliveryType
         && detectedDeliveryType !== SiteModel.DELIVERY_TYPES.OTHER
         && detectedDeliveryType !== existingDeliveryType
       ) {
+        log.info(`Clearing stale config for site ${site.getId()} — previousDeliveryConfig=${JSON.stringify(site.getDeliveryConfig())} previousHlxConfig=${JSON.stringify(site.getHlxConfig())}`);
         site.setDeliveryType(detectedDeliveryType);
-        if (existingDeliveryType) {
-          site.setDeliveryConfig(null);
-          site.setHlxConfig(null);
-        }
+        site.setDeliveryConfig(null);
+        site.setHlxConfig(null);
         log.info(`Updated delivery type for site ${site.getId()} from ${existingDeliveryType} to ${detectedDeliveryType}`);
       }
     }

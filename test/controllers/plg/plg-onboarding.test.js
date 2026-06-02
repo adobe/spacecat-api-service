@@ -3364,8 +3364,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // called twice: once in the RUM-fail path, once in Step 5b.5 to validate delivery type
-      expect(findDeliveryTypeStub).to.have.been.calledTwice;
+      // called once in the RUM-fail path; Step 5a is skipped (siteCreated=true)
+      expect(findDeliveryTypeStub).to.have.been.calledOnce;
     });
 
     it('calls findDeliveryType for existing site and updates delivery type when detected type differs', async () => {
@@ -3383,7 +3383,40 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(findDeliveryTypeStub).to.have.been.calledOnceWith(TEST_BASE_URL);
       expect(existingSite.setDeliveryType).to.have.been.calledWith('aem_edge');
+      expect(existingSite.setDeliveryConfig).to.have.been.calledWith(null);
+      expect(existingSite.setHlxConfig).to.have.been.calledWith(null);
       expect(mockLog.info).to.have.been.calledWithMatch(/Updated delivery type.*aem_cs.*aem_edge/);
+      expect(mockLog.info).to.have.been.calledWithMatch(/Clearing stale config/);
+    });
+
+    it('does not mutate delivery type when detected type matches existing', async () => {
+      findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.resolves('aem_edge');
+      const existingSite = createMockSite({ deliveryType: 'aem_edge', orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingSite.setDeliveryType).to.not.have.been.called;
+      expect(existingSite.setDeliveryConfig).to.not.have.been.called;
+      expect(existingSite.setHlxConfig).to.not.have.been.called;
+    });
+
+    it('skips Step 5a entirely for a new site — no redundant findDeliveryType call', async () => {
+      findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.resolves('aem_edge');
+      // no existing site — Site.findByBaseURL returns null so Site.create is called
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      // findDeliveryType called once in Step 5 for site creation; Step 5a is skipped
+      expect(findDeliveryTypeStub).to.have.been.calledOnce;
+      expect(mockLog.info).to.not.have.been.calledWithMatch(/Clearing stale config/);
     });
 
     it('does not use site delivery type OTHER — calls findDeliveryType when RUM fails', async () => {
@@ -3399,10 +3432,24 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // called twice: once in the RUM-fail path (type is OTHER) and once in Step 5b.5
+      // called twice: once in the RUM-fail path (type is OTHER) and once in Step 5a
       expect(findDeliveryTypeStub).to.have.been.calledTwice;
       expect(findDeliveryTypeStub).to.have.been.calledWith(TEST_BASE_URL);
       expect(mockLog.info).to.not.have.been.calledWithMatch(/Using existing site delivery type/);
+    });
+
+    it('continues onboarding when findDeliveryType throws in Step 5a', async () => {
+      findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.rejects(new Error('network timeout'));
+      const existingSite = createMockSite({ deliveryType: 'aem_cs', orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingSite.setDeliveryType).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to detect delivery type/);
     });
   });
 
