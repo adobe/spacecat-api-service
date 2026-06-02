@@ -153,6 +153,41 @@ site-cdn-logs-config:
 site-scraper-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+    summary: Get scraper configuration for a site
+    description: |
+      Returns the per-site scraper configuration in the same narrow shape as
+      the PATCH endpoint. The full site configuration (which may include
+      unrelated secrets such as `tokowakaConfig.apiKey`) is not echoed.
+
+      When no scraper configuration is persisted for the site, `scraperConfig`
+      is returned as an empty object so callers do not need to handle a
+      separate "missing" case.
+    operationId: getSiteScraperConfig
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+    responses:
+      '200':
+        description: |
+          Scraper configuration retrieved successfully. The response contains
+          only `siteId` and the persisted `scraperConfig`.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ScraperConfigResponse'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
   patch:
     tags:
       - site

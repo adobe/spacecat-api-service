@@ -79,6 +79,7 @@ describe('SerenityController', () => {
     handleUpdatePrompt: sinon.stub(),
     handleBulkDeletePrompts: sinon.stub(),
     handleListMarkets: sinon.stub(),
+    handleGetMarket: sinon.stub(),
     handleCreateMarket: sinon.stub(),
     handleDeleteMarket: sinon.stub(),
     handleListTags: sinon.stub(),
@@ -128,6 +129,7 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/handlers/markets.js': {
         handleListMarkets: handlers.handleListMarkets,
+        handleGetMarket: handlers.handleGetMarket,
         handleCreateMarket: handlers.handleCreateMarket,
         handleDeleteMarket: handlers.handleDeleteMarket,
         handleListTags: handlers.handleListTags,
@@ -351,6 +353,87 @@ describe('SerenityController', () => {
       expect(body.items[0].brandId).to.equal(BRAND);
     });
 
+    it('getMarket forwards the path slice params to handleGetMarket and wraps the result in ok()', async () => {
+      handlers.handleGetMarket.resolves({
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        semrushProjectId: 'proj-us-en',
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: 'EN' },
+      }));
+      expect(response.status).to.equal(200);
+      const body = await readBody(response);
+      expect(body.semrushProjectId).to.equal('proj-us-en');
+      const { args } = handlers.handleGetMarket.firstCall;
+      // Slice forwarded as (geoTargetId:int, languageCode:lowercased).
+      expect(args[2]).to.equal(2840);
+      expect(args[3]).to.equal('en');
+    });
+
+    // Same strict /^\d+$/ guard as deleteMarket: a non-digit suffix must
+    // surface as null so the handler 400s rather than resolving the legit
+    // (2840, en) slice.
+    it('getMarket null-routes a non-digit geoTargetId (e.g. "2840abc") to the handler', async () => {
+      handlers.handleGetMarket.rejects(
+        new ErrorWithStatusCode('geoTargetId must be a positive integer', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840abc', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      expect(handlers.handleGetMarket.firstCall.args[2]).to.equal(null);
+    });
+
+    it('getMarket maps a handler 404 marketNotFound to a 404 envelope carrying that token', async () => {
+      const err = new ErrorWithStatusCode('No market for this slice', 404);
+      err.code = 'marketNotFound';
+      handlers.handleGetMarket.rejects(err);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(404);
+      const body = await readBody(response);
+      expect(body.error).to.equal('marketNotFound');
+    });
+
+    it('getMarket 401s (IMS-only) before dispatching when the caller is not IMS-authenticated', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        authType: 'jwt',
+        params: { geoTargetId: '2840', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(401);
+      expect(handlers.handleGetMarket).not.to.have.been.called;
+    });
+
+    it('getMarket forwards null for an empty languageCode path segment (handler 400s)', async () => {
+      handlers.handleGetMarket.rejects(
+        new ErrorWithStatusCode('languageCode must match', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: '' },
+      }));
+      expect(response.status).to.equal(400);
+      // Exercises the `: null` side of the `pLang ? ...toLowerCase() : null` guard.
+      expect(handlers.handleGetMarket.firstCall.args[3]).to.equal(null);
+    });
+
+    it('getMarket returns the authorize() error (403) and does not dispatch when the caller lacks org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleGetMarket).not.to.have.been.called;
+    });
+
     it('upstream SerenityTransportError maps to 502 envelope without leaking provider detail', async () => {
       handlers.handleListMarkets.rejects(new MockTransportError(503, 'upstream down', { secret: 'leak' }));
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -359,6 +442,28 @@ describe('SerenityController', () => {
       const body = await readBody(response);
       expect(body.error).to.equal('serenityUpstreamError');
       expect(body.message).to.equal('Upstream request failed');
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+    });
+
+    it('upstream SerenityTransportError 403 propagates as 403 forbidden', async () => {
+      handlers.handleListMarkets.rejects(new MockTransportError(403, 'invalid access attempt', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(403);
+      const body = await readBody(response);
+      expect(body.error).to.equal('forbidden');
+      expect(body.message).to.equal('invalid access attempt');
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+    });
+
+    it('upstream SerenityTransportError 401 propagates as 401 authenticationRequired', async () => {
+      handlers.handleListMarkets.rejects(new MockTransportError(401, 'token expired', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(401);
+      const body = await readBody(response);
+      expect(body.error).to.equal('authenticationRequired');
+      expect(body.message).to.equal('token expired');
       expect(JSON.stringify(body)).not.to.match(/leak/);
     });
 
@@ -388,6 +493,7 @@ describe('SerenityController', () => {
       expect(controller.updatePrompt).to.be.a('function');
       expect(controller.bulkDeletePrompts).to.be.a('function');
       expect(controller.listMarkets).to.be.a('function');
+      expect(controller.getMarket).to.be.a('function');
       expect(controller.createMarket).to.be.a('function');
       expect(controller.deleteMarket).to.be.a('function');
       expect(controller.listTags).to.be.a('function');
