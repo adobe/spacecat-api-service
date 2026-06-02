@@ -15,7 +15,7 @@ import { iso31661Alpha2ToNumeric } from 'iso-3166';
 import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { isUpstreamGone } from '../errors.js';
+import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -151,6 +151,59 @@ export async function handleListMarkets(transport, dataAccess, brandId, semrushW
       createdAt: row.getCreatedAt(),
       updatedAt: row.getUpdatedAt(),
     })),
+  };
+}
+
+/**
+ * GET /serenity/markets/:geoTargetId/:languageCode — resolve a single slice to
+ * its full detail, including the upstream `semrushProjectId`.
+ *
+ * This is the ONE place on the /serenity/* surface that deliberately exposes
+ * the upstream project id. The list endpoint (handleListMarkets) stays
+ * provider-free (LLMO-5190); the id surfaces here only because the embedded
+ * Semrush AIO renderer MFE needs it to mount the dashboard for the selected
+ * market. See docs/specs/2026-05-29-serenity-market-detail-endpoint.md for the
+ * decision and the documented deviation from the abstraction spec.
+ *
+ * Slice-key validation mirrors handleDeleteMarket. A missing row is a hard 404
+ * (`marketNotFound`) — unlike the list, "no such slice" is NOT an empty
+ * success here, because the caller addressed one specific resource. Pure DB
+ * read: no upstream call, so it takes neither `transport` nor
+ * `semrushWorkspaceId` (the controller's `authorize()` still enforces the
+ * workspace check, keeping parity with handleListMarkets at the boundary).
+ */
+export async function handleGetMarket(dataAccess, brandId, geoTargetId, languageCode) {
+  if (normalizeGeoTargetId(geoTargetId) === null) {
+    throw new ErrorWithStatusCode('geoTargetId must be a positive integer', 400);
+  }
+  if (normalizeLanguageCode(languageCode) === null) {
+    throw new ErrorWithStatusCode(
+      'languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$',
+      400,
+    );
+  }
+
+  const row = await dataAccess.BrandSemrushProject.findBySlice(
+    brandId,
+    geoTargetId,
+    languageCode,
+  );
+  if (!row) {
+    const err = new ErrorWithStatusCode(
+      'No market for this brand and (geoTargetId, languageCode) slice',
+      404,
+    );
+    err.code = ERROR_CODES.MARKET_NOT_FOUND;
+    throw err;
+  }
+
+  return {
+    brandId,
+    geoTargetId: row.getGeoTargetId(),
+    languageCode: row.getLanguageCode(),
+    semrushProjectId: row.getSemrushProjectId(),
+    createdAt: row.getCreatedAt(),
+    updatedAt: row.getUpdatedAt(),
   };
 }
 
