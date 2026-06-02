@@ -164,6 +164,18 @@ const FIXTURES = {
       market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
     },
   },
+  getSerenityMarket: {
+    expectedStatus: 200,
+    controllerMethod: 'getMarket',
+    handlerName: 'handleGetMarket',
+    handlerResult: {
+      brandId: BRAND,
+      geoTargetId: 2840,
+      languageCode: 'en',
+      semrushProjectId: 'proj-us-en',
+    },
+    params: { geoTargetId: '2840', languageCode: 'en' },
+  },
   deleteSerenityMarket: {
     expectedStatus: 204,
     controllerMethod: 'deleteMarket',
@@ -238,6 +250,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleUpdatePrompt: sinon.stub(),
         handleBulkDeletePrompts: sinon.stub(),
         handleListMarkets: sinon.stub(),
+        handleGetMarket: sinon.stub(),
         handleCreateMarket: sinon.stub(),
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
@@ -269,6 +282,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           },
           '../../src/support/serenity/handlers/markets.js': {
             handleListMarkets: handlerStubs.handleListMarkets,
+            handleGetMarket: handlerStubs.handleGetMarket,
             handleCreateMarket: handlerStubs.handleCreateMarket,
             handleDeleteMarket: handlerStubs.handleDeleteMarket,
             handleListTags: handlerStubs.handleListTags,

@@ -1,3 +1,10 @@
+## [1.535.4](https://github.com/adobe/spacecat-api-service/compare/v1.535.3...v1.535.4) (2026-06-02)
+
+
+### Bug Fixes
+
+* Update CONSUMER_INTEGRATION_GUIDE.md with channel name ([35ca4f6](https://github.com/adobe/spacecat-api-service/commit/35ca4f664f65063f55e16f093b0b09af8a54248b))
+
 ## [1.535.3](https://github.com/adobe/spacecat-api-service/compare/v1.535.2...v1.535.3) (2026-06-02)
 
 

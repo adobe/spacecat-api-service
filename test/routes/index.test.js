@@ -753,6 +753,7 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
