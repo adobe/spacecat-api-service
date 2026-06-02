@@ -280,3 +280,7 @@ The `multipartFormData` wrapper uses the following optional env variables:
 MULTIPART_FORM_FILE_COUNT_LIMIT=Maximum number of files which can be included in a multipart/form-data request (defaults to 5)
 MULTIPART_FORM_MAX_FILE_SIZE_MB=Maximum file size in MB for a single file in a multipart/form-data request (defaults to 20)
 ```
+
+## Operations & Runbooks
+
+- [Release-caused outage (diagnose → verify → revert)](docs/runbooks/release-caused-outage.md) — what to do when the API starts failing broadly after a deploy, including how to confirm a release is the cause before reverting and the `main is not a function` bundle-failure signature.
