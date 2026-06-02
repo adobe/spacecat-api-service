@@ -656,6 +656,8 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
   /llmo/ai-visibility/v1/topic/brand-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
+  /llmo/ai-visibility/v1/topic/brand-topics-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics-export'
   /llmo/ai-visibility/v1/topic/gap-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics'
   /llmo/ai-visibility/v1/prompt/brand-prompts:

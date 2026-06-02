@@ -492,6 +492,7 @@ describe('getRouteHandlers', () => {
     getTopicsResearch: sinon.stub(),
     getTopicsStats: sinon.stub(),
     getV1TopicBrandTopics: sinon.stub(),
+    getV1TopicBrandTopicsExport: sinon.stub(),
     getV1TopicBrandTopicsTotals: sinon.stub(),
     getV1TopicGapTopics: sinon.stub(),
     getV1TopicGapTopicsTotals: sinon.stub(),
@@ -636,6 +637,7 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/topics/research',
       'GET /llmo/ai-visibility/topics/stats',
       'GET /llmo/ai-visibility/v1/topic/brand-topics',
+      'GET /llmo/ai-visibility/v1/topic/brand-topics-export',
       'GET /llmo/ai-visibility/v1/topic/brand-topics-totals',
       'GET /llmo/ai-visibility/v1/topic/gap-topics',
       'GET /llmo/ai-visibility/v1/topic/gap-topics-totals',
@@ -700,6 +702,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research']).to.equal(mockAiVisibilityController.getTopicsResearch);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/stats']).to.equal(mockAiVisibilityController.getTopicsStats);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics']).to.equal(mockAiVisibilityController.getV1TopicBrandTopics);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics-export']).to.equal(mockAiVisibilityController.getV1TopicBrandTopicsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics-totals']).to.equal(mockAiVisibilityController.getV1TopicBrandTopicsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics']).to.equal(mockAiVisibilityController.getV1TopicGapTopics);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics-totals']).to.equal(mockAiVisibilityController.getV1TopicGapTopicsTotals);

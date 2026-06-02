@@ -40,6 +40,7 @@ const ALL_METHOD_NAMES = [
   'getTopicsResearch',
   'getTopicsStats',
   'getV1TopicBrandTopics',
+  'getV1TopicBrandTopicsExport',
   'getV1TopicBrandTopicsTotals',
   'getV1TopicGapTopics',
   'getV1TopicGapTopicsTotals',
@@ -82,6 +83,7 @@ describe('AiVisibilityController', () => {
   let mockHandleTopicsResearchBrands;
   let mockHandleTopicsResearchSourceDomains;
   let mockHandleV1TopicBrandTopics;
+  let mockHandleV1TopicBrandTopicsExport;
   let mockHandleV1TopicBrandTopicsTotals;
   let mockHandleV1TopicGapTopics;
   let mockHandleV1TopicGapTopicsTotals;
@@ -176,6 +178,9 @@ describe('AiVisibilityController', () => {
     mockHandleV1TopicBrandTopics = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1TopicBrandTopicsExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1TopicBrandTopicsTotals = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
@@ -249,6 +254,9 @@ describe('AiVisibilityController', () => {
         handleBrandTopics: mockHandleV1TopicBrandTopics,
         buildBrandTopicsDimensionFilterQl: sandbox.stub().returns(''),
         buildBrandTopicsMetricFilterQl: sandbox.stub().returns({ ok: true, metricFilterQl: '' }),
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/brand-topics-export.js': {
+        handleBrandTopicsExport: mockHandleV1TopicBrandTopicsExport,
       },
       '../../src/support/ai-visibility/handlers/v1/topic/brand-topics-totals.js': {
         handleBrandTopicsTotals: mockHandleV1TopicBrandTopicsTotals,
@@ -343,9 +351,9 @@ describe('AiVisibilityController', () => {
   });
 
   describe('returned handler object', () => {
-    it('returns an object with all 31 method names', () => {
+    it('returns an object with all 32 method names', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      expect(Object.keys(handlers)).to.have.lengthOf(31);
+      expect(Object.keys(handlers)).to.have.lengthOf(32);
       for (const name of ALL_METHOD_NAMES) {
         expect(handlers).to.have.property(name).that.is.a('function');
       }
@@ -600,6 +608,7 @@ describe('AiVisibilityController', () => {
       getTopicsResearch: mockHandleTopicsResearch,
       getTopicsStats: mockHandleTopicsStats,
       getV1TopicBrandTopics: mockHandleV1TopicBrandTopics,
+      getV1TopicBrandTopicsExport: mockHandleV1TopicBrandTopicsExport,
       getV1TopicGapTopics: mockHandleV1TopicGapTopics,
       getV1PromptBrandPrompts: mockHandleV1PromptBrandPrompts,
       getV1PromptBrandPromptsExport: mockHandleV1PromptBrandPromptsExport,

@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 27 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – 28 GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 
@@ -1154,6 +1154,44 @@ ai-visibility-v1-topic-brand-topics:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1TopicBrandTopicsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-brand-topics-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export brand topics as CSV (Topic v2 JSON)
+    description: |
+      Exports brand-associated topics using Semrush `TopicService` v2 `BrandTopicsExport`.
+      The nested `BrandTopicsRequest` uses the same filters and sorting as
+      `/llmo/ai-visibility/v1/topic/brand-topics`: fixed prompt categories
+      `MENTIONS_TARGET` and `CITES_TARGET`, `searchQuery` as `topic CONTAINS "<searchQuery>"`,
+      volume and visibility range filters, `BRAND_TOPICS_ORDER_BY` sorting, and `limit` / `offset`.
+      The response is the native Semrush `ExportResponse` protobuf JSON with CSV
+      `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1TopicBrandTopicsExport
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1BrandTopicsSortByParam
+      - *sortDirectionParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+      - *v1BrandTopicsVisibilityFromParam
+      - *v1BrandTopicsVisibilityToParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Brand topics CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicBrandTopicsExportResponse'
       <<: *errorResponses
     security:
       - api_key: []
