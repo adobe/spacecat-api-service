@@ -1,3 +1,10 @@
+## [1.535.3](https://github.com/adobe/spacecat-api-service/compare/v1.535.2...v1.535.3) (2026-06-02)
+
+
+### Bug Fixes
+
+* **serenity:** propagate upstream 401/403 instead of mapping to 502 ([#2517](https://github.com/adobe/spacecat-api-service/issues/2517)) ([9d2e6b6](https://github.com/adobe/spacecat-api-service/commit/9d2e6b64c126e07e1bdf9dcd5e76a984c8d07104))
+
 ## [1.535.2](https://github.com/adobe/spacecat-api-service/compare/v1.535.1...v1.535.2) (2026-06-01)
 
 
