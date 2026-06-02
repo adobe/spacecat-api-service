@@ -100,5 +100,13 @@ export default function serenityTests(getHttpClient) {
       );
       expect(res.status).to.equal(401);
     });
+
+    it('401s on GET market detail with JWT auth (same IMS-only contract)', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.get(
+        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/markets/2840/en`,
+      );
+      expect(res.status).to.equal(401);
+    });
   });
 }
