@@ -1,3 +1,10 @@
+# [1.538.0](https://github.com/adobe/spacecat-api-service/compare/v1.537.0...v1.538.0) (2026-06-02)
+
+
+### Features
+
+* **s2s:** allow S2S consumers to createSite via adminGrants registry field ([#2523](https://github.com/adobe/spacecat-api-service/issues/2523)) ([a484a35](https://github.com/adobe/spacecat-api-service/commit/a484a358f00bd595c2240364c3a43c454491d788))
+
 # [1.537.0](https://github.com/adobe/spacecat-api-service/compare/v1.536.0...v1.537.0) (2026-06-02)
 
 
