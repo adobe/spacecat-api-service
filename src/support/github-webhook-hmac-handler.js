@@ -40,8 +40,9 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
   // (honest-client-only; attacker can omit the header) then the post-read byte
   // length (the real enforcement). request.text() returns the cached body.
   // The `rejected` callback receives a stable reason label and emits a metric;
-  // it is provided by checkAuth once context.env is available.
-  async readBodyWithLimits(request, rejected) {
+  // it is provided by checkAuth once context.env is available. Defaults to a
+  // no-op so a standalone call (e.g. a direct unit test) cannot throw on reject.
+  async readBodyWithLimits(request, rejected = () => {}) {
     const contentLength = Number(request.headers.get('content-length'));
     if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
       this.log(`Payload too large: ${contentLength} bytes`, 'warn');

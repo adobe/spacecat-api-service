@@ -83,7 +83,7 @@ function WebhooksController(context) {
         return await fn(ctx);
       } catch (e) {
         log.error('GitHub webhook handler error', e);
-        emitMetric({ name: 'WebhookHandlerError' }, { environment: resolveEnvironment(env) });
+        emitMetric({ name: 'WebhookHandlerError', dimensions: { Reason: 'uncaught_exception' } }, { environment: resolveEnvironment(env) });
         return internalServerError('Internal error');
       }
     };
@@ -135,7 +135,7 @@ function WebhooksController(context) {
       // with a 5xx (GitHub retries; visible failed delivery), not a 204 (lost).
       if (!reviewerLogin) {
         log.error('No reviewer login resolved (auth profile missing reviewer_login)', { deliveryId });
-        emitMetric({ name: 'WebhookHandlerError' }, { environment });
+        emitMetric({ name: 'WebhookHandlerError', dimensions: { Reason: 'missing_reviewer_login' } }, { environment });
         outcome = 'handler_error';
         return internalServerError('reviewer login not configured');
       }

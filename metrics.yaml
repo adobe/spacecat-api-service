@@ -59,7 +59,9 @@ metrics:
     meaning: >
       Incremented after a job is successfully sent to SQS. JobType is the
       resolved job type (e.g. pr-review). TargetId is the destination
-      identifier from the GITHUB_DESTINATIONS registry.
+      identifier from the GITHUB_DESTINATIONS registry (expected cardinality
+      under ~20; growth past that should be a deliberate conversation, not a
+      silent dimension explosion).
 
   - name: WebhookEnqueueFailure
     unit: Count
@@ -73,11 +75,14 @@ metrics:
     unit: Count
     dimensions:
       - Environment
+      - Reason
     meaning: >
       Incremented on any uncaught exception in the controller (errorHandler
       catch) or when reviewer_login is missing from the auth profile (fail-
-      closed 500). Covers both the outer catch-all and the internal reviewer
-      check.
+      closed 500). Reason values: uncaught_exception (outer catch-all; also
+      fires when an enqueue failure rethrows), missing_reviewer_login (internal
+      fail-closed reviewer check). Lets alerting separate code bugs from config
+      errors.
 
   - name: WebhookProcessingMillis
     unit: Milliseconds
@@ -87,4 +92,7 @@ metrics:
     meaning: >
       End-to-end controller latency in milliseconds, emitted via the finally
       block so it fires on all code paths. Outcome matches the terminal state:
-      enqueued, skipped, bad_request, handler_error, enqueue_failure, unknown.
+      enqueued, skipped, bad_request, handler_error, enqueue_failure. The
+      `unknown` sentinel is the default and fires only when an error is thrown
+      before any outcome is classified; that latency includes the failed work,
+      so success-only latency panels should exclude it.

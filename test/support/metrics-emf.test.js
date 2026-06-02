@@ -58,7 +58,13 @@ describe('metrics-emf', () => {
       { name: 'WebhookHandlerError', dimensions: { Nope: undefined } },
       { environment: 'dev', sink: (l) => lines.push(l) },
     );
-    expect(JSON.parse(lines[0])).to.not.have.property('Nope');
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed).to.not.have.property('Nope');
+    // The key must also be absent from the Dimensions array, or CloudWatch would
+    // reject the line (a dimension key with no matching top-level property). Guards
+    // a regression that filters null dims after the dims->Dimensions mapping.
+    // eslint-disable-next-line no-underscore-dangle
+    expect(parsed._aws.CloudWatchMetrics[0].Dimensions[0]).to.not.include('Nope');
   });
 
   it('never throws (best-effort) even if the sink throws', () => {

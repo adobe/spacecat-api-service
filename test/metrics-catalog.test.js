@@ -17,7 +17,7 @@ import { WEBHOOK_METRICS } from '../src/support/github-webhook-metrics.js';
 
 describe('webhook metrics catalog drift-guard', () => {
   it('metrics.yaml names exactly match WEBHOOK_METRICS', () => {
-    const doc = yaml.load(readFileSync(new URL('../metrics.yaml', import.meta.url)));
+    const doc = yaml.load(readFileSync(new URL('../metrics.yaml', import.meta.url), 'utf8'));
     expect(doc.metrics.map((m) => m.name).sort()).to.deep.equal([...WEBHOOK_METRICS].sort());
   });
 });

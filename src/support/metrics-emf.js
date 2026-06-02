@@ -46,7 +46,11 @@ export function resolveEnvironment(env = {}) {
  * @param {string} metric.name - CloudWatch metric name
  * @param {number} [metric.value=1] - Metric value (default 1 for counters)
  * @param {string} [metric.unit='Count'] - CloudWatch unit (Count, Milliseconds, etc.)
- * @param {object} [metric.dimensions={}] - Additional dimension key/value pairs
+ * @param {object} [metric.dimensions={}] - Additional dimension key/value pairs.
+ *   Dimension keys MUST NOT equal the metric name: in the EMF envelope the metric
+ *   value and the dimension values share one top-level namespace, so a collision
+ *   would silently overwrite the dimension. Current PascalCase metric names never
+ *   collide with the dimension keys (Environment, Event, Reason, Outcome, ...).
  * @param {object} [options] - Emission options
  * @param {string} [options.environment='dev'] - Environment dimension value
  * @param {Function} [options.sink=console.log] - Output function; receives the JSON string

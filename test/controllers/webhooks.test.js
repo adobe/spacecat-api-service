@@ -634,6 +634,12 @@ describe('WebhooksController', () => {
       expect(names).to.include('WebhookEnqueued');
       expect(names).to.include('WebhookProcessingMillis');
 
+      // Event is the only dimension sourced from a request header; assert its
+      // value so a regression in header reading (ctx.pathInfo.headers) is caught
+      // rather than silently emitting an undefined-then-dropped dimension.
+      const received = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookReceived');
+      expect(received.args[0].dimensions).to.deep.include({ Event: 'pull_request' });
+
       const enqueued = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookEnqueued');
       expect(enqueued.args[0].dimensions).to.deep.include({
         JobType: 'pr-review',
@@ -660,6 +666,8 @@ describe('WebhooksController', () => {
       const skipped = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookSkipped');
       expect(skipped).to.exist;
       expect(skipped.args[0].dimensions).to.deep.include({ SkipReason: 'draft_pr' });
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'skipped' });
     });
 
     it('SQS failure emits WebhookEnqueueFailure and returns 500', async () => {
@@ -670,6 +678,13 @@ describe('WebhooksController', () => {
       expect(response.status).to.equal(500);
       const failure = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookEnqueueFailure');
       expect(failure).to.exist;
+      // enqueue_failure rethrows: finally tags latency Outcome, then errorHandler
+      // catches and emits WebhookHandlerError{uncaught_exception}.
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'enqueue_failure' });
+      const handlerError = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookHandlerError');
+      expect(handlerError).to.exist;
+      expect(handlerError.args[0].dimensions).to.deep.include({ Reason: 'uncaught_exception' });
     });
 
     it('missing action field emits WebhookBadRequest with MissingField action', async () => {
@@ -684,6 +699,31 @@ describe('WebhooksController', () => {
       const bad = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookBadRequest');
       expect(bad).to.exist;
       expect(bad.args[0].dimensions).to.deep.include({ MissingField: 'action' });
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'bad_request' });
+    });
+
+    it('missing reviewer_login emits WebhookHandlerError with Reason missing_reviewer_login', async () => {
+      // Fail-closed path: returns 500 from inside the try (no throw), so the
+      // errorHandler catch does not run - WebhookHandlerError fires once, from the
+      // internal reviewer check, with the distinguishing Reason dimension.
+      const emfController = buildEmfController();
+      const ctx = {
+        ...validContext,
+        attributes: {
+          authInfo: {
+            getProfile: () => ({ user_id: 'github-webhook', target_id: 'github-public' }),
+          },
+        },
+      };
+      const response = await emfController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(500);
+      const handlerError = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookHandlerError');
+      expect(handlerError).to.exist;
+      expect(handlerError.args[0].dimensions).to.deep.include({ Reason: 'missing_reviewer_login' });
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'handler_error' });
     });
   });
 });
