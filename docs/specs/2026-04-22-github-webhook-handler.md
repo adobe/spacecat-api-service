@@ -6,6 +6,8 @@
 - **Jira:** SITES-42733
 - **Target repo:** `adobe/spacecat-api-service`
 
+> **Update (2026-05-31, Phase 4 cleanup):** The handler's configuration has since been consolidated. It now reads a single per-tier `GITHUB_DESTINATIONS` registry (a JSON object keyed by `target_id`, each entry carrying an inline `webhook_secret` and a required `reviewer_login`) and **no longer reads** the legacy `GITHUB_WEBHOOK_SECRET` / `GITHUB_TARGETS` / `GITHUB_APP_SLUG` / per-target `webhookSecretEnvVar` configuration shown in the code snippets below. An unset/malformed registry now fails closed (401), and a missing per-destination reviewer identity fails closed (500). See the ADR [`consolidated-destinations-registry.md`](https://github.com/adobe/mysticat-architecture/blob/main/platform/decisions/consolidated-destinations-registry.md) and PR [adobe/spacecat-api-service#2525](https://github.com/adobe/spacecat-api-service/pull/2525). The design narrative and code snippets below are retained as historical context; for current operator configuration see the **Environment Variables** table.
+
 ## Context
 
 The Mysticat GitHub Service is a GitHub App that orchestrates AI skills against GitHub events (starting with automated PR review). The service follows a webhook -> SQS -> Dispatcher -> ECS worker architecture. The infrastructure (SQS queues, Dispatcher Lambda, ECS cluster, DynamoDB idempotency table) is being built in [spacecat-infrastructure#469](https://github.com/adobe/spacecat-infrastructure/pull/469). The worker application code lives in [mysticat-github-service](https://github.com/adobe/mysticat-github-service).
@@ -456,13 +458,12 @@ export function getSkipReason(data, action, env) {
 
 #### Environment Variables
 
+Current configuration (post Phase 4 cleanup; see the Update note at the top of this doc). The legacy `GITHUB_WEBHOOK_SECRET` / `GITHUB_APP_SLUG` / `GITHUB_TARGETS` / `GITHUB_WEBHOOK_SECRET_GHEC` variables are no longer read.
+
 | Variable | Purpose | Source |
 |----------|---------|--------|
-| `GITHUB_WEBHOOK_SECRET` | HMAC-SHA256 verification | Vault (`dx_mysticat/{env}/mysticat-github-service` key `github_app_webhook_secret`), delivered via Secrets Manager |
+| `GITHUB_DESTINATIONS` | Consolidated webhook-destination registry: a JSON object keyed by `target_id`, each entry `{ match, webhook_secret, reviewer_login }` (snake_case; `webhook_secret` inline; `reviewer_login` required per entry). The handler classifies each signed webhook to a destination, HMAC-verifies against that entry's `webhook_secret`, and attaches its `target_id` + `reviewer_login` to the auth profile. UNSET/malformed = fail closed (401). Secret-bearing - never logged. See the ADR `consolidated-destinations-registry.md`. | Vault (`dx_mysticat/{env}/api-service` key `GITHUB_DESTINATIONS`) -> Secrets Manager |
 | `MYSTICAT_GITHUB_JOBS_QUEUE_URL` | SQS queue URL for job enqueue | Infrastructure module output (`module.mysticat_github_service.work_queue_url`) |
-| `GITHUB_APP_SLUG` | App login for reviewer match (default: `mysticat`) | Environment variable or hardcoded |
-| `GITHUB_TARGETS` | JSON registry of webhook destinations (`[{id, match, appSlug, webhookSecretEnvVar}]`), evaluated top-to-bottom with the `default` entry last. UNSET = legacy single-secret path (no `target_id` emitted). See the multi-destination ADR (`mysticat-architecture` `platform/decisions/support-multiple-github-destinations.md`). | api-service env (per env) |
-| `GITHUB_WEBHOOK_SECRET_GHEC` | Per-target HMAC secret for the `ghec` destination (only when GHEC is enabled; named by that target's `webhookSecretEnvVar`) | Vault -> Secrets Manager, same channel as `GITHUB_WEBHOOK_SECRET` |
 | `MYSTICAT_OBSERVABILITY_SLACK_TOKEN` | Dedicated chat:write-only bot token for the Slack observability feed (best-effort; absent disables Slack posting) | Vault (`dx_mysticat/{env}/...`) -> helix-deploy package secret; on the rotation list |
 | `MYSTICAT_OBSERVABILITY_SLACK_CHANNEL` | Channel id the web tier posts to and propagates to the worker; OMIT to disable observability entirely | api-service env (per env) |
 
@@ -578,7 +579,7 @@ Today only `pull_request` is handled via the `EVENT_JOB_MAP` constant. All other
 The following infrastructure changes are required before this handler can function. These are tracked in a separate spec at `spacecat-infrastructure/docs/plans/2026-04-22-github-webhook-infra-wiring.md`:
 
 1. **SQS policy update** -- Add `mysticat-github-service-jobs` queue ARN to `api_lambda_sqs_policy` in `modules/iam/policies.tf`
-2. **Environment variables** -- Add `GITHUB_WEBHOOK_SECRET`, `MYSTICAT_GITHUB_JOBS_QUEUE_URL`, and `GITHUB_APP_SLUG` to the api-service Lambda configuration
+2. **Environment variables** -- Add `GITHUB_DESTINATIONS` (the consolidated registry; see the Environment Variables table above) and `MYSTICAT_GITHUB_JOBS_QUEUE_URL` to the api-service Lambda configuration
 3. **Feature flag** -- Enable `enable_github_webhook_route = true` in the API Gateway module after the handler is deployed
 
 Phase 3 additions:

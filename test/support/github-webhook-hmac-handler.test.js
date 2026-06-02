@@ -21,6 +21,12 @@ describe('GitHubWebhookHmacHandler', () => {
   let mockLog;
   const secret = 'test-webhook-secret';
   const validPayload = JSON.stringify({ action: 'review_requested', installation: { id: 123 } });
+  // Default consolidated registry: a single github-public default entry whose
+  // inline webhook_secret is `secret`. validPayload has no repository -> null
+  // host -> classifies to this default entry.
+  const DEFAULT_DESTINATIONS = JSON.stringify({
+    'github-public': { match: { default: true }, webhook_secret: secret, reviewer_login: 'MysticatBot' },
+  });
 
   function computeSignature(body, key = secret) {
     return `sha256=${crypto.createHmac('sha256', key).update(body).digest('hex')}`;
@@ -36,7 +42,7 @@ describe('GitHubWebhookHmacHandler', () => {
   function makeContext(overrides = {}) {
     return {
       pathInfo: { suffix: '/webhooks/github' },
-      env: { GITHUB_WEBHOOK_SECRET: secret },
+      env: { GITHUB_DESTINATIONS: DEFAULT_DESTINATIONS },
       ...overrides,
     };
   }
@@ -65,16 +71,6 @@ describe('GitHubWebhookHmacHandler', () => {
     expect(result).to.not.be.null;
     expect(result.type).to.equal('github_webhook');
     expect(result.authenticated).to.be.true;
-  });
-
-  it('attaches no reviewer_login in legacy mode (no GITHUB_TARGETS)', async () => {
-    const sig = computeSignature(validPayload);
-    const request = makeRequest({ 'x-hub-signature-256': sig });
-    const context = makeContext();
-
-    const result = await handler.checkAuth(request, context);
-
-    expect(result.getProfile().reviewer_login).to.be.undefined;
   });
 
   it('accepts webhook path without leading slash', async () => {
@@ -119,7 +115,7 @@ describe('GitHubWebhookHmacHandler', () => {
     expect(result).to.be.null;
   });
 
-  it('returns null and logs error when GITHUB_WEBHOOK_SECRET is not configured', async () => {
+  it('returns null and logs error when GITHUB_DESTINATIONS is not configured', async () => {
     const sig = computeSignature(validPayload);
     const request = makeRequest({ 'x-hub-signature-256': sig });
     const context = makeContext({ env: {} });
@@ -128,6 +124,7 @@ describe('GitHubWebhookHmacHandler', () => {
 
     expect(result).to.be.null;
     expect(mockLog.error.calledOnce).to.be.true;
+    expect(mockLog.error.firstCall.args[0]).to.include('GITHUB_DESTINATIONS not configured');
     expect(mockLog.error.firstCall.args[0]).to.include('misconfigured=true');
   });
 
@@ -341,157 +338,6 @@ describe('GitHubWebhookHmacHandler', () => {
     it('returns null + warn for an empty body', async () => {
       const request = makeRequest({ 'x-hub-signature-256': computeSignature('', secret) }, '');
       const result = await handler.checkAuth(request, destContext());
-      expect(result).to.be.null;
-      expect(mockLog.warn.calledWithMatch('Empty')).to.be.true;
-    });
-
-    it('prefers GITHUB_DESTINATIONS over GITHUB_TARGETS when BOTH are set (dual-read precedence)', async () => {
-      // A legacy GITHUB_TARGETS that, if read, would route differently / use a
-      // different secret. The consolidated path must win, so the github-public
-      // inline secret authenticates and target_id is github-public.
-      const legacyTargets = JSON.stringify([
-        {
-          id: 'github-public', match: { default: true }, appSlug: 'mysticat', webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET',
-        },
-      ]);
-      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
-      const result = await handler.checkAuth(request, destContext({
-        GITHUB_TARGETS: legacyTargets,
-        GITHUB_WEBHOOK_SECRET: 'a-different-legacy-secret',
-      }));
-      expect(result).to.not.be.null;
-      expect(result.getProfile().target_id).to.equal('github-public');
-      // app_slug proves the consolidated path (not the GITHUB_TARGETS path) ran:
-      // the legacy path would have set app_slug 'mysticat'.
-      expect(result.getProfile().app_slug).to.be.undefined;
-    });
-  });
-
-  describe('GITHUB_TARGETS registry path', () => {
-    const ghecSecret = 'ghec-webhook-secret';
-    const TARGETS = JSON.stringify([
-      {
-        id: 'ghec',
-        match: { enterpriseSlug: ['adobe-prd'] },
-        appSlug: 'mysticat-bot',
-        reviewerLogin: 'emu_reviewer',
-        webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET_GHEC',
-      },
-      {
-        id: 'github-public',
-        match: { default: true },
-        appSlug: 'mysticat-bot',
-        webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET',
-      },
-    ]);
-    const publicBody = JSON.stringify({
-      action: 'review_requested',
-      installation: { id: 1 },
-      repository: { html_url: 'https://github.com/adobe/spacecat-api-service' },
-    });
-    const ghecBody = JSON.stringify({
-      action: 'review_requested',
-      installation: { id: 1 },
-      enterprise: { slug: 'adobe-prd' },
-      repository: { html_url: 'https://github.com/Adobe-AEM-Sites/aem-sites-architecture' },
-    });
-    const ghesBody = JSON.stringify({
-      action: 'review_requested',
-      installation: { id: 1 },
-      repository: { html_url: 'https://git.corp.adobe.com/experience-platform/mystique' },
-    });
-    const pingBody = JSON.stringify({ zen: 'Keep it simple', hook_id: 1 });
-
-    function registryContext(extraEnv = {}) {
-      return makeContext({
-        env: {
-          GITHUB_TARGETS: TARGETS,
-          GITHUB_WEBHOOK_SECRET: secret,
-          GITHUB_WEBHOOK_SECRET_GHEC: ghecSecret,
-          ...extraEnv,
-        },
-      });
-    }
-
-    it('authenticates a github.com (default) webhook and attaches target_id github-public', async () => {
-      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
-      const result = await handler.checkAuth(request, registryContext());
-      expect(result).to.not.be.null;
-      expect(result.type).to.equal('github_webhook');
-      expect(result.getProfile().target_id).to.equal('github-public');
-      expect(result.getProfile().app_slug).to.equal('mysticat-bot');
-    });
-
-    it('authenticates a GHEC webhook against the per-target secret and attaches target_id ghec', async () => {
-      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghecBody, ghecSecret) }, ghecBody);
-      const result = await handler.checkAuth(request, registryContext());
-      expect(result).to.not.be.null;
-      expect(result.getProfile().target_id).to.equal('ghec');
-    });
-
-    it('attaches reviewer_login from the matched ghec target to the profile', async () => {
-      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghecBody, ghecSecret) }, ghecBody);
-      const result = await handler.checkAuth(request, registryContext());
-      expect(result.getProfile().reviewer_login).to.equal('emu_reviewer');
-    });
-
-    it('attaches no reviewer_login for the default (github-public) target', async () => {
-      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
-      const result = await handler.checkAuth(request, registryContext());
-      expect(result.getProfile().reviewer_login).to.be.undefined;
-    });
-
-    it('rejects a GHEC body signed with the github-public secret (wrong secret)', async () => {
-      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghecBody, secret) }, ghecBody);
-      const result = await handler.checkAuth(request, registryContext());
-      expect(result).to.be.null;
-      expect(mockLog.warn.calledWithMatch('HMAC signature mismatch')).to.be.true;
-    });
-
-    it('skips (null) a non-github.com host without computing HMAC', async () => {
-      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghesBody, secret) }, ghesBody);
-      const result = await handler.checkAuth(request, registryContext());
-      expect(result).to.be.null;
-      expect(mockLog.warn.calledWithMatch('Skipping webhook')).to.be.true;
-    });
-
-    it('treats a ping (no repository -> null host) as github-public, not skip', async () => {
-      const request = makeRequest({ 'x-hub-signature-256': computeSignature(pingBody, secret) }, pingBody);
-      const result = await handler.checkAuth(request, registryContext());
-      expect(result).to.not.be.null;
-      expect(result.getProfile().target_id).to.equal('github-public');
-    });
-
-    it('returns null + error on malformed GITHUB_TARGETS', async () => {
-      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
-      const result = await handler.checkAuth(request, registryContext({ GITHUB_TARGETS: 'not json' }));
-      expect(result).to.be.null;
-      expect(mockLog.error.calledWithMatch('Invalid GITHUB_TARGETS')).to.be.true;
-    });
-
-    it('returns null + error when the selected target secret env var is unset', async () => {
-      const sig = computeSignature(ghecBody, ghecSecret);
-      const request = makeRequest({ 'x-hub-signature-256': sig }, ghecBody);
-      const ctx = registryContext({ GITHUB_WEBHOOK_SECRET_GHEC: undefined });
-      const result = await handler.checkAuth(request, ctx);
-      expect(result).to.be.null;
-      expect(mockLog.error.calledWithMatch('misconfigured=true')).to.be.true;
-    });
-
-    it('returns null + warn when the registry-mode body is not valid JSON', async () => {
-      const malformed = 'not-json';
-      const request = makeRequest(
-        { 'x-hub-signature-256': computeSignature(malformed, secret) },
-        malformed,
-      );
-      const result = await handler.checkAuth(request, registryContext());
-      expect(result).to.be.null;
-      expect(mockLog.warn.calledWithMatch('not valid JSON')).to.be.true;
-    });
-
-    it('returns null + warn for an empty body in registry mode', async () => {
-      const request = makeRequest({ 'x-hub-signature-256': computeSignature('', secret) }, '');
-      const result = await handler.checkAuth(request, registryContext());
       expect(result).to.be.null;
       expect(mockLog.warn.calledWithMatch('Empty')).to.be.true;
     });

@@ -46,9 +46,7 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
 
-  // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
-  'GET /sites/:siteId/geo-experiments',
-  'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+  // Geo experiment — write/delete endpoints used by DRS/UI
   'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
   'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
 
@@ -56,10 +54,6 @@ export const INTERNAL_ROUTES = [
   'GET /slack/events',
   'POST /slack/events',
   'POST /slack/channels/invite-by-user-id',
-
-  // Consent banner - screenshot tooling, end-user/internal use only
-  'POST /consent-banner',
-  'GET /consent-banner/:jobId',
 
   // Brand Presence stats - org-scoped, LLMO product; not yet required by S2S consumers
   'GET /org/:spaceCatId/brands/all/brand-presence/stats',
@@ -221,6 +215,10 @@ const routeRequiredCapabilities = {
   // Audits
   'GET /audits/latest/:auditType': 'audit:read',
 
+  // Consent Banner
+  'POST /consent-banner': 'organization:write',
+  'GET /consent-banner/:jobId': 'organization:read',
+
   // Configuration
   'GET /configurations/latest': 'configuration:read',
   'PATCH /configurations/latest': 'configuration:write',
@@ -257,6 +255,7 @@ const routeRequiredCapabilities = {
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
@@ -269,6 +268,7 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:read',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:read',
@@ -338,6 +338,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId': 'site:read',
   'PATCH /sites/:siteId': 'site:write',
   'PATCH /sites/:siteId/config/cdn-logs': 'site:write',
+  'GET /sites/:siteId/config/scraper': 'site:read',
   'PATCH /sites/:siteId/config/scraper': 'site:write',
   'DELETE /sites/:siteId': 'site:write',
   'GET /sites/:siteId/bot-blocker': 'site:read',
@@ -357,6 +358,8 @@ const routeRequiredCapabilities = {
   'PATCH /sites/:siteId/:auditType': 'audit:write',
   'GET /sites/:siteId/latest-audit/:auditType': 'audit:read',
   'GET /sites/:siteId/experiments': 'experiment:read',
+  'GET /sites/:siteId/geo-experiments': 'geoExperiment:read',
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'geoExperiment:read', // detail includes prompts
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
@@ -575,7 +578,9 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/topics/research': 'report:read',
   'GET /llmo/ai-visibility/topics/stats': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/brand-topics': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/brand-topics-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/gap-topics': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',

@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 
 import {
   handleListMarkets,
+  handleGetMarket,
   handleCreateMarket,
   handleDeleteMarket,
   handleListTags,
@@ -688,6 +689,54 @@ describe('handlers/markets.js — handleDeleteMarket', () => {
       'en',
       fakeLog(),
     )).to.be.rejectedWith(ErrorWithStatusCode, /retry/);
+  });
+});
+
+describe('handlers/markets.js — handleGetMarket', () => {
+  it('400s on invalid geoTargetId (non-positive)', async () => {
+    const dataAccess = makeDataAccess([]);
+    const err = await handleGetMarket(dataAccess, BRAND, 0, 'en').catch((e) => e);
+    expect(err).to.be.instanceOf(ErrorWithStatusCode);
+    expect(err.status).to.equal(400);
+    expect(dataAccess.BrandSemrushProject.findBySlice).not.to.have.been.called;
+  });
+
+  it('400s on syntactically malformed languageCode (`1z`)', async () => {
+    const dataAccess = makeDataAccess([]);
+    const err = await handleGetMarket(dataAccess, BRAND, 2840, '1z').catch((e) => e);
+    expect(err).to.be.instanceOf(ErrorWithStatusCode);
+    expect(err.status).to.equal(400);
+    expect(dataAccess.BrandSemrushProject.findBySlice).not.to.have.been.called;
+  });
+
+  it('404s with marketNotFound when the slice has no row', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    const err = await handleGetMarket(dataAccess, BRAND, 2840, 'en').catch((e) => e);
+    expect(err).to.be.instanceOf(ErrorWithStatusCode);
+    expect(err.status).to.equal(404);
+    expect(err.code).to.equal('marketNotFound');
+  });
+
+  it('returns the full slice detail including semrushProjectId on the happy path', async () => {
+    const row = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(row);
+
+    const result = await handleGetMarket(dataAccess, BRAND, 2840, 'en');
+
+    expect(dataAccess.BrandSemrushProject.findBySlice)
+      .to.have.been.calledOnceWithExactly(BRAND, 2840, 'en');
+    expect(result).to.deep.equal({
+      brandId: BRAND,
+      geoTargetId: 2840,
+      languageCode: 'en',
+      semrushProjectId: 'proj-us-en',
+      createdAt: '2026-05-28T10:00:00Z',
+      updatedAt: '2026-05-28T10:00:00Z',
+    });
   });
 });
 

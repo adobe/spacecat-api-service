@@ -867,7 +867,7 @@ ScraperConfigUpdate:
 ScraperConfigResponse:
   type: object
   description: |
-    Response body returned by `PATCH /sites/{siteId}/config/scraper`.
+    Response body returned by `GET` and `PATCH /sites/{siteId}/config/scraper`.
     Intentionally narrow: returns only the affected site ID and the persisted
     scraper configuration, not the rest of the site's configuration.
   properties:
@@ -9436,14 +9436,25 @@ AiVisibilityV1TopicBrandTopicsResponse:
   type: object
   description: |
     Brand topics list from `GET /llmo/ai-visibility/v1/topic/brand-topics`.
-    Wraps Semrush v2 topic `BrandTopics` / `BrandTopicsTotals` JSON plus `srFilters` from the API layer.
+    Wraps Semrush v2 topic `BrandTopics` JSON plus `srFilters` from the API layer.
+    For the total count, use `GET /llmo/ai-visibility/v1/topic/brand-topics-totals`.
   properties:
     data:
       type: array
       items:
         $ref: '#/AiVisibilityV1TopicBrandTopicRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1TopicBrandTopicsTotalsResponse:
+  type: object
+  description: |
+    Brand topics count from `GET /llmo/ai-visibility/v1/topic/brand-topics-totals`.
+    Returns only the total count matching the request filters, without paginated data.
+  properties:
     total:
-      description: Total topics matching the request (from `BrandTopicsTotals`)
+      description: Total topics matching the request filters (from `BrandTopicsTotals`)
       oneOf:
         - type: integer
         - type: string
@@ -9544,12 +9555,23 @@ AiVisibilityV1TopicGapTopicsResponse:
   type: object
   description: |
     Gap topics list from `GET /llmo/ai-visibility/v1/topic/gap-topics`.
-    Wraps Semrush v2 topic `GapTopics` / `GapTopicsTotals` JSON plus `srFilters` from the API layer.
+    Wraps Semrush v2 topic `GapTopics` JSON plus `srFilters` from the API layer.
+    For per-kind totals, use `GET /llmo/ai-visibility/v1/topic/gap-topics-totals`.
   properties:
     data:
       type: array
       items:
         $ref: '#/AiVisibilityV1TopicGapTopicRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1TopicGapTopicsTotalsResponse:
+  type: object
+  description: |
+    Per-kind gap topics counts from `GET /llmo/ai-visibility/v1/topic/gap-topics-totals`.
+    Returns only the totals array without paginated data.
+  properties:
     totals:
       type: array
       items:
@@ -10113,6 +10135,24 @@ SerenityMarketListResponse:
     items:
       type: array
       items: { $ref: '#/SerenityMarket' }
+
+SerenityMarketDetail:
+  description: |
+    A single market slice, including the resolved upstream `semrushProjectId`.
+    This is the ONE place on the /serenity/* surface that deliberately exposes
+    the upstream project id — the list representation (SerenityMarket) stays
+    provider-free (LLMO-5190). It is surfaced here only so the embedded Semrush
+    AIO renderer MFE can mount the dashboard for the selected market. Consume
+    `semrushProjectId` ONLY to mount that renderer; the stable handle for a
+    market remains its (geoTargetId, languageCode) slice.
+  allOf:
+    - $ref: '#/SerenityMarket'
+    - type: object
+      required: [semrushProjectId]
+      properties:
+        semrushProjectId:
+          type: string
+          description: Upstream Semrush AIO project id for this slice (provider-specific by design).
 
 SerenityCreateMarketRequest:
   type: object

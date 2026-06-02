@@ -25,39 +25,28 @@ export const EVENT_JOB_MAP = {
  *
  * @param {object} data - Parsed webhook payload
  * @param {string} action - The event action (e.g. 'review_requested', 'labeled')
- * @param {object} env - Environment variables
- * @param {string} [appSlug] - Allowed-bot slug; defaults to env.GITHUB_APP_SLUG
- * @param {string} [reviewerLogin] - Per-target reviewer login; defaults to
- *   env.GITHUB_REVIEWER_LOGIN. The requested reviewer must equal this (or
- *   `${appSlug}[bot]` when both are unset) for review_requested to proceed.
+ * @param {string} reviewerLogin - The destination's reviewer login, attached to
+ *   the auth profile by GitHubWebhookHmacHandler from the consolidated
+ *   GITHUB_DESTINATIONS registry. The requested reviewer must equal this for
+ *   review_requested to proceed. Required: the controller resolves and validates
+ *   it before calling (a missing reviewer identity is a 5xx, not a silent skip).
  * @returns {string|null} Skip reason or null
  */
-export function getSkipReason(
-  data,
-  action,
-  env,
-  appSlug = env.GITHUB_APP_SLUG,
-  reviewerLogin = env.GITHUB_REVIEWER_LOGIN,
-) {
+export function getSkipReason(data, action, reviewerLogin) {
   const pr = data.pull_request;
-  // appSlug is resolved by the caller: the per-target appSlug in registry mode,
-  // else env.GITHUB_APP_SLUG (the default). Used to form the expected bot
-  // reviewer login. Defaulting keeps existing 3-arg callers unchanged.
 
   // Unsupported actions (auto-triggers deferred to Phase 3)
   if (action === 'opened' || action === 'ready_for_review') {
     return `auto-trigger not yet supported: ${action}`;
   }
 
-  // Invite-based trigger: reviewer must be the configured login.
-  // GITHUB_REVIEWER_LOGIN replaces the entire expected reviewer string — use this
-  // when the reviewer is a plain user account (e.g. a shared service account)
-  // rather than a GitHub App bot.
+  // Invite-based trigger: the requested reviewer must be the destination's
+  // configured reviewer login (a plain user, EMU user, or App bot - whatever
+  // the registry pins per destination).
   if (action === 'review_requested') {
     const reviewer = data.requested_reviewer?.login;
-    const expectedReviewer = reviewerLogin?.trim() || `${appSlug}[bot]`;
-    if (reviewer !== expectedReviewer) {
-      return `reviewer ${reviewer} is not ${expectedReviewer}`;
+    if (reviewer !== reviewerLogin) {
+      return `reviewer ${reviewer} is not ${reviewerLogin}`;
     }
   }
 

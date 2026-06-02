@@ -13,104 +13,20 @@
 // GitHub destination registry + classifier. The web tier classifies each
 // inbound webhook to a destination ("target") from the SIGNED body, so the
 // worker can select per-destination credentials by a non-secret target_id.
-// Secrets are NOT in the legacy GITHUB_TARGETS registry: webhookSecretEnvVar
-// names the env var that carries the secret (loaded at runtime from Vault into
-// context.env). The consolidated GITHUB_DESTINATIONS registry carries
-// webhook_secret INLINE in each entry.
-
-/**
- * Parse + validate the GITHUB_TARGETS env var.
- * @param {object} env - context.env
- * @returns {Array|null} ordered target array, or null when GITHUB_TARGETS is
- *   unset (legacy single-secret mode).
- * @throws {Error} when GITHUB_TARGETS is set but structurally invalid.
- */
-export function parseTargets(env) {
-  const raw = env?.GITHUB_TARGETS;
-  if (!raw) {
-    return null;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    throw new Error(`GITHUB_TARGETS is not valid JSON: ${e.message}`);
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error('GITHUB_TARGETS must be a non-empty JSON array');
-  }
-  const ids = new Set();
-  parsed.forEach((t, i) => {
-    if (!t || typeof t.id !== 'string' || !t.id) {
-      throw new Error(`GITHUB_TARGETS[${i}] is missing a string "id"`);
-    }
-    // The id becomes the worker's SQS target_id, which the worker validates as
-    // ^[a-z][a-z0-9-]{0,63}$. Enforce the same here so a bad id fails loudly at
-    // config parse, and so result.id stays a bounded value where it is logged.
-    if (!/^[a-z][a-z0-9-]{0,63}$/.test(t.id)) {
-      throw new Error(`GITHUB_TARGETS[${i}] id "${t.id}" must match ^[a-z][a-z0-9-]{0,63}$ (it becomes the worker target_id)`);
-    }
-    if (ids.has(t.id)) {
-      throw new Error(`GITHUB_TARGETS has duplicate id "${t.id}"`);
-    }
-    ids.add(t.id);
-    if (typeof t.appSlug !== 'string' || !t.appSlug) {
-      throw new Error(`GITHUB_TARGETS["${t.id}"] is missing a string "appSlug"`);
-    }
-    if (typeof t.webhookSecretEnvVar !== 'string' || !t.webhookSecretEnvVar) {
-      throw new Error(`GITHUB_TARGETS["${t.id}"] is missing a string "webhookSecretEnvVar"`);
-    }
-    // Defense-in-depth for operator-authored config: webhookSecretEnvVar is used
-    // as `context.env[name]`, so a typo like "__proto__" would resolve to a
-    // truthy prototype object (not a secret) and break HMAC. Restrict to the
-    // conventional env-var charset so a bad name fails loudly at parse.
-    if (!/^[A-Z][A-Z0-9_]*$/.test(t.webhookSecretEnvVar)) {
-      throw new Error(`GITHUB_TARGETS["${t.id}"].webhookSecretEnvVar must be a valid env var name (^[A-Z][A-Z0-9_]*$)`);
-    }
-    const isDefault = t.match?.default === true;
-    const hasSlugs = Array.isArray(t.match?.enterpriseSlug)
-      && t.match.enterpriseSlug.length > 0
-      && t.match.enterpriseSlug.every((s) => typeof s === 'string' && s.length > 0);
-    if (!isDefault && !hasSlugs) {
-      throw new Error(`GITHUB_TARGETS["${t.id}"] needs match.default:true or a non-empty match.enterpriseSlug[] of strings`);
-    }
-    if (isDefault && i !== parsed.length - 1) {
-      throw new Error(`GITHUB_TARGETS default entry "${t.id}" must be last`);
-    }
-    // reviewerLogin is the trigger-gate identity (the user we react to as the
-    // requested reviewer). REQUIRED on non-default (enterprise-matched) entries
-    // so a destination missing its reviewer fails loudly at config-load rather
-    // than silently falling back to the global GITHUB_REVIEWER_LOGIN (wrong for
-    // that destination). OPTIONAL on the default entry, which keeps the global
-    // fallback. When present, accept plain users (MysticatBot), EMU users
-    // (handle_shortcode), and App bots (slug[bot]).
-    if (!isDefault && (typeof t.reviewerLogin !== 'string' || !t.reviewerLogin.trim())) {
-      throw new Error(`GITHUB_TARGETS["${t.id}"] is missing a string "reviewerLogin" (required for non-default targets)`);
-    }
-    if (t.reviewerLogin !== undefined) {
-      if (typeof t.reviewerLogin !== 'string'
-        || t.reviewerLogin.length > 64
-        || !/^[A-Za-z0-9][A-Za-z0-9_-]*(\[bot\])?$/.test(t.reviewerLogin)) {
-        throw new Error(`GITHUB_TARGETS["${t.id}"].reviewerLogin must match ^[A-Za-z0-9][A-Za-z0-9_-]*(\\[bot\\])?$ and be at most 64 chars`);
-      }
-    }
-  });
-  const defaults = parsed.filter((t) => t.match?.default === true);
-  if (defaults.length !== 1) {
-    throw new Error(`GITHUB_TARGETS must have exactly one match.default:true entry (found ${defaults.length})`);
-  }
-  return parsed;
-}
+// The GITHUB_DESTINATIONS registry carries webhook_secret INLINE in each entry
+// (loaded at runtime from Vault into context.env; secret-bearing - do not log
+// the value).
 
 /**
  * Parse + validate the GITHUB_DESTINATIONS env var (the consolidated registry).
  * A keyed object by target_id; each entry is { match, webhook_secret,
- * reviewer_login } with snake_case keys. The webhook secret is INLINE (no
- * webhookSecretEnvVar indirection). Loaded at runtime from Vault into
- * context.env (secret-bearing - do not log the value).
+ * reviewer_login } with snake_case keys. The webhook secret is INLINE in each
+ * entry. Loaded at runtime from Vault into context.env (secret-bearing - do not
+ * log the value).
  * @param {object} env - context.env
  * @returns {object|null} the keyed destinations object, or null when
- *   GITHUB_DESTINATIONS is unset (legacy GITHUB_TARGETS mode).
+ *   GITHUB_DESTINATIONS is unset (the handler treats unset as a misconfiguration
+ *   and fails closed).
  * @throws {Error} when GITHUB_DESTINATIONS is set but structurally invalid.
  */
 export function parseDestinations(env) {
@@ -209,29 +125,6 @@ export function extractClassificationMetadata(rawBody) {
   }
   const enterpriseSlug = typeof payload.enterprise?.slug === 'string' ? payload.enterprise.slug : null;
   return { host: hostOf(payload.repository?.html_url), enterpriseSlug };
-}
-
-/**
- * Classify webhook metadata to a target, or signal skip.
- * @param {{host: (string|null), enterpriseSlug: (string|null)}} meta
- * @param {Array} targets - validated registry (default entry last)
- * @returns {object|{skip: true}} the matched target, or { skip: true }
- */
-export function classify(meta, targets) {
-  const { host, enterpriseSlug } = meta;
-  // A positively-identified non-github.com host (e.g. a GHES host) has no
-  // in-scope target. A null/unknown host (ping / no repository) falls through
-  // to the github.com catch-all.
-  if (host !== null && host !== 'github.com') {
-    return { skip: true };
-  }
-  // Registry is validated default-last (parseTargets), so a slug-specific entry
-  // is always evaluated before the catch-all default in this find loop.
-  const match = targets.find((t) => t.match?.default === true
-    || (enterpriseSlug
-        && Array.isArray(t.match?.enterpriseSlug)
-        && t.match.enterpriseSlug.includes(enterpriseSlug)));
-  return match || { skip: true };
 }
 
 /**
