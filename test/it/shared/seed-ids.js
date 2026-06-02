@@ -70,6 +70,7 @@ export const FIX_1_ID = 'cc111111-1111-4111-b111-111111111111'; // CODE_CHANGE, 
 export const FIX_1_EXECUTED_AT = '2025-01-20T12:00:00.000Z'; // deterministic date for junction
 export const FIX_1_CREATED_DATE = '2025-01-20'; // fixEntityCreatedDate derived from executedAt
 export const FIX_2_ID = 'cc222222-2222-4222-a222-222222222222'; // CODE_CHANGE, DEPLOYED
+export const FIX_3_ID = 'cc333333-3333-4333-b333-333333333333'; // CODE_CHANGE, DEPLOYED — no junction entry
 
 // ── Experiments (under SITE_1) ──
 

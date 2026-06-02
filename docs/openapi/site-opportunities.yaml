@@ -598,7 +598,7 @@ site-opportunity-suggestions-edge-deploy:
                           type: integer
                         autoCovered:
                           type: integer
-                          description: Number of additional suggestions auto-marked as deployed by domain-wide config
+                          description: Number of additional suggestions auto-marked as deployed by domain-wide or path-level config
                         message:
                           type: string
                           description: Present when autoCovered > 0
