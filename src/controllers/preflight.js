@@ -233,7 +233,7 @@ function PreflightController(ctx, log, env) {
       // Log for dashboard purposes
       const imsOrgId = context.pathInfo?.headers?.['x-gw-ims-org-id'];
       log.info(`createPreflightJob created async job with jobId: ${job.getId()}, siteId: ${site.getId()}, `
-        + `traceId: ${ctx.traceId}, orgId: ${imsOrgId}, urls: ${JSON.stringify(data.urls)}, step: ${step}`);
+        + `traceId: ${ctx.traceId}, orgId: ${imsOrgId}, urls: ${JSON.stringify(data.urls)}, step: ${step}.  Sending to start audits.`);
 
       try {
         // Send message to SQS to trigger the audit worker
