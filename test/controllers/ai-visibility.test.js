@@ -46,6 +46,7 @@ const ALL_METHOD_NAMES = [
   'getV1PromptBrandPrompts',
   'getV1PromptBrandPromptsExport',
   'getV1PromptGapPrompts',
+  'getV1PromptGapPromptsExport',
   'getV1PromptPromptResponse',
 ];
 
@@ -87,6 +88,7 @@ describe('AiVisibilityController', () => {
   let mockHandleV1PromptBrandPrompts;
   let mockHandleV1PromptBrandPromptsExport;
   let mockHandleV1PromptGapPrompts;
+  let mockHandleV1PromptGapPromptsExport;
   let mockHandleV1PromptPromptResponse;
 
   const log = {
@@ -192,6 +194,9 @@ describe('AiVisibilityController', () => {
     mockHandleV1PromptGapPrompts = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1PromptGapPromptsExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1PromptPromptResponse = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
@@ -265,6 +270,9 @@ describe('AiVisibilityController', () => {
       '../../src/support/ai-visibility/handlers/v1/prompt/gap-prompts.js': {
         handleGapPrompts: mockHandleV1PromptGapPrompts,
       },
+      '../../src/support/ai-visibility/handlers/v1/prompt/gap-prompts-export.js': {
+        handleGapPromptsExport: mockHandleV1PromptGapPromptsExport,
+      },
       '../../src/support/ai-visibility/handlers/v1/prompt/prompt-response.js': {
         handlePromptResponse: mockHandleV1PromptPromptResponse,
       },
@@ -335,9 +343,9 @@ describe('AiVisibilityController', () => {
   });
 
   describe('returned handler object', () => {
-    it('returns an object with all 30 method names', () => {
+    it('returns an object with all 31 method names', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      expect(Object.keys(handlers)).to.have.lengthOf(30);
+      expect(Object.keys(handlers)).to.have.lengthOf(31);
       for (const name of ALL_METHOD_NAMES) {
         expect(handlers).to.have.property(name).that.is.a('function');
       }
@@ -596,6 +604,7 @@ describe('AiVisibilityController', () => {
       getV1PromptBrandPrompts: mockHandleV1PromptBrandPrompts,
       getV1PromptBrandPromptsExport: mockHandleV1PromptBrandPromptsExport,
       getV1PromptGapPrompts: mockHandleV1PromptGapPrompts,
+      getV1PromptGapPromptsExport: mockHandleV1PromptGapPromptsExport,
       getV1PromptPromptResponse: mockHandleV1PromptPromptResponse,
     });
 

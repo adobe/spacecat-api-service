@@ -56,6 +56,7 @@ import { handleGapTopicsTotals as handleGapTopicsTotalsV1 } from '../support/ai-
 import { handleBrandPrompts as handleBrandPromptsV1 } from '../support/ai-visibility/handlers/v1/prompt/brand-prompts.js';
 import { handleBrandPromptsExport as handleBrandPromptsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/brand-prompts-export.js';
 import { handleGapPrompts as handleGapPromptsV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts.js';
+import { handleGapPromptsExport as handleGapPromptsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts-export.js';
 import { handlePromptResponse as handlePromptResponseV1 } from '../support/ai-visibility/handlers/v1/prompt/prompt-response.js';
 import { handleMeta } from '../support/ai-visibility/handlers/meta.js';
 
@@ -89,6 +90,7 @@ const ROUTE_MAP = [
   ['/v1/prompt/brand-prompts', handleBrandPromptsV1],
   ['/v1/prompt/brand-prompts-export', handleBrandPromptsExportV1],
   ['/v1/prompt/gap-prompts', handleGapPromptsV1],
+  ['/v1/prompt/gap-prompts-export', handleGapPromptsExportV1],
   ['/v1/prompt/prompt-response', handlePromptResponseV1],
 ];
 

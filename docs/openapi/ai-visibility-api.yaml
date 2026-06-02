@@ -1388,6 +1388,43 @@ ai-visibility-v1-prompt-gap-prompts:
     security:
       - api_key: []
 
+ai-visibility-v1-prompt-gap-prompts-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export gap prompts as CSV (Prompt v2 JSON)
+    description: |
+      Exports prompts with the gap between the target brand and its competitors using Semrush
+      `PromptService` v2 `GapPromptsExport`. The nested `GapPromptsRequest` uses the same
+      filters and sorting as `/llmo/ai-visibility/v1/prompt/gap-prompts`: competitors,
+      `gapKinds`, optional `topicId` as native `topic_hash`, optional `sourceDomain` as native
+      `source_domain`, `GAP_PROMPTS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`.
+      The response is the native Semrush `ExportResponse` protobuf JSON with CSV
+      `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1PromptGapPromptsExport
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1GapPromptsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *topicIdOptionalParam
+      - *v1GapPromptsSourceDomainParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap prompts CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptGapPromptsExportResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-v1-prompt-prompt-response:
   get:
     tags: [ai-visibility]

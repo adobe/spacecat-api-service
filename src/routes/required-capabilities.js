@@ -584,6 +584,7 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
 
   // Site Enrollments

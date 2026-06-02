@@ -664,6 +664,8 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts-export'
   /llmo/ai-visibility/v1/prompt/gap-prompts:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts'
+  /llmo/ai-visibility/v1/prompt/gap-prompts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
 
