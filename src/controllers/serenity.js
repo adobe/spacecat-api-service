@@ -109,6 +109,12 @@ function mapError(e, log) {
   }
   if (e instanceof SerenityTransportError) {
     log.error('Serenity upstream error', e);
+    if (e.status === 401 || e.status === 403) {
+      return createResponse(
+        { error: errorTokenForStatus(e.status), message: safeError(e.message) },
+        e.status,
+      );
+    }
     return createResponse({
       error: 'serenityUpstreamError',
       message: 'Upstream request failed',

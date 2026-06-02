@@ -445,6 +445,28 @@ describe('SerenityController', () => {
       expect(JSON.stringify(body)).not.to.match(/leak/);
     });
 
+    it('upstream SerenityTransportError 403 propagates as 403 forbidden', async () => {
+      handlers.handleListMarkets.rejects(new MockTransportError(403, 'invalid access attempt', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(403);
+      const body = await readBody(response);
+      expect(body.error).to.equal('forbidden');
+      expect(body.message).to.equal('invalid access attempt');
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+    });
+
+    it('upstream SerenityTransportError 401 propagates as 401 authenticationRequired', async () => {
+      handlers.handleListMarkets.rejects(new MockTransportError(401, 'token expired', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(401);
+      const body = await readBody(response);
+      expect(body.error).to.equal('authenticationRequired');
+      expect(body.message).to.equal('token expired');
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+    });
+
     // mapError's final fallback: anything that isn't ErrorWithStatusCode and
     // isn't SerenityTransportError lands on the generic 500 path. No upstream
     // body, no status code leakage — the message is always the constant
