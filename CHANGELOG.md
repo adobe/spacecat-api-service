@@ -1,3 +1,10 @@
+# [1.537.0](https://github.com/adobe/spacecat-api-service/compare/v1.536.0...v1.537.0) (2026-06-02)
+
+
+### Features
+
+* add GET /sites/:siteId/config/scraper ([#2511](https://github.com/adobe/spacecat-api-service/issues/2511)) ([a7b17b8](https://github.com/adobe/spacecat-api-service/commit/a7b17b80fc3b6a463c10601258002e998f60447c))
+
 # [1.536.0](https://github.com/adobe/spacecat-api-service/compare/v1.535.4...v1.536.0) (2026-06-02)
 
 
