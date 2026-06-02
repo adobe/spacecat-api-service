@@ -105,7 +105,7 @@ export default class AccessControlUtil {
   /**
    * Fetches and validates the S2S consumer identity from the DB, covering the shared
    * denial paths (not-s2s, not-found, revoked, not-active) used by both
-   * `hasS2SCapability` and `hasAdminGrant`. Returns either a denial result or the
+   * `hasS2SCapability`. Returns either a denial result or the
    * validated consumer ready for domain-specific checks.
    *
    * @returns {Promise<{ denied: true, result: object }
@@ -170,35 +170,6 @@ export default class AccessControlUtil {
     if (!fresh.getCapabilities()?.includes(capability)) {
       return {
         allowed: false, reason: 'missing-capability', clientId, consumerId: fresh.getId(),
-      };
-    }
-    return {
-      allowed: true, reason: 'granted', clientId, consumerId: fresh.getId(),
-    };
-  }
-
-  /**
-   * Verifies the requesting S2S consumer holds the specified admin grant by issuing
-   * a fresh DB fetch. Follows the same fresh-DB-fetch TOCTOU pattern as hasS2SCapability.
-   * The `adminGrants` map is NOT read from the in-context object.
-   *
-   * Returns a result object so controllers can audit-log without re-reading context.
-   * The `reason` discriminates denial paths: `not-s2s`, `not-found`, `revoked`,
-   * `not-active`, `missing-grant`, `granted`.
-   *
-   * @param {string} operationKey - The operation key to check, e.g. 'CREATE_SITE'.
-   * @returns {Promise<{ allowed: boolean, reason: string,
-   *   consumerId: (string|undefined), clientId: (string|undefined) }>}
-   */
-  async hasAdminGrant(operationKey) {
-    const validated = await this._fetchAndValidateConsumer();
-    if (validated.denied) {
-      return validated.result;
-    }
-    const { fresh, clientId } = validated;
-    if (fresh.getAdminGrants?.()?.[operationKey] !== true) {
-      return {
-        allowed: false, reason: 'missing-grant', clientId, consumerId: fresh.getId(),
       };
     }
     return {

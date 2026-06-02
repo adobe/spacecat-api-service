@@ -307,7 +307,7 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only admins can create new sites');
   });
 
-  describe('POST /sites - S2S admin grant', () => {
+  describe('POST /sites - S2S site:create capability', () => {
     function makeS2SConsumer({ clientId = 'svc-sandbox', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
       return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
     }
@@ -317,14 +317,12 @@ describe('Sites Controller', () => {
       capabilities = ['site:write'],
       status = 'ACTIVE',
       revoked = false,
-      adminGrants = undefined,
     } = {}) {
       return {
         getId: () => id,
         getCapabilities: () => capabilities,
         getStatus: () => status,
         isRevoked: () => revoked,
-        getAdminGrants: () => adminGrants,
       };
     }
 
@@ -333,10 +331,10 @@ describe('Sites Controller', () => {
       mockDataAccess.Consumer = { findByClientIdAndImsOrgId: sandbox.stub() };
     });
 
-    it('grants access to S2S consumer with adminGrants.CREATE_SITE: true', async () => {
+    it('grants access to S2S consumer with capabilities: [site:create]', async () => {
       context.s2sConsumer = makeS2SConsumer();
       mockDataAccess.Consumer.findByClientIdAndImsOrgId
-        .resolves(makeFreshConsumer({ adminGrants: { CREATE_SITE: true } }));
+        .resolves(makeFreshConsumer({ capabilities: ['site:create'] }));
       mockDataAccess.Site.findByBaseURL.resolves(null);
 
       const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
@@ -345,10 +343,10 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Site.create).to.have.been.calledOnce;
     });
 
-    it('denies S2S consumer without grant (missing-grant) → 403', async () => {
+    it('denies S2S consumer without capability (missing-capability) → 403', async () => {
       context.s2sConsumer = makeS2SConsumer();
       mockDataAccess.Consumer.findByClientIdAndImsOrgId
-        .resolves(makeFreshConsumer({ adminGrants: undefined }));
+        .resolves(makeFreshConsumer({ capabilities: [] }));
 
       const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
       const body = await result.json();
@@ -356,7 +354,7 @@ describe('Sites Controller', () => {
       expect(result.status).to.equal(403);
       expect(body).to.have.property('message', 'Only admins can create new sites');
       expect(loggerStub.info).to.have.been.calledWithMatch(
-        /\[acl\] Denied POST \/sites - reason=missing-grant/,
+        /\[acl\] Denied POST \/sites - reason=missing-capability/,
       );
     });
 
@@ -371,7 +369,7 @@ describe('Sites Controller', () => {
       );
     });
 
-    it('admin user bypasses grant check entirely → 201', async () => {
+    it('admin user bypasses capability check entirely → 201', async () => {
       context.attributes.authInfo.withProfile({ is_admin: true });
       mockDataAccess.Site.findByBaseURL.resolves(null);
 

@@ -45,7 +45,7 @@ import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { CAP_SITE_READ_ALL, ADMIN_GRANT_CREATE_SITE } from '../routes/capability-constants.js';
+import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
@@ -370,7 +370,7 @@ function SitesController(ctx, log, env) {
   const createSite = async (context) => {
     const isAdmin = accessControlUtil.hasAdminAccess();
     if (!isAdmin) {
-      const s2sResult = await accessControlUtil.hasAdminGrant(ADMIN_GRANT_CREATE_SITE);
+      const s2sResult = await accessControlUtil.hasS2SCapability(CAP_SITE_CREATE);
       if (!s2sResult.allowed) {
         log.info(`[acl] Denied POST /sites - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
         return forbidden('Only admins can create new sites');

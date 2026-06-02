@@ -45,7 +45,6 @@ describe('ConsumersController', () => {
       imsOrgId: 'test-ims-org@AdobeOrg',
       consumerName: 'Test Integration',
       capabilities: ['site:read', 'site:write'],
-      adminGrants: undefined,
       status: 'ACTIVE',
       revokedAt: null,
       createdAt: '2026-01-15T10:00:00.000Z',
@@ -60,7 +59,6 @@ describe('ConsumersController', () => {
       getImsOrgId: () => defaults.imsOrgId,
       getConsumerName: () => defaults.consumerName,
       getCapabilities: () => defaults.capabilities,
-      getAdminGrants: () => defaults.adminGrants,
       getStatus: () => defaults.status,
       getRevokedAt: () => defaults.revokedAt,
       getCreatedAt: () => defaults.createdAt,
@@ -68,7 +66,6 @@ describe('ConsumersController', () => {
       getUpdatedBy: () => defaults.updatedBy,
       setConsumerName: sinon.stub().callsFake((v) => { defaults.consumerName = v; }),
       setCapabilities: sinon.stub().callsFake((v) => { defaults.capabilities = v; }),
-      setAdminGrants: sinon.stub().callsFake((v) => { defaults.adminGrants = v; }),
       setStatus: sinon.stub().callsFake((v) => { defaults.status = v; }),
       setRevokedAt: sinon.stub().callsFake((v) => { defaults.revokedAt = v; }),
       setUpdatedBy: sinon.stub().callsFake((v) => { defaults.updatedBy = v; }),
@@ -108,7 +105,6 @@ describe('ConsumersController', () => {
           findById: sandbox.stub().resolves(mockConsumer),
           create: sandbox.stub().resolves(mockConsumer),
           validateCapabilities: sandbox.stub(),
-          validateAdminGrants: sandbox.stub(),
         },
       },
       imsClient: {
@@ -712,78 +708,6 @@ describe('ConsumersController', () => {
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
       expect(response.headers.get('x-error')).to.include('Invalid capabilities');
       expect(mockConsumer.save).not.to.have.been.called;
-    });
-
-    it('updates adminGrants successfully', async () => {
-      const controller = ConsumersController(context);
-      const response = await controller.update({
-        ...context,
-        params: { consumerId: 'test-client-id' },
-        data: { adminGrants: { CREATE_SITE: true } },
-      });
-
-      expect(response.status).to.equal(STATUS_OK);
-      expect(mockConsumer.setAdminGrants).to.have.been.calledWith({ CREATE_SITE: true });
-      expect(mockConsumer.save).to.have.been.calledOnce;
-    });
-
-    it('clears adminGrants with null', async () => {
-      const controller = ConsumersController(context);
-      const response = await controller.update({
-        ...context,
-        params: { consumerId: 'test-client-id' },
-        data: { adminGrants: null },
-      });
-
-      expect(response.status).to.equal(STATUS_OK);
-      expect(mockConsumer.setAdminGrants).to.have.been.calledWith(null);
-      expect(mockConsumer.save).to.have.been.calledOnce;
-    });
-
-    it('rejects invalid adminGrants key', async () => {
-      context.dataAccess.Consumer.validateAdminGrants
-        .throws(new Error('Invalid admin grant key: "UNKNOWN_OP". Valid keys: [CREATE_SITE]'));
-      const controller = ConsumersController(context);
-      const response = await controller.update({
-        ...context,
-        params: { consumerId: 'test-client-id' },
-        data: { adminGrants: { UNKNOWN_OP: true } },
-      });
-
-      expect(response.status).to.equal(STATUS_BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.include('Invalid admin grant key');
-      expect(mockConsumer.save).not.to.have.been.called;
-    });
-
-    it('rejects non-boolean value in adminGrants', async () => {
-      context.dataAccess.Consumer.validateAdminGrants
-        .throws(new Error('adminGrants values must be boolean true. Got "CREATE_SITE": false'));
-      const controller = ConsumersController(context);
-      const response = await controller.update({
-        ...context,
-        params: { consumerId: 'test-client-id' },
-        data: { adminGrants: { CREATE_SITE: false } },
-      });
-
-      expect(response.status).to.equal(STATUS_BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.include('adminGrants values must be boolean true');
-      expect(mockConsumer.save).not.to.have.been.called;
-    });
-
-    it('returns 501 when adminGrants is requested but setAdminGrants is absent (old shared version)', async () => {
-      const oldConsumer = createMockConsumerEntity();
-      delete oldConsumer.setAdminGrants;
-      context.dataAccess.Consumer.findById.resolves(oldConsumer);
-
-      const controller = ConsumersController(context);
-      const response = await controller.update({
-        ...context,
-        params: { consumerId: 'test-consumer-id' },
-        data: { adminGrants: { CREATE_SITE: true } },
-      });
-
-      expect(response.status).to.equal(501);
-      expect(response.headers.get('x-error')).to.include('adminGrants is not supported');
     });
 
     it('rejects revokedAt in update payload', async () => {

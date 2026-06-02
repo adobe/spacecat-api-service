@@ -129,41 +129,6 @@ export default function consumerTests(getHttpClient, resetData) {
         expect(res.body.consumerName).to.equal('Updated IT Consumer');
       });
 
-      // TODO: unskip once spacecat-shared PR #1644 is merged and the package bumped.
-      // These tests require Consumer.validateAdminGrants (collection) and
-      // consumer.setAdminGrants (entity) which land in that release.
-      it.skip('admin: sets adminGrants and verifies persistence via GET', async () => {
-        const http = getHttpClient();
-
-        const patch = await http.admin.patch(`/consumers/${CONSUMER_1_ID}`, {
-          adminGrants: { CREATE_SITE: true },
-        });
-        expect(patch.status).to.equal(200);
-        expect(patch.body.adminGrants).to.deep.equal({ CREATE_SITE: true });
-
-        const get = await http.admin.get(`/consumers/${CONSUMER_1_ID}`);
-        expect(get.status).to.equal(200);
-        expect(get.body.adminGrants).to.deep.equal({ CREATE_SITE: true });
-      });
-
-      it.skip('admin: clears adminGrants with null and verifies via GET', async () => {
-        const http = getHttpClient();
-
-        await http.admin.patch(`/consumers/${CONSUMER_1_ID}`, {
-          adminGrants: { CREATE_SITE: true },
-        });
-
-        const clear = await http.admin.patch(`/consumers/${CONSUMER_1_ID}`, {
-          adminGrants: null,
-        });
-        expect(clear.status).to.equal(200);
-        expect(clear.body.adminGrants).to.be.null;
-
-        const get = await http.admin.get(`/consumers/${CONSUMER_1_ID}`);
-        expect(get.status).to.equal(200);
-        expect(get.body.adminGrants).to.be.null;
-      });
-
       it('user: returns 403 (requires S2S admin)', async () => {
         const http = getHttpClient();
         const res = await http.user.patch(`/consumers/${CONSUMER_1_ID}`, {

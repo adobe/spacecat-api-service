@@ -21,9 +21,11 @@ import * as Capabilities from '../../src/routes/capability-constants.js';
 const testDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(testDir, '..', '..');
 
-const READ_ALL_CONSTANTS = Object.entries(Capabilities)
+const ALL_CAP_CONSTANTS = Object.entries(Capabilities)
   .filter(([key]) => key.startsWith('CAP_'))
   .map(([, value]) => value);
+
+const READ_ALL_CONSTANTS = ALL_CAP_CONSTANTS.filter((cap) => cap.endsWith(':readAll'));
 
 /**
  * Drift assertions for the readAll capability surface.

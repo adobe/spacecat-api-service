@@ -22,9 +22,4 @@
 export const CAP_SITE_READ_ALL = 'site:readAll';
 export const CAP_ORG_READ_ALL = 'organization:readAll';
 
-/**
- * Admin grant operation keys used by `hasAdminGrant()` at Layer 2.
- * Must match `Consumer.ADMIN_GRANTS` in spacecat-shared-data-access.
- * TODO: import directly from Consumer.ADMIN_GRANTS once spacecat-shared PR #1644 is released.
- */
-export const ADMIN_GRANT_CREATE_SITE = 'CREATE_SITE';
+export const CAP_SITE_CREATE = 'site:create';
