@@ -18,6 +18,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cachedOk } from '../../support/cached-response.js';
+import { INTENT_VALUES } from '../../support/prompts-storage.js';
 
 /**
  * Brand Presence filter-dimensions handler for org-based routes.
@@ -644,11 +645,7 @@ const CONFIG_FILTER_ORIGINS = Object.freeze([
   toFilterOption('ai', 'ai'),
 ]);
 
-/** Hardcoded prompt intent options for filter-dimensions. */
-const CONFIG_PROMPT_INTENTS = Object.freeze([
-  'informational', 'instructional', 'comparative',
-  'transactional', 'planning', 'delegation',
-].map((v) => toFilterOption(v, v)));
+const CONFIG_PROMPT_INTENTS = Object.freeze(INTENT_VALUES.map((v) => toFilterOption(v, v)));
 
 /**
  * Optional query params: siteId / site_id, categoryId / category_id.

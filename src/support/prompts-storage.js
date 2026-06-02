@@ -464,6 +464,7 @@ export async function getPromptById({
       regions,
       status,
       origin,
+      intent,
       source,
       category_id,
       topic_id,
@@ -828,7 +829,7 @@ export async function checkPromptsExist({ brandUuid, prompts, postgrestClient })
   return data ?? [];
 }
 
-const INTENT_VALUES = ['informational', 'instructional', 'comparative', 'transactional', 'planning', 'delegation'];
+export const INTENT_VALUES = Object.freeze(['informational', 'instructional', 'comparative', 'transactional', 'planning', 'delegation']);
 
 export async function getPromptStats({ organizationId, brandUuid, postgrestClient }) {
   if (!postgrestClient?.rpc) {
