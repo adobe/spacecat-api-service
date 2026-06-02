@@ -867,7 +867,7 @@ ScraperConfigUpdate:
 ScraperConfigResponse:
   type: object
   description: |
-    Response body returned by `PATCH /sites/{siteId}/config/scraper`.
+    Response body returned by `GET` and `PATCH /sites/{siteId}/config/scraper`.
     Intentionally narrow: returns only the affected site ID and the persisted
     scraper configuration, not the rest of the site's configuration.
   properties:
