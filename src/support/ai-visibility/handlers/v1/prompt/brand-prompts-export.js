@@ -45,6 +45,7 @@ export async function handleBrandPromptsExport(sp, clients) {
   const sortBy = sp.get('sortBy') || PROMPTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
   const topicId = sp.get('topicId');
+  const date = sp.get('date');
   const { limit, offset } = parseLimitOffset(sp);
 
   const categories = [
@@ -65,6 +66,7 @@ export async function handleBrandPromptsExport(sp, clients) {
       range: { limit, offset },
       categories,
       dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
+      target_date: date,
     },
     PROTO_FROM_JSON,
   );

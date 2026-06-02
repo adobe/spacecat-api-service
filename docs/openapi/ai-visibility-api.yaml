@@ -70,6 +70,15 @@ x-ai-vis-month: &monthParam
     pattern: '^\d{4}-\d{2}$'
     example: '2026-01'
 
+x-ai-vis-date: &dateParam
+  name: date
+  in: query
+  required: false
+  description: Snapshot date forwarded to supported Semrush v1 gRPC requests as `target_date`
+  schema:
+    type: string
+    example: '2026-01-15'
+
 x-ai-vis-window-months: &windowMonthsParam
   name: windowMonths
   in: query
@@ -1138,6 +1147,7 @@ ai-visibility-v1-topic-brand-topics:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1BrandTopicsSortByParam
       - *sortDirectionParam
       - *v1BrandTopicsSearchQueryParam
@@ -1176,6 +1186,7 @@ ai-visibility-v1-topic-brand-topics-export:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1BrandTopicsSortByParam
       - *sortDirectionParam
       - *v1BrandTopicsSearchQueryParam
@@ -1213,6 +1224,7 @@ ai-visibility-v1-topic-brand-topics-totals:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1BrandTopicsSearchQueryParam
       - *v1BrandTopicsVolumeFromParam
       - *v1BrandTopicsVolumeToParam
@@ -1260,6 +1272,7 @@ ai-visibility-v1-topic-gap-topics:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1GapTopicsSortByParam
       - *sortDirectionParam
       - *v1GapTopicsGapKindsParam
@@ -1298,6 +1311,7 @@ ai-visibility-v1-topic-gap-topics-export:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1GapTopicsSortByParam
       - *sortDirectionParam
       - *v1GapTopicsGapKindsParam
@@ -1337,6 +1351,7 @@ ai-visibility-v1-topic-gap-topics-totals:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1BrandTopicsSearchQueryParam
       - *v1BrandTopicsVolumeFromParam
       - *v1BrandTopicsVolumeToParam
@@ -1369,6 +1384,7 @@ ai-visibility-v1-prompt-brand-prompts:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1PromptsSortByParam
       - *sortDirectionParam
       - *topicIdOptionalParam
@@ -1403,6 +1419,7 @@ ai-visibility-v1-prompt-brand-prompts-export:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1PromptsSortByParam
       - *sortDirectionParam
       - *topicIdOptionalParam
@@ -1446,6 +1463,7 @@ ai-visibility-v1-prompt-gap-prompts:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1GapPromptsSortByParam
       - *sortDirectionParam
       - *v1GapTopicsGapKindsParam
@@ -1483,6 +1501,7 @@ ai-visibility-v1-prompt-gap-prompts-export:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1GapPromptsSortByParam
       - *sortDirectionParam
       - *v1GapTopicsGapKindsParam
@@ -1518,6 +1537,7 @@ ai-visibility-v1-prompt-prompt-response:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
     responses:
       '200':
         description: Prompt response retrieved successfully

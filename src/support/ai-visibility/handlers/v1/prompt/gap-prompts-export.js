@@ -52,6 +52,7 @@ export async function handleGapPromptsExport(sp, clients) {
 
   const topicId = sp.get('topicId');
   const sourceDomain = sp.get('sourceDomain');
+  const date = sp.get('date');
 
   let exportRequest;
   try {
@@ -66,6 +67,7 @@ export async function handleGapPromptsExport(sp, clients) {
         direction: sortDirection,
       },
       range: { limit, offset },
+      target_date: date,
     };
     if (topicId) {
       gapPromptsJson.topic_hash = topicId;

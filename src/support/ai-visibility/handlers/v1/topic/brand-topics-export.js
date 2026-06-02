@@ -48,6 +48,7 @@ export async function handleBrandTopicsExport(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
+  const date = sp.get('date');
   const { limit, offset } = parseLimitOffset(sp);
 
   const dimensionFilterQl = buildBrandTopicsDimensionFilterQl(sp);
@@ -76,6 +77,7 @@ export async function handleBrandTopicsExport(sp, clients) {
       categories,
       dimension_filter_ql: dimensionFilterQl,
       metric_filter_ql: metricFilterQl,
+      target_date: date,
     },
     PROTO_FROM_JSON,
   );

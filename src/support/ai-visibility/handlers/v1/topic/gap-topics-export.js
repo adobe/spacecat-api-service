@@ -49,6 +49,7 @@ export async function handleGapTopicsExport(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || TOPICS_REQUEST_ORDER_BY_ENUM.TOTAL_COMPETITOR_MENTIONS;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
+  const date = sp.get('date');
   const { limit, offset } = parseLimitOffset(sp);
 
   const gapKindsRaw = sp.get('gapKinds');
@@ -77,6 +78,7 @@ export async function handleGapTopicsExport(sp, clients) {
         range: { limit, offset },
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
+        target_date: date,
       },
       PROTO_FROM_JSON,
     );

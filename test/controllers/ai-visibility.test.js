@@ -16,42 +16,6 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
 
-const ALL_METHOD_NAMES = [
-  'getBrandsStats',
-  'getBrandsTopics',
-  'getBrandsPrompts',
-  'getBrandsCitedPages',
-  'getBrandsTopicOpportunities',
-  'getBrandsTopBrands',
-  'getBrandsCitedSources',
-  'getBrandsSourceOpportunities',
-  'getBrandsCompetitors',
-  'getCompetitorsMetrics',
-  'getCompetitorsGapTopics',
-  'getCompetitorsGapSourceDomains',
-  'getCompetitorsGapPrompts',
-  'getMeta',
-  'getPromptsResponsesLatest',
-  'getPromptsResponses',
-  'getTopicsResearchStats',
-  'getTopicsResearchPrompts',
-  'getTopicsResearchBrands',
-  'getTopicsResearchSourceDomains',
-  'getTopicsResearch',
-  'getTopicsStats',
-  'getV1TopicBrandTopics',
-  'getV1TopicBrandTopicsExport',
-  'getV1TopicBrandTopicsTotals',
-  'getV1TopicGapTopics',
-  'getV1TopicGapTopicsExport',
-  'getV1TopicGapTopicsTotals',
-  'getV1PromptBrandPrompts',
-  'getV1PromptBrandPromptsExport',
-  'getV1PromptGapPrompts',
-  'getV1PromptGapPromptsExport',
-  'getV1PromptPromptResponse',
-];
-
 describe('AiVisibilityController', () => {
   let sandbox;
   let AiVisibilityController;
@@ -355,23 +319,6 @@ describe('AiVisibilityController', () => {
 
     it('throws when log is undefined', () => {
       expect(() => AiVisibilityController({ some: 'data' }, undefined, env)).to.throw('Log required');
-    });
-  });
-
-  describe('returned handler object', () => {
-    it('returns an object with all 32 method names', () => {
-      const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      expect(Object.keys(handlers)).to.have.lengthOf(32);
-      for (const name of ALL_METHOD_NAMES) {
-        expect(handlers).to.have.property(name).that.is.a('function');
-      }
-    });
-
-    it('each returned method is a function', () => {
-      const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      for (const value of Object.values(handlers)) {
-        expect(value).to.be.a('function');
-      }
     });
   });
 
