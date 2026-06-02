@@ -43,6 +43,7 @@ const ALL_METHOD_NAMES = [
   'getV1TopicBrandTopicsExport',
   'getV1TopicBrandTopicsTotals',
   'getV1TopicGapTopics',
+  'getV1TopicGapTopicsExport',
   'getV1TopicGapTopicsTotals',
   'getV1PromptBrandPrompts',
   'getV1PromptBrandPromptsExport',
@@ -86,6 +87,7 @@ describe('AiVisibilityController', () => {
   let mockHandleV1TopicBrandTopicsExport;
   let mockHandleV1TopicBrandTopicsTotals;
   let mockHandleV1TopicGapTopics;
+  let mockHandleV1TopicGapTopicsExport;
   let mockHandleV1TopicGapTopicsTotals;
   let mockHandleV1PromptBrandPrompts;
   let mockHandleV1PromptBrandPromptsExport;
@@ -187,6 +189,9 @@ describe('AiVisibilityController', () => {
     mockHandleV1TopicGapTopics = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1TopicGapTopicsExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1TopicGapTopicsTotals = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
@@ -265,6 +270,9 @@ describe('AiVisibilityController', () => {
         handleGapTopics: mockHandleV1TopicGapTopics,
         buildGapTopicsDimensionFilterQl: sandbox.stub().returns(''),
         buildGapTopicsMetricFilterQl: sandbox.stub().returns({ ok: true, metricFilterQl: '' }),
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/gap-topics-export.js': {
+        handleGapTopicsExport: mockHandleV1TopicGapTopicsExport,
       },
       '../../src/support/ai-visibility/handlers/v1/topic/gap-topics-totals.js': {
         handleGapTopicsTotals: mockHandleV1TopicGapTopicsTotals,
@@ -610,6 +618,7 @@ describe('AiVisibilityController', () => {
       getV1TopicBrandTopics: mockHandleV1TopicBrandTopics,
       getV1TopicBrandTopicsExport: mockHandleV1TopicBrandTopicsExport,
       getV1TopicGapTopics: mockHandleV1TopicGapTopics,
+      getV1TopicGapTopicsExport: mockHandleV1TopicGapTopicsExport,
       getV1PromptBrandPrompts: mockHandleV1PromptBrandPrompts,
       getV1PromptBrandPromptsExport: mockHandleV1PromptBrandPromptsExport,
       getV1PromptGapPrompts: mockHandleV1PromptGapPrompts,

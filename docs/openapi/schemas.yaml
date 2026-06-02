@@ -9588,6 +9588,28 @@ AiVisibilityV1TopicGapTopicsResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1TopicGapTopicsExportResponse:
+  type: object
+  description: |
+    Gap topics CSV export from `GET /llmo/ai-visibility/v1/topic/gap-topics-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: gap-topics.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityV1TopicGapTopicsTotalsResponse:
   type: object
   description: |

@@ -53,6 +53,7 @@ import { handleBrandTopics as handleBrandTopicsV1 } from '../support/ai-visibili
 import { handleBrandTopicsExport as handleBrandTopicsExportV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics-export.js';
 import { handleBrandTopicsTotals as handleBrandTopicsTotalsV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics-totals.js';
 import { handleGapTopics as handleGapTopicsV1 } from '../support/ai-visibility/handlers/v1/topic/gap-topics.js';
+import { handleGapTopicsExport as handleGapTopicsExportV1 } from '../support/ai-visibility/handlers/v1/topic/gap-topics-export.js';
 import { handleGapTopicsTotals as handleGapTopicsTotalsV1 } from '../support/ai-visibility/handlers/v1/topic/gap-topics-totals.js';
 import { handleBrandPrompts as handleBrandPromptsV1 } from '../support/ai-visibility/handlers/v1/prompt/brand-prompts.js';
 import { handleBrandPromptsExport as handleBrandPromptsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/brand-prompts-export.js';
@@ -88,6 +89,7 @@ const ROUTE_MAP = [
   ['/v1/topic/brand-topics-export', handleBrandTopicsExportV1],
   ['/v1/topic/brand-topics-totals', handleBrandTopicsTotalsV1],
   ['/v1/topic/gap-topics', handleGapTopicsV1],
+  ['/v1/topic/gap-topics-export', handleGapTopicsExportV1],
   ['/v1/topic/gap-topics-totals', handleGapTopicsTotalsV1],
   ['/v1/prompt/brand-prompts', handleBrandPromptsV1],
   ['/v1/prompt/brand-prompts-export', handleBrandPromptsExportV1],

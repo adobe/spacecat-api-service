@@ -1279,6 +1279,44 @@ ai-visibility-v1-topic-gap-topics:
     security:
       - api_key: []
 
+ai-visibility-v1-topic-gap-topics-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export gap topics as CSV (Topic v2 JSON)
+    description: |
+      Exports topics with the gap between the target brand and its competitors using Semrush
+      `TopicService` v2 `GapTopicsExport`. The nested `GapTopicsRequest` uses the same
+      filters and sorting as `/llmo/ai-visibility/v1/topic/gap-topics`: competitors,
+      `searchQuery` as `topic CONTAINS "<searchQuery>"`, volume range filters, `gapKinds`,
+      `TOPICS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`.
+      The response is the native Semrush `ExportResponse` protobuf JSON with CSV
+      `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1TopicGapTopicsExport
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1GapTopicsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap topics CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicGapTopicsExportResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-v1-topic-gap-topics-totals:
   get:
     tags: [ai-visibility]
