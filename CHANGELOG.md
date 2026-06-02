@@ -1,3 +1,10 @@
+# [1.536.0](https://github.com/adobe/spacecat-api-service/compare/v1.535.4...v1.536.0) (2026-06-02)
+
+
+### Features
+
+* **serenity:** add market detail endpoint exposing semrushProjectId (LLMO-5190 follow-up) ([#2519](https://github.com/adobe/spacecat-api-service/issues/2519)) ([14be96c](https://github.com/adobe/spacecat-api-service/commit/14be96ca86e0e5fcdb1f7d883c82480daa84b5ab))
+
 ## [1.535.4](https://github.com/adobe/spacecat-api-service/compare/v1.535.3...v1.535.4) (2026-06-02)
 
 
