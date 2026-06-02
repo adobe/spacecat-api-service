@@ -253,6 +253,7 @@ x-ai-vis-v1-prompts-sort-by: &v1PromptsSortByParam
           - MENTIONED_BRANDS_COUNT
           - SOURCES_COUNT
           - TOPIC_VOLUME
+          - TOPIC_VISIBILITY
       - type: integer
         enum: [0, 1, 2, 3, 4, 5]
     example: MENTIONED_BRANDS_COUNT
@@ -337,15 +338,15 @@ x-ai-vis-fts-prompts-sort-by: &ftsPromptsSortByParam
   required: false
   description: |
     `PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY` for Semrush v2 `PromptsByTopicFTSRequest.order.by`.
-    Default when omitted: `MENTIONED_BRANDS_COUNT`. Returns `400 invalid_sort_by` for any other value.
+    Default when omitted: `RELEVANCE_SCORE`. Returns `400 invalid_sort_by` for any other value.
 
     Note: on the all-engines path (no `engine` query param) the sort is applied
     server-side per LLM and the merged page is re-sorted in-process, so ordering
     is fully consistent within each page but only approximate across pages.
   schema:
     type: string
-    enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT]
-    default: MENTIONED_BRANDS_COUNT
+    enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT, RELEVANCE_SCORE]
+    default: RELEVANCE_SCORE
 
 x-ai-vis-fts-brands-sort-by: &ftsBrandsSortByParam
   name: sortBy
@@ -1006,7 +1007,7 @@ ai-visibility-topics-research-prompts:
       the sum of per-LLM totals.
       Data from `PromptService/PromptsByTopicFTS` and `PromptsByTopicFTSTotals`.
 
-      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT` (default), `SOURCES_COUNT`)
+      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT`, `RELEVANCE_SCORE`, `RELEVANCE_SCORE` (default))
       and `sortDirection` (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is
       applied per LLM and the merged page is re-sorted in-process; cross-page ordering is
       approximate.
