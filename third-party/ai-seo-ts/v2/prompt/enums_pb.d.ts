@@ -44,7 +44,6 @@ export enum PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM {
 
   /**
    * MENTIONED_BRANDS_COUNT orders results by the number of brands mentioned in the LLM response.
-   * This is the default ordering.
    *
    * @generated from enum value: MENTIONED_BRANDS_COUNT = 2;
    */
@@ -56,6 +55,13 @@ export enum PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM {
    * @generated from enum value: SOURCES_COUNT = 3;
    */
   SOURCES_COUNT = 3,
+
+  /**
+   * RELEVANCE_SCORE orders results by the prompt's topic relevance score.
+   *
+   * @generated from enum value: RELEVANCE_SCORE = 4;
+   */
+  RELEVANCE_SCORE = 4,
 }
 
 /**
@@ -305,6 +311,11 @@ export enum PROMPTS_REQUEST_ORDER_BY_ENUM {
    * @generated from enum value: TOPIC_VOLUME = 5;
    */
   TOPIC_VOLUME = 5,
+
+  /**
+   * @generated from enum value: TOPIC_VISIBILITY = 6;
+   */
+  TOPIC_VISIBILITY = 6,
 }
 
 /**

@@ -201,7 +201,9 @@ export enum DOMAINS_REQUEST_ORDER_BY_ENUM {
 export declare const DOMAINS_REQUEST_ORDER_BY_ENUMSchema: GenEnum<DOMAINS_REQUEST_ORDER_BY_ENUM>;
 
 /**
- * SEARCH_TYPE defines the type of search to perform when looking for citations.
+ * SEARCH_TYPE defines how a search_item is interpreted when filtering source
+ * URLs (citations, mentions, etc.). It is consumed by any endpoint that scopes
+ * results to a root domain, subdomain, subfolder, or exact URL.
  *
  * @generated from message semrush.services.ai_seo.v2.source.SEARCH_TYPE
  */
