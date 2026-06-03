@@ -1780,14 +1780,14 @@ export const onboardSingleSite = async (
 
     const auditTypes = Object.keys(profile.audits);
 
-    // Determine scheduledRun early so we only enable audits in config for paid profiles
+    // Determine scheduledRun early so we only enable audits in config for paid/scheduled profiles
     const scheduledRun = additionalParams.scheduledRun !== undefined
       ? additionalParams.scheduledRun
       : (profile.config?.scheduledRun || false);
 
     const latestConfiguration = await Configuration.findLatest();
 
-    // Only enable audits in configuration when scheduledRun is true (paid profiles)
+    // Enable audits in configuration only for scheduled runs (so they recur on schedule)
     const auditsEnabled = [];
     if (scheduledRun) {
       for (const auditType of auditTypes) {
@@ -1811,7 +1811,7 @@ export const onboardSingleSite = async (
         log.error(`Failed to save configuration for site ${siteID}:`, error);
         throw error;
       }
-    } else {
+    } else if (scheduledRun) {
       log.debug(`All the required audits for the given profile are already enabled for site ${siteID}`);
     }
 
@@ -1888,7 +1888,7 @@ export const onboardSingleSite = async (
 
     // Prepare and start step function workflow with the necessary parameters.
     // Always send disableImportAndAuditJob so imports can be disabled (avoid exhausting Ahrefs).
-    // auditsEnabled is not sent to the task handler; only log/Slack the info here.
+    // For non-paid, non-scheduled sites, audits that were enabled are also disabled after the wait.
     const workflowInput = {
       opportunityStatusJob,
       disableImportAndAuditJob: {
@@ -1899,9 +1899,7 @@ export const onboardSingleSite = async (
         organizationId,
         taskContext: {
           importTypes: importsEnabled || [],
-          // Not sent to task handler; audits are enabled in config only when scheduledRun is true,
-          // so no separate audit-disable list is needed here.
-          auditTypes: [],
+          auditTypes,
           scheduledRun,
           slackContext: {
             channelId: slackContext.channelId,
