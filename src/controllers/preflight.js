@@ -519,7 +519,11 @@ function PreflightController(ctx, log, env) {
     } catch (mysticatError) {
       log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);
       preflight.setStatus(AsyncJob.Status.FAILED);
-      preflight.setError({ code: 'MYSTICAT_ERROR', message: mysticatError.message });
+      // Stored error message mirrors the external 502 response — the raw
+      // upstream body could carry internal hostnames / stack traces and is
+      // exposed via GET /sites/:siteId/preflights/:preflightId. Full detail
+      // is in the log.error above for ops visibility.
+      preflight.setError({ code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed' });
       preflight.setEndedAt(new Date().toISOString());
       await preflight.save().catch((e) => log.warn(`Failed to persist FAILED state on preflight ${preflight.getId()}: ${e.message}`));
       asyncJob.setStatus(AsyncJob.Status.FAILED);

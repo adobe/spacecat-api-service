@@ -1175,8 +1175,18 @@ describe('Preflight Controller', () => {
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_UPSTREAM_ERROR');
       expect(mockPreflight.setStatus).to.have.been.calledWith('FAILED');
-      expect(mockPreflight.setError).to.have.been.calledWithMatch({ code: 'MYSTICAT_ERROR' });
+      // Stored error mirrors the external 502 message — the raw upstream
+      // body could leak via GET detail and is sanitized server-side.
+      expect(mockPreflight.setError).to.have.been.calledWithMatch({
+        code: 'MYSTICAT_ERROR',
+        message: 'Upstream analyze service failed',
+      });
       expect(mockPreflight.save).to.have.been.calledOnce;
+      // AsyncJob row must also be flipped to FAILED; the controller updates
+      // both records so a future refactor that drops the AsyncJob update is
+      // caught here.
+      expect(mockJob.setStatus).to.have.been.calledWith('FAILED');
+      expect(mockJob.save).to.have.been.called;
     });
 
     it('creates preflight successfully and returns 202 with Location header (prod)', async () => {
