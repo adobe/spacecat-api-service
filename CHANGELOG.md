@@ -1,3 +1,10 @@
+# [1.542.0](https://github.com/adobe/spacecat-api-service/compare/v1.541.0...v1.542.0) (2026-06-03)
+
+
+### Features
+
+* **s2s:** expose auto-fix endpoint to S2S consumers via fixEntity:create ([#2542](https://github.com/adobe/spacecat-api-service/issues/2542)) ([c357593](https://github.com/adobe/spacecat-api-service/commit/c3575935eef29e4a1515e24cbee92278a15c83aa))
+
 # [1.541.0](https://github.com/adobe/spacecat-api-service/compare/v1.540.0...v1.541.0) (2026-06-03)
 
 
