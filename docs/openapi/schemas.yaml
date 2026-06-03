@@ -6197,7 +6197,7 @@ V2Prompt:
     intent:
       type: [string, 'null']
       enum: [informational, instructional, comparative, transactional, planning, delegation, null]
-      description: Search intent assigned during AI prompt generation. Null for human-created prompts.
+      description: Search intent classification applied to all prompts regardless of origin. Null until classified.
       example: informational
     source:
       type: string
@@ -6282,7 +6282,7 @@ V2PromptInput:
     intent:
       type: [string, 'null']
       enum: [informational, instructional, comparative, transactional, planning, delegation, null]
-      description: Search intent assigned during AI prompt generation. Null for human-created prompts.
+      description: Search intent classification applied to all prompts regardless of origin. Null until classified.
       example: informational
     source:
       type: string
