@@ -497,7 +497,7 @@ describe('SerenityController', () => {
     });
 
     it('listModels dispatches to handleListModels and wraps the result in ok()', async () => {
-      handlers.handleListModels.resolves({ items: [{ id: 'm1', key: 'chatgpt', name: null, icon: null }] });
+      handlers.handleListModels.resolves({ items: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext();
       ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };

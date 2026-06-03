@@ -1337,7 +1337,12 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     // currentItems has one valid entry and one with model: null (malformed upstream shape)
     const transport = makeTransport({
       currentItems: [
-        { id: 'assign-good', model: { id: 'cat-a', key: 'key-a', name: null, icon: null } },
+        {
+          id: 'assign-good',
+          model: {
+            id: 'cat-a', key: 'key-a', name: null, icon: null,
+          },
+        },
         { id: 'assign-bad', model: null },
       ],
     });
