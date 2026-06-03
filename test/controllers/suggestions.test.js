@@ -2979,7 +2979,7 @@ describe('Suggestions Controller', () => {
       expect(postSlackMessageStub.firstCall.args[1]).to.include('TOO_RISKY');
     });
 
-    it('sends skip alert to PAID channel for a PAID site', async () => {
+    it('does not send PLG skip alert when patchSuggestion skips for a PAID site', async () => {
       const postSlackMessageStub = sandbox.stub().resolves();
       const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
         '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
@@ -2994,42 +2994,13 @@ describe('Suggestions Controller', () => {
       const response = await ctrl.patchSuggestion({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
         data: { status: 'SKIPPED' },
-        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_PLG', SLACK_PAID_SKIP_CHANNEL_ID: 'C_PAID', SLACK_BOT_TOKEN: 'xoxb-token' },
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
         ...context,
         dataAccess: da,
       });
-      await new Promise(setImmediate);
-
-      expect(response.status).to.equal(200);
-      expect(postSlackMessageStub).to.have.been.calledOnce;
-      expect(postSlackMessageStub.firstCall.args[0]).to.equal('C_PAID');
-      expect(postSlackMessageStub.firstCall.args[1]).to.include('PAID Customer Skipped');
-    });
-
-    it('logs warning and skips when no channel is configured for the site tier', async () => {
-      const postSlackMessageStub = sandbox.stub().resolves();
-      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
-        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
-      });
-
-      const paidSite = makePaidSite();
-      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(paidSite) } };
-      const ctrl = ControllerWithSlack({
-        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
-
-      const response = await ctrl.patchSuggestion({
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
-        data: { status: 'SKIPPED' },
-        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_PLG', SLACK_BOT_TOKEN: 'xoxb-token' },
-        ...context,
-        dataAccess: da,
-      });
-      await new Promise(setImmediate);
 
       expect(response.status).to.equal(200);
       expect(postSlackMessageStub).to.not.have.been.called;
-      expect(context.log.warn).to.have.been.calledWithMatch('No Slack skip channel configured for tier PAID');
     });
 
     it('does not send PLG skip alert when patchSuggestion skips and channel env var is missing', async () => {
@@ -3104,7 +3075,7 @@ describe('Suggestions Controller', () => {
       await new Promise(setImmediate);
 
       expect(response.status).to.equal(200);
-      expect(context.log.error).to.have.been.calledWithMatch('Failed to send suggestion skip Slack alert');
+      expect(context.log.error).to.have.been.calledWithMatch('Failed to send PLG suggestion skip Slack alert');
     });
 
     it('does not send PLG skip alert when getSiteEnrollments throws', async () => {
@@ -3242,7 +3213,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.metadata.success).to.equal(1);
-      expect(context.log.error).to.have.been.calledWithMatch('Failed to send suggestion skip Slack alert');
+      expect(context.log.error).to.have.been.calledWithMatch('Failed to send PLG suggestion skip Slack alert');
     });
   });
 

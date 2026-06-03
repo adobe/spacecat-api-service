@@ -53,38 +53,28 @@ import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-st
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
-async function getSiteAsoTier(site, log) {
+async function isSitePlgTier(site, log) {
   try {
     const enrollments = await site.getSiteEnrollments();
     const entitlements = await Promise.all((enrollments ?? []).map((e) => e.getEntitlement()));
-    const asoEntitlement = entitlements.find((e) => e?.getProductCode() === 'ASO');
-    const tier = asoEntitlement?.getTier();
-    return (tier === 'PLG' || tier === 'PAID') ? tier : null;
+    return entitlements.some((e) => e?.getProductCode() === 'ASO' && e.getTier() === 'PLG');
   } catch (err) {
-    log.warn(`Failed to determine ASO tier for site ${site.getId()}: ${err.message}`);
-    return null;
+    log.warn(`Failed to determine PLG tier for site ${site.getId()}: ${err.message}`);
+    return false;
   }
 }
 
-async function postSuggestionSkipAlert(site, opportunity, suggestion, context, tier) {
+async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context, isPlgTier) {
   const { env, log } = context;
-  const plgChannelId = env?.SLACK_PLG_SKIP_CHANNEL_ID;
-  const paidChannelId = env?.SLACK_PAID_SKIP_CHANNEL_ID;
+  const channelId = env?.SLACK_PLG_SKIP_CHANNEL_ID;
   const token = env?.SLACK_BOT_TOKEN;
-
-  if (!token || (!plgChannelId && !paidChannelId)) {
+  if (!channelId || !token) {
     return;
   }
 
   try {
-    const resolvedTier = tier !== undefined ? tier : await getSiteAsoTier(site, log);
-    if (!resolvedTier) {
-      return;
-    }
-
-    const channelId = resolvedTier === 'PLG' ? plgChannelId : paidChannelId;
-    if (!channelId) {
-      log.warn(`No Slack skip channel configured for tier ${resolvedTier}; skipping suggestion skip alert`);
+    const plg = isPlgTier !== undefined ? isPlgTier : await isSitePlgTier(site, log);
+    if (!plg) {
       return;
     }
 
@@ -95,7 +85,7 @@ async function postSuggestionSkipAlert(site, opportunity, suggestion, context, t
     const skipReason = suggestion.getSkipReason?.() ?? null;
     const skipDetail = suggestion.getSkipDetail?.() ?? null;
 
-    let message = `:no_entry_sign: *${resolvedTier} Customer Skipped a Suggestion*\n\n`
+    let message = ':no_entry_sign: *PLG Customer Skipped a Suggestion*\n\n'
       + `• *Site:* \`${siteBaseURL}\`\n`
       + `• *Site ID:* \`${site.getId()}\`\n`
       + `• *Opportunity Type:* \`${opportunityType}\`\n`
@@ -111,7 +101,7 @@ async function postSuggestionSkipAlert(site, opportunity, suggestion, context, t
 
     await postSlackMessage(channelId, message, token);
   } catch (alertError) {
-    log.error('Failed to send suggestion skip Slack alert', {
+    log.error('Failed to send PLG suggestion skip Slack alert', {
       error: alertError,
       suggestionId: suggestion.getId?.(),
       siteId: site.getId?.(),
@@ -785,7 +775,7 @@ function SuggestionsController(ctx, sqs, env) {
         suggestion.setUpdatedBy(profile.email || 'system');
         const updatedSuggestion = await suggestion.save();
         if (isNewSkipTransition) {
-          postSuggestionSkipAlert(site, opportunity, updatedSuggestion, context)
+          postPlgSuggestionSkipAlert(site, opportunity, updatedSuggestion, context)
             .catch((err) => context.log.error(`PLG skip alert failed: ${err.message}`));
         }
         return ok(SuggestionDto.toJSON(updatedSuggestion));
@@ -874,7 +864,7 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Request body must be an array of [{ id: <suggestion id>, status: <suggestion status> },...]');
     }
 
-    const resolvedTierCache = await getSiteAsoTier(site, context.log);
+    const isPlgSite = await isSitePlgTier(site, context.log);
 
     const suggestionPromises = context.data.map(async (item, index) => {
       const {
@@ -1000,7 +990,7 @@ function SuggestionsController(ctx, sqs, env) {
         const updatedSuggestion = await suggestion.save();
         if (isNewSkipTransition) {
           const opp = await suggestion.getOpportunity();
-          postSuggestionSkipAlert(site, opp, updatedSuggestion, context, resolvedTierCache)
+          postPlgSuggestionSkipAlert(site, opp, updatedSuggestion, context, isPlgSite)
             .catch((err) => context.log.error(`PLG skip alert failed: ${err.message}`));
         }
         return {
