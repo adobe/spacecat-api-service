@@ -1820,29 +1820,32 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('Missing required environment variables');
         }
         const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
-        let promptSources;
+        let prompts;
         if (domainWideSuggestions.length > 0) {
-          const newStatus = SuggestionModel.STATUSES.NEW;
-          const allNew = await Suggestion.allByOpportunityIdAndStatus(opportunityId, newStatus);
-          const top15ByContentGainRatio = [...allNew]
-            .filter((s) => s.getData()?.isDomainWide !== true)
-            .sort((a, b) => (b.getData()?.contentGainRatio || 0)
-              - (a.getData()?.contentGainRatio || 0))
-            .slice(0, 15);
-          promptSources = top15ByContentGainRatio
-            .sort((a, b) => (b.getData()?.agenticTraffic || 0) - (a.getData()?.agenticTraffic || 0))
-            .slice(0, 10);
+          // LLMO-5141: For domain-wide RCV suggestions the prerender audit has already
+          // shortlisted high-value URLs (agentic traffic × content gain) and stored
+          // their prompts on the domain-wide suggestion's data.prompts field.
+          // Extract those prompts directly — no need to re-rank per-URL suggestions here.
+          // Use the first domain-wide suggestion (there should only be one per opportunity).
+          const domainWideSuggestionData = domainWideSuggestions[0].suggestion.getData();
+          prompts = Array.isArray(domainWideSuggestionData?.prompts)
+            ? domainWideSuggestionData.prompts
+            : [];
+
+          // Success scoring tracks the domain URL (www.domain.com) for metrics calculations.
+          // Set urls to the wildcard domain pattern so the experiment covers the whole domain.
+          urls = [`${apexBaseUrl}/*`];
+          context.log.info(
+            `[edge-geo-exp] domain-wide deploy: extracted ${prompts.length} prompts from `
+            + `domain-wide suggestion. urls=[${urls[0]}]`,
+          );
         } else {
-          promptSources = validSuggestions;
+          const promptSources = validSuggestions;
+          prompts = promptSources.flatMap((s) => s.getData()?.prompts || []);
+          urls = promptSources
+            .map((s) => s.getData()?.url)
+            .filter(Boolean);
         }
-        const domainWideSuggestionIds = new Set(
-          domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
-        );
-        urls = promptSources
-          .filter((s) => !domainWideSuggestionIds.has(s.getId()))
-          .map((s) => s.getData()?.url)
-          .filter(Boolean);
-        const prompts = promptSources.flatMap((s) => s.getData()?.prompts || []);
         if (prompts.length === 0) {
           context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, no prompts found in selected suggestions`);
           throw new Error('No prompts found in selected suggestions');
