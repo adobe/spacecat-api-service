@@ -769,9 +769,13 @@ export async function handleListModels(
           limit: AI_MODELS_PAGE,
         });
         const batch = Array.isArray(resp?.items) ? resp.items : [];
-        if (batch.length === 0) { break; }
+        if (batch.length === 0) {
+          break;
+        }
         rawItems.push(...batch);
-        if (batch.length < AI_MODELS_PAGE) { break; }
+        if (batch.length < AI_MODELS_PAGE) {
+          break;
+        }
         page += 1;
       }
     } catch (e) {
