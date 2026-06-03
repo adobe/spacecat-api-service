@@ -73,7 +73,7 @@ v2-serenity-prompts:
         schema:
           type: array
           maxItems: 50
-          items: { type: string }
+          items: { type: string, maxLength: 128 }
         description: |
           Filter prompts to those carrying any of these upstream tag ids.
           Sent as repeated keys (`?tagIds=a&tagIds=b`); ids come from each

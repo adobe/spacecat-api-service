@@ -318,6 +318,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
             { id: 'id-only' },
             { name: 'name-only' },
             { name: 'valid', id: 42 },
+            '',
             'string-tag',
           ],
         }],
