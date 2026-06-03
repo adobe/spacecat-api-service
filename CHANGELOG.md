@@ -1,3 +1,10 @@
+# [1.548.0](https://github.com/adobe/spacecat-api-service/compare/v1.547.0...v1.548.0) (2026-06-03)
+
+
+### Features
+
+* **serenity:** server-side tag filtering for prompts list ([#2547](https://github.com/adobe/spacecat-api-service/issues/2547)) ([ef3a226](https://github.com/adobe/spacecat-api-service/commit/ef3a22695929e9f4d384cb975c52915863f713d1))
+
 # [1.547.0](https://github.com/adobe/spacecat-api-service/compare/v1.546.0...v1.547.0) (2026-06-03)
 
 
