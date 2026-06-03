@@ -1,3 +1,17 @@
+## [1.542.1](https://github.com/adobe/spacecat-api-service/compare/v1.542.0...v1.542.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* Revert "feat: resolve promise token from the header required to create a preflight job" ([#2544](https://github.com/adobe/spacecat-api-service/issues/2544)) ([2f167a9](https://github.com/adobe/spacecat-api-service/commit/2f167a9ed063457f828cd614b0626efcc522b1d7)), closes [adobe/spacecat-api-service#2480](https://github.com/adobe/spacecat-api-service/issues/2480)
+
+# [1.542.0](https://github.com/adobe/spacecat-api-service/compare/v1.541.0...v1.542.0) (2026-06-03)
+
+
+### Features
+
+* **s2s:** expose auto-fix endpoint to S2S consumers via fixEntity:create ([#2542](https://github.com/adobe/spacecat-api-service/issues/2542)) ([c357593](https://github.com/adobe/spacecat-api-service/commit/c3575935eef29e4a1515e24cbee92278a15c83aa))
+
 # [1.541.0](https://github.com/adobe/spacecat-api-service/compare/v1.540.0...v1.541.0) (2026-06-03)
 
 
