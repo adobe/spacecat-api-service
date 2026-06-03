@@ -256,6 +256,38 @@ describe('SerenityController', () => {
       expect(args[4].limit).to.equal(null);
     });
 
+    it('listPrompts collects repeated tagIds query keys into an array', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = {
+        url: 'https://x/v2/orgs/x/brands/y/serenity/prompts?geoTargetId=2840&languageCode=en&tagIds=t-1&tagIds=t-2',
+      };
+
+      await controller.listPrompts(ctx);
+
+      const { args } = handlers.handleListPrompts.firstCall;
+      expect(args[4].tagIds).to.deep.equal(['t-1', 't-2']);
+    });
+
+    it('listPrompts omits tagIds when no tagIds query key is present', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = {
+        url: 'https://x/v2/orgs/x/brands/y/serenity/prompts?geoTargetId=2840&languageCode=en',
+      };
+
+      await controller.listPrompts(ctx);
+
+      const { args } = handlers.handleListPrompts.firstCall;
+      expect(args[4]).to.not.have.property('tagIds');
+    });
+
     it('updatePrompt requires :semrushPromptId path param', async () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.updatePrompt(fakeContext({ params: {} }));

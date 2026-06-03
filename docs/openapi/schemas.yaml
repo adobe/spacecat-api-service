@@ -10066,9 +10066,17 @@ SerenityPrompt:
       description: BCP-47 primary subtag (lowercase) for the slice.
     text:
       type: string
-    tags:
-      type: array
-      items: { type: string }
+    tagMap:
+      type: object
+      additionalProperties: { type: string }
+      description: |
+        Map of tag name → upstream tag id. Keys are the tag names (e.g.
+        "category:Firefly"); values are the Semrush tag UUIDs to pass back as
+        `tagIds` query params when filtering. Tags without an upstream id carry
+        an empty string value and are excluded from tag_ids filter calls.
+        Tag names are assumed unique per Semrush project; if duplicates exist,
+        only the last entry is retained.
+      example: { "category:Firefly": "uuid-1", "intent:research": "uuid-2" }
 
 SerenityPromptListResponse:
   type: object
