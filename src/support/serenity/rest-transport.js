@@ -284,7 +284,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * Used to populate the "available models" list in the UI.
      * Returns {page, total, items: [{id, key, name, icon}]}.
      */
-    async listWorkspaceAiModels(_semrushWorkspaceId, { page = 1, limit = 100 } = {}) {
+    async listGlobalAiModels({ page = 1, limit = 100 } = {}) {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
       const url = `${root}${API_PREFIX}/v1/ai_models?${params.toString()}`;
       return request('GET', url, imsToken, undefined);

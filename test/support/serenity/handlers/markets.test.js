@@ -885,10 +885,10 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     );
   });
 
-  it('listModels (catalog mode) calls listWorkspaceAiModels and returns items', async () => {
+  it('listModels (catalog mode) calls listGlobalAiModels and returns items', async () => {
     const dataAccess = makeDataAccess([]);
     const transport = {
-      listWorkspaceAiModels: sinon.stub().resolves({
+      listGlobalAiModels: sinon.stub().resolves({
         items: [
           {
             id: 'cat-gpt-4o', key: 'chatgpt', name: 'ChatGPT', icon: null,
@@ -902,7 +902,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
     expect(result.items).to.have.lengthOf(2);
     expect(result.items[0].id).to.equal('cat-gpt-4o');
-    expect(transport.listWorkspaceAiModels).to.have.callCount(1);
+    expect(transport.listGlobalAiModels).to.have.callCount(1);
   });
 
   it('listModels (catalog mode) paginates when page 1 is full (100 items)', async () => {
@@ -913,7 +913,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     const stub = sinon.stub();
     stub.onFirstCall().resolves({ items: page1 });
     stub.onSecondCall().resolves({ items: [] });
-    const transport = { listWorkspaceAiModels: stub };
+    const transport = { listGlobalAiModels: stub };
     const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
     expect(result.items).to.have.lengthOf(100);
     expect(stub).to.have.callCount(2);
@@ -922,7 +922,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
   it('listModels (catalog mode) also normalises wrapped assignment items from workspace endpoint', async () => {
     const dataAccess = makeDataAccess([]);
     const transport = {
-      listWorkspaceAiModels: sinon.stub().resolves({
+      listGlobalAiModels: sinon.stub().resolves({
         items: [
           {
             id: 'assign-1',
@@ -941,13 +941,13 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
   it('listModels (catalog mode) returns empty when workspace endpoint responds 404/405', async () => {
     const dataAccess = makeDataAccess([]);
     const transport404 = {
-      listWorkspaceAiModels: sinon.stub().rejects(new SerenityTransportError(404, 'not found')),
+      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(404, 'not found')),
     };
     const result404 = await handleListModels(transport404, dataAccess, BRAND, WORKSPACE, {});
     expect(result404).to.deep.equal({ items: [] });
 
     const transport405 = {
-      listWorkspaceAiModels: sinon.stub().rejects(new SerenityTransportError(405, 'not allowed')),
+      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(405, 'not allowed')),
     };
     const result405 = await handleListModels(transport405, dataAccess, BRAND, WORKSPACE, {});
     expect(result405).to.deep.equal({ items: [] });
@@ -956,13 +956,13 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
   it('listModels (catalog mode) propagates auth errors (401/403) from workspace endpoint', async () => {
     const dataAccess = makeDataAccess([]);
     const transport401 = {
-      listWorkspaceAiModels: sinon.stub().rejects(new SerenityTransportError(401, 'unauthorized')),
+      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(401, 'unauthorized')),
     };
     await expect(handleListModels(transport401, dataAccess, BRAND, WORKSPACE, {}))
       .to.be.rejectedWith(SerenityTransportError);
 
     const transport403 = {
-      listWorkspaceAiModels: sinon.stub().rejects(new SerenityTransportError(403, 'forbidden')),
+      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(403, 'forbidden')),
     };
     await expect(handleListModels(transport403, dataAccess, BRAND, WORKSPACE, {}))
       .to.be.rejectedWith(SerenityTransportError);

@@ -741,11 +741,10 @@ async function fetchAllAiModels(transport, semrushWorkspaceId, projectId) {
  * With geoTargetId + languageCode: models configured for the slice's upstream
  * project (existing behaviour).
  *
- * Without params: workspace-level catalog of ALL AI models available for
- * tracking. Uses the Semrush workspace endpoint
- * GET /v1/workspaces/{ws}/ai_models which returns the full model catalog
- * independent of any project configuration. Falls back to an empty list if
- * the endpoint is not available (e.g. 404/405 from upstream).
+ * Without params: global catalog of ALL AI models available for tracking.
+ * Uses GET /v1/ai_models (not workspace-scoped) which returns the full
+ * model catalog independent of any project configuration. Falls back to an
+ * empty list if the endpoint is not available (e.g. 404/405 from upstream).
  */
 export async function handleListModels(
   transport,
@@ -757,14 +756,14 @@ export async function handleListModels(
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
 
-  // No-params path: return workspace-level model catalog.
+  // No-params path: return global model catalog.
   if (geoTargetId === null && languageCode === null) {
     let rawItems = [];
     try {
       let page = 1;
       while (page <= MAX_AI_MODELS_PAGES) {
         // eslint-disable-next-line no-await-in-loop
-        const resp = await transport.listWorkspaceAiModels(semrushWorkspaceId, {
+        const resp = await transport.listGlobalAiModels({
           page,
           limit: AI_MODELS_PAGE,
         });

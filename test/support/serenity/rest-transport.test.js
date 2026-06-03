@@ -514,12 +514,12 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  describe('listWorkspaceAiModels', () => {
+  describe('listGlobalAiModels', () => {
     it('GETs /v1/ai_models (global catalog, no workspace prefix) with default pagination', async () => {
       fetchStub.resolves(fetchOk({ page: 1, total: 1, items: [{ id: 'cat-gpt', key: 'chatgpt' }] }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const result = await transport.listWorkspaceAiModels(WORKSPACE_ID);
+      const result = await transport.listGlobalAiModels();
 
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('GET');

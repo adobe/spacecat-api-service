@@ -458,11 +458,11 @@ v2-serenity-models:
       AI models configured for that slice's upstream project. `key` is the
       value the Reporting API expects as `CBF_model`.
 
-      **Catalog mode** (neither param present): returns the workspace-level
-      catalog of ALL AI models available for tracking via
-      `GET /v1/workspaces/{ws}/ai_models`. Falls back to an empty list if the
-      upstream endpoint is unavailable. Use this to populate "available models"
-      selectors in the UI before a market is configured.
+      **Catalog mode** (neither param present): returns the global catalog of
+      ALL AI models available for tracking via `GET /v1/ai_models` (not
+      workspace-scoped). Falls back to an empty list if the upstream endpoint
+      is unavailable. Use this to populate "available models" selectors in the
+      UI before a market is configured.
 
       Providing exactly one of the two params returns 400.
     operationId: listSerenityModels
