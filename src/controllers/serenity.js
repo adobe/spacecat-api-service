@@ -31,6 +31,7 @@ import {
   handleDeleteMarket,
   handleListTags,
   handleListModels,
+  handleUpdateModels,
 } from '../support/serenity/handlers/markets.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
@@ -454,6 +455,28 @@ function SerenityController(context, log, env) {
     }
   };
 
+  const updateModels = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = await handleUpdateModels(
+        transport,
+        ctx.dataAccess,
+        auth.brandUuid,
+        auth.semrushWorkspaceId,
+        ctx.data || {},
+        log,
+      );
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   return {
     listPrompts,
     createPrompts,
@@ -465,6 +488,7 @@ function SerenityController(context, log, env) {
     deleteMarket,
     listTags,
     listModels,
+    updateModels,
   };
 }
 
