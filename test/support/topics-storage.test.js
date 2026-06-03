@@ -442,7 +442,7 @@ describe('topics-storage', () => {
       expect(err.cause).to.equal(dbError);
     });
 
-    it('throws a 409-typed error echoing the constraint name on a 23505 unique violation', async () => {
+    it('throws a 409-typed error with a generic message on a 23505 unique violation', async () => {
       const raw = {
         code: '23505',
         message: 'duplicate key value violates unique constraint "uq_topic_per_org"',
@@ -462,29 +462,38 @@ describe('topics-storage', () => {
 
       expect(err).to.be.instanceOf(Error);
       expect(err.status).to.equal(409);
-      expect(err.message).to.include('uq_topic_per_org');
+      expect(err.message).to.include('already exists for this organization');
+      // The client-facing message must not leak the Postgres constraint name;
+      // that schema detail stays in `.cause` for operator triage. LLMO-4370.
+      expect(err.message).to.not.include('uq_topic_per_org');
       // Original PostgREST error preserved as `cause` so operators reading
       // the WARN-level conflict log can still reach the raw DB payload
       // during triage. LLMO-4370 #14.
       expect(err.cause).to.equal(raw);
     });
 
-    it('still surfaces 409 with a generic message when the 23505 error lacks a constraint clause', async () => {
+    it('throws a 422-typed error on a 23503 foreign-key violation', async () => {
+      const raw = {
+        code: '23503',
+        message: 'insert or update on table "topics" violates foreign key constraint "topics_brand_id_fkey"',
+        details: '',
+        hint: '',
+      };
       const postgrestClient = {
-        from: sinon.stub().returns(createChainableQuery({
-          data: null,
-          error: { code: '23505', message: '' },
-        })),
+        from: sinon.stub().returns(createChainableQuery({ data: null, error: raw })),
       };
 
       const err = await createTopic({
         organizationId: ORG_ID,
-        topic: { name: 'Whatever' },
+        topic: { name: 'BadBrandTopic', brandId: 'nonexistent-uuid' },
         postgrestClient,
+        updatedBy: 'test',
       }).catch((e) => e);
 
-      expect(err.status).to.equal(409);
-      expect(err.message).to.match(/unique constraint/i);
+      expect(err).to.be.instanceOf(Error);
+      expect(err.status).to.equal(422);
+      expect(err.message).to.include('non-existent related entity');
+      expect(err.cause).to.equal(raw);
     });
   });
 

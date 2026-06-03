@@ -15,6 +15,7 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -32,17 +33,12 @@ function fakeLog() {
   };
 }
 
-/**
- * Builds a minimum request context with the IMS bearer header and the
- * authInfo / Organization / brand lookups every handler now exercises.
- */
 function fakeContext({
   bearer = 'ims-token-123',
   authType = 'ims',
   params = {},
   data = undefined,
-  org = { getId: () => ORG },
-  brandResolved = BRAND,
+  brandId = BRAND,
 } = {}) {
   return {
     env: {},
@@ -50,19 +46,13 @@ function fakeContext({
       headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
     },
     attributes: {
-      authInfo: {
-        getType: () => authType,
-      },
+      authInfo: { getType: () => authType },
     },
     dataAccess: {
-      Organization: {
-        findById: sinon.stub().resolves(org),
-      },
-      services: {
-        postgrestClient: { from: () => ({}), __brandResolved: brandResolved },
-      },
+      Organization: { findById: sinon.stub().resolves({ getId: () => ORG }) },
+      services: { postgrestClient: { from: () => ({}) } },
     },
-    params: { spaceCatId: ORG, brandId: BRAND, ...params },
+    params: { spaceCatId: ORG, brandId, ...params },
     data,
   };
 }
@@ -88,11 +78,12 @@ describe('SerenityController', () => {
     handleCreatePrompts: sinon.stub(),
     handleUpdatePrompt: sinon.stub(),
     handleBulkDeletePrompts: sinon.stub(),
-    handleListProjects: sinon.stub(),
-    handleCreateProject: sinon.stub(),
-    handleListProjectTags: sinon.stub(),
-    handleListProjectModels: sinon.stub(),
-    handleListWorkspaceProjects: sinon.stub(),
+    handleListMarkets: sinon.stub(),
+    handleGetMarket: sinon.stub(),
+    handleCreateMarket: sinon.stub(),
+    handleDeleteMarket: sinon.stub(),
+    handleListTags: sinon.stub(),
+    handleListModels: sinon.stub(),
   };
   let resolveWorkspaceIdStub;
   let createTransportStub;
@@ -110,6 +101,7 @@ describe('SerenityController', () => {
     MockTransportError = class extends Error {
       constructor(status, message, body) {
         super(message);
+        this.name = 'SerenityTransportError';
         this.status = status;
         this.body = body;
       }
@@ -121,427 +113,397 @@ describe('SerenityController', () => {
         }),
       },
     };
-    SerenityController = (await esmock(
-      '../../src/controllers/serenity.js',
-      {
-        '../../src/support/serenity/rest-transport.js': {
-          createSerenityTransport: createTransportStub,
-          SerenityTransportError: MockTransportError,
-        },
-        '../../src/support/serenity/workspace-resolver.js': {
-          resolveWorkspaceId: resolveWorkspaceIdStub,
-        },
-        '../../src/support/serenity/handlers/prompts.js': {
-          handleListPrompts: handlers.handleListPrompts,
-          handleCreatePrompts: handlers.handleCreatePrompts,
-          handleUpdatePrompt: handlers.handleUpdatePrompt,
-          handleBulkDeletePrompts: handlers.handleBulkDeletePrompts,
-        },
-        '../../src/support/serenity/handlers/projects.js': {
-          handleListProjects: handlers.handleListProjects,
-          handleCreateProject: handlers.handleCreateProject,
-          handleListProjectTags: handlers.handleListProjectTags,
-          handleListProjectModels: handlers.handleListProjectModels,
-          handleListWorkspaceProjects: handlers.handleListWorkspaceProjects,
-        },
-        '../../src/support/access-control-util.js': MockAccessControlUtil,
-        '../../src/support/prompts-storage.js': {
-          resolveBrandUuid: resolveBrandUuidStub,
-        },
+    SerenityController = (await esmock('../../src/controllers/serenity.js', {
+      '../../src/support/serenity/rest-transport.js': {
+        createSerenityTransport: createTransportStub,
+        SerenityTransportError: MockTransportError,
       },
-    )).default;
+      '../../src/support/serenity/workspace-resolver.js': {
+        resolveWorkspaceId: resolveWorkspaceIdStub,
+      },
+      '../../src/support/serenity/handlers/prompts.js': {
+        handleListPrompts: handlers.handleListPrompts,
+        handleCreatePrompts: handlers.handleCreatePrompts,
+        handleUpdatePrompt: handlers.handleUpdatePrompt,
+        handleBulkDeletePrompts: handlers.handleBulkDeletePrompts,
+      },
+      '../../src/support/serenity/handlers/markets.js': {
+        handleListMarkets: handlers.handleListMarkets,
+        handleGetMarket: handlers.handleGetMarket,
+        handleCreateMarket: handlers.handleCreateMarket,
+        handleDeleteMarket: handlers.handleDeleteMarket,
+        handleListTags: handlers.handleListTags,
+        handleListModels: handlers.handleListModels,
+      },
+      '../../src/support/access-control-util.js': MockAccessControlUtil,
+      '../../src/support/prompts-storage.js': {
+        resolveBrandUuid: resolveBrandUuidStub,
+      },
+    })).default;
   });
 
-  it('throws when constructed without a context or log', () => {
-    expect(() => SerenityController(null, fakeLog())).to.throw(/Context required/);
-    expect(() => SerenityController(fakeContext(), null)).to.throw(/Log required/);
+  afterEach(() => sinon.restore());
+
+  describe('constructor', () => {
+    it('requires a context', () => {
+      expect(() => SerenityController(null, fakeLog(), {})).to.throw('Context required');
+    });
+
+    it('requires a log', () => {
+      expect(() => SerenityController({ env: {} }, null, {})).to.throw('Log required');
+    });
   });
 
-  describe('listPrompts', () => {
-    it('200s on success with the handler payload', async () => {
-      handlers.handleListPrompts.resolves({
-        items: [], total: 0, page: 1, limit: 50,
-      });
-      const ctx = fakeContext();
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(200);
-      const body = await readBody(resp);
-      expect(body).to.deep.include({ total: 0, page: 1 });
-      expect(createTransportStub).to.have.been.calledWith({ env: {}, imsToken: 'ims-token-123' });
-      expect(resolveWorkspaceIdStub).to.have.been.calledOnceWithExactly(ctx, ORG);
-      expect(resolveBrandUuidStub).to.have.been.calledOnce;
+  describe('auth + brand resolution', () => {
+    it('401s without an Authorization header', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ bearer: null });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
     });
 
-    it('401s when the IMS bearer is missing — error token authenticationRequired', async () => {
-      const ctx = fakeContext({ bearer: '' });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(401);
-      const body = await readBody(resp);
-      expect(body.error).to.equal('authenticationRequired');
-    });
-
-    it('401s when the caller authenticated via a non-IMS mechanism', async () => {
+    it('401s when the caller did not authenticate via IMS', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({ authType: 'jwt' });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(401);
-      const body = await readBody(resp);
-      expect(body.error).to.equal('authenticationRequired');
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
     });
 
-    it('404s when the organization is not found', async () => {
-      const ctx = fakeContext();
-      ctx.dataAccess.Organization.findById = sinon.stub().resolves(null);
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(404);
+    it('400s when :brandId is not a UUID (the new guard)', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ brandId: 'adobe-brand-name' });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(400);
+      const body = await readBody(response);
+      expect(body.error).to.equal('invalidRequest');
+      expect(body.message).to.match(/brandId must be a UUID/);
+      expect(resolveBrandUuidStub).not.to.have.been.called;
     });
 
-    it('403s when the caller has no access to the organization', async () => {
-      accessControlHasAccessStub.resolves(false);
-      const ctx = fakeContext();
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(403);
-    });
-
-    it('404s when the brand does not belong to the organization', async () => {
+    it('404s when the brand does not belong to the org', async () => {
       resolveBrandUuidStub.resolves(null);
-      const ctx = fakeContext();
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(404);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listPrompts(fakeContext());
+      expect(response.status).to.equal(404);
     });
 
-    it('503s when PostgREST is not available', async () => {
-      const ctx = fakeContext();
-      ctx.dataAccess.services = {};
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(503);
+    it('403s when the user has no access to the org', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listPrompts(fakeContext());
+      expect(response.status).to.equal(403);
     });
 
-    it('503 configurationError envelope when transport construction fails on missing env', async () => {
-      // Mirrors what happens in prod when SEMRUSH_PROJECTS_BASE_URL is unset:
-      // baseUrl() throws ErrorWithStatusCode(message, 503), mapError surfaces
-      // it as { error: 'configurationError', message } with status 503 —
-      // distinguishing operational failures from generic 500s.
-      const { ErrorWithStatusCode } = await import('../../src/support/utils.js');
-      createTransportStub.throws(new ErrorWithStatusCode(
-        'SEMRUSH_PROJECTS_BASE_URL is not set',
-        503,
-      ));
-      const ctx = fakeContext();
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(503);
-      const body = await readBody(resp);
-      expect(body.error).to.equal('configurationError');
-      expect(body.message).to.match(/SEMRUSH_PROJECTS_BASE_URL is not set/);
-      // Reset for subsequent tests in this describe block.
-      createTransportStub.reset();
-      createTransportStub.returns({});
-    });
-
-    it('404s when the organization has no semrush_workspace_id', async () => {
+    it('404s when the org has no semrush_workspace_id', async () => {
       resolveWorkspaceIdStub.resolves(null);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listPrompts(fakeContext());
+      expect(response.status).to.equal(404);
+    });
+  });
+
+  describe('routing to handlers', () => {
+    it('listPrompts forwards parsed query (geoTargetId as int, page as int) to handleListPrompts', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext();
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(404);
+      ctx.request = {
+        url: 'https://x/v2/orgs/x/brands/y/serenity/prompts?geoTargetId=2840&languageCode=en&page=2',
+      };
+
+      await controller.listPrompts(ctx);
+
+      expect(handlers.handleListPrompts).to.have.been.calledOnce;
+      const { args } = handlers.handleListPrompts.firstCall;
+      expect(args[4]).to.include({
+        geoTargetId: 2840, languageCode: 'en', page: 2,
+      });
     });
 
-    it('502 envelope when handler throws SerenityTransportError; no upstream body leaked', async () => {
-      handlers.handleListPrompts.rejects(new MockTransportError(503, 'down', { code: 'x' }));
+    it('listPrompts coerces limit query param to integer and forwards it', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 25,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext();
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(502);
-      const body = await readBody(resp);
-      expect(body.error).to.equal('semrushUpstreamError');
-      expect(body).to.not.have.property('body');
-      expect(body).to.not.have.property('status');
+      ctx.request = {
+        url: 'https://x/v2/orgs/x/brands/y/serenity/prompts?geoTargetId=2840&languageCode=en&limit=25',
+      };
+
+      await controller.listPrompts(ctx);
+
+      const { args } = handlers.handleListPrompts.firstCall;
+      expect(args[4]).to.include({ limit: 25 });
     });
 
-    it('500s on unexpected handler errors', async () => {
-      handlers.handleListPrompts.rejects(new Error('something bad'));
+    it('listPrompts forwards null when limit query param is unparseable', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext();
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(500);
-      const body = await readBody(resp);
-      // Sanitized — the raw error message must NOT leak into the response.
-      expect(JSON.stringify(body)).to.not.include('something bad');
+      ctx.request = {
+        url: 'https://x/v2/orgs/x/brands/y/serenity/prompts?geoTargetId=2840&languageCode=en&limit=abc',
+      };
+
+      await controller.listPrompts(ctx);
+
+      const { args } = handlers.handleListPrompts.firstCall;
+      expect(args[4].limit).to.equal(null);
+    });
+
+    it('updatePrompt requires :semrushPromptId path param', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updatePrompt(fakeContext({ params: {} }));
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePrompt forwards semrushPromptId from path to handleUpdatePrompt', async () => {
+      handlers.handleUpdatePrompt.resolves({ status: 200, body: { semrushPromptId: 'new-sem' } });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updatePrompt(fakeContext({
+        params: { semrushPromptId: 'sem-1' },
+        data: { geoTargetId: 2840, languageCode: 'en', text: 'next' },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdatePrompt.firstCall.args[4]).to.equal('sem-1');
+    });
+
+    it('deleteMarket forwards the path slice params to handleDeleteMarket', async () => {
+      handlers.handleDeleteMarket.resolves({ status: 204 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: 'EN' },
+      }));
+      expect(response.status).to.equal(204);
+      const { args } = handlers.handleDeleteMarket.firstCall;
+      expect(args[4]).to.equal(2840);
+      expect(args[5]).to.equal('en');
+    });
+
+    // Minor #1 from review: parseInt('2840abc', 10) === 2840 would silently
+    // route /markets/2840abc/en to the legit slice. The controller now uses a
+    // strict /^\d+$/ regex; non-digit suffixes must surface as null so the
+    // handler returns 400 instead of resolving to (2840, en).
+    it('deleteMarket null-routes a non-digit geoTargetId (e.g. "2840abc") to the handler', async () => {
+      handlers.handleDeleteMarket.rejects(
+        new ErrorWithStatusCode('geoTargetId must be a positive integer', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({
+        params: { geoTargetId: '2840abc', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      const { args } = handlers.handleDeleteMarket.firstCall;
+      expect(args[4]).to.equal(null);
+    });
+
+    it('deleteMarket forwards null for an empty geoTargetId path segment', async () => {
+      handlers.handleDeleteMarket.rejects(
+        new ErrorWithStatusCode('geoTargetId must be a positive integer', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({
+        params: { geoTargetId: '', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      const { args } = handlers.handleDeleteMarket.firstCall;
+      expect(args[4]).to.equal(null);
+    });
+
+    it('deleteMarket forwards null for an empty languageCode path segment', async () => {
+      handlers.handleDeleteMarket.rejects(
+        new ErrorWithStatusCode('languageCode must match', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: '' },
+      }));
+      expect(response.status).to.equal(400);
+      const { args } = handlers.handleDeleteMarket.firstCall;
+      expect(args[5]).to.equal(null);
+    });
+
+    // '0' is a distinct code path from '2840abc' (regex-reject at the
+    // controller) and '' (regex-reject at the controller): the strict-digit
+    // regex /^\d+$/ accepts '0', so the controller forwards Number('0') === 0
+    // to the handler. The handler's normalizeGeoTargetId(0) returns null
+    // because the OpenAPI contract declares `minimum: 1`, surfacing as a 400.
+    it('deleteMarket forwards 0 through to the handler (handler rejects via positive-integer guard)', async () => {
+      handlers.handleDeleteMarket.rejects(
+        new ErrorWithStatusCode('geoTargetId must be a positive integer', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({
+        params: { geoTargetId: '0', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      const { args } = handlers.handleDeleteMarket.firstCall;
+      expect(args[4]).to.equal(0);
+    });
+
+    it('listMarkets returns the handler result wrapped in ok()', async () => {
+      handlers.handleListMarkets.resolves({ items: [{ brandId: BRAND, geoTargetId: 2840, languageCode: 'en' }] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(200);
+      const body = await readBody(response);
+      expect(body.items[0].brandId).to.equal(BRAND);
+    });
+
+    it('getMarket forwards the path slice params to handleGetMarket and wraps the result in ok()', async () => {
+      handlers.handleGetMarket.resolves({
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        semrushProjectId: 'proj-us-en',
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: 'EN' },
+      }));
+      expect(response.status).to.equal(200);
+      const body = await readBody(response);
+      expect(body.semrushProjectId).to.equal('proj-us-en');
+      const { args } = handlers.handleGetMarket.firstCall;
+      // Slice forwarded as (geoTargetId:int, languageCode:lowercased).
+      expect(args[2]).to.equal(2840);
+      expect(args[3]).to.equal('en');
+    });
+
+    // Same strict /^\d+$/ guard as deleteMarket: a non-digit suffix must
+    // surface as null so the handler 400s rather than resolving the legit
+    // (2840, en) slice.
+    it('getMarket null-routes a non-digit geoTargetId (e.g. "2840abc") to the handler', async () => {
+      handlers.handleGetMarket.rejects(
+        new ErrorWithStatusCode('geoTargetId must be a positive integer', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840abc', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      expect(handlers.handleGetMarket.firstCall.args[2]).to.equal(null);
+    });
+
+    it('getMarket maps a handler 404 marketNotFound to a 404 envelope carrying that token', async () => {
+      const err = new ErrorWithStatusCode('No market for this slice', 404);
+      err.code = 'marketNotFound';
+      handlers.handleGetMarket.rejects(err);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(404);
+      const body = await readBody(response);
+      expect(body.error).to.equal('marketNotFound');
+    });
+
+    it('getMarket 401s (IMS-only) before dispatching when the caller is not IMS-authenticated', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        authType: 'jwt',
+        params: { geoTargetId: '2840', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(401);
+      expect(handlers.handleGetMarket).not.to.have.been.called;
+    });
+
+    it('getMarket forwards null for an empty languageCode path segment (handler 400s)', async () => {
+      handlers.handleGetMarket.rejects(
+        new ErrorWithStatusCode('languageCode must match', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: '' },
+      }));
+      expect(response.status).to.equal(400);
+      // Exercises the `: null` side of the `pLang ? ...toLowerCase() : null` guard.
+      expect(handlers.handleGetMarket.firstCall.args[3]).to.equal(null);
+    });
+
+    it('getMarket returns the authorize() error (403) and does not dispatch when the caller lacks org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleGetMarket).not.to.have.been.called;
+    });
+
+    it('upstream SerenityTransportError maps to 502 envelope without leaking provider detail', async () => {
+      handlers.handleListMarkets.rejects(new MockTransportError(503, 'upstream down', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(502);
+      const body = await readBody(response);
+      expect(body.error).to.equal('serenityUpstreamError');
+      expect(body.message).to.equal('Upstream request failed');
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+    });
+
+    it('upstream SerenityTransportError 403 propagates as 403 forbidden', async () => {
+      handlers.handleListMarkets.rejects(new MockTransportError(403, 'invalid access attempt', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(403);
+      const body = await readBody(response);
+      expect(body.error).to.equal('forbidden');
+      expect(body.message).to.equal('invalid access attempt');
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+    });
+
+    it('upstream SerenityTransportError 401 propagates as 401 authenticationRequired', async () => {
+      handlers.handleListMarkets.rejects(new MockTransportError(401, 'token expired', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(401);
+      const body = await readBody(response);
+      expect(body.error).to.equal('authenticationRequired');
+      expect(body.message).to.equal('token expired');
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+    });
+
+    // mapError's final fallback: anything that isn't ErrorWithStatusCode and
+    // isn't SerenityTransportError lands on the generic 500 path. No upstream
+    // body, no status code leakage — the message is always the constant
+    // 'Internal server error'. The error itself is log.error'd server-side
+    // so an operator can still reconstruct.
+    it('generic Error maps to 500 internalServerError with no upstream detail leakage', async () => {
+      handlers.handleListMarkets.rejects(new Error('boom from somewhere'));
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(500);
+      const body = await readBody(response);
       expect(body.error).to.equal('internalServerError');
-    });
-
-    it('parses semrushLocationId from query string', async () => {
-      handlers.handleListPrompts.resolves({
-        items: [], total: 0, page: 1, limit: 50,
-      });
-      const ctx = fakeContext();
-      ctx.request = { url: 'https://api/v2/orgs/x/brands/y/serenity/prompts?semrushLocationId=2840&language=en' };
-      const controller = SerenityController(ctx, fakeLog());
-      await controller.listPrompts(ctx);
-      const query = handlers.handleListPrompts.firstCall.args[4];
-      expect(query.semrushLocationId).to.equal(2840);
-      expect(query.language).to.equal('en');
-    });
-
-    it('does NOT fall back to context.data when the URL has no query string', async () => {
-      handlers.handleListPrompts.resolves({
-        items: [], total: 0, page: 1, limit: 50,
-      });
-      const ctx = fakeContext({ data: { semrushLocationId: 9999 } });
-      // No `request.url` → query must be empty, not pulled from body.
-      const controller = SerenityController(ctx, fakeLog());
-      await controller.listPrompts(ctx);
-      const query = handlers.handleListPrompts.firstCall.args[4];
-      expect(query).to.deep.equal({});
-    });
-
-    it('500s when Organization data-access is not on the context', async () => {
-      const ctx = fakeContext();
-      ctx.dataAccess.Organization = undefined;
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(500);
-    });
-
-    it('400s on a non-parseable request.url (extractQuery catch path)', async () => {
-      handlers.handleListPrompts.resolves({
-        items: [], total: 0, page: 1, limit: 50,
-      });
-      const ctx = fakeContext();
-      ctx.request = { url: '::not a url::' };
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listPrompts(ctx);
-      expect(resp.status).to.equal(200);
-      const query = handlers.handleListPrompts.firstCall.args[4];
-      expect(query).to.deep.equal({});
+      expect(body.message).to.equal('Internal server error');
+      expect(log.error).to.have.been.calledWithMatch('Serenity controller error');
     });
   });
 
-  describe('createPrompts', () => {
-    it('200s and delegates to handler', async () => {
-      handlers.handleCreatePrompts.resolves({ created: [], skipped: [], failed: [] });
-      const ctx = fakeContext({ data: { prompts: [{ text: 't' }] } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.createPrompts(ctx);
-      expect(resp.status).to.equal(200);
-    });
-  });
+  describe('controller surface', () => {
+    it('exposes the new method names and does NOT expose listProjects / listWorkspaceProjects', () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      expect(controller.listPrompts).to.be.a('function');
+      expect(controller.createPrompts).to.be.a('function');
+      expect(controller.updatePrompt).to.be.a('function');
+      expect(controller.bulkDeletePrompts).to.be.a('function');
+      expect(controller.listMarkets).to.be.a('function');
+      expect(controller.getMarket).to.be.a('function');
+      expect(controller.createMarket).to.be.a('function');
+      expect(controller.deleteMarket).to.be.a('function');
+      expect(controller.listTags).to.be.a('function');
+      expect(controller.listModels).to.be.a('function');
 
-  describe('updatePrompt', () => {
-    it('400s when promptId path param is missing', async () => {
-      const ctx = fakeContext({ params: { spaceCatId: ORG, brandId: BRAND } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.updatePrompt(ctx);
-      expect(resp.status).to.equal(400);
-    });
-
-    it('returns the handler status + body verbatim', async () => {
-      handlers.handleUpdatePrompt.resolves({ status: 200, body: { id: 'new' } });
-      const ctx = fakeContext({ params: { promptId: 'logical-1' } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.updatePrompt(ctx);
-      expect(resp.status).to.equal(200);
-      const body = await readBody(resp);
-      expect(body.id).to.equal('new');
-    });
-  });
-
-  describe('bulkDeletePrompts', () => {
-    it('200s and delegates', async () => {
-      handlers.handleBulkDeletePrompts.resolves({ deleted: 3, failed: [] });
-      const ctx = fakeContext({ data: { semrushIds: [{ semrushProjectId: 'p', semrushPromptId: 'x' }] } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.bulkDeletePrompts(ctx);
-      expect(resp.status).to.equal(200);
-    });
-  });
-
-  describe('listProjects', () => {
-    it('200s with the handler payload', async () => {
-      handlers.handleListProjects.resolves({ items: [] });
-      const ctx = fakeContext();
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listProjects(ctx);
-      expect(resp.status).to.equal(200);
-    });
-  });
-
-  describe('createProject', () => {
-    it('returns the handler status + body verbatim (201 happy)', async () => {
-      handlers.handleCreateProject.resolves({
-        status: 201,
-        body: {
-          semrushProjectId: 'new-1',
-          semrushLocationId: 2840,
-          language: 'en',
-          name: 'X',
-          workspaceId: WORKSPACE,
-        },
-      });
-      const ctx = fakeContext({ data: { name: 'X', market: 'US', language: 'en' } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.createProject(ctx);
-      expect(resp.status).to.equal(201);
-      const body = await readBody(resp);
-      expect(body.semrushProjectId).to.equal('new-1');
-    });
-
-    it('returns 409 envelope from handler', async () => {
-      handlers.handleCreateProject.resolves({
-        status: 409,
-        body: { error: 'sliceExists' },
-      });
-      const ctx = fakeContext();
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.createProject(ctx);
-      expect(resp.status).to.equal(409);
-    });
-  });
-
-  describe('listProjectTags', () => {
-    it('400s on missing projectId path param', async () => {
-      const ctx = fakeContext({ params: { workspaceId: WORKSPACE } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listProjectTags(ctx);
-      expect(resp.status).to.equal(400);
-    });
-
-    it('403s when path workspaceId does not match the org workspace', async () => {
-      const ctx = fakeContext({ params: { workspaceId: 'wrong-ws', projectId: 'p' } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listProjectTags(ctx);
-      expect(resp.status).to.equal(403);
-    });
-
-    it('200s on success', async () => {
-      handlers.handleListProjectTags.resolves({ items: [{ id: 't', name: 'T' }] });
-      const ctx = fakeContext({ params: { workspaceId: WORKSPACE, projectId: 'p' } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listProjectTags(ctx);
-      expect(resp.status).to.equal(200);
-    });
-  });
-
-  describe('listProjectModels', () => {
-    it('200s with handler payload', async () => {
-      handlers.handleListProjectModels.resolves({ items: [] });
-      const ctx = fakeContext({ params: { workspaceId: WORKSPACE, projectId: 'p' } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listProjectModels(ctx);
-      expect(resp.status).to.equal(200);
-    });
-
-    it('400s on missing projectId path param', async () => {
-      const ctx = fakeContext({ params: { workspaceId: WORKSPACE } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listProjectModels(ctx);
-      expect(resp.status).to.equal(400);
-    });
-
-    it('403s when path workspaceId does not match org workspace', async () => {
-      const ctx = fakeContext({ params: { workspaceId: 'wrong-ws', projectId: 'p' } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listProjectModels(ctx);
-      expect(resp.status).to.equal(403);
-    });
-  });
-
-  describe('listWorkspaceProjects', () => {
-    it('200s with handler payload', async () => {
-      handlers.handleListWorkspaceProjects.resolves({ items: [] });
-      const ctx = fakeContext({ params: { workspaceId: WORKSPACE } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listWorkspaceProjects(ctx);
-      expect(resp.status).to.equal(200);
-    });
-
-    it('400s on missing path param', async () => {
-      const ctx = fakeContext({ params: { spaceCatId: ORG, brandId: BRAND } });
-      const controller = SerenityController(ctx, fakeLog());
-      const resp = await controller.listWorkspaceProjects(ctx);
-      expect(resp.status).to.equal(400);
-    });
-  });
-
-  /**
-   * Parameterized error-path sweep — every handler exercises the same
-   * authorize + transport + mapError pipeline, so once listPrompts is
-   * covered individually we drive each of the other 8 through the same
-   * five failure modes to keep coverage uniform without duplicating the
-   * full per-suite scaffolding.
-   */
-  describe('every handler shares the same error envelope', () => {
-    const cases = [
-      { method: 'createPrompts', handler: 'handleCreatePrompts', params: {} },
-      {
-        method: 'updatePrompt', handler: 'handleUpdatePrompt', params: { promptId: 'logical-1' }, returnsRaw: true,
-      },
-      { method: 'bulkDeletePrompts', handler: 'handleBulkDeletePrompts', params: {} },
-      { method: 'listProjects', handler: 'handleListProjects', params: {} },
-      {
-        method: 'createProject', handler: 'handleCreateProject', params: {}, returnsRaw: true,
-      },
-      { method: 'listProjectTags', handler: 'handleListProjectTags', params: { workspaceId: WORKSPACE, projectId: 'p' } },
-      { method: 'listProjectModels', handler: 'handleListProjectModels', params: { workspaceId: WORKSPACE, projectId: 'p' } },
-      { method: 'listWorkspaceProjects', handler: 'handleListWorkspaceProjects', params: { workspaceId: WORKSPACE } },
-    ];
-    cases.forEach(({
-      method, handler, params, returnsRaw,
-    }) => {
-      describe(method, () => {
-        const okResult = returnsRaw ? { status: 200, body: { ok: true } } : { ok: true };
-
-        it('401s on missing bearer', async () => {
-          const ctx = fakeContext({ bearer: '', params });
-          const controller = SerenityController(ctx, fakeLog());
-          const resp = await controller[method](ctx);
-          expect(resp.status).to.equal(401);
-        });
-
-        it('404s when organization is missing', async () => {
-          const ctx = fakeContext({ params });
-          ctx.dataAccess.Organization.findById = sinon.stub().resolves(null);
-          const controller = SerenityController(ctx, fakeLog());
-          const resp = await controller[method](ctx);
-          expect(resp.status).to.equal(404);
-        });
-
-        it('403s when caller has no access', async () => {
-          accessControlHasAccessStub.resolves(false);
-          const ctx = fakeContext({ params });
-          const controller = SerenityController(ctx, fakeLog());
-          const resp = await controller[method](ctx);
-          expect(resp.status).to.equal(403);
-        });
-
-        it('502 envelope on SerenityTransportError', async () => {
-          handlers[handler].resolves(okResult);
-          handlers[handler].rejects(new MockTransportError(503, 'down'));
-          const ctx = fakeContext({ params });
-          const controller = SerenityController(ctx, fakeLog());
-          const resp = await controller[method](ctx);
-          expect(resp.status).to.equal(502);
-          const body = await readBody(resp);
-          expect(body.error).to.equal('semrushUpstreamError');
-        });
-
-        it('500s on unexpected handler errors', async () => {
-          handlers[handler].rejects(new Error(`boom-${method}`));
-          const ctx = fakeContext({ params });
-          const controller = SerenityController(ctx, fakeLog());
-          const resp = await controller[method](ctx);
-          expect(resp.status).to.equal(500);
-          const body = await readBody(resp);
-          expect(JSON.stringify(body)).to.not.include(`boom-${method}`);
-        });
-      });
+      expect(controller.listProjects).to.be.undefined;
+      expect(controller.createProject).to.be.undefined;
+      expect(controller.listProjectTags).to.be.undefined;
+      expect(controller.listProjectModels).to.be.undefined;
+      expect(controller.listWorkspaceProjects).to.be.undefined;
     });
   });
 });

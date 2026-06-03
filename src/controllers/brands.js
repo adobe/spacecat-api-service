@@ -37,6 +37,7 @@ import {
   deletePromptById,
   bulkDeletePrompts,
   checkPromptsExist,
+  getPromptStats,
   resolveBrandUuid,
 } from '../support/prompts-storage.js';
 import {
@@ -653,6 +654,53 @@ function BrandsController(ctx, log, env) {
       return ok({ results });
     } catch (error) {
       log.error('Error checking prompts existence', { brandId, error });
+      return createErrorResponse(error);
+    }
+  };
+
+  const getPromptStatsByBrand = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      const stats = await getPromptStats({
+        organizationId: spaceCatId,
+        brandUuid,
+        postgrestClient,
+      });
+
+      return ok(stats);
+    } catch (error) {
+      log.error('Error fetching prompt stats', { brandId, error });
       return createErrorResponse(error);
     }
   };
@@ -1384,6 +1432,7 @@ function BrandsController(ctx, log, env) {
     deleteBrandForOrg,
     listPromptsByBrand,
     getPromptByBrandAndId,
+    getPromptStatsByBrand,
     createPromptsByBrand,
     updatePromptByBrandAndId,
     deletePromptByBrandAndId,
