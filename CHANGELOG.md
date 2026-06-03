@@ -1,3 +1,10 @@
+# [1.546.0](https://github.com/adobe/spacecat-api-service/compare/v1.545.0...v1.546.0) (2026-06-03)
+
+
+### Features
+
+* **serenity:** PUT /serenity/models — update AI models for a market slice ([#2545](https://github.com/adobe/spacecat-api-service/issues/2545)) ([1454f48](https://github.com/adobe/spacecat-api-service/commit/1454f489f67a65023e278090b89dcb7c15f43b71))
+
 # [1.545.0](https://github.com/adobe/spacecat-api-service/compare/v1.544.0...v1.545.0) (2026-06-03)
 
 
