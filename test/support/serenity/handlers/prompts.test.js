@@ -302,6 +302,65 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     const [, , body] = transport.listPromptsByTags.firstCall.args;
     expect(body.tag_ids).to.deep.equal([]);
   });
+
+  it('slices tagIds to MAX_TAG_IDS (50) before forwarding', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    };
+    const tooMany = Array.from({ length: 55 }, (_, i) => `tag-${i}`);
+
+    await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', tagIds: tooMany,
+    });
+
+    const [, , body] = transport.listPromptsByTags.firstCall.args;
+    expect(body.tag_ids).to.have.lengthOf(50);
+    expect(body.tag_ids[0]).to.equal('tag-0');
+    expect(body.tag_ids[49]).to.equal('tag-49');
+  });
+
+  it('uses resp.total when returned item count equals the page limit', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const fullPage = Array.from({ length: 10 }, (_, i) => ({ id: `s-${i}`, name: `prompt ${i}` }));
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: fullPage, total: 999 }),
+    };
+
+    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', limit: 10,
+    });
+
+    // items.length (10) === limit (10) → use resp.total
+    expect(result.total).to.equal(999);
+  });
+
+  it('computes exact total from items when on the last (partial) page', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    // 3 items returned, limit=10, page=2 → exact total = (2-1)*10 + 3 = 13
+    const partialPage = Array.from({ length: 3 }, (_, i) => ({ id: `s-${i}`, name: `prompt ${i}` }));
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: partialPage, total: 999 }),
+    };
+
+    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', limit: 10, page: 2,
+    });
+
+    expect(result.total).to.equal(13);
+  });
 });
 
 describe('handlers/prompts.js — handleCreatePrompts', () => {
