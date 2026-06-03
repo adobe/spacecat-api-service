@@ -1056,7 +1056,12 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const s2sResult = await accessControlUtil.hasS2SCapability(CAP_FIX_ENTITY_CREATE);
-    if (!s2sResult.allowed && !await accessControlUtil.hasAccess(site, 'auto_fix')) {
+    if (s2sResult.allowed) {
+      ctx.log?.info(`[acl] S2S auto-fix granted - clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
+    } else if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+      if (s2sResult.reason !== 'not-s2s') {
+        ctx.log?.info(`[acl] Denied PATCH auto-fix - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+      }
       return forbidden('User does not belong to the organization or does not have sufficient permissions');
     }
 

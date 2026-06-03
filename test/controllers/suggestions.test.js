@@ -6197,6 +6197,8 @@ describe('Suggestions Controller', () => {
 
       sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
         .resolves({ allowed: true, reason: 'granted', clientId: 'svc-autofix', consumerId: 'consumer-1' });
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess')
+        .rejects(new Error('hasAccess must not be called when S2S capability is granted'));
 
       const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -6205,6 +6207,7 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
+      expect(hasAccessStub).to.not.have.been.called;
     });
 
     it('returns forbidden for S2S consumer missing fixEntity:create when user lacks auto_fix access', async () => {
@@ -6219,7 +6222,7 @@ describe('Suggestions Controller', () => {
 
       sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
         .resolves({ allowed: false, reason: 'missing-capability', clientId: 'svc-autofix', consumerId: 'consumer-1' });
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
 
       const response = await suggestionsController.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -6229,6 +6232,37 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       const body = await response.json();
       expect(body).to.have.property('message', 'User does not belong to the organization or does not have sufficient permissions');
+    });
+
+    it('allows non-S2S user with auto_fix access even when S2S capability is absent', async () => {
+      const testSite = {
+        id: SITE_ID,
+        getImsOrgId: () => 'test-org-id',
+        getDeliveryType: () => 'aem_edge',
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://test.com',
+      };
+      mockSuggestionDataAccess.Site.findById.resolves(testSite);
+      mockSuggestionDataAccess.Opportunity.findById.resolves({
+        getSiteId: () => SITE_ID,
+        getType: () => 'broken-backlinks',
+      });
+      mockSuggestionDataAccess.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+      });
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .resolves({ allowed: false, reason: 'not-s2s' });
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
     });
   });
 
