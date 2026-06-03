@@ -3633,6 +3633,95 @@ describe('LLMO Onboarding Functions', () => {
       expect(result.serenity.failed).to.be.empty;
     });
 
+    it('warns and skips provisioning when an allowlisted org resolves to v1 (LLMO-5007)', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org-serenity-cohort'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+        // Workspace is bound, so M5 passes — the org only fails to provision
+        // because it resolves to v1, which is the branch under test.
+        getSemrushWorkspaceId: sinon.stub().returns('semrush-ws-123'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns({ main_profile: { target_audience: 'Pros' } }),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        // Allowlisted (serenity on) but the global kill switch forces v1.
+        env: {
+          ...mockEnv,
+          [SERENITY_SITE_ALLOWLIST]: 'org-serenity-cohort',
+          LLMO_ONBOARDING_DEFAULT_VERSION: 'v1',
+        },
+        sqs: { sendMessage: sinon.stub().resolves() },
+        attributes: { authInfo: { getType: () => 'ims' } },
+        pathInfo: { headers: { authorization: 'Bearer ims-token' } },
+      };
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        markets: [{ market: 'US', language: 'en' }],
+      }, context);
+
+      // The v1 branch warns that markets are not provisioned, and never sets
+      // result.serenity (no fan-out ran).
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match(/resolved to v1 — skipping Semrush provisioning of 1 market/),
+      );
+      expect(result.serenity).to.be.undefined;
+    }).timeout(10000);
+
     it('should fail fast with a 404 when an allowlisted org has no Semrush workspace bound (LLMO-5203)', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org-serenity-cohort'),
