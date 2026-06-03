@@ -1241,9 +1241,11 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  */
 function extractImsBearer(context) {
   // The Semrush gateway only understands IMS user tokens; anything else
-  // (scoped API key, S2S JWT) cannot be forwarded.
+  // (scoped API key, S2S JWT, or an auth object we can't classify) must not be
+  // forwarded. Stricter than the proxy's `requireImsBearer` on purpose: require
+  // a recognisable IMS auth type rather than letting an unknown shape through.
   const authInfo = context?.attributes?.authInfo;
-  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+  if (!authInfo?.getType || authInfo.getType() !== 'ims') {
     return null;
   }
   const header = context?.pathInfo?.headers?.authorization;
@@ -1352,6 +1354,10 @@ export async function performSerenityFanOut(context, {
     }
 
     // 201 = newly created; 409 = slice already exists (idempotent success).
+    // Note the 201/409 asymmetry: a 201 echoes `semrushLocationId`, a 409 only
+    // returns the conflicting `semrushProjectId` (no location). That's fine —
+    // M8 (`reconcileSerenityProjects`) reads the authoritative location back from
+    // the DB, so this fan-out entry is provisional and superseded there.
     if (outcome.status === 201 || outcome.status === 409) {
       succeeded.push({
         market,
@@ -1424,6 +1430,11 @@ export async function reconcileSerenityProjects(context, { brandId, fanOut }) {
   const succeeded = [];
   const failed = [];
   requested.forEach(({ market, language }) => {
+    // `resolveLocation` returns null for an unknown market, in which case no DB
+    // slice can match and the tuple is treated as failed. This is consistent
+    // with M7: the proxy also rejects such a tuple (`unknownMarket`), so it
+    // never wrote a row. Unreachable given the `^[A-Z]{2}$` + proxy validation,
+    // but guarded so a bad code degrades to a failure, not a thrown lookup.
     const location = resolveLocation(market);
     const lang = String(language).toLowerCase();
     const row = location ? rowBySlice.get(`${location.locationId}::${lang}`) : undefined;
@@ -1652,9 +1663,12 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         // workspace presence above. T3b fans out one project per market tuple;
         // T3c (LLMO-5205) will shape the 200/207 response from the result.
         log.info(`Serenity onboarding enabled for org ${organization.getId()} — ${markets?.length ?? 0} market(s) to provision (LLMO-5007)`);
+        // A failed M4 brand upsert leaves `upsertedBrand` undefined; the fan-out
+        // detects the missing brand id and fails every tuple cleanly.
+        const brandId = upsertedBrand?.id ?? null;
         // M7: fan out one Semrush project per (market, language) tuple.
         const fanOut = await performSerenityFanOut(context, {
-          brandId: upsertedBrand?.id,
+          brandId,
           workspaceId: organization.getSemrushWorkspaceId(),
           brandName,
           baseURL,
@@ -1662,7 +1676,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         });
         // M8: read back the authoritative DB state and shape the final outcome.
         serenityProvisioning = await reconcileSerenityProjects(context, {
-          brandId: upsertedBrand?.id,
+          brandId,
           fanOut,
         });
         log.info(`Serenity provisioning for org ${organization.getId()}: ${serenityProvisioning.succeeded.length} of ${serenityProvisioning.requested.length} project(s) live, ${serenityProvisioning.failed.length} failed (LLMO-5007)`);
