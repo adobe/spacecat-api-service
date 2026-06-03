@@ -35,7 +35,11 @@ export function isSerenityOnboardingEnabled(organizationId, imsOrgId, env) {
     return false;
   }
   const allowed = allowlist.split(',').map((s) => s.trim()).filter(Boolean);
-  return allowed.includes(organizationId) || allowed.includes(imsOrgId);
+  // SpaceCat org IDs are UUIDs (case-stable). IMS org IDs are validated with /i upstream
+  // so normalize both sides for the IMS arm to avoid silent mismatches.
+  const imsLower = imsOrgId?.toLowerCase();
+  return allowed.includes(organizationId)
+    || allowed.some((entry) => entry.toLowerCase() === imsLower);
 }
 
 /**

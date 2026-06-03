@@ -1109,7 +1109,10 @@ llmo-onboard:
                     language:
                       type: string
                       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
-                      description: BCP-47 primary language subtag (lowercase).
+                      description: |
+                        BCP-47 language tag (lowercase). Accepts a primary subtag
+                        or primary + script/region subtag (e.g. en, de, zh-hans).
+                        Lowercase is enforced as a normalization choice.
                       example: "en"
                 example:
                   - market: "US"
@@ -1225,7 +1228,7 @@ llmo-onboard:
                   example: "IN"
                 requested:
                   type: array
-                  description: The markets tuples that were requested for Semrush provisioning. Present only for cohort orgs.
+                  description: The market tuples requested for Semrush provisioning. Present only for cohort orgs.
                   items:
                     type: object
                     properties:
@@ -1235,7 +1238,7 @@ llmo-onboard:
                         type: string
                 succeeded:
                   type: array
-                  description: Tuples for which a Semrush project was successfully created.
+                  description: Tuples for which a Semrush project is live (read back from the DB). Cohort orgs only.
                   items:
                     type: object
                     properties:
@@ -1249,7 +1252,7 @@ llmo-onboard:
                         type: integer
                 failed:
                   type: array
-                  description: Tuples for which Semrush project creation failed. Present on 207 responses.
+                  description: Tuples with no Semrush project row. Empty on 200; non-empty drives a 207. Cohort orgs only.
                   items:
                     type: object
                     properties:
