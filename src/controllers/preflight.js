@@ -16,19 +16,22 @@ import {
 import {
   badRequest, internalServerError, notFound, ok, accepted, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
-import { AsyncJob, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { AsyncJob } from '@adobe/spacecat-shared-data-access';
 import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
 import { TierClient } from '@adobe/spacecat-shared-tier-client';
 import AccessControlUtil from '../support/access-control-util.js';
 import { PreflightDto } from '../dto/preflight.js';
-import { getCookieValue, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import { ErrorWithStatusCode } from '../support/utils.js';
+import { getHeader } from '../support/http-headers.js';
+import {
+  MISSING_X_PROMISE_TOKEN_MESSAGE,
+  PROMISE_BASED_AUTHORING_TYPES,
+  STATUS_BAD_REQUEST,
+  X_PROMISE_TOKEN_HEADER,
+} from '../utils/constants.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
-
-const PROMISE_BASED_TYPES = [
-  SiteModel.AUTHORING_TYPES.CS, SiteModel.AUTHORING_TYPES.CS_CW, SiteModel.AUTHORING_TYPES.AMS,
-];
 
 /**
  * Creates a preflight controller instance
@@ -97,21 +100,6 @@ function PreflightController(ctx, log, env) {
   }
 
   /**
-   * Creates a new preflight job. For promise-based authoring types (CS, CS_CW, AMS),
-   * the promise token is resolved from the promiseToken cookie sent by the browser
-   * (set via /auth/promise endpoint), otherwise falls back to creating one from
-   * the Authorization header via IMS.
-   * @param {Object} context - The request context
-   * @param {Object} context.data - The request data
-   * @param {string[]} context.data.urls - Array of URLs to process
-   * @param {string} context.data.step - The audit step
-   * @param {string} context.data.siteId - The siteId, if it's an AMS site
-   * @param {Object} [context.pathInfo] - The path info object
-   * @param {Object} [context.pathInfo.headers] - Request headers; must include a
-   *   `cookie` header with `promiseToken=<token>` for CS/CS_CW/AMS authoring types
-   * @returns {Promise<Object>} The HTTP response object
-   */
-  /**
    * Checks if a handler type is enabled for a site, including product code
    * entitlement verification. Mirrors the audit worker's isAuditEnabledForSite.
    */
@@ -162,17 +150,44 @@ function PreflightController(ctx, log, env) {
     return headResponse.status === 401 || headResponse.status === 403;
   }
 
+  /**
+   * Resolves the IMS promise token for promise-based authoring types (CS, CS_CW, AMS).
+   * @param {Object} site - Site entity
+   * @param {Object} context - Request context with pathInfo.headers
+   * @returns {Promise<{ promise_token: string } | null>} Token object, or null
+   * @throws {ErrorWithStatusCode} 400 when the header is missing or empty
+   */
   async function resolvePromiseToken(site, context) {
-    if (!PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
+    if (!PROMISE_BASED_AUTHORING_TYPES.includes(site.getAuthoringType())) {
       return null;
     }
-    const cookieToken = getCookieValue(context, 'promiseToken');
-    if (hasText(cookieToken)) {
-      return { promise_token: cookieToken };
+    let promiseTokenHeader = getHeader(context, X_PROMISE_TOKEN_HEADER);
+    if (hasText(promiseTokenHeader)) {
+      try {
+        promiseTokenHeader = decodeURIComponent(promiseTokenHeader);
+      } catch {
+        // Bearer-style tokens may contain literal %; use trimmed value as-is
+      }
     }
-    return getIMSPromiseToken(context);
+    // Re-check after decode
+    if (hasText(promiseTokenHeader)) {
+      return { promise_token: promiseTokenHeader };
+    }
+    throw new ErrorWithStatusCode(MISSING_X_PROMISE_TOKEN_MESSAGE, STATUS_BAD_REQUEST);
   }
 
+  /**
+   * Creates a new preflight job. For promise-based authoring types (CS, CS_CW, AMS),
+   * the promise token must be sent on the `x-promise-token` header (from POST /auth/v2/promise).
+   * @param {Object} context - The request context
+   * @param {Object} context.data - The request data
+   * @param {string[]} context.data.urls - Array of URLs to process
+   * @param {string} context.data.step - The audit step
+   * @param {string} context.data.siteId - The siteId, if it's an AMS site
+   * @param {Object} [context.pathInfo] - The path info object
+   * @param {Object} [context.pathInfo.headers] - Request headers; must include `x-promise-token`
+   * @returns {Promise<Object>} The HTTP response object
+  */
   const createPreflightJob = async (context) => {
     log.debug('createPreflightJob started');
     const { data } = context;
@@ -250,7 +265,7 @@ function PreflightController(ctx, log, env) {
         // remove the promiseToken from the message if it exists from the debug log
         log.debug(`createPreflightJob sending message to SQS with payload: ${JSON.stringify(sqsMessage)}`);
 
-        if (PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
+        if (PROMISE_BASED_AUTHORING_TYPES.includes(site.getAuthoringType())) {
           sqsMessage.promiseToken = promiseTokenResponse;
         }
 
@@ -373,6 +388,8 @@ function PreflightController(ctx, log, env) {
   /**
    * Creates a new preflight for a site-scoped URL.
    * siteId comes from the path; url from the request body.
+   * For promise-based authoring types (CS, CS_CW, AMS) that require authentication, the
+   * promise token must be sent on the `x-promise-token` header (from POST /auth/v2/promise).
    * @param {Object} context - The request context
    * @returns {Promise<Object>} 202 Accepted with preflight summary and Location header
    */
