@@ -12,6 +12,8 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+import { throwOnPgConstraintViolation } from './errors.js';
+
 // Embed shape used by listTopics / createTopic / updateTopic so the response
 // shape is symmetric across the three endpoints. Nesting `categories(status)`
 // inside `topic_categories` lets us drop tombstoned categories client-side
@@ -124,25 +126,15 @@ export async function createTopic({
     .single();
 
   if (error) {
-    // Any unique-constraint violation that escapes the `organization_id,
-    // topic_id` upsert target is surfaced as a typed 409 so callers can
-    // handle it without mining 500 bodies. The message echoes the actual
-    // constraint name rather than hard-coding a field (the colliding
-    // column may not be `name`). LLMO-4370.
-    if (error.code === '23505') {
-      const match = /unique constraint "([^"]+)"/.exec(error.message || '');
-      const constraint = match ? match[1] : 'unique constraint';
-      // Chain the original PostgREST error as `cause` so operators reading
-      // WARN-level conflict logs can still reach the raw DB error during
-      // triage — symmetric with categories-storage. LLMO-4370 #14.
-      const conflict = new Error(
-        `Topic conflicts with ${constraint} for this organization`,
-        { cause: error },
-      );
-      conflict.status = 409;
-      throw conflict;
-    }
-    throw new Error(`Failed to create topic: ${error.message}`, { cause: error });
+    // 23505 unique-constraint and 23503 FK violations are surfaced as typed
+    // HTTP errors (409 / 422) via the centralised utility. Postgres internals
+    // (constraint names, table names) stay in `.cause` for operator triage and
+    // are kept out of client-facing messages to avoid schema leakage. LLMO-4370.
+    throwOnPgConstraintViolation(error, {
+      23505: { status: 409, message: 'A topic with these attributes already exists for this organization' },
+      23503: { status: 422, message: 'Topic references a non-existent related entity' },
+    });
+    throw new Error('Failed to create topic', { cause: error });
   }
 
   // Link topic to category via the topic_categories junction table.
