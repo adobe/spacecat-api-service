@@ -1226,6 +1226,44 @@ llmo-onboard:
                     the request body; omitted when the DRS default ('US')
                     applies.
                   example: "IN"
+                requested:
+                  type: array
+                  description: The market tuples requested for Semrush provisioning. Present only for cohort orgs.
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      language:
+                        type: string
+                succeeded:
+                  type: array
+                  description: Tuples for which a Semrush project is live (read back from the DB). Cohort orgs only.
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      language:
+                        type: string
+                      semrushProjectId:
+                        type: string
+                      semrushLocationId:
+                        type: integer
+                failed:
+                  type: array
+                  description: Tuples with no Semrush project row. Empty on 200; non-empty drives a 207. Cohort orgs only.
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      language:
+                        type: string
+                      status:
+                        type: integer
+                      error:
+                        type: string
               required:
                 - message
                 - domain
