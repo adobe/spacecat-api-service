@@ -592,4 +592,138 @@ describe('WebhooksController', () => {
       expect(text).to.include('author <https://github.com/bob|bob>');
     });
   });
+
+  describe('EMF metrics', () => {
+    let emitMetricStub;
+    let MockedEmfController;
+
+    before(async () => {
+      emitMetricStub = sinon.stub();
+      const mod = await esmock('../../src/controllers/webhooks.js', {
+        '../../src/support/metrics-emf.js': {
+          emitMetric: emitMetricStub,
+          resolveEnvironment: () => 'dev',
+        },
+      });
+      MockedEmfController = mod.default;
+    });
+
+    beforeEach(() => {
+      emitMetricStub.reset();
+    });
+
+    function buildEmfController(envOverrides = {}) {
+      return MockedEmfController({
+        sqs: mockSqs,
+        log: mockLog,
+        env: {
+          MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
+          ...envOverrides,
+        },
+      });
+    }
+
+    it('success path emits WebhookReceived, WebhookEnqueued, and WebhookProcessingMillis', async () => {
+      const emfController = buildEmfController();
+      const response = await emfController.processGitHubWebhook(validContext);
+
+      expect(response.status).to.equal(202);
+
+      const names = emitMetricStub.getCalls().map((c) => c.args[0].name);
+      expect(names).to.include('WebhookReceived');
+      expect(names).to.include('WebhookEnqueued');
+      expect(names).to.include('WebhookProcessingMillis');
+
+      // Event is the only dimension sourced from a request header; assert its
+      // value so a regression in header reading (ctx.pathInfo.headers) is caught
+      // rather than silently emitting an undefined-then-dropped dimension.
+      const received = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookReceived');
+      expect(received.args[0].dimensions).to.deep.include({ Event: 'pull_request' });
+
+      const enqueued = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookEnqueued');
+      expect(enqueued.args[0].dimensions).to.deep.include({
+        JobType: 'pr-review',
+        TargetId: 'github-public',
+      });
+
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'enqueued' });
+      expect(millis.args[0].unit).to.equal('Milliseconds');
+    });
+
+    it('draft PR skip emits WebhookSkipped with SkipReason draft_pr', async () => {
+      const emfController = buildEmfController();
+      const ctx = {
+        ...validContext,
+        data: {
+          ...validContext.data,
+          pull_request: { ...validContext.data.pull_request, draft: true },
+        },
+      };
+      const response = await emfController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(204);
+      const skipped = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookSkipped');
+      expect(skipped).to.exist;
+      expect(skipped.args[0].dimensions).to.deep.include({ SkipReason: 'draft_pr' });
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'skipped' });
+    });
+
+    it('SQS failure emits WebhookEnqueueFailure and returns 500', async () => {
+      mockSqs.sendMessage.rejects(new Error('SQS timeout'));
+      const emfController = buildEmfController();
+      const response = await emfController.processGitHubWebhook(validContext);
+
+      expect(response.status).to.equal(500);
+      const failure = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookEnqueueFailure');
+      expect(failure).to.exist;
+      // enqueue_failure rethrows: finally tags latency Outcome, then errorHandler
+      // catches and emits WebhookHandlerError{uncaught_exception}.
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'enqueue_failure' });
+      const handlerError = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookHandlerError');
+      expect(handlerError).to.exist;
+      expect(handlerError.args[0].dimensions).to.deep.include({ Reason: 'uncaught_exception' });
+    });
+
+    it('missing action field emits WebhookBadRequest with MissingField action', async () => {
+      const emfController = buildEmfController();
+      const ctx = {
+        ...validContext,
+        data: { ...validContext.data, action: undefined },
+      };
+      const response = await emfController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(400);
+      const bad = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookBadRequest');
+      expect(bad).to.exist;
+      expect(bad.args[0].dimensions).to.deep.include({ MissingField: 'action' });
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'bad_request' });
+    });
+
+    it('missing reviewer_login emits WebhookHandlerError with Reason missing_reviewer_login', async () => {
+      // Fail-closed path: returns 500 from inside the try (no throw), so the
+      // errorHandler catch does not run - WebhookHandlerError fires once, from the
+      // internal reviewer check, with the distinguishing Reason dimension.
+      const emfController = buildEmfController();
+      const ctx = {
+        ...validContext,
+        attributes: {
+          authInfo: {
+            getProfile: () => ({ user_id: 'github-webhook', target_id: 'github-public' }),
+          },
+        },
+      };
+      const response = await emfController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(500);
+      const handlerError = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookHandlerError');
+      expect(handlerError).to.exist;
+      expect(handlerError.args[0].dimensions).to.deep.include({ Reason: 'missing_reviewer_login' });
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'handler_error' });
+    });
+  });
 });
