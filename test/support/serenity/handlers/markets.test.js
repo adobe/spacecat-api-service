@@ -905,6 +905,20 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(transport.listWorkspaceAiModels).to.have.callCount(1);
   });
 
+  it('listModels (catalog mode) paginates when page 1 is full (100 items)', async () => {
+    const dataAccess = makeDataAccess([]);
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      id: `cat-${i}`, key: `model-${i}`, name: null, icon: null,
+    }));
+    const stub = sinon.stub();
+    stub.onFirstCall().resolves({ items: page1 });
+    stub.onSecondCall().resolves({ items: [] });
+    const transport = { listWorkspaceAiModels: stub };
+    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
+    expect(result.items).to.have.lengthOf(100);
+    expect(stub).to.have.callCount(2);
+  });
+
   it('listModels (catalog mode) also normalises wrapped assignment items from workspace endpoint', async () => {
     const dataAccess = makeDataAccess([]);
     const transport = {
@@ -924,13 +938,34 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(result.items[0].id).to.equal('cat-gpt');
   });
 
-  it('listModels (catalog mode) returns empty when workspace endpoint throws', async () => {
+  it('listModels (catalog mode) returns empty when workspace endpoint responds 404/405', async () => {
     const dataAccess = makeDataAccess([]);
-    const transport = {
-      listWorkspaceAiModels: sinon.stub().rejects(new Error('404 not found')),
+    const transport404 = {
+      listWorkspaceAiModels: sinon.stub().rejects(new SerenityTransportError(404, 'not found')),
     };
-    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
-    expect(result).to.deep.equal({ items: [] });
+    const result404 = await handleListModels(transport404, dataAccess, BRAND, WORKSPACE, {});
+    expect(result404).to.deep.equal({ items: [] });
+
+    const transport405 = {
+      listWorkspaceAiModels: sinon.stub().rejects(new SerenityTransportError(405, 'not allowed')),
+    };
+    const result405 = await handleListModels(transport405, dataAccess, BRAND, WORKSPACE, {});
+    expect(result405).to.deep.equal({ items: [] });
+  });
+
+  it('listModels (catalog mode) propagates auth errors (401/403) from workspace endpoint', async () => {
+    const dataAccess = makeDataAccess([]);
+    const transport401 = {
+      listWorkspaceAiModels: sinon.stub().rejects(new SerenityTransportError(401, 'unauthorized')),
+    };
+    await expect(handleListModels(transport401, dataAccess, BRAND, WORKSPACE, {}))
+      .to.be.rejectedWith(SerenityTransportError);
+
+    const transport403 = {
+      listWorkspaceAiModels: sinon.stub().rejects(new SerenityTransportError(403, 'forbidden')),
+    };
+    await expect(handleListModels(transport403, dataAccess, BRAND, WORKSPACE, {}))
+      .to.be.rejectedWith(SerenityTransportError);
   });
 
   it('listModels 400s when only one of geoTargetId/languageCode is provided', async () => {

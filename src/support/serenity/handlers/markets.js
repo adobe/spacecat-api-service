@@ -16,6 +16,7 @@ import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
+import { SerenityTransportError } from '../rest-transport.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -773,10 +774,16 @@ export async function handleListModels(
         if (batch.length < AI_MODELS_PAGE) { break; }
         page += 1;
       }
-    } catch {
-      // Workspace catalog endpoint may not be available — return empty list
-      // rather than surfacing a 5xx to the client.
-      rawItems = [];
+    } catch (e) {
+      // Only swallow "endpoint not available" responses (404/405). Auth
+      // errors (401/403) and server errors must propagate — silently
+      // returning an empty list on a 403 would look like "no models to
+      // choose from" rather than the auth failure it actually is.
+      if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+        rawItems = [];
+      } else {
+        throw e;
+      }
     }
     // Workspace items may be plain model objects { id, key, name, icon } or
     // wrapped assignments { model: { id, key, name, icon } }. Normalise both.
@@ -866,7 +873,7 @@ export async function handleUpdateModels(
   body,
   log,
 ) {
-  const geoTargetId = normalizeGeoTargetId(body?.geoTargetId);
+  const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
   if (geoTargetId === null || languageCode === null) {
     throw new ErrorWithStatusCode(
