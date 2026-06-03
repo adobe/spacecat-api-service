@@ -785,7 +785,8 @@ export async function handleListModels(
  * `modelIds` contains catalog model IDs — the `id` field from
  * `AIModelResponse` (i.e. `ProjectAIModelResponse.model.id`), NOT the
  * assignment row's `id`. The caller gets these from a prior `GET /serenity/models`
- * call on the same or any other slice.
+ * call on the same or any other slice. Duplicate IDs in `modelIds` are
+ * silently deduplicated before diffing.
  *
  * Assignment IDs (outer `id` on `ProjectAIModelResponse`) are resolved
  * internally for the DELETE batch and are never exposed to callers.
@@ -843,6 +844,20 @@ export async function handleUpdateModels(
     .map((id) => currentMap.get(id))
     .filter(Boolean);
 
+  // Short-circuit: nothing to do — return the already-fetched list as-is.
+  if (toAdd.length === 0 && toRemoveAssignmentIds.length === 0) {
+    const items = currentAssignments
+      .map((it) => it?.model)
+      .filter((m) => m && typeof m === 'object' && hasText(m.id) && hasText(m.key))
+      .map((m) => ({
+        id: m.id,
+        key: m.key,
+        name: m.name ?? null,
+        icon: m.icon ?? null,
+      }));
+    return { items };
+  }
+
   // Apply removals first (fewer dangling adds if a later add fails)
   if (toRemoveAssignmentIds.length > 0) {
     try {
@@ -863,11 +878,14 @@ export async function handleUpdateModels(
 
   // Apply additions sequentially — Semrush add endpoint takes one model at a
   // time; parallel calls could race on the same project state.
+  const alreadyAdded = [];
   for (const catalogId of toAdd) {
     try {
       // eslint-disable-next-line no-await-in-loop
       await transport.addAiModel(semrushWorkspaceId, projectId, catalogId);
+      alreadyAdded.push(catalogId);
     } catch (e) {
+      // Log which IDs were already added so operators can assess partial state.
       log?.error?.('handleUpdateModels: failed to add AI model', {
         brandId,
         semrushWorkspaceId,
@@ -875,6 +893,7 @@ export async function handleUpdateModels(
         geoTargetId,
         languageCode,
         catalogId,
+        alreadyAdded,
         error: e.message,
       });
       throw e;

@@ -1074,11 +1074,19 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     });
     // after add, list returns the newly added model
     transport.listAiModels.onSecondCall().resolves({
-      items: [{ id: 'assign-1', model: { id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null } }],
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
     });
 
     const result = await handleUpdateModels(
-      transport, da, BRAND, WORKSPACE,
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
       { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
       fakeLog(),
     );
@@ -1095,13 +1103,21 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     da.BrandSemrushProject.findBySlice.resolves(project);
     const transport = makeTransport({
       currentItems: [
-        { id: 'assign-1', model: { id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null } },
+        {
+          id: 'assign-1',
+          model: {
+            id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+          },
+        },
       ],
     });
     transport.listAiModels.onSecondCall().resolves({ items: [] });
 
     const result = await handleUpdateModels(
-      transport, da, BRAND, WORKSPACE,
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
       { geoTargetId: 2840, languageCode: 'en', modelIds: [] },
       fakeLog(),
     );
@@ -1117,15 +1133,28 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     da.BrandSemrushProject.findBySlice.resolves(project);
     const transport = makeTransport({
       currentItems: [
-        { id: 'assign-old', model: { id: 'cat-old', key: 'old-model', name: 'Old', icon: null } },
+        {
+          id: 'assign-old',
+          model: {
+            id: 'cat-old', key: 'old-model', name: 'Old', icon: null,
+          },
+        },
       ],
     });
     transport.listAiModels.onSecondCall().resolves({
-      items: [{ id: 'assign-new', model: { id: 'cat-new', key: 'new-model', name: 'New', icon: null } }],
+      items: [{
+        id: 'assign-new',
+        model: {
+          id: 'cat-new', key: 'new-model', name: 'New', icon: null,
+        },
+      }],
     });
 
     await handleUpdateModels(
-      transport, da, BRAND, WORKSPACE,
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
       { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-new'] },
       fakeLog(),
     );
@@ -1140,19 +1169,29 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     da.BrandSemrushProject.findBySlice.resolves(project);
     const transport = makeTransport({
       currentItems: [
-        { id: 'assign-1', model: { id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null } },
+        {
+          id: 'assign-1',
+          model: {
+            id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+          },
+        },
       ],
     });
-    transport.listAiModels.onSecondCall().resolves({ items: transport.listAiModels.args[0]?.[2] ?? [] });
-
-    await handleUpdateModels(
-      transport, da, BRAND, WORKSPACE,
+    const result = await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
       { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
       fakeLog(),
     );
 
     expect(transport.deleteAiModelsByIds).not.to.have.been.called;
     expect(transport.addAiModel).not.to.have.been.called;
+    // Short-circuit: only one upstream list call (the initial fetch; no second refresh)
+    expect(transport.listAiModels).to.have.callCount(1);
+    expect(result.items).to.have.length(1);
+    expect(result.items[0].id).to.equal('cat-gpt');
   });
 
   it('propagates transport errors from deleteAiModelsByIds', async () => {
@@ -1161,7 +1200,12 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     da.BrandSemrushProject.findBySlice.resolves(project);
     const transport = makeTransport({
       currentItems: [
-        { id: 'assign-1', model: { id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null } },
+        {
+          id: 'assign-1',
+          model: {
+            id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+          },
+        },
       ],
     });
     const err = new SerenityTransportError(502, 'upstream failure');
