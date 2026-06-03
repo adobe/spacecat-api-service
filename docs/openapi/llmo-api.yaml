@@ -1226,18 +1226,115 @@ llmo-onboard:
                     the request body; omitted when the DRS default ('US')
                     applies.
                   example: "IN"
+                requested:
+                  type: array
+                  description: The market tuples requested for Semrush provisioning. Present only for cohort orgs.
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      language:
+                        type: string
+                succeeded:
+                  type: array
+                  description: Tuples for which a Semrush project is live (read back from the DB). Cohort orgs only.
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      language:
+                        type: string
+                      semrushProjectId:
+                        type: string
+                      semrushLocationId:
+                        type: integer
+                failed:
+                  type: array
+                  description: Tuples with no Semrush project row. Empty on 200; non-empty drives a 207. Cohort orgs only.
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      language:
+                        type: string
+                      status:
+                        type: integer
+                      error:
+                        type: string
               required:
                 - message
                 - domain
                 - brandName
                 - imsOrgId
                 - status
+      '207':
+        description: |
+          Partial success — LLMO onboarding completed but one or more Semrush project
+          provisioning steps failed. Successfully created projects are not rolled back.
+          Re-invoking with the same `markets[]` is safe (already-created slices are skipped).
+
+          The body carries the same onboarding fields as the 200 response (message,
+          domain, brandName, imsOrgId, organizationId, siteId, status, …) in addition
+          to the `requested`/`succeeded`/`failed` arrays below. Only cohort
+          (`SERENITY_SITE_ALLOWLIST`) onboardings can return 207; all others return 200.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requested:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      language:
+                        type: string
+                succeeded:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      language:
+                        type: string
+                      semrushProjectId:
+                        type: string
+                      semrushLocationId:
+                        type: integer
+                failed:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      language:
+                        type: string
+                      status:
+                        type: integer
+                      error:
+                        type: string
       '400':
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
+      '404':
+        description: |
+          The org is in the Semrush cohort (`SERENITY_SITE_ALLOWLIST`) but has no
+          Semrush workspace bound. An operator must run
+          `PATCH /organizations/:spaceCatId` with `{ semrushWorkspaceId: ... }`
+          before retrying onboarding. No Adobe-side state is created in this case.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
         $ref: './responses.yaml#/500'
     security: []

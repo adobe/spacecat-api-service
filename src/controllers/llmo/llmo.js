@@ -1069,7 +1069,7 @@ function LlmoController(ctx) {
 
       log.info(`LLMO onboarding completed successfully for domain ${domain}`);
 
-      return ok({
+      const responseBody = {
         message: result.message,
         domain,
         brandName,
@@ -1083,9 +1083,30 @@ function LlmoController(ctx) {
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
         ...(region ? { region } : {}),
-      });
+      };
+
+      // M8 (LLMO-5205): for cohort onboardings, surface the per-tuple Semrush
+      // provisioning outcome. A non-empty `failed` is a partial success → 207
+      // Multi-Status; successful tuples are never rolled back. Re-invoking with
+      // the same markets[] is safe (the proxy 409-dedupes already-created slices).
+      if (result.serenity) {
+        const { requested, succeeded, failed } = result.serenity;
+        const serenityBody = {
+          ...responseBody, requested, succeeded, failed,
+        };
+        return failed.length > 0
+          ? createResponse(serenityBody, 207)
+          : ok(serenityBody);
+      }
+
+      return ok(responseBody);
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
+      // M5 (LLMO-5203): a missing Semrush workspace fails fast with a 404 and an
+      // operator-actionable message; everything else stays a 400.
+      if (error.status === 404) {
+        return notFound(error.message);
+      }
       return badRequest(cleanupHeaderValue(error.message));
     }
   };
