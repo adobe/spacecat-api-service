@@ -3800,6 +3800,7 @@ describe('LlmoController', () => {
         'Semrush workspace not bound to org org-1. Run PATCH /organizations/org-1 with { semrushWorkspaceId: ... } then retry onboarding.',
       );
       workspaceError.status = 404;
+      workspaceError.preflight = true;
       const failingStub = sinon.stub().rejects(workspaceError);
       const ctrl = await makeOnboardController(failingStub);
 
@@ -3808,6 +3809,19 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(404);
       const body = await result.json();
       expect(body.message).to.match(/Semrush workspace not bound to org org-1/);
+    });
+
+    it('should NOT map an incidental downstream 404 (no preflight) to notFound (LLMO-5203)', async () => {
+      // A dependency that throws a bare status-404 must stay a 400, not be
+      // reshaped into a notFound that leaks its message.
+      const downstream = new Error('some dependency 404');
+      downstream.status = 404;
+      const failingStub = sinon.stub().rejects(downstream);
+      const ctrl = await makeOnboardController(failingStub);
+
+      const result = await ctrl.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(400);
     });
 
     it('should return 207 when some Semrush projects failed to provision (LLMO-5205)', async () => {
