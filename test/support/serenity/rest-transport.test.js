@@ -480,4 +480,37 @@ describe('Semrush REST transport', () => {
       }
     });
   });
+
+  describe('addAiModel (new in this PR)', () => {
+    it('POSTs model_id to /v1/.../ai_models and returns the assignment row', async () => {
+      fetchStub.resolves(fetchOk({ id: 'new-assignment-uuid' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.addAiModel(WORKSPACE_ID, PROJECT_ID, 'cat-gpt-4o');
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models`,
+      );
+      expect(JSON.parse(init.body)).to.deep.equal({ model_id: 'cat-gpt-4o' });
+      expect(result.id).to.equal('new-assignment-uuid');
+    });
+  });
+
+  describe('deleteAiModelsByIds (new in this PR)', () => {
+    it('DELETEs an ids array from /v1/.../ai_models', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.deleteAiModelsByIds(WORKSPACE_ID, PROJECT_ID, ['assign-1', 'assign-2']);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('DELETE');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models`,
+      );
+      expect(JSON.parse(init.body)).to.deep.equal({ ids: ['assign-1', 'assign-2'] });
+    });
+  });
 });

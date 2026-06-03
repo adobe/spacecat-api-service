@@ -1329,4 +1329,32 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport2.deleteAiModelsByIds).not.to.have.been.called;
     expect(result.items).to.have.length(2);
   });
+
+  it('filters out malformed current items (null model) from the no-op short-circuit response', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    // currentItems has one valid entry and one with model: null (malformed upstream shape)
+    const transport = makeTransport({
+      currentItems: [
+        { id: 'assign-good', model: { id: 'cat-a', key: 'key-a', name: null, icon: null } },
+        { id: 'assign-bad', model: null },
+      ],
+    });
+
+    const result = await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-a'] },
+      fakeLog(),
+    );
+
+    // Short-circuit fires (cat-a already current). Malformed entry is excluded.
+    expect(transport.addAiModel).not.to.have.been.called;
+    expect(transport.deleteAiModelsByIds).not.to.have.been.called;
+    expect(result.items).to.have.length(1);
+    expect(result.items[0].id).to.equal('cat-a');
+  });
 });

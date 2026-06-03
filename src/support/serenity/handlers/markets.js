@@ -919,5 +919,13 @@ export async function handleUpdateModels(
   // Return the refreshed model list
   const updated = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
   const items = updated.map(assignmentToItem).filter(Boolean);
+  log?.info?.('handleUpdateModels: sync complete', {
+    brandId,
+    projectId,
+    geoTargetId,
+    languageCode,
+    added: toAdd.length,
+    removed: toRemoveAssignmentIds.length,
+  });
   return { items };
 }

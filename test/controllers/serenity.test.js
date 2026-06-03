@@ -84,6 +84,7 @@ describe('SerenityController', () => {
     handleDeleteMarket: sinon.stub(),
     handleListTags: sinon.stub(),
     handleListModels: sinon.stub(),
+    handleUpdateModels: sinon.stub(),
   };
   let resolveWorkspaceIdStub;
   let createTransportStub;
@@ -134,6 +135,7 @@ describe('SerenityController', () => {
         handleDeleteMarket: handlers.handleDeleteMarket,
         handleListTags: handlers.handleListTags,
         handleListModels: handlers.handleListModels,
+        handleUpdateModels: handlers.handleUpdateModels,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
@@ -482,6 +484,47 @@ describe('SerenityController', () => {
       expect(body.error).to.equal('internalServerError');
       expect(body.message).to.equal('Internal server error');
       expect(log.error).to.have.been.calledWithMatch('Serenity controller error');
+    });
+
+    it('listTags dispatches to handleListTags and wraps the result in ok()', async () => {
+      handlers.handleListTags.resolves({ items: [{ id: 't1', name: 'tag1' }] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+      const response = await controller.listTags(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListTags).to.have.been.calledOnce;
+    });
+
+    it('listModels dispatches to handleListModels and wraps the result in ok()', async () => {
+      handlers.handleListModels.resolves({ items: [{ id: 'm1', key: 'chatgpt', name: null, icon: null }] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+      const response = await controller.listModels(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListModels).to.have.been.calledOnce;
+    });
+
+    it('updateModels dispatches ctx.data to handleUpdateModels and wraps the result in ok()', async () => {
+      handlers.handleUpdateModels.resolves({ items: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateModels(fakeContext({
+        data: { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdateModels).to.have.been.calledOnce;
+      expect(handlers.handleUpdateModels.firstCall.args[4]).to.deep.equal({
+        geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'],
+      });
+    });
+
+    it('updateModels falls back to {} when ctx.data is absent', async () => {
+      handlers.handleUpdateModels.resolves({ items: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateModels(fakeContext());
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdateModels.firstCall.args[4]).to.deep.equal({});
     });
   });
 
