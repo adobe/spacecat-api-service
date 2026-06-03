@@ -77,6 +77,7 @@ describe('Preflight Controller', () => {
 
   const mockSite = {
     getId: () => 'test-site-123',
+    getOrganizationId: () => 'org-123',
     getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
   };
 
@@ -582,6 +583,7 @@ describe('Preflight Controller', () => {
     it('creates a preflight job using promiseToken cookie for crosswalk authoring type', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
@@ -638,6 +640,7 @@ describe('Preflight Controller', () => {
     it('handles promise token error for AEM_CS site', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
@@ -684,6 +687,7 @@ describe('Preflight Controller', () => {
     it('handles promise token error for AEM_CS site with generic error', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
@@ -728,6 +732,7 @@ describe('Preflight Controller', () => {
     it('uses promiseToken cookie when present instead of IMS', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
@@ -784,6 +789,7 @@ describe('Preflight Controller', () => {
     it('preserves full cookie value when token contains = characters (base64)', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
@@ -841,6 +847,7 @@ describe('Preflight Controller', () => {
     it('falls back to IMS when promiseToken cookie is absent', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
@@ -891,6 +898,7 @@ describe('Preflight Controller', () => {
     it('falls back to IMS when promiseToken cookie is empty', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.AMS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
