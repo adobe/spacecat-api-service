@@ -47,6 +47,7 @@ import {
   isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { CAP_FIX_ENTITY_CREATE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
@@ -1054,7 +1055,8 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+    const s2sResult = await accessControlUtil.hasS2SCapability(CAP_FIX_ENTITY_CREATE);
+    if (!s2sResult.allowed && !await accessControlUtil.hasAccess(site, 'auto_fix')) {
       return forbidden('User does not belong to the organization or does not have sufficient permissions');
     }
 
