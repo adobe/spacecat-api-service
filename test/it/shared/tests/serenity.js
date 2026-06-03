@@ -32,15 +32,17 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  *      not be silently accepted by the IMS-required serenity proxy.
  *
  * The end-to-end "list/create/delete market" and "required-filter 400 on
- * prompts/tags/models" paths the bot review asked for are covered today by
- * the unit suites (`test/support/serenity/handlers/*.test.js` — 100% line +
- * branch coverage) and the OpenAPI contract suite (`test/openapi-contract/
- * serenity-api.test.js`). The remaining IT gap is structural (auth-token
- * shape) and is filed for follow-up rather than worked around inside this
- * PR — the workaround alternatives (stubbing requireImsBearer at IT time;
- * injecting a fake IMS token-mint side-by-side with the JWT mint) would
- * either ship test-only code into production paths or duplicate the auth
- * harness in a way that drifts independently.
+ * prompts/tags/models" paths are covered by the unit suites
+ * (`test/support/serenity/handlers/*.test.js` — 100% line + branch coverage)
+ * and the OpenAPI contract suite (`test/openapi-contract/serenity-api.test.js`).
+ * The `tagIds` multi-value query param added in feat/serenity-tag-filter is
+ * verified at IT level by the test below (repeated params reach extractQuery
+ * without a 500, then 401 from requireImsBearer as expected).
+ * The remaining IT gap is structural (auth-token shape) and is filed for
+ * follow-up — the workaround alternatives (stubbing requireImsBearer at IT
+ * time; injecting a fake IMS token-mint) would either ship test-only code
+ * into production paths or duplicate the auth harness in a way that drifts
+ * independently.
  */
 export default function serenityTests(getHttpClient) {
   describe('Serenity API — route-gate + auth contract (LLMO-5190)', () => {
@@ -73,6 +75,18 @@ export default function serenityTests(getHttpClient) {
       const http = getHttpClient();
       const res = await http.admin.get(
         `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/prompts?geoTargetId=2840&languageCode=en`,
+      );
+      expect(res.status).to.equal(401);
+    });
+
+    // Verifies that repeated tagIds query params (the new filter feature) are
+    // accepted by extractQuery / parsedQuery without a 500 and that auth still
+    // fires — i.e. the multi-value param handling does not crash the controller
+    // before it reaches requireImsBearer.
+    it('401s on prompts endpoint with tagIds params (multi-value param does not crash controller)', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.get(
+        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/prompts?geoTargetId=2840&languageCode=en&tagIds=uuid-1&tagIds=uuid-2`,
       );
       expect(res.status).to.equal(401);
     });
