@@ -10,12 +10,15 @@
  * governing permissions and limitations under the License.
  */
 
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 
 use(sinonChai);
+
+const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
 
 describe('cdn-opt-in-notification', () => {
   let notifyOptInIfNeeded;
@@ -55,6 +58,9 @@ describe('cdn-opt-in-notification', () => {
         TrialUser: {
           allByOrganizationId: sinon.stub().resolves([]),
         },
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sinon.stub().resolves(null),
+        },
       },
     };
   });
@@ -90,6 +96,74 @@ describe('cdn-opt-in-notification', () => {
       expect(opts.templateData.adobeManaged).to.be.false;
       expect(opts.templateData.commerceManaged).to.be.false;
       expect(opts.templateData.replyAllTeam).to.equal('');
+      expect(opts.templateData.customerTier).to.equal('');
+      expect(opts.templateData.isPaidTier).to.be.false;
+      expect(opts.templateData.tierKnown).to.be.false;
+      const findEntitlement = mockContext.dataAccess.Entitlement
+        .findByOrganizationIdAndProductCode;
+      expect(findEntitlement).to.have.been.calledWith('org-uuid-456', LLMO_PRODUCT_CODE);
+    });
+
+    it('passes isPaidTier=true and customerTier=PAID when org has paid LLMO entitlement', async () => {
+      mockContext.dataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getTier: () => EntitlementModel.TIERS.PAID,
+      });
+
+      await notifyOptInIfNeeded(mockContext, baseParams);
+
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.customerTier).to.equal('PAID');
+      expect(templateData.isPaidTier).to.be.true;
+      expect(templateData.tierKnown).to.be.true;
+    });
+
+    it('passes isPaidTier=false and customerTier=FREE_TRIAL for trial entitlement', async () => {
+      mockContext.dataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getTier: () => EntitlementModel.TIERS.FREE_TRIAL,
+      });
+
+      await notifyOptInIfNeeded(mockContext, baseParams);
+
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.customerTier).to.equal('FREE_TRIAL');
+      expect(templateData.isPaidTier).to.be.false;
+      expect(templateData.tierKnown).to.be.true;
+    });
+
+    it('keeps sending with tierKnown=false when no LLMO entitlement exists', async () => {
+      mockContext.dataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
+
+      const result = await notifyOptInIfNeeded(mockContext, baseParams);
+
+      expect(result.sent).to.be.true;
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.customerTier).to.equal('');
+      expect(templateData.isPaidTier).to.be.false;
+      expect(templateData.tierKnown).to.be.false;
+    });
+
+    it('keeps sending when entitlement lookup fails', async () => {
+      mockContext.dataAccess.Entitlement.findByOrganizationIdAndProductCode.rejects(new Error('db unavailable'));
+
+      const result = await notifyOptInIfNeeded(mockContext, baseParams);
+
+      expect(result.sent).to.be.true;
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.tierKnown).to.be.false;
+      expect(templateData.isPaidTier).to.be.false;
+      expect(mockContext.log.warn).to.have.been.calledWith(
+        sinon.match(/Failed to fetch LLMO entitlement/),
+      );
+    });
+
+    it('keeps sending with unknown tier when Entitlement model is unavailable', async () => {
+      delete mockContext.dataAccess.Entitlement;
+
+      const result = await notifyOptInIfNeeded(mockContext, baseParams);
+
+      expect(result.sent).to.be.true;
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.tierKnown).to.be.false;
     });
 
     it('adds organization members as comma-separated emails', async () => {
@@ -169,13 +243,18 @@ describe('cdn-opt-in-notification', () => {
     });
 
     it('keeps sending with empty org members when TrialUser model is unavailable', async () => {
-      mockContext.dataAccess = {};
+      mockContext.dataAccess = {
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sinon.stub().resolves(null),
+        },
+      };
 
       const result = await notifyOptInIfNeeded(mockContext, baseParams);
 
       expect(result.sent).to.be.true;
       const { templateData } = sendEmailStub.firstCall.args[1];
       expect(templateData.orgMembers).to.equal('');
+      expect(templateData.tierKnown).to.be.false;
     });
 
     it('formats org members when trial users expose plain status/emailId fields', async () => {
@@ -366,6 +445,8 @@ describe('cdn-opt-in-notification', () => {
       expect(templateData.adobeManaged).to.be.false;
       expect(templateData.replyAllTeam).to.equal('');
       expect(templateData.orgMembers).to.equal('');
+      expect(templateData.tierKnown).to.be.false;
+      expect(templateData.isPaidTier).to.be.false;
       expect(mockContext.log.warn).to.have.been.calledWithMatch(
         /Unknown CDN type for site=/,
       );
@@ -379,6 +460,7 @@ describe('cdn-opt-in-notification', () => {
       const { templateData } = sendEmailStub.firstCall.args[1];
       expect(templateData.siteBaseURL).to.equal('');
       expect(templateData.orgMembers).to.equal('');
+      expect(templateData.tierKnown).to.be.false;
     });
   });
 });
