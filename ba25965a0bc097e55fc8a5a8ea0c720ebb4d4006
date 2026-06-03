@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "full",
+  "commit_sha": "ba25965a0bc097e55fc8a5a8ea0c720ebb4d4006",
+  "author": "astroe@adobe.com",
+  "timestamp": "2026-06-03T16:46:30+03:00",
+  "detection": {
+    "ai_assisted": true,
+    "method": "editor_hook",
+    "tool": "claude",
+    "model": "",
+    "confidence": 1.0
+  },
+  "stats": {
+    "total_additions": 14,
+    "total_deletions": 0,
+    "ai_additions": 14,
+    "ai_deletions": 0,
+    "human_additions": 0,
+    "human_deletions": 0
+  },
+  "files": {
+    "test/controllers/llmo/llmo.test.js": {
+      "ai_additions": 14,
+      "human_additions": 0,
+      "ai_deletions": 0,
+      "human_deletions": 0,
+      "ai_lines": "3803,3812-3824",
+      "human_lines": ""
+    }
+  }
+}
