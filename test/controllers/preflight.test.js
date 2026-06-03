@@ -1354,7 +1354,8 @@ describe('Preflight Controller', () => {
 
     it('forwards Authorization header to Mysticat for auth-required URL with promiseToken cookie', async () => {
       // First fetch (HEAD): 401 → enableAuthentication=true.
-      // Use CS_CW so resolvePromiseToken consults the cookie (PROMISE_BASED_TYPES = [CS, CS_CW, AMS]).
+      // Use CS_CW so resolvePromiseToken consults the cookie
+      // (PROMISE_BASED_TYPES = [CS, CS_CW, AMS]).
       fetchStub.resetBehavior();
       fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
       fetchStub.onSecondCall().resolves({ ok: true });
@@ -1401,7 +1402,7 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(202);
       const [, mystiOpts] = fetchStub.secondCall.args;
-      // CS_CW authoring type with promiseToken → isBearer false (DeliveryType !== AEM_CS) → 'token <token>'
+      // CS_CW + promiseToken → isBearer false (DeliveryType !== AEM_CS) → 'token <t>'
       expect(mystiOpts.headers.Authorization).to.equal('token page-access-token');
       expect(mockRetrievePageAuth).to.have.been.calledOnce;
     });
@@ -1615,9 +1616,8 @@ describe('Preflight Controller', () => {
         attributes: { authInfo: mockAuthInfo },
       });
       expect(response.status).to.equal(202);
-      expect(mockRetrievePageAuth).to.have.been.calledWithMatch(
-        sinon.match.any, sinon.match.any, {},
-      );
+      const [, , authOptsArg] = mockRetrievePageAuth.firstCall.args;
+      expect(authOptsArg).to.deep.equal({});
     });
 
     it('uses Bearer prefix for AEM_CS site with promiseToken cookie', async () => {
