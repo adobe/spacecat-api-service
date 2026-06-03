@@ -1,3 +1,10 @@
+# [1.539.0](https://github.com/adobe/spacecat-api-service/compare/v1.538.0...v1.539.0) (2026-06-02)
+
+
+### Features
+
+* **webhooks:** emit CloudWatch EMF metrics from the GitHub webhook path (Plan B) ([#2537](https://github.com/adobe/spacecat-api-service/issues/2537)) ([c0ec71d](https://github.com/adobe/spacecat-api-service/commit/c0ec71d56cfec356b89472459abd3db24a51a767))
+
 # [1.538.0](https://github.com/adobe/spacecat-api-service/compare/v1.537.0...v1.538.0) (2026-06-02)
 
 
