@@ -507,7 +507,7 @@ describe('topics-storage', () => {
 
       expect(err).to.be.instanceOf(Error);
       expect(err.status).to.equal(422);
-      expect(err.message).to.include('invalid foreign key');
+      expect(err.message).to.include('non-existent related entity');
       expect(err.cause).to.equal(raw);
     });
   });
