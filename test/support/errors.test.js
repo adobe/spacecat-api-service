@@ -28,8 +28,8 @@ describe('errors', () => {
 
   describe('throwOnPgConstraintViolation', () => {
     const codeMap = {
-      23505: { status: 409, message: 'unique conflict' },
-      23503: { status: 422, message: 'invalid foreign key reference' },
+      '23505': { status: 409, message: 'unique conflict' },
+      '23503': { status: 422, message: 'invalid foreign key reference' },
     };
 
     it('throws a typed error with the mapped status when the code matches', () => {
