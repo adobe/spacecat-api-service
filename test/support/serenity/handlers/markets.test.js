@@ -890,8 +890,12 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     const transport = {
       listWorkspaceAiModels: sinon.stub().resolves({
         items: [
-          { id: 'cat-gpt-4o', key: 'chatgpt', name: 'ChatGPT', icon: null },
-          { id: 'cat-claude', key: 'claude', name: 'Claude', icon: null },
+          {
+            id: 'cat-gpt-4o', key: 'chatgpt', name: 'ChatGPT', icon: null,
+          },
+          {
+            id: 'cat-claude', key: 'claude', name: 'Claude', icon: null,
+          },
         ],
       }),
     };
@@ -906,7 +910,12 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     const transport = {
       listWorkspaceAiModels: sinon.stub().resolves({
         items: [
-          { id: 'assign-1', model: { id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null } },
+          {
+            id: 'assign-1',
+            model: {
+              id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+            },
+          },
         ],
       }),
     };
