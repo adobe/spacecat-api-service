@@ -39,6 +39,7 @@ export async function handleGapTopicsTotals(sp, clients) {
   const competitorDomains = parseCompetitorDomainsList(sp);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
+  const date = sp.get('date');
 
   const dimensionFilterQl = buildGapTopicsDimensionFilterQl(sp);
   const metricFilterResult = buildGapTopicsMetricFilterQl(sp);
@@ -57,6 +58,7 @@ export async function handleGapTopicsTotals(sp, clients) {
         competitors: competitorDomains.map(brandTarget),
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
+        target_date: date,
       },
       PROTO_FROM_JSON,
     );

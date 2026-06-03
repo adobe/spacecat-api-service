@@ -373,6 +373,21 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
   });
 
+  it('rejects /sites/:siteId/preflights/:preflightId with invalid preflightId UUID', async () => {
+    const validSiteId = 'a1b2c3d4-1234-5678-9abc-def012345678';
+    context.pathInfo.suffix = `/sites/${validSiteId}/preflights/not-a-uuid`;
+
+    request = new Request(
+      `${baseUrl}/sites/${validSiteId}/preflights/not-a-uuid`,
+      { headers: { 'x-api-key': apiKey } },
+    );
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Preflight Id is invalid. Please provide a valid UUID.');
+  });
+
   it('rejects bare /tools/scrape/jobs/by-base-url misroute with invalid jobId', async () => {
     context.pathInfo.suffix = '/tools/scrape/jobs/by-base-url';
 
