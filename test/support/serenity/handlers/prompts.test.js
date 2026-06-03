@@ -195,7 +195,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     });
 
     expect(result.items[0].semrushPromptId).to.equal('');
-    expect(result.items[0].tags).to.deep.equal(['consideration']);
+    expect(result.items[0].tagMap).to.deep.equal({ consideration: '' });
   });
 
   // Branch coverage: tagNamesOf handles items with no tags array (DTO carries
@@ -228,7 +228,6 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'good prompt',
-      tags: [],
       tagMap: {},
     });
   });
@@ -259,7 +258,6 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'What is Adobe?',
-      tags: ['awareness'],
       tagMap: { awareness: 't-1' },
     });
     expect(result.items[0]).not.to.have.property('id');

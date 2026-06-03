@@ -34,28 +34,20 @@ const BULK_CREATE_CONCURRENCY = 8;
 // of them. Defense-in-depth, not a correctness gate.
 const BULK_PROMPTS_MAX_ITEMS = 500;
 
-function tagNamesOf(item) {
-  if (!Array.isArray(item?.tags)) {
-    return [];
-  }
-  /* c8 ignore start -- the typeof/optional-chaining ternary's branches are
-     all exercised by the handleListPrompts tests (string tags, object tags,
-     null, number) but c8 splits the expression across blocks that
-     double-count, so the branch ratio appears <100% even when every side
-     runs. */
-  return item.tags
-    .map((t) => (typeof t === 'string' ? t : t?.name))
-    .filter(Boolean);
-  /* c8 ignore stop */
-}
-
+// Builds { tagName → semrushTagId } from the upstream prompt item.
+// Object-form tags (the normal Semrush shape) carry both name and id.
+// String-form tags (defensive fallback) are included with an empty id so
+// callers can still read the name via Object.keys() — they are excluded
+// from tag_ids filtering because filter(Boolean) drops empty strings.
 function buildTagMapOf(item) {
   if (!Array.isArray(item?.tags)) {
     return {};
   }
   return item.tags.reduce((acc, t) => {
-    if (typeof t === 'object' && t?.name && t?.id) {
-      acc[t.name] = String(t.id);
+    if (typeof t === 'string' && t) {
+      acc[t] = '';
+    } else if (typeof t === 'object' && t?.name) {
+      acc[t.name] = t.id ? String(t.id) : '';
     }
     return acc;
   }, {});
@@ -71,7 +63,6 @@ function buildPromptDto(geoTargetId, languageCode, item) {
     geoTargetId,
     languageCode,
     text,
-    tags: tagNamesOf(item),
     tagMap: buildTagMapOf(item),
   };
 }
