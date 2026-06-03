@@ -26,6 +26,7 @@ import {
 } from '../support/serenity/handlers/prompts.js';
 import {
   handleListMarkets,
+  handleGetMarket,
   handleCreateMarket,
   handleDeleteMarket,
   handleListTags,
@@ -108,6 +109,12 @@ function mapError(e, log) {
   }
   if (e instanceof SerenityTransportError) {
     log.error('Serenity upstream error', e);
+    if (e.status === 401 || e.status === 403) {
+      return createResponse(
+        { error: errorTokenForStatus(e.status), message: safeError(e.message) },
+        e.status,
+      );
+    }
     return createResponse({
       error: 'serenityUpstreamError',
       message: 'Upstream request failed',
@@ -326,6 +333,33 @@ function SerenityController(context, log, env) {
     }
   };
 
+  const getMarket = async (ctx) => {
+    try {
+      // Enforce the IMS-only contract (throws 401 on non-IMS / missing bearer)
+      // even though this is a pure DB read with no upstream call — keeps the
+      // whole /serenity/* surface uniformly IMS-gated. Token is intentionally
+      // not captured: there is no upstream transport to build here.
+      requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { geoTargetId: pGeo, languageCode: pLang } = ctx?.params || {};
+      // Strict digit match — same rationale as deleteMarket: parseInt would
+      // coerce '2840abc' → 2840 and silently resolve a different slice.
+      const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
+      const result = await handleGetMarket(
+        ctx.dataAccess,
+        auth.brandUuid,
+        geoTargetId,
+        pLang ? String(pLang).toLowerCase() : null,
+      );
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   const createMarket = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
@@ -426,6 +460,7 @@ function SerenityController(context, log, env) {
     updatePrompt,
     bulkDeletePrompts,
     listMarkets,
+    getMarket,
     createMarket,
     deleteMarket,
     listTags,

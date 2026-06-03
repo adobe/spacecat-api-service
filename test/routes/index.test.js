@@ -753,6 +753,7 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
@@ -822,6 +823,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId',
       'PATCH /sites/:siteId',
       'PATCH /sites/:siteId/config/cdn-logs',
+      'GET /sites/:siteId/config/scraper',
       'PATCH /sites/:siteId/config/scraper',
       'DELETE /sites/:siteId',
       'GET /sites/:siteId/bot-blocker',
@@ -1265,6 +1267,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType'].paramNames).to.deep.equal(['baseURL', 'processingType']);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/cdn-logs'].handler).to.equal(mockSitesController.updateCdnLogsConfig);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/cdn-logs'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/config/scraper'].handler).to.equal(mockSitesController.getScraperConfig);
+    expect(dynamicRoutes['GET /sites/:siteId/config/scraper'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/scraper'].handler).to.equal(mockSitesController.updateScraperConfig);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/scraper'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/reports'].handler).to.equal(mockReportsController.createReport);

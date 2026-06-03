@@ -10,7 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import { CAP_ORG_READ_ALL, CAP_SITE_READ_ALL } from './capability-constants.js';
+import {
+  CAP_FIX_ENTITY_CREATE,
+  CAP_ORG_READ_ALL,
+  CAP_SITE_CREATE,
+  CAP_SITE_READ_ALL,
+} from './capability-constants.js';
 
 /**
  * Routes that are intentionally excluded from S2S consumer access.
@@ -38,9 +43,7 @@ export const INTERNAL_ROUTES = [
   // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
   'POST /webhooks/github',
 
-  // Suggestion edge ops (auto-fix, edge-deploy, etc.): not yet required by S2S
-  // TODO: Add these back in when we have a S2S consumer that needs them
-  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
+  // Suggestion edge ops (edge-deploy, etc.): not yet required by S2S
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
@@ -268,6 +271,7 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:read',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:read',
@@ -329,7 +333,7 @@ const routeRequiredCapabilities = {
   // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
   // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
   'GET /sites': CAP_SITE_READ_ALL,
-  'POST /sites': 'site:write',
+  'POST /sites': CAP_SITE_CREATE,
   'POST /sites/detect/jobs': 'site:write',
   'GET /sites/detect/jobs/:jobId': 'site:read',
   'GET /sites.csv': 'site:read',
@@ -337,6 +341,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId': 'site:read',
   'PATCH /sites/:siteId': 'site:write',
   'PATCH /sites/:siteId/config/cdn-logs': 'site:write',
+  'GET /sites/:siteId/config/scraper': 'site:read',
   'PATCH /sites/:siteId/config/scraper': 'site:write',
   'DELETE /sites/:siteId': 'site:write',
   'GET /sites/:siteId/bot-blocker': 'site:read',
@@ -385,6 +390,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fixEntity:read',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': 'suggestion:write',
+  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': CAP_FIX_ENTITY_CREATE,
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
 

@@ -1,3 +1,80 @@
+## [1.542.2](https://github.com/adobe/spacecat-api-service/compare/v1.542.1...v1.542.2) (2026-06-03)
+
+
+### Bug Fixes
+
+* **topics:** return 422 instead of 500 on foreign-key violation (23503) ([#2543](https://github.com/adobe/spacecat-api-service/issues/2543)) ([1666840](https://github.com/adobe/spacecat-api-service/commit/16668400ffa84f3da328a64cc6127d1e80918332))
+
+## [1.542.1](https://github.com/adobe/spacecat-api-service/compare/v1.542.0...v1.542.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* Revert "feat: resolve promise token from the header required to create a preflight job" ([#2544](https://github.com/adobe/spacecat-api-service/issues/2544)) ([2f167a9](https://github.com/adobe/spacecat-api-service/commit/2f167a9ed063457f828cd614b0626efcc522b1d7)), closes [adobe/spacecat-api-service#2480](https://github.com/adobe/spacecat-api-service/issues/2480)
+
+# [1.542.0](https://github.com/adobe/spacecat-api-service/compare/v1.541.0...v1.542.0) (2026-06-03)
+
+
+### Features
+
+* **s2s:** expose auto-fix endpoint to S2S consumers via fixEntity:create ([#2542](https://github.com/adobe/spacecat-api-service/issues/2542)) ([c357593](https://github.com/adobe/spacecat-api-service/commit/c3575935eef29e4a1515e24cbee92278a15c83aa))
+
+# [1.541.0](https://github.com/adobe/spacecat-api-service/compare/v1.540.0...v1.541.0) (2026-06-03)
+
+
+### Features
+
+* resolve promise token from the header required to create a preflight job ([#2480](https://github.com/adobe/spacecat-api-service/issues/2480)) ([93ac940](https://github.com/adobe/spacecat-api-service/commit/93ac9403191f3879eed3a4c01544ae1f366a47c8))
+
+# [1.540.0](https://github.com/adobe/spacecat-api-service/compare/v1.539.0...v1.540.0) (2026-06-03)
+
+
+### Features
+
+* **trigger:** add rum-config-refresh audit type to /trigger endpoint ([#2538](https://github.com/adobe/spacecat-api-service/issues/2538)) ([1f0cc26](https://github.com/adobe/spacecat-api-service/commit/1f0cc269ca928fe88fbeb4bd295e5d624f4230d2))
+
+# [1.539.0](https://github.com/adobe/spacecat-api-service/compare/v1.538.0...v1.539.0) (2026-06-02)
+
+
+### Features
+
+* **webhooks:** emit CloudWatch EMF metrics from the GitHub webhook path (Plan B) ([#2537](https://github.com/adobe/spacecat-api-service/issues/2537)) ([c0ec71d](https://github.com/adobe/spacecat-api-service/commit/c0ec71d56cfec356b89472459abd3db24a51a767))
+
+# [1.538.0](https://github.com/adobe/spacecat-api-service/compare/v1.537.0...v1.538.0) (2026-06-02)
+
+
+### Features
+
+* **s2s:** allow S2S consumers to createSite via adminGrants registry field ([#2523](https://github.com/adobe/spacecat-api-service/issues/2523)) ([a484a35](https://github.com/adobe/spacecat-api-service/commit/a484a358f00bd595c2240364c3a43c454491d788))
+
+# [1.537.0](https://github.com/adobe/spacecat-api-service/compare/v1.536.0...v1.537.0) (2026-06-02)
+
+
+### Features
+
+* add GET /sites/:siteId/config/scraper ([#2511](https://github.com/adobe/spacecat-api-service/issues/2511)) ([a7b17b8](https://github.com/adobe/spacecat-api-service/commit/a7b17b80fc3b6a463c10601258002e998f60447c))
+
+# [1.536.0](https://github.com/adobe/spacecat-api-service/compare/v1.535.4...v1.536.0) (2026-06-02)
+
+
+### Features
+
+* **serenity:** add market detail endpoint exposing semrushProjectId (LLMO-5190 follow-up) ([#2519](https://github.com/adobe/spacecat-api-service/issues/2519)) ([14be96c](https://github.com/adobe/spacecat-api-service/commit/14be96ca86e0e5fcdb1f7d883c82480daa84b5ab))
+
+## [1.535.4](https://github.com/adobe/spacecat-api-service/compare/v1.535.3...v1.535.4) (2026-06-02)
+
+
+### Bug Fixes
+
+* Update CONSUMER_INTEGRATION_GUIDE.md with channel name ([35ca4f6](https://github.com/adobe/spacecat-api-service/commit/35ca4f664f65063f55e16f093b0b09af8a54248b))
+
+## [1.535.3](https://github.com/adobe/spacecat-api-service/compare/v1.535.2...v1.535.3) (2026-06-02)
+
+
+### Bug Fixes
+
+* **serenity:** propagate upstream 401/403 instead of mapping to 502 ([#2517](https://github.com/adobe/spacecat-api-service/issues/2517)) ([9d2e6b6](https://github.com/adobe/spacecat-api-service/commit/9d2e6b64c126e07e1bdf9dcd5e76a984c8d07104))
+
 ## [1.535.2](https://github.com/adobe/spacecat-api-service/compare/v1.535.1...v1.535.2) (2026-06-01)
 
 

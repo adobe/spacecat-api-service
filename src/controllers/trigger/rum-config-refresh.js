@@ -10,18 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-/**
- * Single source of truth for capability strings shared between
- * `routes/required-capabilities.js` (Layer 1, s2sAuthWrapper) and the controller-level
- * `hasS2SCapability` checks (Layer 2). Both layers must use the same string for the same
- * route - drift is caught by `test/routes/capability-constants.test.js`.
- *
- * See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the design.
- */
+import { triggerFromData } from './common/trigger.js';
 
-export const CAP_SITE_READ_ALL = 'site:readAll';
-export const CAP_ORG_READ_ALL = 'organization:readAll';
+export default async function trigger(context) {
+  const { type, url } = context.data;
 
-export const CAP_SITE_CREATE = 'site:create';
-
-export const CAP_FIX_ENTITY_CREATE = 'fixEntity:create';
+  return triggerFromData(context, { url, auditTypes: [type], deliveryType: 'ALL' });
+}
