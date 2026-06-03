@@ -232,7 +232,7 @@ function PreflightController(ctx, log, env) {
 
       // Log for dashboard purposes
       log.info(`[Preflight] created async job with jobId=${job.getId()}, siteId=${site.getId()}, `
-        + `orgId=${site.getOrganizationId()}, urls=${JSON.stringify(data.urls)}, step=${step}.  Starting audits.`);
+        + `orgId=${site.getOrganizationId()}, urls=${JSON.stringify(data.urls)}, step=${step}.`);
 
       try {
         // Send message to SQS to trigger the audit worker
