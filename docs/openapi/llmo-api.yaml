@@ -1248,7 +1248,7 @@ llmo-onboard:
                         type: string
                       semrushProjectId:
                         type: string
-                      semrushLocationId:
+                      geoTargetId:
                         type: integer
                 failed:
                   type: array
@@ -1305,7 +1305,7 @@ llmo-onboard:
                         type: string
                       semrushProjectId:
                         type: string
-                      semrushLocationId:
+                      geoTargetId:
                         type: integer
                 failed:
                   type: array

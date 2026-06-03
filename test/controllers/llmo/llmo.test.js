@@ -3772,7 +3772,7 @@ describe('LlmoController', () => {
         serenity: {
           requested: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
           succeeded: [{
-            market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+            market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
           }],
           failed: [{
             market: 'DE', language: 'de', status: 502, error: 'semrushUpstreamError',
@@ -3790,7 +3790,7 @@ describe('LlmoController', () => {
       expect(body.status).to.equal('completed');
       expect(body.requested).to.have.length(2);
       expect(body.succeeded).to.deep.equal([{
-        market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+        market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
       }]);
       expect(body.failed).to.deep.equal([{
         market: 'DE', language: 'de', status: 502, error: 'semrushUpstreamError',
@@ -3807,7 +3807,7 @@ describe('LlmoController', () => {
         serenity: {
           requested: [{ market: 'US', language: 'en' }],
           succeeded: [{
-            market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+            market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
           }],
           failed: [],
         },

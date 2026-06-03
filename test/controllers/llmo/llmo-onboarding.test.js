@@ -3673,10 +3673,10 @@ describe('LLMO Onboarding Functions', () => {
       ...overrides,
     });
 
-    const loadFanOut = async (handleCreateProjectStub) => {
+    const loadFanOut = async (handleCreateMarketStub) => {
       const mod = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
-        '../../../src/support/serenity/handlers/projects.js': {
-          handleCreateProject: handleCreateProjectStub,
+        '../../../src/support/serenity/handlers/markets.js': {
+          handleCreateMarket: handleCreateMarketStub,
         },
         '../../../src/support/serenity/rest-transport.js': {
           createSerenityTransport: createTransportStub,
@@ -3701,10 +3701,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(createTransportStub).to.not.have.been.called;
     });
 
-    it('creates one project per tuple and collects successes (201)', async () => {
+    it('creates one market per tuple and collects successes (201)', async () => {
       const hcp = sinon.stub();
-      hcp.onCall(0).resolves({ status: 201, body: { semrushProjectId: 'p-us', semrushLocationId: 2840 } });
-      hcp.onCall(1).resolves({ status: 201, body: { semrushProjectId: 'p-de', semrushLocationId: 2276 } });
+      hcp.onCall(0).resolves({ status: 201, body: { brandId: 'brand-uuid-1', geoTargetId: 2840, languageCode: 'en' } });
+      hcp.onCall(1).resolves({ status: 201, body: { brandId: 'brand-uuid-1', geoTargetId: 2276, languageCode: 'de' } });
       const performSerenityFanOut = await loadFanOut(hcp);
 
       const res = await performSerenityFanOut(makeContext(), baseArgs);
@@ -3712,38 +3712,36 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.requested).to.deep.equal([
         { market: 'US', language: 'en' }, { market: 'DE', language: 'de' },
       ]);
+      // The create response does not echo the project id/geo target; M8 fills
+      // those from the DB. M7 just records the tuple as succeeded.
       expect(res.succeeded).to.deep.equal([
-        {
-          market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
-        },
-        {
-          market: 'DE', language: 'de', semrushProjectId: 'p-de', semrushLocationId: 2276,
-        },
+        { market: 'US', language: 'en' },
+        { market: 'DE', language: 'de' },
       ]);
       expect(res.failed).to.be.empty;
       expect(hcp).to.have.been.calledTwice;
 
-      // Body contract enforced by the proxy's validateCreateBody.
+      // Body contract enforced by the proxy's validateCreateBody (markets.js).
       const [, , brandIdArg, wsArg, body] = hcp.firstCall.args;
       expect(brandIdArg).to.equal('brand-uuid-1');
       expect(wsArg).to.equal('ws-1');
       expect(body.name).to.equal('example-brand · US · en');
       expect(body.market).to.equal('US');
-      expect(body.language).to.equal('en');
+      expect(body.languageCode).to.equal('en');
       expect(body.brandDomain).to.equal('example.com');
       expect(body.brandNames).to.deep.equal(['Example Brand']);
-      expect(body.projectType).to.equal('ai');
+      expect(body).to.not.have.property('projectType');
     });
 
     it('treats 409 (slice already exists) as an idempotent success', async () => {
-      const hcp = sinon.stub().resolves({ status: 409, body: { semrushProjectId: 'p-existing' } });
+      const hcp = sinon.stub().resolves({ status: 409, body: { error: 'sliceExists' } });
       const performSerenityFanOut = await loadFanOut(hcp);
       const res = await performSerenityFanOut(
         makeContext(),
         { ...baseArgs, markets: [{ market: 'US', language: 'en' }] },
       );
       expect(res.succeeded).to.deep.equal([
-        { market: 'US', language: 'en', semrushProjectId: 'p-existing' },
+        { market: 'US', language: 'en' },
       ]);
       expect(res.failed).to.be.empty;
     });
@@ -3751,7 +3749,7 @@ describe('LLMO Onboarding Functions', () => {
     it('collects per-tuple failures without aborting the remaining tuples', async () => {
       const hcp = sinon.stub();
       hcp.onCall(0).resolves({ status: 502, body: { error: 'semrushUpstreamError' } });
-      hcp.onCall(1).resolves({ status: 201, body: { semrushProjectId: 'p-de', semrushLocationId: 2276 } });
+      hcp.onCall(1).resolves({ status: 201, body: { brandId: 'brand-uuid-1', geoTargetId: 2276, languageCode: 'de' } });
       const performSerenityFanOut = await loadFanOut(hcp);
 
       const res = await performSerenityFanOut(makeContext(), baseArgs);
@@ -3763,9 +3761,7 @@ describe('LLMO Onboarding Functions', () => {
         },
       ]);
       expect(res.succeeded).to.deep.equal([
-        {
-          market: 'DE', language: 'de', semrushProjectId: 'p-de', semrushLocationId: 2276,
-        },
+        { market: 'DE', language: 'de' },
       ]);
     });
 
@@ -3774,7 +3770,7 @@ describe('LLMO Onboarding Functions', () => {
       const err = new Error('upstream 503');
       err.status = 502;
       hcp.onCall(0).rejects(err);
-      hcp.onCall(1).resolves({ status: 201, body: { semrushProjectId: 'p-de', semrushLocationId: 2276 } });
+      hcp.onCall(1).resolves({ status: 201, body: { brandId: 'brand-uuid-1', geoTargetId: 2276, languageCode: 'de' } });
       const performSerenityFanOut = await loadFanOut(hcp);
 
       const res = await performSerenityFanOut(makeContext(), baseArgs);
@@ -3862,9 +3858,9 @@ describe('LLMO Onboarding Functions', () => {
 
   describe('reconcileSerenityProjects (LLMO-5205)', () => {
     // resolveLocation: US → 2840, DE → 2276 (2000 + ISO 3166-1 numeric).
-    const dbRow = (locationId, language, projectId) => ({
-      getSemrushLocationId: () => locationId,
-      getLanguage: () => language,
+    const dbRow = (geoTargetId, languageCode, projectId) => ({
+      getGeoTargetId: () => geoTargetId,
+      getLanguageCode: () => languageCode,
       getSemrushProjectId: () => projectId,
     });
 
@@ -3920,10 +3916,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.failed).to.be.empty;
       expect(res.succeeded).to.deep.equal([
         {
-          market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+          market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
         },
         {
-          market: 'DE', language: 'de', semrushProjectId: 'p-de', semrushLocationId: 2276,
+          market: 'DE', language: 'de', semrushProjectId: 'p-de', geoTargetId: 2276,
         },
       ]);
     });
@@ -3941,7 +3937,7 @@ describe('LLMO Onboarding Functions', () => {
       const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
       expect(res.succeeded).to.deep.equal([
         {
-          market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+          market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
         },
       ]);
       expect(res.failed).to.deep.equal([
@@ -3957,7 +3953,7 @@ describe('LLMO Onboarding Functions', () => {
         requested: [{ market: 'US', language: 'en' }],
         // Fan-out thought it succeeded, but the row never landed (201-but-no-insert).
         succeeded: [{
-          market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+          market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
         }],
         failed: [],
       };
@@ -3976,7 +3972,7 @@ describe('LLMO Onboarding Functions', () => {
       const fanOut = {
         requested: [{ market: 'US', language: 'en' }],
         succeeded: [{
-          market: 'US', language: 'en', semrushProjectId: 'p-us', semrushLocationId: 2840,
+          market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
         }],
         failed: [],
       };
