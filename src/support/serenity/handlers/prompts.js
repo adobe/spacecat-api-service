@@ -19,6 +19,7 @@ import { invalidateTagCacheForProject } from './markets.js';
 
 const DEFAULT_PAGE_LIMIT = 50;
 const MAX_PAGE_LIMIT = 1000;
+const MAX_TAG_IDS = 50;
 // Caps the inflight upstream calls when fanning out a bulk create.
 // 8 keeps per-call wall time reasonable without overwhelming upstream rate
 // limits — the prior `serenity` testing exhausted Semrush's shared limit
@@ -33,19 +34,23 @@ const BULK_CREATE_CONCURRENCY = 8;
 // of them. Defense-in-depth, not a correctness gate.
 const BULK_PROMPTS_MAX_ITEMS = 500;
 
-function tagNamesOf(item) {
+// Builds { tagName → semrushTagId } from the upstream prompt item.
+// Object-form tags (the normal Semrush shape) carry both name and id.
+// String-form tags (defensive fallback) are included with an empty id so
+// callers can still read the name via Object.keys() — they are excluded
+// from tag_ids filtering because filter(Boolean) drops empty strings.
+function buildTagMapOf(item) {
   if (!Array.isArray(item?.tags)) {
-    return [];
+    return {};
   }
-  /* c8 ignore start -- the typeof/optional-chaining ternary's branches are
-     all exercised by the handleListPrompts tests (string tags, object tags,
-     null, number) but c8 splits the expression across blocks that
-     double-count, so the branch ratio appears <100% even when every side
-     runs. */
-  return item.tags
-    .map((t) => (typeof t === 'string' ? t : t?.name))
-    .filter(Boolean);
-  /* c8 ignore stop */
+  return item.tags.reduce((acc, t) => {
+    if (typeof t === 'string' && t) {
+      acc[t] = '';
+    } else if (typeof t === 'object' && t?.name) {
+      acc[t.name] = t.id ? String(t.id) : '';
+    }
+    return acc;
+  }, {});
 }
 
 function buildPromptDto(geoTargetId, languageCode, item) {
@@ -58,15 +63,20 @@ function buildPromptDto(geoTargetId, languageCode, item) {
     geoTargetId,
     languageCode,
     text,
-    tags: tagNamesOf(item),
+    tagMap: buildTagMapOf(item),
   };
 }
 
 /**
- * GET /serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search= —
- * list prompts for one slice. Both filters are required (the route handler
- * returns 400 if either is missing). Pagination is real upstream
- * pagination — one slice = one project = one upstream call set per page.
+ * GET /serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds= —
+ * list prompts for one slice. geoTargetId and languageCode are required.
+ * Pagination is real upstream pagination — one slice = one project = one
+ * upstream call set per page.
+ *
+ * tagIds (repeatable): Semrush tag UUIDs from SerenityPrompt.tagMap. Passed
+ * as tag_ids to the by_tags endpoint. Semrush applies OR semantics — prompts
+ * carrying any of the supplied tag IDs are returned. AND semantics must be
+ * enforced by the caller if needed.
  */
 export async function handleListPrompts(
   transport,
@@ -91,6 +101,9 @@ export async function handleListPrompts(
     ? query.limit : DEFAULT_PAGE_LIMIT;
   const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
   const search = hasText(query?.search) ? String(query.search).trim() : undefined;
+  const tagIds = Array.isArray(query?.tagIds)
+    ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
+    : [];
 
   const row = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
@@ -118,14 +131,22 @@ export async function handleListPrompts(
     semrushWorkspaceId,
     row.getSemrushProjectId(),
     {
-      tag_ids: [],
+      tag_ids: tagIds,
       page,
       limit,
       search,
     },
   );
   const items = Array.isArray(resp?.items) ? resp.items : [];
-  const total = Number.isFinite(resp?.total) ? resp.total : items.length;
+  // When fewer items than the limit are returned we are on the last page and
+  // know the exact filtered count. Avoids trusting the upstream total which
+  // may be the project-wide count rather than the tag/search-filtered count.
+  let total;
+  if (items.length < limit) {
+    total = (page - 1) * limit + items.length;
+  } else {
+    total = Number.isFinite(resp?.total) ? resp.total : items.length;
+  }
   return {
     items: items
       .map((item) => buildPromptDto(geoTargetId, languageCode, item))
