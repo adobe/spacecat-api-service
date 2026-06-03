@@ -3564,8 +3564,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(thrown.status).to.equal(404);
       expect(thrown.preflight).to.be.true;
       expect(thrown.message).to.match(/Semrush workspace not bound to org org-serenity-cohort/);
-      // Fail-fast: nothing downstream of the org lookup should have run.
+      // Fail-fast: nothing downstream of the org lookup should have run —
+      // neither site creation nor any later config/audit step.
       expect(mockDataAccess.Site.create).to.not.have.been.called;
+      expect(mockDataAccess.Configuration.findLatest).to.not.have.been.called;
     });
 
     it('should skip serenity provisioning when org is not in SERENITY_SITE_ALLOWLIST', async () => {
@@ -3816,6 +3818,19 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.failed.map((f) => f.error)).to.deep.equal(['missingImsBearer', 'missingImsBearer']);
     });
 
+    it('fails all tuples when the auth object cannot be classified as IMS (no getType)', async () => {
+      const hcp = sinon.stub();
+      const performSerenityFanOut = await loadFanOut(hcp);
+      // Unrecognisable auth shape (no getType) — must not forward the token.
+      const res = await performSerenityFanOut(
+        makeContext({ attributes: { authInfo: {} } }),
+        baseArgs,
+      );
+      expect(hcp).to.not.have.been.called;
+      expect(createTransportStub).to.not.have.been.called;
+      expect(res.failed.map((f) => f.error)).to.deep.equal(['missingImsBearer', 'missingImsBearer']);
+    });
+
     it('fails all tuples when the brand row is missing', async () => {
       const hcp = sinon.stub();
       const performSerenityFanOut = await loadFanOut(hcp);
@@ -3969,6 +3984,26 @@ describe('LLMO Onboarding Functions', () => {
       const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
       expect(res).to.deep.equal(fanOut);
       expect(ctx.log.error).to.have.been.called;
+    });
+
+    it('fails an unknown market code (resolveLocation null) without throwing', async () => {
+      const reconcileSerenityProjects = await loadReconcile();
+      const fanOut = {
+        requested: [{ market: 'ZZ', language: 'en' }],
+        succeeded: [],
+        failed: [{
+          market: 'ZZ', language: 'en', status: 400, error: 'unknownMarket',
+        }],
+      };
+      // A row keyed to a real location must NOT be matched to the unknown 'ZZ' tuple.
+      const ctx = makeContext([dbRow(2840, 'en', 'p-us')]);
+      const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
+      expect(res.succeeded).to.be.empty;
+      expect(res.failed).to.deep.equal([
+        {
+          market: 'ZZ', language: 'en', status: 400, error: 'unknownMarket',
+        },
+      ]);
     });
   });
 
