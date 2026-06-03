@@ -131,8 +131,8 @@ export async function createTopic({
     // (constraint names, table names) stay in `.cause` for operator triage and
     // are kept out of client-facing messages to avoid schema leakage. LLMO-4370.
     throwOnPgConstraintViolation(error, {
-      '23505': { status: 409, message: 'A topic with these attributes already exists for this organization' },
-      '23503': { status: 422, message: 'Topic references a non-existent related entity' },
+      23505: { status: 409, message: 'A topic with these attributes already exists for this organization' },
+      23503: { status: 422, message: 'Topic references a non-existent related entity' },
     });
     throw new Error('Failed to create topic', { cause: error });
   }
