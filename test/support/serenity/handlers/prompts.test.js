@@ -229,6 +229,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       languageCode: 'en',
       text: 'good prompt',
       tags: [],
+      tagIds: [],
     });
   });
 
@@ -259,9 +260,47 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       languageCode: 'en',
       text: 'What is Adobe?',
       tags: ['awareness'],
+      tagIds: ['t-1'],
     });
     expect(result.items[0]).not.to.have.property('id');
     expect(result.items[0]).not.to.have.property('semrushProjectId');
+  });
+
+  it('passes tagIds from query to listPromptsByTags when provided', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    };
+
+    await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-uuid-1', 'tag-uuid-2'],
+    });
+
+    expect(transport.listPromptsByTags).to.have.been.calledOnce;
+    const [, , body] = transport.listPromptsByTags.firstCall.args;
+    expect(body.tag_ids).to.deep.equal(['tag-uuid-1', 'tag-uuid-2']);
+  });
+
+  it('passes empty tag_ids when tagIds is absent', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    };
+
+    await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en',
+    });
+
+    const [, , body] = transport.listPromptsByTags.firstCall.args;
+    expect(body.tag_ids).to.deep.equal([]);
   });
 });
 

@@ -48,6 +48,13 @@ function tagNamesOf(item) {
   /* c8 ignore stop */
 }
 
+function tagIdsOf(item) {
+  if (!Array.isArray(item?.tags)) return [];
+  return item.tags
+    .map((t) => (typeof t === 'object' && t?.id ? String(t.id) : null))
+    .filter(Boolean);
+}
+
 function buildPromptDto(geoTargetId, languageCode, item) {
   const text = item?.name || '';
   if (!text) {
@@ -59,6 +66,7 @@ function buildPromptDto(geoTargetId, languageCode, item) {
     languageCode,
     text,
     tags: tagNamesOf(item),
+    tagIds: tagIdsOf(item),
   };
 }
 
@@ -91,6 +99,9 @@ export async function handleListPrompts(
     ? query.limit : DEFAULT_PAGE_LIMIT;
   const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
   const search = hasText(query?.search) ? String(query.search).trim() : undefined;
+  const tagIds = Array.isArray(query?.tagIds)
+    ? query.tagIds.map(String).filter(Boolean)
+    : [];
 
   const row = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
@@ -118,7 +129,7 @@ export async function handleListPrompts(
     semrushWorkspaceId,
     row.getSemrushProjectId(),
     {
-      tag_ids: [],
+      tag_ids: tagIds,
       page,
       limit,
       search,
