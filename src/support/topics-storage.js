@@ -142,6 +142,17 @@ export async function createTopic({
       conflict.status = 409;
       throw conflict;
     }
+    if (error.code === '23503') {
+      // FK violation — the supplied brandId (or categoryId) does not exist in
+      // the referenced table. Surface as 422 so callers get a typed client
+      // error instead of an opaque 500.
+      const fk = new Error(
+        `Topic references an invalid foreign key: ${error.message}`,
+        { cause: error },
+      );
+      fk.status = 422;
+      throw fk;
+    }
     throw new Error(`Failed to create topic: ${error.message}`, { cause: error });
   }
 

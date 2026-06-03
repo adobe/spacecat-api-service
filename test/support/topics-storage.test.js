@@ -486,6 +486,30 @@ describe('topics-storage', () => {
       expect(err.status).to.equal(409);
       expect(err.message).to.match(/unique constraint/i);
     });
+
+    it('throws a 422-typed error on a 23503 foreign-key violation', async () => {
+      const raw = {
+        code: '23503',
+        message: 'insert or update on table "topics" violates foreign key constraint "topics_brand_id_fkey"',
+        details: '',
+        hint: '',
+      };
+      const postgrestClient = {
+        from: sinon.stub().returns(createChainableQuery({ data: null, error: raw })),
+      };
+
+      const err = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'BadBrandTopic', brandId: 'nonexistent-uuid' },
+        postgrestClient,
+        updatedBy: 'test',
+      }).catch((e) => e);
+
+      expect(err).to.be.instanceOf(Error);
+      expect(err.status).to.equal(422);
+      expect(err.message).to.include('invalid foreign key');
+      expect(err.cause).to.equal(raw);
+    });
   });
 
   describe('updateTopic', () => {
