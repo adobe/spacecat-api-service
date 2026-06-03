@@ -1,4 +1,4 @@
-# ADR-003: Preflight Request-ID Header
+# Preflight Request-ID — SpaceCat Design (`spacecat-api-service`)
 
 ## Context
 
@@ -144,7 +144,7 @@ The single caller of `callMysticatAnalyze` inside `createBetaPreflightJob` is up
 
 `imsOrgId` comes from the `x-gw-ims-org-id` gateway header automatically added by the Adobe API Gateway. `imsUserId` comes from `authInfo.getProfile().email` (despite the field name).  Both are naturally available in the SpaceCat request context and require no additional auth calls.
 
-**Header accessor (`context.pathInfo.headers`).** All request headers in this service are read via `context.pathInfo.headers` — populated by the `enrichPathInfo` middleware in the global wrapper chain (`src/index.js`). This is the existing convention in `src/controllers/preflight.js` itself (`resolvePromiseToken` reads `x-promise-token` from `context.pathInfo.headers`, case-insensitively) and across every other controller (`sites.js`, `organizations.js`, `webhooks.js`, `import.js`, `consumers.js`, `llmo/llmo.js`, …). Reading `imsOrgId` via the same accessor keeps the controller consistent and avoids the helix-universal trap where some routes surface headers under `context.invocation.event.headers` instead. (The new `preflightRequestIdWrapper` itself runs *before* `enrichPathInfo` and therefore reads from `request.headers` directly — see the snippet above.)
+**Header accessor (`context.pathInfo.headers`).** All request headers in this service are read via `context.pathInfo.headers` — populated by the `enrichPathInfo` middleware in the global wrapper chain (`src/index.js`). This is the existing convention in `src/controllers/preflight.js` itself (the `cookie` header consumed by `resolvePromiseToken` is read from `context.pathInfo?.headers?.cookie` in `src/support/utils.js`) and across every other controller (`sites.js`, `organizations.js`, `webhooks.js`, `import.js`, `consumers.js`, `llmo/llmo.js`, …). Reading `imsOrgId` via the same accessor keeps the controller consistent and avoids the helix-universal trap where some routes surface headers under `context.invocation.event.headers` instead. (The new `preflightRequestIdWrapper` itself runs *before* `enrichPathInfo` and therefore reads from `request.headers` directly — see the snippet above.)
 
 These fields are logged at the SpaceCat layer only. Mystique uses Okta OIDC for its own service-to-service auth and does not receive IMS identity. Cross-org queries that span both services are answered with a two-step join via `preflightRequestId`.
 
