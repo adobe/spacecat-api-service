@@ -279,14 +279,14 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * GET /v1/workspaces/{ws}/ai_models — workspace-level catalog of all AI
-     * models available for tracking (not scoped to a specific project). Used
-     * to populate the "available models" list in the UI before a market is
-     * configured. Returns the same shape as listAiModels.
+     * GET /v1/ai_models — global catalog of all AI models available for
+     * tracking across any workspace. Not scoped to a workspace or project.
+     * Used to populate the "available models" list in the UI.
+     * Returns {page, total, items: [{id, key, name, icon}]}.
      */
-    async listWorkspaceAiModels(semrushWorkspaceId, { page = 1, limit = 100 } = {}) {
+    async listWorkspaceAiModels(_semrushWorkspaceId, { page = 1, limit = 100 } = {}) {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/ai_models?${params.toString()}`;
+      const url = `${root}${API_PREFIX}/v1/ai_models?${params.toString()}`;
       return request('GET', url, imsToken, undefined);
     },
 

@@ -514,9 +514,9 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  describe('listWorkspaceAiModels (new in this PR)', () => {
-    it('GETs /v1/workspaces/{ws}/ai_models with default pagination', async () => {
-      fetchStub.resolves(fetchOk({ items: [{ id: 'cat-gpt', key: 'chatgpt' }] }));
+  describe('listWorkspaceAiModels', () => {
+    it('GETs /v1/ai_models (global catalog, no workspace prefix) with default pagination', async () => {
+      fetchStub.resolves(fetchOk({ page: 1, total: 1, items: [{ id: 'cat-gpt', key: 'chatgpt' }] }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       const result = await transport.listWorkspaceAiModels(WORKSPACE_ID);
@@ -524,7 +524,7 @@ describe('Semrush REST transport', () => {
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('GET');
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/ai_models?page=1&limit=100`,
+        'https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/ai_models?page=1&limit=100',
       );
       expect(result.items[0].id).to.equal('cat-gpt');
     });
