@@ -1238,7 +1238,10 @@ llmo-onboard:
                         type: string
                 succeeded:
                   type: array
-                  description: Tuples for which a Semrush project is live (read back from the DB). Cohort orgs only.
+                  description: |
+                    Tuples for which a Semrush project is live (read back from the DB). Cohort orgs only.
+                    `semrushProjectId`/`geoTargetId` are populated from the authoritative read-back;
+                    on a degraded path (read-back failure) a succeeded entry may carry only market/language.
                   items:
                     type: object
                     properties:

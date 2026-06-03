@@ -1504,7 +1504,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       imsOrgId,
       env,
     );
-    if (serenityEnabled && !organization.getSemrushWorkspaceId?.()) {
+    if (serenityEnabled && !organization.getSemrushWorkspaceId()) {
       const spaceCatId = organization.getId();
       const workspaceError = new Error(
         `Semrush workspace not bound to org ${spaceCatId}. `
@@ -1703,6 +1703,15 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       }
     } else {
       log.info(`Skipping v2 customer config initialization and Brandalf flow for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
+
+      // M6–M8 (Semrush provisioning) only runs in the v2 block. An allowlisted
+      // org that resolves to v1 (global v1 kill-switch, or re-onboarding a
+      // pre-cutoff site) passed the M5 workspace check but its markets are not
+      // provisioned — surface that rather than dropping them silently. Whether
+      // v1 + cohort is a valid combination is a product decision (LLMO-5007).
+      if (serenityEnabled && Array.isArray(markets) && markets.length > 0) {
+        log.warn(`Serenity onboarding: org ${organization.getId()} resolved to v1 — skipping Semrush provisioning of ${markets.length} market(s); markets[] not processed (LLMO-5007)`);
+      }
 
       // V1 has no Brandalf trigger, so DRS will not submit prompt generation
       // automatically. Submit it directly here so v1 onboardings still get

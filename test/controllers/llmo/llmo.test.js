@@ -3740,6 +3740,54 @@ describe('LlmoController', () => {
       expect(performLlmoOnboardingStub).to.not.have.been.called;
     });
 
+    it('should return 400 for an object entry missing market (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{ language: 'en' }] },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 when markets[] exceeds the cap (LLMO-5204)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      // 51 valid, distinct tuples (> MAX_MARKETS = 50) so the 400 is the cap,
+      // not incidental per-entry validation. Markets AA, AB, … BY.
+      const many = Array.from({ length: 51 }, (_, i) => ({
+        market: `${String.fromCharCode(65 + Math.floor(i / 26))}${String.fromCharCode(65 + (i % 26))}`,
+        language: 'en',
+      }));
+      const result = await ctrl.onboardCustomer({
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: many },
+      });
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should collapse duplicate market tuples before forwarding (LLMO-5204)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: {
+          ...onboardingContext.data,
+          markets: [
+            { market: 'US', language: 'en' },
+            { market: 'US', language: 'en' },
+            { market: 'DE', language: 'de' },
+          ],
+        },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
+        { market: 'US', language: 'en' },
+        { market: 'DE', language: 'de' },
+      ]);
+    });
+
     it('should not set markets when neither markets nor region is supplied (LLMO-5202)', async () => {
       const ctrl = await makeOnboardController(performLlmoOnboardingStub);
       const result = await ctrl.onboardCustomer(onboardingContext);

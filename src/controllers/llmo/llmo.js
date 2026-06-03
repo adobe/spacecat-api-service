@@ -99,6 +99,11 @@ const ISO_ALPHA2_UPPER_REGEX = /^[A-Z]{2}$/;
 // BCP-47 primary + optional script/region subtag (all lowercase as a normalization choice;
 // real BCP-47 script subtags are title-case but we enforce lowercase to prevent drift).
 const BCP47_LANGUAGE_REGEX = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
+// Upper bound on markets[] (LLMO-5204). The fan-out is sequential — one upstream
+// create+publish+DB write per tuple on a single synchronous request — so an
+// unbounded array would blow the Lambda timeout. 50 covers adobe.com's ~19
+// tuples with headroom.
+const MAX_MARKETS = 50;
 
 /** Site IDs for which HLX `brandpresence` sheet data is blocked (PG migration). */
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
@@ -977,6 +982,9 @@ function LlmoController(ctx) {
         if (!Array.isArray(markets) || markets.length === 0) {
           return badRequest('markets must be a non-empty array');
         }
+        if (markets.length > MAX_MARKETS) {
+          return badRequest(`markets must contain at most ${MAX_MARKETS} entries`);
+        }
         for (const entry of markets) {
           if (!entry || typeof entry !== 'object') {
             return badRequest('Each markets entry must be an object with market and language');
@@ -991,7 +999,21 @@ function LlmoController(ctx) {
         if (region !== undefined) {
           log.warn(`LLMO onboarding: both markets and region supplied for domain ${domain} — markets wins, region ignored`);
         }
-        resolvedMarkets = markets;
+        // Collapse duplicate (market, language) tuples — otherwise the second
+        // hits the proxy's 409 and the M8 read-back emits a duplicate succeeded
+        // entry for the same slice.
+        const seenTuples = new Set();
+        resolvedMarkets = markets.filter(({ market, language }) => {
+          const key = `${market}:${language}`;
+          if (seenTuples.has(key)) {
+            return false;
+          }
+          seenTuples.add(key);
+          return true;
+        });
+        if (resolvedMarkets.length !== markets.length) {
+          log.info(`LLMO onboarding: collapsed ${markets.length - resolvedMarkets.length} duplicate market tuple(s) for domain ${domain}`);
+        }
       } else if (region !== undefined) {
         log.debug(`LLMO onboarding: markets absent, synthesizing from region "${region}" for domain ${domain}`);
         resolvedMarkets = [{ market: region, language: 'en' }];
@@ -1102,10 +1124,11 @@ function LlmoController(ctx) {
       return ok(responseBody);
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
-      // M5 (LLMO-5203): a missing Semrush workspace fails fast with a 404 and an
-      // operator-actionable message; everything else stays a 400.
-      if (error.status === 404) {
-        return notFound(error.message);
+      // M5 (LLMO-5203): the missing-workspace pre-flight throw is tagged
+      // `preflight` + status 404. Key on that marker (not a bare status) so an
+      // incidental downstream 404 from a dependency isn't reshaped/leaked here.
+      if (error.preflight && error.status === 404) {
+        return notFound(cleanupHeaderValue(error.message));
       }
       return badRequest(cleanupHeaderValue(error.message));
     }

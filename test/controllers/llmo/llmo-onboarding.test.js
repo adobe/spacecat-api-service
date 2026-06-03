@@ -3507,6 +3507,132 @@ describe('LLMO Onboarding Functions', () => {
       );
     });
 
+    it('composes the full M7→M8 seam with real markets[] and returns result.serenity (LLMO-5204/5205)', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org-serenity-cohort'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+        getSemrushWorkspaceId: sinon.stub().returns('semrush-ws-123'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns({ main_profile: { target_audience: 'Pros' } }),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select: selectRead, upsert: upsertStub });
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+      // M8 authoritative read-back: one row for the US/en slice (geoTargetId 2840).
+      mockDataAccess.BrandSemrushProject = {
+        allByBrandId: sinon.stub().resolves([{
+          getGeoTargetId: () => 2840,
+          getLanguageCode: () => 'en',
+          getSemrushProjectId: () => 'p-us',
+        }]),
+      };
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const handleCreateMarketStub = sinon.stub().resolves({
+        status: 201,
+        body: { brandId: 'brand-123', geoTargetId: 2840, languageCode: 'en' },
+      });
+      const deps = createCommonEsmockDependencies({
+        mockTierClient,
+        mockTracingFetch,
+        mockConfig,
+        mockComposeBaseURL,
+        mockSharePointClient: sharePointClient,
+        mockOctokit,
+        mockDrsClient,
+        mockCustomerConfigV2Storage,
+      });
+      deps['../../../src/support/serenity/handlers/markets.js'] = {
+        handleCreateMarket: handleCreateMarketStub,
+        // Real resolveLocation behavior for the US slice so the M8 slice key matches.
+        resolveLocation: (m) => (m === 'US' ? { geoTargetId: 2840, locationName: 'United States' } : null),
+      };
+      deps['../../../src/support/serenity/rest-transport.js'] = {
+        createSerenityTransport: sinon.stub().returns({ id: 'transport' }),
+      };
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        deps,
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, [SERENITY_SITE_ALLOWLIST]: 'org-serenity-cohort' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+        // IMS bearer required to forward to the Semrush gateway.
+        attributes: { authInfo: { getType: () => 'ims' } },
+        pathInfo: { headers: { authorization: 'Bearer ims-token' } },
+      };
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        markets: [{ market: 'US', language: 'en' }],
+      }, context);
+
+      // The fan-out was actually invoked with the create-market body contract.
+      expect(handleCreateMarketStub).to.have.been.calledOnce;
+      const [, , brandIdArg, wsArg, body] = handleCreateMarketStub.firstCall.args;
+      expect(brandIdArg).to.equal('brand-123');
+      expect(wsArg).to.equal('semrush-ws-123');
+      expect(body.market).to.equal('US');
+      expect(body.languageCode).to.equal('en');
+      expect(body.brandDomain).to.equal('example.com');
+      expect(body.brandNames).to.deep.equal(['Test Brand']);
+
+      // The M8 read-back composed into result.serenity.
+      expect(result.serenity).to.exist;
+      expect(result.serenity.requested).to.deep.equal([{ market: 'US', language: 'en' }]);
+      expect(result.serenity.succeeded).to.deep.equal([{
+        market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+      }]);
+      expect(result.serenity.failed).to.be.empty;
+    });
+
     it('should fail fast with a 404 when an allowlisted org has no Semrush workspace bound (LLMO-5203)', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org-serenity-cohort'),
@@ -3854,6 +3980,34 @@ describe('LLMO Onboarding Functions', () => {
         },
       ]);
     });
+
+    it('defaults the error to unknownError when a non-2xx outcome carries no body.error', async () => {
+      const hcp = sinon.stub().resolves({ status: 400 }); // no body
+      const performSerenityFanOut = await loadFanOut(hcp);
+      const res = await performSerenityFanOut(
+        makeContext(),
+        { ...baseArgs, markets: [{ market: 'US', language: 'en' }] },
+      );
+      expect(res.failed).to.deep.equal([
+        {
+          market: 'US', language: 'en', status: 400, error: 'unknownError',
+        },
+      ]);
+    });
+
+    it('defaults a thrown error with no status to 502', async () => {
+      const hcp = sinon.stub().rejects(new Error('boom')); // no .status
+      const performSerenityFanOut = await loadFanOut(hcp);
+      const res = await performSerenityFanOut(
+        makeContext(),
+        { ...baseArgs, markets: [{ market: 'US', language: 'en' }] },
+      );
+      expect(res.failed).to.deep.equal([
+        {
+          market: 'US', language: 'en', status: 502, error: 'boom',
+        },
+      ]);
+    });
   });
 
   describe('reconcileSerenityProjects (LLMO-5205)', () => {
@@ -3998,6 +4152,23 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.failed).to.deep.equal([
         {
           market: 'ZZ', language: 'en', status: 400, error: 'unknownMarket',
+        },
+      ]);
+    });
+
+    it('treats a null read-back as no rows (all requested tuples fail)', async () => {
+      const reconcileSerenityProjects = await loadReconcile();
+      const fanOut = {
+        requested: [{ market: 'US', language: 'en' }],
+        succeeded: [{ market: 'US', language: 'en' }],
+        failed: [],
+      };
+      const ctx = makeContext(null); // allByBrandId resolves null
+      const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
+      expect(res.succeeded).to.be.empty;
+      expect(res.failed).to.deep.equal([
+        {
+          market: 'US', language: 'en', status: 500, error: 'projectRowMissing',
         },
       ]);
     });
