@@ -177,6 +177,8 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * POST /v2/.../aio/prompts/by_tags — paginated list of prompts in a
      * project. Pass an empty `tag_ids` array to list all prompts.
+     * Multiple tag IDs use OR semantics: any prompt carrying at least one of
+     * the supplied IDs is included. AND filtering must be done by the caller.
      *
      * Note: Semrush rejects `sort_field` / `sort_dir` on this endpoint (see
      * commit history on the prior `serenity` handler). Body is restricted to

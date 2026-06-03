@@ -76,10 +76,15 @@ function buildPromptDto(geoTargetId, languageCode, item) {
 }
 
 /**
- * GET /serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search= —
- * list prompts for one slice. Both filters are required (the route handler
- * returns 400 if either is missing). Pagination is real upstream
- * pagination — one slice = one project = one upstream call set per page.
+ * GET /serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds= —
+ * list prompts for one slice. geoTargetId and languageCode are required.
+ * Pagination is real upstream pagination — one slice = one project = one
+ * upstream call set per page.
+ *
+ * tagIds (repeatable): Semrush tag UUIDs from SerenityPrompt.tagMap. Passed
+ * as tag_ids to the by_tags endpoint. Semrush applies OR semantics — prompts
+ * carrying any of the supplied tag IDs are returned. AND semantics must be
+ * enforced by the caller if needed.
  */
 export async function handleListPrompts(
   transport,
