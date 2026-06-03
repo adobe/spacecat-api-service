@@ -38,7 +38,7 @@ import {
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
-import { handleCreateProject, resolveLocation } from '../../support/serenity/handlers/projects.js';
+import { handleCreateMarket, resolveLocation } from '../../support/serenity/handlers/markets.js';
 import { createSerenityTransport } from '../../support/serenity/rest-transport.js';
 
 // LLMO Constants
@@ -1257,7 +1257,7 @@ function extractImsBearer(context) {
 
 /**
  * M7 (LLMO-5204): fan out one Semrush project per (market, language) tuple by
- * calling the already-shipped AIO Proxy handler (`handleCreateProject`)
+ * calling the already-shipped AIO Proxy handler (`handleCreateMarket`)
  * in-process, once per tuple, sequentially.
  *
  * Best-effort per LLMO-5007 §M7: a per-tuple failure is collected, not thrown,
@@ -1322,20 +1322,23 @@ export async function performSerenityFanOut(context, {
   const brandDomain = new URL(baseURL).hostname;
 
   for (const { market, language } of requested) {
+    // The AIO Proxy's create-market body: `languageCode` (not `language`), no
+    // `projectType` (the handler hard-codes `type: 'ai'`). `name` is optional;
+    // we set the design's `<brand-slug> · <ISO> · <lang>` form rather than let
+    // it default to `<brand>-<hex>`.
     const body = {
       name: `${brandSlug} · ${market} · ${language}`,
       market,
-      language,
+      languageCode: language,
       brandDomain,
       brandNames: [brandName.trim()],
-      projectType: 'ai',
     };
 
     let outcome;
     try {
       // Sequential by design (prototype): one upstream create+publish at a time.
       // eslint-disable-next-line no-await-in-loop
-      outcome = await handleCreateProject(
+      outcome = await handleCreateMarket(
         transport,
         context.dataAccess,
         brandId,
@@ -1354,19 +1357,11 @@ export async function performSerenityFanOut(context, {
     }
 
     // 201 = newly created; 409 = slice already exists (idempotent success).
-    // Note the 201/409 asymmetry: a 201 echoes `semrushLocationId`, a 409 only
-    // returns the conflicting `semrushProjectId` (no location). That's fine —
-    // M8 (`reconcileSerenityProjects`) reads the authoritative location back from
-    // the DB, so this fan-out entry is provisional and superseded there.
+    // Neither response echoes the project id or geo target, so this fan-out
+    // entry just records the tuple — M8 (`reconcileSerenityProjects`) reads the
+    // authoritative semrushProjectId + geoTargetId back from the DB.
     if (outcome.status === 201 || outcome.status === 409) {
-      succeeded.push({
-        market,
-        language,
-        semrushProjectId: outcome.body?.semrushProjectId,
-        ...(outcome.body?.semrushLocationId !== undefined
-          ? { semrushLocationId: outcome.body.semrushLocationId }
-          : {}),
-      });
+      succeeded.push({ market, language });
     } else {
       failed.push({
         market,
@@ -1422,7 +1417,7 @@ export async function reconcileSerenityProjects(context, { brandId, fanOut }) {
 
   const rowBySlice = new Map();
   rows.forEach((row) => {
-    rowBySlice.set(`${row.getSemrushLocationId()}::${row.getLanguage()}`, row);
+    rowBySlice.set(`${row.getGeoTargetId()}::${row.getLanguageCode()}`, row);
   });
   const failureByTuple = new Map();
   fanOut.failed.forEach((f) => failureByTuple.set(`${f.market}::${f.language}`, f));
@@ -1437,13 +1432,13 @@ export async function reconcileSerenityProjects(context, { brandId, fanOut }) {
     // but guarded so a bad code degrades to a failure, not a thrown lookup.
     const location = resolveLocation(market);
     const lang = String(language).toLowerCase();
-    const row = location ? rowBySlice.get(`${location.locationId}::${lang}`) : undefined;
+    const row = location ? rowBySlice.get(`${location.geoTargetId}::${lang}`) : undefined;
     if (row) {
       succeeded.push({
         market,
         language,
         semrushProjectId: row.getSemrushProjectId(),
-        semrushLocationId: row.getSemrushLocationId(),
+        geoTargetId: row.getGeoTargetId(),
       });
     } else {
       const prior = failureByTuple.get(`${market}::${language}`);
