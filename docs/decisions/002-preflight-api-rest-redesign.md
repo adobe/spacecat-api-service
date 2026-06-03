@@ -130,7 +130,7 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 |-----------|------|----------|-------------|
 | `url` | string (URI, URL-encoded) | No | When present, filters results to preflights for this specific page URL only |
 
-**Response** `200 OK` — a flat list of preflights for the site, sorted by `createdAt` descending. No cap is applied; the 7-day TTL on `AsyncJob` records provides the natural upper bound. Pagination is deferred until there is evidence of consumers needing it.
+**Response** `200 OK` — a flat list of preflights for the site, sorted by `createdAt` descending. No pagination cap is applied at this stage. This is safe given: (a) results come from a dedicated `Preflight` table indexed on `siteId` — not the shared `AsyncJob` table; (b) preflights are human-triggered from the MFE, not batch-generated; (c) the 7-day TTL bounds per-site volume to a small set; (d) list items are lightweight (no result payload). Pagination will be added if evidence of consumer need emerges.
 ```json
 [
   {
@@ -244,83 +244,14 @@ OpenAPI spec entries and response headers (`Deprecation: true`, `Sunset: <date>`
 date will be set by PM at the time this ADR moves to Accepted, with a minimum of 90 days from
 MFE migration start.
 
-## Data Model: Dedicated Preflight Entity
+## Data Model
 
-The current implementation backs preflights with the generic `AsyncJob` model. `AsyncJob` is
-not exclusive to preflight — it is a shared backing store used by site-detection, PR review,
-and both legacy preflight variants (`preflight` and `preflight-beta`), each distinguished only
-by a `jobType` string buried in the `metadata` blob. Using it as the preflight backing store
-creates several problems:
+The backing entity design — including the rationale for a dedicated `Preflight` entity over
+extending `AsyncJob`, the full field schema, collection methods, creation flow, TTL strategy,
+and dual-store boundary — is captured in
+[ADR-003: Dedicated Preflight Entity Design](003-preflight-entity-design.md).
 
-- **No schema enforcement.** Preflight-specific fields — `siteId`, `url`, `createdBy` — live
-  in the `metadata` JSON blob with no type guarantees. Consumers must introspect the blob
-  directly rather than relying on a typed contract.
-- **Type discrimination via metadata.** Querying preflights for a site requires filtering on
-  `metadata.jobType === "preflight"` alongside `metadata.siteId`, neither of which is indexed.
-  Promoting them to top-level attributes works around the indexing problem but still leaves the
-  domain model generic.
-- **Coupling to an implementation detail.** `AsyncJob` is an execution primitive; `Preflight`
-  is a domain concept. Exposing the same model for both leaks the execution abstraction to
-  callers and makes the API contract brittle as `AsyncJob` evolves.
-- **Query inefficiency at scale.** Even with `siteId` promoted to an indexed column on
-  `async_jobs`, a query of `WHERE site_id = $siteId` would scan across all job types for that
-  site (site-detection, pr-review, preflight, preflight-beta). Isolating preflight records
-  requires a compound filter on `(site_id, job_type)`, a composite index, or an in-memory
-  post-filter pass. Preflight jobs represent a fraction of total `AsyncJob` volume; a dedicated
-  `preflights` table makes every row in the index a preflight by definition, keeping the index
-  small and the query clean with no cross-workflow contamination.
-
-The decision is to **introduce a dedicated `Preflight` entity in `spacecat-shared-data-access`**
-rather than extending `AsyncJob`. The `Preflight` entity owns the domain record and holds a
-1-to-1 FK reference to an `AsyncJob` via `asyncJobId` for execution lifecycle tracking (status
-polling, result storage). The `asyncJobId` is never exposed to API consumers.
-
-**`Preflight` entity — first-class fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `preflightId` | UUID | Primary key |
-| `siteId` | UUID (indexed) | The site this preflight belongs to |
-| `url` | string | The page URL that was analyzed; `(site_id, url)` composite index deferred — `url` filter applied in-memory (see collection methods) |
-| `asyncJobId` | UUID (FK to `async_jobs`, 1-to-1) | Backing AsyncJob reference for execution lifecycle tracking; never exposed to API consumers |
-| `status` | enum | `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` |
-| `createdBy` | object | `{ email, displayName }` from IMS profile at creation time |
-| `createdAt` | ISO 8601 | Creation timestamp |
-| `updatedAt` | ISO 8601 | Last update timestamp |
-| `startedAt` | ISO 8601 | When processing began |
-| `endedAt` | ISO 8601 | When processing completed |
-| `result` | object \| null | Audit result payload; `null` until completed. Shape is loosely typed here; the exact structure will be defined and strongly typed during implementation. |
-| `error` | object \| null | `{ code, message }` on failure |
-
-**`PreflightCollection` — methods:**
-
-- `allBySiteId(siteId)` — returns all preflights for a site, sorted by `createdAt` descending;
-  `url` filter applied in-memory when `?url=` query parameter is present
-- `findById(preflightId)` — loads a single preflight; caller verifies `siteId` matches path
-
-**Creation flow:** The controller creates the `AsyncJob` first, receives the `asyncJobId`, then
-immediately creates the `Preflight` entity with `asyncJobId` as the FK. This ordering ensures
-the execution primitive exists before the domain record that references it.
-
-**Expiry** is handled implicitly via the `ON DELETE CASCADE` on `async_job_id`. When the
-backing `AsyncJob` is cleaned up, its associated `Preflight` row is deleted with it. There
-is no separate TTL column on `preflights` — the `withRecordExpiry` SchemaBuilder helper is
-a DynamoDB-era mechanism marked `postgrestIgnore` in the v3 PostgreSQL layer and does not
-write to the database.
-
-`createdBy` is derived from the caller's IMS profile at job creation time: `email` is
-`profile.email` (the IMS user identifier); `displayName` is composed from
-`profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`). It is
-never supplied by the client.
-
-`/preflight/beta/jobs` is removed outright as part of this work — it is replaced by the new
-endpoints, not deprecated. `/preflight/jobs` is the only legacy endpoint; it continues writing
-to `AsyncJob` unchanged until external consumers have migrated. The new
-`/sites/:siteId/preflights` endpoints write exclusively to the `Preflight` entity.
-
-**This change is scoped to `spacecat-shared-data-access` and is a prerequisite that must land
-before the controller work in this repo.** Alignment with @ekdogan is complete (SITES-44675).
-See SITES-44675 for the tracking ticket.
+That decision was aligned with @ekdogan (SITES-44675) before implementation began.
 
 ## Consequences
 - API shape is consistent with the rest of the service; new consumers can discover preflight
