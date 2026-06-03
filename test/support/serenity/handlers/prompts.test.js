@@ -301,6 +301,41 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     expect(body.tag_ids).to.deep.equal([]);
   });
 
+  it('buildTagMapOf: skips null/non-object entries and objects without name; coerces numeric id', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({
+        items: [{
+          id: 'sem-1',
+          name: 'prompt',
+          tags: [
+            null,
+            42,
+            { id: 'id-only' },
+            { name: 'name-only' },
+            { name: 'valid', id: 42 },
+            'string-tag',
+          ],
+        }],
+        total: 1,
+      }),
+    };
+
+    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en',
+    });
+
+    expect(result.items[0].tagMap).to.deep.equal({
+      'name-only': '',
+      valid: '42',
+      'string-tag': '',
+    });
+  });
+
   it('slices tagIds to MAX_TAG_IDS (50) before forwarding', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',

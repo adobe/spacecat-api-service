@@ -72,11 +72,15 @@ v2-serenity-prompts:
         explode: true
         schema:
           type: array
+          maxItems: 50
           items: { type: string }
         description: |
           Filter prompts to those carrying any of these upstream tag ids.
           Sent as repeated keys (`?tagIds=a&tagIds=b`); ids come from each
           prompt's `tagMap`. Omitted/empty lists all prompts in the slice.
+          Maximum 50 ids; excess values are silently truncated (same pattern
+          as the `limit` cap). This matches the server-side `MAX_TAG_IDS`
+          constant in `handlers/prompts.js`.
     responses:
       '200':
         description: Prompts retrieved successfully.
