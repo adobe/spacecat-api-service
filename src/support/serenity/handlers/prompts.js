@@ -48,11 +48,14 @@ function tagNamesOf(item) {
   /* c8 ignore stop */
 }
 
-function tagIdsOf(item) {
-  if (!Array.isArray(item?.tags)) return [];
-  return item.tags
-    .map((t) => (typeof t === 'object' && t?.id ? String(t.id) : null))
-    .filter(Boolean);
+function buildTagMapOf(item) {
+  if (!Array.isArray(item?.tags)) return {};
+  return item.tags.reduce((acc, t) => {
+    if (typeof t === 'object' && t?.name && t?.id) {
+      acc[t.name] = String(t.id);
+    }
+    return acc;
+  }, {});
 }
 
 function buildPromptDto(geoTargetId, languageCode, item) {
@@ -66,7 +69,7 @@ function buildPromptDto(geoTargetId, languageCode, item) {
     languageCode,
     text,
     tags: tagNamesOf(item),
-    tagIds: tagIdsOf(item),
+    tagMap: buildTagMapOf(item),
   };
 }
 

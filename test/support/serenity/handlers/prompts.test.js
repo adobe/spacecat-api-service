@@ -229,7 +229,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       languageCode: 'en',
       text: 'good prompt',
       tags: [],
-      tagIds: [],
+      tagMap: {},
     });
   });
 
@@ -260,7 +260,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       languageCode: 'en',
       text: 'What is Adobe?',
       tags: ['awareness'],
-      tagIds: ['t-1'],
+      tagMap: { awareness: 't-1' },
     });
     expect(result.items[0]).not.to.have.property('id');
     expect(result.items[0]).not.to.have.property('semrushProjectId');
