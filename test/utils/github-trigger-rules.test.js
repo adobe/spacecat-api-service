@@ -11,7 +11,9 @@
  */
 
 import { expect } from 'chai';
-import { getSkipReason, EVENT_JOB_MAP, isMysticatTargetedSkip } from '../../src/utils/github-trigger-rules.js';
+import {
+  getSkipReason, EVENT_JOB_MAP, isMysticatTargetedSkip, skipReasonLabel,
+} from '../../src/utils/github-trigger-rules.js';
 
 describe('github-trigger-rules', () => {
   describe('EVENT_JOB_MAP', () => {
@@ -220,6 +222,41 @@ describe('github-trigger-rules', () => {
         expect(reason).to.include('auto-trigger');
         expect(isMysticatTargetedSkip(reason)).to.be.false;
       });
+    });
+  });
+
+  describe('skipReasonLabel', () => {
+    it('returns draft_pr for draft PR', () => {
+      expect(skipReasonLabel('draft PR')).to.equal('draft_pr');
+    });
+
+    it('returns bot_sender for bot sender', () => {
+      expect(skipReasonLabel('bot sender')).to.equal('bot_sender');
+    });
+
+    it('returns non_default_branch for non-default branch reason', () => {
+      expect(skipReasonLabel('non-default branch: release/v2')).to.equal('non_default_branch');
+    });
+
+    it('returns auto_trigger for auto-trigger not yet supported reason', () => {
+      expect(skipReasonLabel('auto-trigger not yet supported: opened')).to.equal('auto_trigger');
+    });
+
+    it('returns wrong_reviewer for reviewer mismatch reason', () => {
+      expect(skipReasonLabel('reviewer some-human is not MysticatBot')).to.equal('wrong_reviewer');
+    });
+
+    it('returns unsupported_action for unsupported action reason', () => {
+      expect(skipReasonLabel('unsupported action: closed')).to.equal('unsupported_action');
+    });
+
+    it('returns other for unknown reason', () => {
+      expect(skipReasonLabel('something completely unknown')).to.equal('other');
+    });
+
+    it('returns other for null/undefined', () => {
+      expect(skipReasonLabel(null)).to.equal('other');
+      expect(skipReasonLabel(undefined)).to.equal('other');
     });
   });
 });
