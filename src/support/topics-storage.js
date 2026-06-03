@@ -130,13 +130,11 @@ export async function createTopic({
     // HTTP errors (409 / 422) via the centralised utility. Postgres internals
     // (constraint names, table names) stay in `.cause` for operator triage and
     // are kept out of client-facing messages to avoid schema leakage. LLMO-4370.
-    const match = /unique constraint "([^"]+)"/.exec(error.message || '');
-    const constraint = match ? match[1] : 'unique constraint';
     throwOnPgConstraintViolation(error, {
-      '23505': { status: 409, message: `Topic conflicts with ${constraint} for this organization` },
-      '23503': { status: 422, message: 'Topic references a non-existent related entity' },
+      23505: { status: 409, message: 'A topic with these attributes already exists for this organization' },
+      23503: { status: 422, message: 'Topic references a non-existent related entity' },
     });
-    throw new Error(`Failed to create topic: ${error.message}`, { cause: error });
+    throw new Error('Failed to create topic', { cause: error });
   }
 
   // Link topic to category via the topic_categories junction table.
