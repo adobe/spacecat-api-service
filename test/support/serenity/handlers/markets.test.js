@@ -22,6 +22,7 @@ import {
   handleDeleteMarket,
   handleListTags,
   handleListModels,
+  handleUpdateModels,
   resolveLocation,
   clearLanguageCache,
   clearTagCache,
@@ -1010,5 +1011,181 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
         id: 'm-2', key: 'anthropic-claude', name: null, icon: null,
       },
     ]);
+  });
+});
+
+describe('handlers/markets.js — handleUpdateModels', () => {
+  function makeTransport({ currentItems = [], addResult = {}, deleteResult = undefined } = {}) {
+    return {
+      listAiModels: sinon.stub().resolves({ items: currentItems }),
+      addAiModel: sinon.stub().resolves(addResult),
+      deleteAiModelsByIds: sinon.stub().resolves(deleteResult),
+    };
+  }
+
+  it('rejects when geoTargetId is missing', async () => {
+    const da = makeDataAccess([]);
+    await expect(
+      handleUpdateModels({}, da, BRAND, WORKSPACE, { languageCode: 'en', modelIds: [] }, fakeLog()),
+    ).to.be.rejectedWith(ErrorWithStatusCode, /geoTargetId/);
+  });
+
+  it('rejects when languageCode is missing', async () => {
+    const da = makeDataAccess([]);
+    await expect(
+      handleUpdateModels({}, da, BRAND, WORKSPACE, { geoTargetId: 2840, modelIds: [] }, fakeLog()),
+    ).to.be.rejectedWith(ErrorWithStatusCode, /BCP-47/);
+  });
+
+  it('rejects when modelIds is not an array', async () => {
+    const da = makeDataAccess([]);
+    await expect(
+      handleUpdateModels({}, da, BRAND, WORKSPACE, {
+        geoTargetId: 2840, languageCode: 'en', modelIds: 'bad',
+      }, fakeLog()),
+    ).to.be.rejectedWith(ErrorWithStatusCode, /modelIds/);
+  });
+
+  it('rejects when modelIds contains non-string entries', async () => {
+    const da = makeDataAccess([]);
+    await expect(
+      handleUpdateModels({}, da, BRAND, WORKSPACE, {
+        geoTargetId: 2840, languageCode: 'en', modelIds: [42],
+      }, fakeLog()),
+    ).to.be.rejectedWith(ErrorWithStatusCode, /modelIds/);
+  });
+
+  it('throws 404 when market row is not found', async () => {
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(null);
+    await expect(
+      handleUpdateModels({}, da, BRAND, WORKSPACE, {
+        geoTargetId: 2840, languageCode: 'en', modelIds: [],
+      }, fakeLog()),
+    ).to.be.rejectedWith(ErrorWithStatusCode, /Market not found/);
+  });
+
+  it('adds models absent from the current set', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({
+      currentItems: [],
+    });
+    // after add, list returns the newly added model
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{ id: 'assign-1', model: { id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null } }],
+    });
+
+    const result = await handleUpdateModels(
+      transport, da, BRAND, WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+
+    expect(transport.addAiModel).to.have.been.calledOnceWith(WORKSPACE, 'proj-1', 'cat-gpt');
+    expect(transport.deleteAiModelsByIds).not.to.have.been.called;
+    expect(result.items).to.have.length(1);
+    expect(result.items[0].id).to.equal('cat-gpt');
+  });
+
+  it('removes models absent from the desired set', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({
+      currentItems: [
+        { id: 'assign-1', model: { id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null } },
+      ],
+    });
+    transport.listAiModels.onSecondCall().resolves({ items: [] });
+
+    const result = await handleUpdateModels(
+      transport, da, BRAND, WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: [] },
+      fakeLog(),
+    );
+
+    expect(transport.deleteAiModelsByIds).to.have.been.calledOnceWith(WORKSPACE, 'proj-1', ['assign-1']);
+    expect(transport.addAiModel).not.to.have.been.called;
+    expect(result.items).to.deep.equal([]);
+  });
+
+  it('adds and removes in the same call', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({
+      currentItems: [
+        { id: 'assign-old', model: { id: 'cat-old', key: 'old-model', name: 'Old', icon: null } },
+      ],
+    });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{ id: 'assign-new', model: { id: 'cat-new', key: 'new-model', name: 'New', icon: null } }],
+    });
+
+    await handleUpdateModels(
+      transport, da, BRAND, WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-new'] },
+      fakeLog(),
+    );
+
+    expect(transport.deleteAiModelsByIds).to.have.been.calledOnceWith(WORKSPACE, 'proj-1', ['assign-old']);
+    expect(transport.addAiModel).to.have.been.calledOnceWith(WORKSPACE, 'proj-1', 'cat-new');
+  });
+
+  it('is a no-op when desired set equals current set', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({
+      currentItems: [
+        { id: 'assign-1', model: { id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null } },
+      ],
+    });
+    transport.listAiModels.onSecondCall().resolves({ items: transport.listAiModels.args[0]?.[2] ?? [] });
+
+    await handleUpdateModels(
+      transport, da, BRAND, WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+
+    expect(transport.deleteAiModelsByIds).not.to.have.been.called;
+    expect(transport.addAiModel).not.to.have.been.called;
+  });
+
+  it('propagates transport errors from deleteAiModelsByIds', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({
+      currentItems: [
+        { id: 'assign-1', model: { id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null } },
+      ],
+    });
+    const err = new SerenityTransportError(502, 'upstream failure');
+    transport.deleteAiModelsByIds.rejects(err);
+
+    await expect(
+      handleUpdateModels(transport, da, BRAND, WORKSPACE, {
+        geoTargetId: 2840, languageCode: 'en', modelIds: [],
+      }, fakeLog()),
+    ).to.be.rejectedWith(SerenityTransportError);
+  });
+
+  it('propagates transport errors from addAiModel', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    const err = new SerenityTransportError(502, 'upstream failure');
+    transport.addAiModel.rejects(err);
+
+    await expect(
+      handleUpdateModels(transport, da, BRAND, WORKSPACE, {
+        geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-new'],
+      }, fakeLog()),
+    ).to.be.rejectedWith(SerenityTransportError);
   });
 });

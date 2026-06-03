@@ -498,6 +498,7 @@ describe('SerenityController', () => {
       expect(controller.deleteMarket).to.be.a('function');
       expect(controller.listTags).to.be.a('function');
       expect(controller.listModels).to.be.a('function');
+      expect(controller.updateModels).to.be.a('function');
 
       expect(controller.listProjects).to.be.undefined;
       expect(controller.createProject).to.be.undefined;

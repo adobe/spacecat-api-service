@@ -259,6 +259,26 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * POST /v1/workspaces/{ws}/projects/{pid}/ai_models — adds one AI model
+     * to a project. `modelId` is the catalog model identifier from
+     * `AIModelResponse.id` on the GET listing. Returns the new assignment row.
+     */
+    async addAiModel(semrushWorkspaceId, projectId, modelId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models`;
+      return request('POST', url, imsToken, { model_id: modelId });
+    },
+
+    /**
+     * DELETE /v1/workspaces/{ws}/projects/{pid}/ai_models — removes AI model
+     * assignments by their assignment ids (the outer `id` on
+     * `ProjectAIModelResponse`, NOT the catalog `model.id`).
+     */
+    async deleteAiModelsByIds(semrushWorkspaceId, projectId, ids) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models`;
+      return request('DELETE', url, imsToken, { ids });
+    },
+
+    /**
      * GET /v1/languages — returns Semrush's language catalog. Used to resolve
      * the language_id UUID from an ISO 639-1 code (e.g. 'en' → UUID). The
      * caller is expected to cache the result (catalog is stable).
