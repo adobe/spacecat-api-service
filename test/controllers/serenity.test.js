@@ -526,6 +526,29 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleUpdateModels.firstCall.args[4]).to.deep.equal({});
     });
+
+    it('updateModels returns 403 and does not dispatch when the caller lacks org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateModels(fakeContext({
+        data: { geoTargetId: 2840, languageCode: 'en', modelIds: [] },
+      }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleUpdateModels).not.to.have.been.called;
+    });
+
+    it('updateModels maps a thrown Error through mapError (500)', async () => {
+      handlers.handleUpdateModels.rejects(new Error('boom'));
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.updateModels(fakeContext({
+        data: { geoTargetId: 2840, languageCode: 'en', modelIds: [] },
+      }));
+      expect(response.status).to.equal(500);
+      const body = await readBody(response);
+      expect(body.error).to.equal('internalServerError');
+      expect(log.error).to.have.been.calledWithMatch('Serenity controller error');
+    });
   });
 
   describe('controller surface', () => {
