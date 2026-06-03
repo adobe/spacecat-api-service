@@ -49,7 +49,9 @@ function tagNamesOf(item) {
 }
 
 function buildTagMapOf(item) {
-  if (!Array.isArray(item?.tags)) return {};
+  if (!Array.isArray(item?.tags)) {
+    return {};
+  }
   return item.tags.reduce((acc, t) => {
     if (typeof t === 'object' && t?.name && t?.id) {
       acc[t.name] = String(t.id);
@@ -139,7 +141,15 @@ export async function handleListPrompts(
     },
   );
   const items = Array.isArray(resp?.items) ? resp.items : [];
-  const total = Number.isFinite(resp?.total) ? resp.total : items.length;
+  // When fewer items than the limit are returned we are on the last page and
+  // know the exact filtered count. Avoids trusting the upstream total which
+  // may be the project-wide count rather than the tag/search-filtered count.
+  let total;
+  if (items.length < limit) {
+    total = (page - 1) * limit + items.length;
+  } else {
+    total = Number.isFinite(resp?.total) ? resp.total : items.length;
+  }
   return {
     items: items
       .map((item) => buildPromptDto(geoTargetId, languageCode, item))
