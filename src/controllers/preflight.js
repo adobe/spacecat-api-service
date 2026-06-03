@@ -432,8 +432,19 @@ function PreflightController(ctx, log, env) {
       return preflightError('PREFLIGHT_NOT_ENABLED', 'Preflight is not enabled for this site', 403);
     }
 
-    // Resolve page authentication if required
-    const enableAuthentication = await checkEnableAuthentication(previewBaseURL);
+    // Resolve page authentication if required.
+    // checkEnableAuthentication does a bare HEAD fetch against the customer
+    // URL; DNS failure / connection refused / TLS error throws. Treat any
+    // throw as "auth not required" (false) so an unreachable customer URL
+    // returns a structured 502 from the downstream Mysticat call rather
+    // than an unstructured 500 here that would break the errorCode contract.
+    let enableAuthentication;
+    try {
+      enableAuthentication = await checkEnableAuthentication(previewBaseURL);
+    } catch (e) {
+      log.warn(`checkEnableAuthentication failed for ${previewBaseURL}: ${e.message}`);
+      enableAuthentication = false;
+    }
     let authorizationHeader;
     if (enableAuthentication) {
       let promiseTokenObj;
@@ -442,7 +453,7 @@ function PreflightController(ctx, log, env) {
       } catch (e) {
         log.error(`Failed to get promise token: ${e.message}`);
         if (e instanceof ErrorWithStatusCode) {
-          return badRequest(e.message);
+          return preflightError('PREFLIGHT_INVALID_REQUEST', e.message, 400);
         }
         return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Error getting promise token', 500);
       }

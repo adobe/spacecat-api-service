@@ -1452,6 +1452,9 @@ describe('Preflight Controller', () => {
         data: { url: 'https://main--example-site.aem.page/test.html' },
       });
       expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.message).to.equal('Missing Authorization header');
     });
 
     it('returns 500 when resolvePromiseToken throws a non-ErrorWithStatusCode error', async () => {
@@ -1700,6 +1703,27 @@ describe('Preflight Controller', () => {
       expect(mockDataAccess.Preflight.create).to.have.been.calledWithMatch({
         createdBy: { email: 'just-email@example.com', displayName: 'just-email@example.com' },
       });
+    });
+
+    it('treats checkEnableAuthentication throw as auth-not-required (structured 502 if Mysticat then fails, not unstructured 500)', async () => {
+      // checkEnableAuthentication does a bare HEAD fetch; DNS / TLS /
+      // connection errors throw. We must catch and default to false so the
+      // {errorCode, message} contract isn't broken downstream.
+      fetchStub.resetBehavior();
+      fetchStub.onFirstCall().rejects(new Error('ENOTFOUND'));
+      fetchStub.onSecondCall().resolves({ ok: true }); // Mysticat call succeeds
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      // We proceeded past the HEAD failure (defaulting to auth-not-required)
+      // and Mysticat accepted the call — so 202, not 500.
+      expect(response.status).to.equal(202);
+      // The Mysticat call was made without an Authorization header (auth
+      // was skipped because the HEAD probe threw).
+      const [, mystiOpts] = fetchStub.secondCall.args;
+      expect(mystiOpts.headers.Authorization).to.be.undefined;
     });
 
     it('returns 500 and rolls back the AsyncJob when Preflight.create throws', async () => {
