@@ -12,7 +12,7 @@
 
 import { triggerFromData } from './common/trigger.js';
 
-export default async function triggerAudit(context) {
+export default async function trigger(context) {
   const { type, url } = context.data;
 
   return triggerFromData(context, { url, auditTypes: [type], deliveryType: 'ALL' });
