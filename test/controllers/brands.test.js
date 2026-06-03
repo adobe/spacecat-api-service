@@ -3788,7 +3788,7 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(409);
       const body = await response.json();
-      expect(body.message).to.include('uq_topic_per_org');
+      expect(body.message).to.include('A topic with these attributes already exists');
       expect(loggerStub.warn).to.have.been.called;
       expect(loggerStub.error).to.not.have.been.called;
     });

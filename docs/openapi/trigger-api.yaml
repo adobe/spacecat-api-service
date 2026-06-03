@@ -22,6 +22,9 @@ trigger:
         - lhs-desktop
         - lhs-mobile
 
+      Note: additional internal audit types (e.g. rum-config-refresh) are supported but intentionally
+      omitted from this list — they are not part of the public API surface.
+
       The URL can be either a site ID or a base URL depending on the audit type.
     operationId: triggerAudit
     responses:

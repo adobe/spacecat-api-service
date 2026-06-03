@@ -13,6 +13,7 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import crypto from 'crypto';
+import esmock from 'esmock';
 import GitHubWebhookHmacHandler from '../../src/support/github-webhook-hmac-handler.js';
 
 describe('GitHubWebhookHmacHandler', () => {
@@ -340,6 +341,55 @@ describe('GitHubWebhookHmacHandler', () => {
       const result = await handler.checkAuth(request, destContext());
       expect(result).to.be.null;
       expect(mockLog.warn.calledWithMatch('Empty')).to.be.true;
+    });
+  });
+
+  describe('EMF metrics', () => {
+    let emitMetricStub;
+    let MockedHandler;
+
+    before(async () => {
+      emitMetricStub = sinon.stub();
+      const mod = await esmock('../../src/support/github-webhook-hmac-handler.js', {
+        '../../src/support/metrics-emf.js': {
+          emitMetric: emitMetricStub,
+          resolveEnvironment: () => 'dev',
+        },
+      });
+      MockedHandler = mod.default;
+    });
+
+    beforeEach(() => {
+      emitMetricStub.reset();
+    });
+
+    it('emits WebhookRejected with hmac_mismatch on bad signature', async () => {
+      const mockedHandler = new MockedHandler(mockLog);
+      const wrongSig = computeSignature(validPayload, 'wrong-secret');
+      const request = makeRequest({ 'x-hub-signature-256': wrongSig });
+      const context = makeContext();
+
+      const result = await mockedHandler.checkAuth(request, context);
+
+      expect(result).to.be.null;
+      const mismatch = emitMetricStub.getCalls()
+        .find((c) => c.args[0].name === 'WebhookRejected'
+          && c.args[0].dimensions?.Reason === 'hmac_mismatch');
+      expect(mismatch).to.exist;
+    });
+
+    it('emits WebhookDestinationsMisconfigured when GITHUB_DESTINATIONS is unset', async () => {
+      const mockedHandler = new MockedHandler(mockLog);
+      const sig = computeSignature(validPayload);
+      const request = makeRequest({ 'x-hub-signature-256': sig });
+      const context = makeContext({ env: {} });
+
+      const result = await mockedHandler.checkAuth(request, context);
+
+      expect(result).to.be.null;
+      const misconfigured = emitMetricStub.getCalls()
+        .find((c) => c.args[0].name === 'WebhookDestinationsMisconfigured');
+      expect(misconfigured).to.exist;
     });
   });
 });
