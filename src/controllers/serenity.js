@@ -59,10 +59,13 @@ function extractQuery(context) {
       const u = new URL(context.request.url);
       const out = {};
       for (const [k, v] of u.searchParams) {
-        out[k] = v;
+        // tagIds is multi-value — collected below via getAll(); excluded here
+        // to avoid last-write-wins clobbering the array. Any future multi-value
+        // param should follow the same pattern.
+        if (k !== 'tagIds') {
+          out[k] = v;
+        }
       }
-      // Collect multi-value params that the client sends as repeated keys
-      // (e.g. ?tagIds=a&tagIds=b). URLSearchParams.getAll() captures all values.
       const tagIdsAll = u.searchParams.getAll('tagIds');
       if (tagIdsAll.length > 0) {
         out.tagIds = tagIdsAll;

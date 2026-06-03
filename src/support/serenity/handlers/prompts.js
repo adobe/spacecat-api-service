@@ -19,6 +19,7 @@ import { invalidateTagCacheForProject } from './markets.js';
 
 const DEFAULT_PAGE_LIMIT = 50;
 const MAX_PAGE_LIMIT = 1000;
+const MAX_TAG_IDS = 50;
 // Caps the inflight upstream calls when fanning out a bulk create.
 // 8 keeps per-call wall time reasonable without overwhelming upstream rate
 // limits — the prior `serenity` testing exhausted Semrush's shared limit
@@ -110,7 +111,7 @@ export async function handleListPrompts(
   const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
   const search = hasText(query?.search) ? String(query.search).trim() : undefined;
   const tagIds = Array.isArray(query?.tagIds)
-    ? query.tagIds.map(String).filter(Boolean)
+    ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
     : [];
 
   const row = await dataAccess.BrandSemrushProject.findBySlice(
