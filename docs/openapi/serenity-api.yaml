@@ -65,6 +65,18 @@ v2-serenity-prompts:
         required: false
         schema: { type: string }
         description: Free-text match against prompt text.
+      - name: tagIds
+        in: query
+        required: false
+        style: form
+        explode: true
+        schema:
+          type: array
+          items: { type: string }
+        description: |
+          Filter prompts to those carrying any of these upstream tag ids.
+          Sent as repeated keys (`?tagIds=a&tagIds=b`); ids come from each
+          prompt's `tagMap`. Omitted/empty lists all prompts in the slice.
     responses:
       '200':
         description: Prompts retrieved successfully.

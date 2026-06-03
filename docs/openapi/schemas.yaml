@@ -10069,6 +10069,13 @@ SerenityPrompt:
     tags:
       type: array
       items: { type: string }
+    tagMap:
+      type: object
+      additionalProperties: { type: string }
+      description: |
+        Map of tag name → upstream tag id. Keys mirror `tags`; values are the
+        ids to pass back as `tagIds` query params when filtering the list.
+      example: { awareness: 't-1' }
 
 SerenityPromptListResponse:
   type: object
