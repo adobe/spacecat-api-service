@@ -849,7 +849,11 @@ export async function handleUpdateModels(
       await transport.deleteAiModelsByIds(semrushWorkspaceId, projectId, toRemoveAssignmentIds);
     } catch (e) {
       log?.error?.('handleUpdateModels: failed to remove AI models', {
-        brandId, semrushWorkspaceId, projectId, geoTargetId, languageCode,
+        brandId,
+        semrushWorkspaceId,
+        projectId,
+        geoTargetId,
+        languageCode,
         assignmentIds: toRemoveAssignmentIds,
         error: e.message,
       });
@@ -865,7 +869,11 @@ export async function handleUpdateModels(
       await transport.addAiModel(semrushWorkspaceId, projectId, catalogId);
     } catch (e) {
       log?.error?.('handleUpdateModels: failed to add AI model', {
-        brandId, semrushWorkspaceId, projectId, geoTargetId, languageCode,
+        brandId,
+        semrushWorkspaceId,
+        projectId,
+        geoTargetId,
+        languageCode,
         catalogId,
         error: e.message,
       });
