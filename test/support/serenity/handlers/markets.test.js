@@ -885,14 +885,54 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     );
   });
 
-  it('listModels 400s on missing filters', async () => {
+  it('listModels (catalog mode) calls listWorkspaceAiModels and returns items', async () => {
     const dataAccess = makeDataAccess([]);
-    await expect(handleListModels({}, dataAccess, BRAND, WORKSPACE, {}))
+    const transport = {
+      listWorkspaceAiModels: sinon.stub().resolves({
+        items: [
+          { id: 'cat-gpt-4o', key: 'chatgpt', name: 'ChatGPT', icon: null },
+          { id: 'cat-claude', key: 'claude', name: 'Claude', icon: null },
+        ],
+      }),
+    };
+    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
+    expect(result.items).to.have.lengthOf(2);
+    expect(result.items[0].id).to.equal('cat-gpt-4o');
+    expect(transport.listWorkspaceAiModels).to.have.callCount(1);
+  });
+
+  it('listModels (catalog mode) also normalises wrapped assignment items from workspace endpoint', async () => {
+    const dataAccess = makeDataAccess([]);
+    const transport = {
+      listWorkspaceAiModels: sinon.stub().resolves({
+        items: [
+          { id: 'assign-1', model: { id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null } },
+        ],
+      }),
+    };
+    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
+    expect(result.items).to.have.lengthOf(1);
+    expect(result.items[0].id).to.equal('cat-gpt');
+  });
+
+  it('listModels (catalog mode) returns empty when workspace endpoint throws', async () => {
+    const dataAccess = makeDataAccess([]);
+    const transport = {
+      listWorkspaceAiModels: sinon.stub().rejects(new Error('404 not found')),
+    };
+    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
+    expect(result).to.deep.equal({ items: [] });
+  });
+
+  it('listModels 400s when only one of geoTargetId/languageCode is provided', async () => {
+    const dataAccess = makeDataAccess([]);
+    await expect(handleListModels({}, dataAccess, BRAND, WORKSPACE, { geoTargetId: 2840 }))
+      .to.be.rejectedWith(ErrorWithStatusCode);
+    await expect(handleListModels({}, dataAccess, BRAND, WORKSPACE, { languageCode: 'en' }))
       .to.be.rejectedWith(ErrorWithStatusCode);
   });
 
-  // Minor #6 from review: lock the same malformed-languageCode 400 contract
-  // for handleListModels.
+  // Minor #6 from review: lock the malformed-languageCode 400 contract.
   it('listModels 400s on syntactically malformed languageCode (`1z`)', async () => {
     const dataAccess = makeDataAccess([]);
     await expect(handleListModels({}, dataAccess, BRAND, WORKSPACE, {

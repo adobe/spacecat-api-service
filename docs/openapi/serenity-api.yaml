@@ -450,21 +450,32 @@ v2-serenity-models:
         format: uuid
   get:
     tags: [serenity]
-    summary: List AI models for one slice
+    summary: List AI models
     description: |
-      Returns the AI models configured for the slice's upstream project.
-      `key` is the value the Reporting API expects as `CBF_model`.
+      Two modes depending on whether slice filters are provided:
+
+      **Slice mode** (`geoTargetId` + `languageCode` both present): returns the
+      AI models configured for that slice's upstream project. `key` is the
+      value the Reporting API expects as `CBF_model`.
+
+      **Catalog mode** (neither param present): returns the workspace-level
+      catalog of ALL AI models available for tracking via
+      `GET /v1/workspaces/{ws}/ai_models`. Falls back to an empty list if the
+      upstream endpoint is unavailable. Use this to populate "available models"
+      selectors in the UI before a market is configured.
+
+      Providing exactly one of the two params returns 400.
     operationId: listSerenityModels
     security:
       - ims_key: []
     parameters:
       - name: geoTargetId
         in: query
-        required: true
+        required: false
         schema: { type: integer, minimum: 1 }
       - name: languageCode
         in: query
-        required: true
+        required: false
         schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
     responses:
       '200':

@@ -735,8 +735,16 @@ async function fetchAllAiModels(transport, semrushWorkspaceId, projectId) {
 }
 
 /**
- * GET /serenity/models?geoTargetId=&languageCode= — AI models configured
- * for the slice's upstream project. Required filters.
+ * GET /serenity/models — AI models.
+ *
+ * With geoTargetId + languageCode: models configured for the slice's upstream
+ * project (existing behaviour).
+ *
+ * Without params: workspace-level catalog of ALL AI models available for
+ * tracking. Uses the Semrush workspace endpoint
+ * GET /v1/workspaces/{ws}/ai_models which returns the full model catalog
+ * independent of any project configuration. Falls back to an empty list if
+ * the endpoint is not available (e.g. 404/405 from upstream).
  */
 export async function handleListModels(
   transport,
@@ -747,13 +755,52 @@ export async function handleListModels(
 ) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
+
+  // No-params path: return workspace-level model catalog.
+  if (geoTargetId === null && languageCode === null) {
+    let rawItems = [];
+    try {
+      let page = 1;
+      while (page <= MAX_AI_MODELS_PAGES) {
+        // eslint-disable-next-line no-await-in-loop
+        const resp = await transport.listWorkspaceAiModels(semrushWorkspaceId, {
+          page,
+          limit: AI_MODELS_PAGE,
+        });
+        const batch = Array.isArray(resp?.items) ? resp.items : [];
+        if (batch.length === 0) break;
+        rawItems.push(...batch);
+        if (batch.length < AI_MODELS_PAGE) break;
+        page += 1;
+      }
+    } catch {
+      // Workspace catalog endpoint may not be available — return empty list
+      // rather than surfacing a 5xx to the client.
+      rawItems = [];
+    }
+    // Workspace items may be plain model objects { id, key, name, icon } or
+    // wrapped assignments { model: { id, key, name, icon } }. Normalise both.
+    const items = rawItems
+      .map((it) => (it?.model && typeof it.model === 'object' ? it.model : it))
+      .filter((m) => m && typeof m === 'object' && hasText(m.id) && hasText(m.key))
+      .map((m) => ({
+        id: m.id,
+        key: m.key,
+        name: m.name ?? null,
+        icon: m.icon ?? null,
+      }));
+    return { items };
+  }
+
+  // Partial params: both must be provided together.
   if (geoTargetId === null || languageCode === null) {
     throw new ErrorWithStatusCode(
-      'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
+      'Provide both geoTargetId and languageCode to query a specific market, or omit both for the workspace catalog',
       400,
     );
   }
 
+  // Slice path: return models for the specific (brand, geo, language) project.
   const row = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
     geoTargetId,
