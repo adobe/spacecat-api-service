@@ -179,7 +179,9 @@ describe('Fixes Controller', () => {
         executedBy: testExternalUserId,
         changeDetails: { arbitrary: 'value 1' },
       });
-      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -210,7 +212,9 @@ describe('Fixes Controller', () => {
         executedBy: testExternalUserId,
         changeDetails: { arbitrary: 'value 1' },
       });
-      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -226,7 +230,9 @@ describe('Fixes Controller', () => {
         executedBy: testExternalUserId,
         changeDetails: { arbitrary: 'value 1' },
       });
-      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -255,7 +261,9 @@ describe('Fixes Controller', () => {
         executedBy: hexOrgUserId,
         changeDetails: { arbitrary: 'value 1' },
       });
-      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -289,7 +297,9 @@ describe('Fixes Controller', () => {
         executedBy: 'rpapani@adobe.com',
         changeDetails: { arbitrary: 'value 1' },
       });
-      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -320,7 +330,9 @@ describe('Fixes Controller', () => {
         executedBy: '',
         changeDetails: { arbitrary: 'value 1' },
       });
-      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -347,7 +359,9 @@ describe('Fixes Controller', () => {
         executedBy: testExternalUserId,
         changeDetails: { arbitrary: 'value 1' },
       });
-      fixEntityCollection.allByOpportunityId.resolves([fixEntity]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -357,6 +371,51 @@ describe('Fixes Controller', () => {
       expect(warnSpy).to.have.been.calledOnceWith(
         `Could not enrich fixes with user names: ${errorMessage}`,
       );
+    });
+
+    it('deduplicates IMS lookups when multiple fixes share the same executedBy', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'John',
+          last_name: 'Doe',
+          email: 'john.doe@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const [fixEntity1, fixEntity2] = await Promise.all([
+        fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          executedBy: testExternalUserId,
+          changeDetails: { arbitrary: 'value 1' },
+        }),
+        fixEntityCollection.create({
+          type: Suggestion.TYPES.REDIRECT_UPDATE,
+          opportunityId,
+          executedBy: testExternalUserId,
+          changeDetails: { arbitrary: 'value 2' },
+        }),
+      ]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([
+          { fixEntity: fixEntity1, suggestions: [] },
+          { fixEntity: fixEntity2, suggestions: [] },
+        ]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result).to.have.lengthOf(2);
+      expect(result[0]).to.have.property('executedByUser');
+      expect(result[1]).to.have.property('executedByUser');
+      // Both fixes share the same executedBy — the IMS API must be called only once.
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnce;
     });
 
     it('responds 404 if the fix does not belong to the given opportunity', async () => {
@@ -1064,6 +1123,11 @@ describe('Fixes Controller', () => {
 
     it('strips client-supplied executedBy when caller identity cannot be resolved', async () => {
       // No authInfo on context - callerUserId is unresolvable.
+      const warnSpy = sandbox.spy();
+      fixesController = new FixesController(
+        { dataAccess, log: { ...log, warn: warnSpy } },
+        accessControlUtil,
+      );
       requestContext.attributes = {};
       requestContext.data = [{
         type: 'CONTENT_UPDATE',
@@ -1076,7 +1140,12 @@ describe('Fixes Controller', () => {
       expect(response).includes({ status: 207 });
 
       const { fixes } = await response.json();
-      expect(fixes[0].fix.executedBy).to.not.equal('attacker@evil.org');
+      // fakeCreateFix fills the gap with 'test user' since no executedBy was passed to create();
+      // the key assertion is that the attacker-supplied value was not forwarded.
+      expect(fixes[0].fix.executedBy).to.equal('test user');
+      expect(warnSpy).to.have.been.calledOnceWith(
+        'createFixes: executedBy intent signal present but caller identity is unresolvable; executedBy will not be set',
+      );
     });
 
     it('falls back to sub claim when user_id is absent', async () => {

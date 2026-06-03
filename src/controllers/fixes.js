@@ -43,6 +43,12 @@ import { getIMSPromiseToken, exchangePromiseToken } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
+// Only pass IMS-format IDs to the admin profile API. Rejects legacy or malformed
+// values that could have been stored before the server-side derivation fix, closing
+// the residual PII exfiltration path for pre-fix data.
+const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{24})$/;
+const IMS_ENRICH_BATCH_SIZE = 5;
+
 /**
  * @typedef {Object} DataAccess
  * @property {FixEntityCollection} FixEntity
@@ -302,6 +308,11 @@ export class FixesController {
     const log = this.#ctx.log || console;
 
     const callerUserId = FixesController.#resolveCallerId(context);
+
+    const anySuppliedExecutedBy = context.data.some((d) => hasText(d.executedBy));
+    if (anySuppliedExecutedBy && !hasText(callerUserId)) {
+      log.warn('createFixes: executedBy intent signal present but caller identity is unresolvable; executedBy will not be set');
+    }
 
     // Pre-fetch site and opportunity info for documentPath enrichment of manual fixes
     const enrichmentCtx = await this.#prepareDocumentPathEnrichment(
@@ -744,11 +755,13 @@ export class FixesController {
 
   /**
    * Attaches `_executedByUser` to each fix by resolving `executedBy` IMS user IDs
-   * via the IMS admin profile API. Only called from `getAllForOpportunity`; other read
-   * endpoints (`getByStatus`, `getByID`) skip enrichment intentionally to keep those
-   * responses fast and enrichment opt-in per caller.
+   * via the IMS admin profile API. Called from `getAllForOpportunity` and `getByID`.
+   * `getByStatus` intentionally skips enrichment to avoid unbounded fan-out for
+   * potentially large result sets.
    *
-   * Fails silently so callers always get a response even when IMS is unavailable.
+   * IMS lookups are batched in groups of {@link IMS_ENRICH_BATCH_SIZE} to cap
+   * concurrency. Fails silently so callers always get a response even when IMS
+   * is unavailable.
    * @param {FixEntity[]} fixes
    */
   async #enrichFixesWithUserNames(fixes) {
@@ -756,10 +769,6 @@ export class FixesController {
       return;
     }
 
-    // Only pass IMS-format IDs to the admin profile API. Rejects legacy or malformed
-    // values that could have been stored before the server-side derivation fix, closing
-    // the residual PII exfiltration path for pre-fix data.
-    const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{24})$/;
     const userIds = [
       ...new Set(fixes.map((f) => f.getExecutedBy()).filter((id) => id && IMS_ID_RE.test(id))),
     ];
@@ -768,23 +777,26 @@ export class FixesController {
     }
 
     try {
-      const imsResults = await Promise.allSettled(
-        userIds.map((id) => this.#imsClient.getImsAdminProfile(id)),
-      );
-
       const userMap = new Map();
-      imsResults.forEach((result, i) => {
-        if (result.status === 'fulfilled') {
-          const { first_name: firstName, last_name: lastName, email } = result.value;
-          userMap.set(userIds[i], {
-            firstName: firstName || null,
-            lastName: lastName || null,
-            email: email || null,
-          });
-        } else {
-          this.#ctx.log?.warn?.(`Failed to resolve IMS profile for user [redacted]: ${result.reason?.message}`);
-        }
-      });
+      for (let i = 0; i < userIds.length; i += IMS_ENRICH_BATCH_SIZE) {
+        const batch = userIds.slice(i, i + IMS_ENRICH_BATCH_SIZE);
+        // eslint-disable-next-line no-await-in-loop
+        const batchResults = await Promise.allSettled(
+          batch.map((id) => this.#imsClient.getImsAdminProfile(id)),
+        );
+        batchResults.forEach((result, j) => {
+          if (result.status === 'fulfilled') {
+            const { first_name: firstName, last_name: lastName, email } = result.value;
+            userMap.set(batch[j], {
+              firstName: firstName || null,
+              lastName: lastName || null,
+              email: email || null,
+            });
+          } else {
+            this.#ctx.log?.warn?.(`Failed to resolve IMS profile for user [redacted]: ${result.reason?.message}`);
+          }
+        });
+      }
 
       for (const fix of fixes) {
         const userId = fix.getExecutedBy();
@@ -800,14 +812,14 @@ export class FixesController {
 
   /**
    * Resolves the authenticated caller's IMS user ID from the request context.
-   * Tries `user_id` first (S2S JWT), then `sub` (OIDC), then `email` (IMS handler fallback).
-   * Returns undefined when none of the claims are present.
+   * Tries `user_id` first (S2S JWT), then `sub` (OIDC).
+   * Returns undefined when neither claim is present.
    * @param {RequestContext} context
    * @returns {string | undefined}
    */
   static #resolveCallerId(context) {
     const profile = context.attributes?.authInfo?.getProfile?.();
-    return profile?.user_id ?? profile?.sub ?? profile?.email;
+    return profile?.user_id ?? profile?.sub;
   }
 
   /**

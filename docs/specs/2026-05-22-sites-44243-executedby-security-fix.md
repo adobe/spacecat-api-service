@@ -56,6 +56,11 @@ const callerUserId = profile?.user_id ?? profile?.sub;
 The `user_id` claim is the primary IMS user ID. `sub` is the fallback for non-IMS JWT paths. The
 resolved `callerUserId` is used as the stored value; the client-supplied string is ignored.
 
+`profile?.email` is intentionally excluded as a third fallback. An email string does not pass
+`IMS_ID_RE`, so any value stored via the email path would silently produce un-enrichable records
+at read time — creating two classes of `executedBy` values with different behaviors. If the email
+fallback becomes necessary, the regex and enrichment logic must be updated together with it.
+
 ### Known limitation: IMS auth path
 
 The IMS authentication handler (in `@adobe/helix-shared-wrap`) strips `user_id` from the profile
@@ -64,10 +69,6 @@ via `IGNORED_PROFILE_PROPS`. For callers authenticated via IMS (not S2S JWT), `p
 both are `undefined` is a silent no-op: `setExecutedBy` is not called and the stored value is
 unchanged. This is preferable to accepting the client-supplied ID, but it leaves `executedBy`
 unset for IMS-authenticated callers who do not have `sub` populated.
-
-A future improvement is to use `profile?.email` as a third fallback, since the IMS handler sets
-`email` to the IMS user's email address. This is left out of scope for this fix to keep the change
-minimal and reviewable.
 
 ## Scope
 
@@ -87,9 +88,8 @@ minimal and reviewable.
 ### Out of scope
 
 - Changing `getAllForOpportunity` enrichment logic.
-- `getByStatus` and `getByID` enrichment (flagged as a follow-up - these endpoints do not
-  currently call `#enrichFixesWithUserNames`, creating inconsistency).
-- Handling the IMS auth path `user_id`/`sub`/`email` disambiguation fully.
+- `getByStatus` enrichment — intentionally skipped to avoid unbounded IMS fan-out on large result sets.
+- Handling the IMS auth path `user_id`/`sub` disambiguation fully.
 - Adding `executedByUser` to the OpenAPI `Fix` response schema (tracked as follow-up).
 
 ## Changes
@@ -108,12 +108,12 @@ The following items were identified during review and are tracked for follow-up:
 
 1. **`executedByUser` missing from OpenAPI `Fix` response schema** - the field is returned by the
    controller but not documented in `schemas.yaml`. Add it to the `Fix` schema.
-2. **`getByStatus` and `getByID` not enriched** - `#enrichFixesWithUserNames` is called from
-   `getAllForOpportunity` only. The other two read methods return fixes without `executedByUser`,
-   creating an inconsistent API surface.
+2. **`getByStatus` not enriched** - `#enrichFixesWithUserNames` is called from `getAllForOpportunity`
+   and `getByID`. `getByStatus` intentionally omits enrichment to avoid fan-out for large result
+   sets, but this inconsistency should be documented in the API contract.
 3. **IMS auth path silent no-op** - for callers whose profile has neither `user_id` nor `sub`,
-   a client-supplied `executedBy` intent signal results in a no-op with no feedback. Consider
-   returning a `400` or using `profile?.email` as a third fallback.
+   a client-supplied `executedBy` intent signal results in a no-op with a `log.warn`. Consider
+   returning a `400` instead for clearer operator feedback.
 4. **Stale comment in `src/dto/fix.js:57`** - says "TrialUser store"; should say "IMS admin
    profile API".
 
