@@ -1232,4 +1232,101 @@ describe('handlers/markets.js — handleUpdateModels', () => {
       }, fakeLog()),
     ).to.be.rejectedWith(SerenityTransportError);
   });
+
+  it('rejects when modelIds exceeds the maximum length', async () => {
+    const da = makeDataAccess([]);
+    const tooMany = Array.from({ length: 51 }, (_, i) => `cat-${i}`);
+    await expect(
+      handleUpdateModels({}, da, BRAND, WORKSPACE, {
+        geoTargetId: 2840, languageCode: 'en', modelIds: tooMany,
+      }, fakeLog()),
+    ).to.be.rejectedWith(ErrorWithStatusCode, /exceed/);
+  });
+
+  it('deduplicates modelIds before diffing — addAiModel called only once for duplicates', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt', 'cat-gpt'] },
+      fakeLog(),
+    );
+
+    expect(transport.addAiModel).to.have.been.calledOnceWith(WORKSPACE, 'proj-1', 'cat-gpt');
+  });
+
+  it('converges correctly on retry after a partial-failure add', async () => {
+    // First invocation: add two models, second one fails.
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.addAiModel.onFirstCall().resolves({});
+    transport.addAiModel.onSecondCall().rejects(new SerenityTransportError(502, 'upstream failure'));
+
+    await expect(
+      handleUpdateModels(
+        transport,
+        da,
+        BRAND,
+        WORKSPACE,
+        { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-a', 'cat-b'] },
+        fakeLog(),
+      ),
+    ).to.be.rejectedWith(SerenityTransportError);
+
+    // After partial failure, 'cat-a' is now persisted upstream.
+    // Retry with the same desired set: diff should only add 'cat-b'.
+    const transport2 = makeTransport({
+      currentItems: [{
+        id: 'assign-a',
+        model: {
+          id: 'cat-a', key: 'model-a', name: 'Model A', icon: null,
+        },
+      }],
+    });
+    transport2.listAiModels.onSecondCall().resolves({
+      items: [
+        {
+          id: 'assign-a',
+          model: {
+            id: 'cat-a', key: 'model-a', name: 'Model A', icon: null,
+          },
+        },
+        {
+          id: 'assign-b',
+          model: {
+            id: 'cat-b', key: 'model-b', name: 'Model B', icon: null,
+          },
+        },
+      ],
+    });
+
+    const result = await handleUpdateModels(
+      transport2,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-a', 'cat-b'] },
+      fakeLog(),
+    );
+
+    expect(transport2.addAiModel).to.have.been.calledOnceWith(WORKSPACE, 'proj-1', 'cat-b');
+    expect(transport2.deleteAiModelsByIds).not.to.have.been.called;
+    expect(result.items).to.have.length(2);
+  });
 });

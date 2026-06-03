@@ -19,6 +19,7 @@ import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
+const MAX_MODEL_IDS = 50;
 
 // Reusable English region-name formatter (ICU-backed, built into Node). Used
 // for the `location_name` we send upstream — matches the form Semrush stores
@@ -776,6 +777,23 @@ export async function handleListModels(
 }
 
 /**
+ * Maps a raw Semrush assignment row to the shape returned by the models
+ * endpoints. Returns null for rows that lack a valid model id/key pair.
+ */
+function assignmentToItem(it) {
+  const m = it?.model;
+  if (!m || typeof m !== 'object' || !hasText(m.id) || !hasText(m.key)) {
+    return null;
+  }
+  return {
+    id: m.id,
+    key: m.key,
+    name: m.name ?? null,
+    icon: m.icon ?? null,
+  };
+}
+
+/**
  * PUT /serenity/models — replaces the AI-model set for a (geoTargetId,
  * languageCode) slice with the caller-supplied list. Implements a diff-based
  * sync: models absent from `modelIds` are removed; models present in
@@ -816,6 +834,12 @@ export async function handleUpdateModels(
       400,
     );
   }
+  if (modelIds.length > MAX_MODEL_IDS) {
+    throw new ErrorWithStatusCode(
+      `modelIds must not exceed ${MAX_MODEL_IDS} entries`,
+      400,
+    );
+  }
 
   const row = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
@@ -846,15 +870,7 @@ export async function handleUpdateModels(
 
   // Short-circuit: nothing to do — return the already-fetched list as-is.
   if (toAdd.length === 0 && toRemoveAssignmentIds.length === 0) {
-    const items = currentAssignments
-      .map((it) => it?.model)
-      .filter((m) => m && typeof m === 'object' && hasText(m.id) && hasText(m.key))
-      .map((m) => ({
-        id: m.id,
-        key: m.key,
-        name: m.name ?? null,
-        icon: m.icon ?? null,
-      }));
+    const items = currentAssignments.map(assignmentToItem).filter(Boolean);
     return { items };
   }
 
@@ -902,14 +918,6 @@ export async function handleUpdateModels(
 
   // Return the refreshed model list
   const updated = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
-  const items = updated
-    .map((it) => it?.model)
-    .filter((m) => m && typeof m === 'object' && hasText(m.id) && hasText(m.key))
-    .map((m) => ({
-      id: m.id,
-      key: m.key,
-      name: m.name ?? null,
-      icon: m.icon ?? null,
-    }));
+  const items = updated.map(assignmentToItem).filter(Boolean);
   return { items };
 }
