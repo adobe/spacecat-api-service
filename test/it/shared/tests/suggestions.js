@@ -438,5 +438,32 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(res.status).to.equal(404);
       });
     });
+
+    // ── S2S auto-fix access control ──
+
+    describe('PATCH .../suggestions/auto-fix (S2S capability gate)', () => {
+      before(() => resetData());
+
+      it('s2sConsumerReadOnly: returns 403 — lacks fixEntity:create capability (Layer 1)', async () => {
+        // s2sConsumerReadOnly holds site:read + site:write but not fixEntity:create.
+        // The s2sAuthWrapper rejects at Layer 1 before the controller is reached.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.patch(
+          `${BASE}/auto-fix`,
+          { suggestionIds: [SUGG_1_ID] },
+        );
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerReadAll: returns 403 — lacks fixEntity:create capability (Layer 1)', async () => {
+        // s2sConsumerReadAll holds site:readAll + organization:readAll but not fixEntity:create.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.patch(
+          `${BASE}/auto-fix`,
+          { suggestionIds: [SUGG_1_ID] },
+        );
+        expect(res.status).to.equal(403);
+      });
+    });
   });
 }
