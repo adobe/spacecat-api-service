@@ -22,7 +22,6 @@ import {
   notFound,
   authWrapper,
   enrichPathInfo,
-  LegacyApiKeyHandler,
   ScopedApiKeyHandler,
   AdobeImsHandler,
   JwtHandler,
@@ -109,9 +108,20 @@ import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
 
-const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Accept any RFC 4122 / 9562-defined UUID version (v1..v8) instead of
+// v4-only. Version nibble `[1-8]` covers all allocated versions; v0/nil
+// (reserved) and v9..vF (unallocated) are still rejected. The clock-seq
+// variant nibble is independently clamped to `[89ab]` (the `10xx` RFC
+// variant) so genuinely malformed strings still fail. Version and variant
+// are distinct UUID concepts — keeping that separation explicit in the regex.
+//
+// Why widen: producer-side IDs are progressively migrating to UUID v7 for
+// sortable keys (Mystique-allocated site/opportunity IDs already use v7),
+// and rejecting them at the API gateway breaks otherwise-valid routes
+// (e.g. GET /sites/{siteId}/opportunities returns 400 "Site Id is invalid").
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
+const isValidUUIDAnyVersion = (uuid) => uuidRegex.test(uuid);
 
 /**
  * LOCAL DEVELOPMENT ONLY - CORS middleware wrapper
@@ -137,7 +147,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product, x-promise-token',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -328,11 +338,11 @@ async function run(request, context) {
     if (routeMatch) {
       const { handler, params } = routeMatch;
 
-      if (params.siteId && !isValidUUIDV4(params.siteId)) {
+      if (params.siteId && !isValidUUIDAnyVersion(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
       if (params.organizationId
-        && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
+        && (!isValidUUIDAnyVersion(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
       if (params.spaceCatId && !isValidUUID(params.spaceCatId)) {
@@ -341,20 +351,20 @@ async function run(request, context) {
       if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
         return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
       }
-      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
+      if (params.plgOnboardingId && !isValidUUIDAnyVersion(params.plgOnboardingId)) {
         return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
-      if (params.onboardingId && !isValidUUIDV4(params.onboardingId)) {
+      if (params.onboardingId && !isValidUUIDAnyVersion(params.onboardingId)) {
         return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
       if (params.executionId && !isValidUUID(params.executionId)) {
         return badRequest('Execution Id is invalid. Please provide a valid UUID.');
       }
-      if (params.jobId && !isValidUUIDV4(params.jobId)) {
+      if (params.jobId && !isValidUUIDAnyVersion(params.jobId)) {
         return badRequest('Job Id is invalid. Please provide a valid UUID.');
       }
-      if (params.workspaceId && !isValidUUID(params.workspaceId)) {
-        return badRequest('Workspace Id is invalid. Please provide a valid UUID.');
+      if (params.preflightId && !isValidUUID(params.preflightId)) {
+        return badRequest('Preflight Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;
@@ -375,7 +385,7 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 // Wrapper execution order (helix-shared-wrap: last .with() = outermost = runs first):
 // 1. s2sAuthWrapper — intercepts S2S JWT bearer tokens, passes through non-S2S to authWrapper
-// 2. authWrapper — handles JWT, IMS, scoped API key, legacy API key
+// 2. authWrapper — handles JWT, IMS, scoped API key, route-scoped legacy API key
 // 3. readOnlyAdminWrapper — enforces read-only access for read-only admin tokens (see
 //    adobe/spacecat-shared#1469); routes not present in routeCapabilities default to deny
 //    (fail-closed), so unmapped routes are blocked for read-only admins
@@ -387,7 +397,8 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 //    BEFORE path-agnostic handlers so a webhook request does not reach JwtHandler
 //    / AdobeImsHandler and fail with a misleading 401 on a missing JWT.
 //  - JwtHandler: tried first for token-bearing requests (JWT path is the target
-//    end-state for all consumers).
+//    end-state for all consumers). S2S consumers use s2sAuthWrapper; all new
+//    service integrations must onboard via S2S (SITES-34224).
 //  - ApiKeyImsHandler: route-scoped IMS handler (/tools/api-keys/*) for IaaS-only
 //    orgs that cannot acquire a JWT session token. Returns null for other paths,
 //    falling through to AdobeImsHandler. Once Auto-Fix (ASO-607) migrates and
@@ -396,13 +407,12 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 //  - AdobeImsHandler: legacy global IMS path; kept for routes still on IMS auth
 //    (e.g. Auto-Fix). To be removed once all consumers are JWT-migrated.
 //  - ScopedApiKeyHandler: scoped API-key auth for Import-as-a-Service.
-//  - RouteScopedLegacyApiKeyHandler: route-scoped legacy API key handler for
-//    POST /event/fulfillment and POST /slack/channels/invite-by-user-id — the two
-//    admin endpoints whose callers cannot migrate to S2S. Returns null for all
-//    other routes. Must run BEFORE LegacyApiKeyHandler so the scoped handler owns
-//    those two routes explicitly. LegacyApiKeyHandler is kept for now and will be
-//    removed in a follow-up once all other consumers are confirmed migrated.
-//  - LegacyApiKeyHandler: legacy catch-all; to be removed in follow-up.
+//  - RouteScopedLegacyApiKeyHandler: the only remaining legacy-key surface. Owns
+//    exactly two routes whose external callers cannot be onboarded as IMS S2S
+//    consumers: POST /event/fulfillment (external fulfillment webhook) and
+//    POST /slack/channels/invite-by-user-id (external Slack integration).
+//    Returns null for every other path. The list is frozen — no new routes will
+//    be added; every new service integration must use S2S (SITES-34224).
 // When adding a new path-scoped handler, place it in the same position (after
 // SkipAuthHandler, before the path-agnostic handlers) to preserve early-bail.
 // AUTH_HANDLERS order is enforced by test/auth-handlers-order.test.js.
@@ -414,7 +424,6 @@ const AUTH_HANDLERS = [
   AdobeImsHandler,
   ScopedApiKeyHandler,
   RouteScopedLegacyApiKeyHandler,
-  LegacyApiKeyHandler,
 ];
 
 const wrappedMain = wrap(run)

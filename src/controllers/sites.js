@@ -45,10 +45,15 @@ import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
+import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
+import {
+  ensureSiteEntitlementAndEnrollment,
+  logSiteOrphanedAfterCreate,
+  resolveProductCode,
+} from '../support/tier-provisioning.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -354,37 +359,66 @@ function SitesController(ctx, log, env) {
    *
    * Alternative: If strict REST semantics are preferred, 409 Conflict is also valid.
    *
+   * Write-time tier provisioning: when a site is newly created, it ensures org entitlement and
+   * site enrollment via TierClient using the existing tier when present, otherwise FREE_TRIAL.
+   * Idempotent re-POSTs do not run provisioning.
+   * Provisioning failures return 500 with `event=site_orphaned_after_create`.
+   *
    * @param {object} context - Request context containing site data
    * @returns {Promise<Response>} HTTP 200 with existing site or 201 with new site
    */
   const createSite = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can create new sites');
+    const isAdmin = accessControlUtil.hasAdminAccess();
+    if (!isAdmin) {
+      const s2sResult = await accessControlUtil.hasS2SCapability(CAP_SITE_CREATE);
+      if (!s2sResult.allowed) {
+        log.info(`[acl] Denied POST /sites - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+        return forbidden('Only admins can create new sites');
+      }
     }
     if (!hasText(context.data?.baseURL)) {
       return badRequest('Base URL required');
     }
+    const { productCode, error: productCodeError } = resolveProductCode(context);
+    if (productCodeError) {
+      return badRequest(productCodeError);
+    }
+    let site;
+    let status;
     try {
       const baseURL = composeBaseURL(context.data.baseURL);
       const existingSite = await Site.findByBaseURL(baseURL);
       if (existingSite) {
         // Idempotent behavior: return existing site with 200 (not 409)
         log.info(`Site already exists for baseURL: ${baseURL}, returning existing site ${existingSite.getId()}`);
-        return createResponse(SiteDto.toJSON(existingSite), 200);
+        site = existingSite;
+        status = 200;
+      } else {
+        site = await Site.create({
+          organizationId: env.DEFAULT_ORGANIZATION_ID,
+          ...context.data,
+          baseURL, // override with normalized value
+        });
+        updateRumConfig(site, context).catch((e) => {
+          log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
+        });
+        status = 201;
       }
-      const site = await Site.create({
-        organizationId: env.DEFAULT_ORGANIZATION_ID,
-        ...context.data,
-        baseURL, // override with normalized value
-      });
-      updateRumConfig(site, context).catch((e) => {
-        log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
-      });
-      return createResponse(SiteDto.toJSON(site), 201);
     } catch (error) {
       log.error(`Error creating site: ${error.message}`, error);
       return internalServerError('Failed to create site');
     }
+
+    if (productCode && status === 201) {
+      try {
+        await ensureSiteEntitlementAndEnrollment(context, site, productCode, log);
+      } catch (error) {
+        logSiteOrphanedAfterCreate(log, site, productCode, error);
+        return internalServerError('Failed to ensure entitlement/enrollment for site');
+      }
+    }
+
+    return createResponse(SiteDto.toJSON(site), status);
   };
 
   /**
@@ -1146,6 +1180,62 @@ function SitesController(ctx, log, env) {
   };
 
   /**
+   * GET /sites/:siteId/config/scraper
+   *
+   * Returns just the per-site scraper configuration. Symmetric with the
+   * PATCH endpoint below — same narrow `{ siteId, scraperConfig }` shape
+   * so a caller writing then reading sees an identical envelope, and the
+   * full site config (which may include unrelated secrets such as
+   * `tokowakaConfig.apiKey`) is never echoed to a caller that only needs
+   * `scraperConfig`.
+   *
+   * Returns `scraperConfig: {}` when nothing is persisted yet, so callers
+   * don't need to handle a separate "missing" case.
+   */
+  const getScraperConfig = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Invalid site ID');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Only users belonging to the organization can read its sites');
+      }
+
+      // Defensive optional chain: `??` only protects the innermost return value.
+      // `getConfig()` itself can be null (matches `getBrandProfile` precedent on
+      // sites without a persisted config row), and `getScraperConfig` may not
+      // exist on Config objects produced by older `@adobe/spacecat-shared-data-
+      // access` versions if a deploy ever drifts. Either way, treat it as the
+      // documented "nothing persisted" case.
+      const raw = site.getConfig()?.getScraperConfig?.();
+      if (raw === null) {
+        // `undefined` is the normal "never written" case the JSDoc documents.
+        // `null` specifically means the field was explicitly cleared or that
+        // the persisted row went through an out-of-band edit — surface it so
+        // a post-hoc forensics pass can tell the two apart, but do not change
+        // the response shape callers depend on.
+        log.warn(`[getScraperConfig] site ${siteId} returned null scraperConfig (treating as empty)`);
+      }
+
+      return ok({
+        siteId: site.getId(),
+        scraperConfig: raw ?? {},
+      });
+    } catch (error) {
+      log.error(`Error getting scraper config for site ${siteId}: ${error.message}`, error);
+      throw error;
+    }
+  };
+
+  /**
    * PATCH /sites/:siteId/config/scraper
    *
    * Replaces the entire `scraperConfig` on the site. Passing
@@ -1582,6 +1672,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    getScraperConfig,
     updateScraperConfig,
     getPageCitabilityCounts,
     getTopPages,

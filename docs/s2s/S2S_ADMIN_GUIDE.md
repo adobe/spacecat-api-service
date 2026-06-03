@@ -235,8 +235,6 @@ Headers:
 }
 ```
 
----
-
 ### 3. Suspend Consumer
 
 Temporarily disables a consumer's access without permanent revocation.
@@ -443,6 +441,7 @@ All capabilities must follow the format: `entity:operation`
 | `fixEntity:write` | **RESTRICTED** | Never grant under any circumstances |
 | `site:write` | **RESTRICTED** | Critical write access, rarely granted |
 | `organization:write` | **RESTRICTED** | Critical write access, rarely granted |
+| `site:create` | **RESTRICTED** | Admin-gated site creation for S2S consumers; explicit grant required |
 | `admin:*` | **INVALID** | Invalid capability |
 
 ### Restricted Capabilities
