@@ -919,6 +919,19 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(stub).to.have.callCount(2);
   });
 
+  it('listModels (catalog mode) stops at MAX_AI_MODELS_PAGES (5) when upstream always returns full pages', async () => {
+    const dataAccess = makeDataAccess([]);
+    const fullPage = Array.from({ length: 100 }, (_, i) => ({
+      id: `cat-${i}`, key: `model-${i}`, name: null, icon: null,
+    }));
+    // Always return a full page — the ceiling guard must terminate the loop.
+    const stub = sinon.stub().resolves({ items: fullPage });
+    const transport = { listGlobalAiModels: stub };
+    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
+    expect(stub).to.have.callCount(5);
+    expect(result.items).to.have.lengthOf(500);
+  });
+
   it('listModels (catalog mode) also normalises wrapped assignment items from workspace endpoint', async () => {
     const dataAccess = makeDataAccess([]);
     const transport = {
