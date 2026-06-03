@@ -1,4 +1,4 @@
-# ADR-003: Preflight Request-ID Header
+# ADR-004: Preflight Request-ID Header
 
 ## Context
 
