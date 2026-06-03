@@ -11,8 +11,10 @@
  */
 
 /**
- * This file contains HTTP status code constants used throughout the application.
+ * Shared constants used across the application (HTTP status codes, headers, and enums).
  */
+
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
 export const STATUS_BAD_REQUEST = 400;
 export const STATUS_ACCEPTED = 202;
@@ -23,6 +25,17 @@ export const STATUS_NO_CONTENT = 204;
 export const STATUS_NOT_FOUND = 404;
 export const STATUS_OK = 200;
 export const STATUS_INTERNAL_SERVER_ERROR = 500;
+
+export const X_PROMISE_TOKEN_HEADER = 'x-promise-token';
+
+export const MISSING_X_PROMISE_TOKEN_MESSAGE = `Invalid request: missing required header: ${X_PROMISE_TOKEN_HEADER}`;
+
+/** Authoring types that use IMS promise-token auth (CS, CS_CW, AMS). */
+export const PROMISE_BASED_AUTHORING_TYPES = [
+  SiteModel.AUTHORING_TYPES.CS,
+  SiteModel.AUTHORING_TYPES.CS_CW,
+  SiteModel.AUTHORING_TYPES.AMS,
+];
 
 /**
  * Report types enum
