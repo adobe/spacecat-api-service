@@ -1285,6 +1285,439 @@ describe('Preflight Controller', () => {
         status: 'IN_PROGRESS',
       });
     });
+
+    // -- isAuditEnabledForSite error / not-found paths --
+
+    it('returns 403 PREFLIGHT_NOT_ENABLED when the preflight handler is not in Configuration', async () => {
+      mockConfiguration.getHandlers.returns({}); // no `preflight` handler
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+      });
+      expect(response.status).to.equal(403);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_NOT_ENABLED');
+    });
+
+    it('returns 403 PREFLIGHT_NOT_ENABLED when the preflight handler has no productCodes', async () => {
+      mockConfiguration.getHandlers.returns({
+        preflight: {
+          // no productCodes
+          enabledByDefault: false,
+          enabled: { sites: ['test-site-123'], orgs: [] },
+          disabled: { sites: [], orgs: [] },
+        },
+      });
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+      });
+      expect(response.status).to.equal(403);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_NOT_ENABLED');
+    });
+
+    it('returns 403 PREFLIGHT_NOT_ENABLED when TierClient.createForSite throws (caught, returns false)', async () => {
+      // Rebuild the controller so the TierClient esmock rejects this run.
+      const ControllerWithFailingTier = await esmock('../../src/controllers/preflight.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          TierClient: { createForSite: sandbox.stub().rejects(new Error('tier-client-down')) },
+        },
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
+        },
+      });
+      const controller = ControllerWithFailingTier(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+      });
+      expect(response.status).to.equal(403);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_NOT_ENABLED');
+    });
+
+    // -- enableAuthentication=true path (HEAD returns 401) --
+
+    it('forwards Authorization header to Mysticat for auth-required URL with promiseToken cookie', async () => {
+      // First fetch (HEAD): 401 → enableAuthentication=true.
+      // Use CS_CW so resolvePromiseToken consults the cookie (PROMISE_BASED_TYPES = [CS, CS_CW, AMS]).
+      fetchStub.resetBehavior();
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+      fetchStub.onSecondCall().resolves({ ok: true });
+      const cwSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
+        getDeliveryType: () => 'aem_edge',
+      };
+      mockDataAccess.Site.findById.resolves(cwSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(cwSite);
+
+      const mockRetrievePageAuth = sandbox.stub().resolves('page-access-token');
+      const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          retrievePageAuthentication: mockRetrievePageAuth,
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
+        },
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
+        },
+      });
+      const controller = ControllerWithIms(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: { cookie: 'promiseToken=cookie-token' } },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        pathInfo: { headers: { cookie: 'promiseToken=cookie-token' } },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      const [, mystiOpts] = fetchStub.secondCall.args;
+      // CS_CW authoring type with promiseToken → isBearer false (DeliveryType !== AEM_CS) → 'token <token>'
+      expect(mystiOpts.headers.Authorization).to.equal('token page-access-token');
+      expect(mockRetrievePageAuth).to.have.been.calledOnce;
+    });
+
+    it('returns 400 when resolvePromiseToken throws ErrorWithStatusCode', async () => {
+      fetchStub.resetBehavior();
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+      fetchStub.onSecondCall().resolves({ ok: true });
+      const csSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+        getDeliveryType: () => 'aem_cs',
+      };
+      mockDataAccess.Site.findById.resolves(csSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
+      const ControllerWithStubbed = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getIMSPromiseToken: async () => {
+            throw new utils.ErrorWithStatusCode('Missing Authorization header', 400);
+          },
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
+        },
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
+        },
+      });
+      const controller = ControllerWithStubbed(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 500 when resolvePromiseToken throws a non-ErrorWithStatusCode error', async () => {
+      fetchStub.resetBehavior();
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+      fetchStub.onSecondCall().resolves({ ok: true });
+      const csSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+        getDeliveryType: () => 'aem_cs',
+      };
+      mockDataAccess.Site.findById.resolves(csSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
+      const ControllerWithStubbed = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getIMSPromiseToken: async () => { throw new Error('IMS down'); },
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
+        },
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
+        },
+      });
+      const controller = ControllerWithStubbed(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+    });
+
+    it('returns 500 when retrievePageAuthentication throws', async () => {
+      fetchStub.resetBehavior();
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+      fetchStub.onSecondCall().resolves({ ok: true });
+      const csSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+        getDeliveryType: () => 'aem_cs',
+      };
+      mockDataAccess.Site.findById.resolves(csSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
+      const mockRetrievePageAuth = sandbox.stub().rejects(new Error('IMS down'));
+      const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          retrievePageAuthentication: mockRetrievePageAuth,
+        },
+        '../../src/support/utils.js': {
+          ...utils,
+          getIMSPromiseToken: async () => ({ promise_token: 'ims-token' }),
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
+        },
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
+        },
+      });
+      const controller = ControllerWithIms(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.equal('Error retrieving page authentication');
+    });
+
+    // -- AsyncJob / Preflight create failure paths --
+
+    it('returns 500 when AsyncJob.create throws', async () => {
+      mockDataAccess.AsyncJob.create.rejects(new Error('db down'));
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.equal('Failed to create async job');
+    });
+
+    it('omits promiseToken from authOptions for non-promise-based authoring (SP) when auth required', async () => {
+      // Covers the falsy side of `promiseTokenObj ? { promiseToken: ... } : {}`.
+      // SP authoring → resolvePromiseToken returns null (not in PROMISE_BASED_TYPES).
+      // retrievePageAuthentication is still called for page-protected sites,
+      // but with an empty options object.
+      fetchStub.resetBehavior();
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+      fetchStub.onSecondCall().resolves({ ok: true });
+      const spSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+        getDeliveryType: () => 'aem_edge',
+      };
+      mockDataAccess.Site.findById.resolves(spSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(spSite);
+
+      const mockRetrievePageAuth = sandbox.stub().resolves('sp-page-token');
+      const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          retrievePageAuthentication: mockRetrievePageAuth,
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
+        },
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
+        },
+      });
+      const controller = ControllerWithIms(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      expect(mockRetrievePageAuth).to.have.been.calledWithMatch(
+        sinon.match.any, sinon.match.any, {},
+      );
+    });
+
+    it('uses Bearer prefix for AEM_CS site with promiseToken cookie', async () => {
+      // Covers the `isBearer` branch where DeliveryType === AEM_CS && promiseTokenObj truthy.
+      fetchStub.resetBehavior();
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+      fetchStub.onSecondCall().resolves({ ok: true });
+      const csSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+        getDeliveryType: () => 'aem_cs',
+      };
+      mockDataAccess.Site.findById.resolves(csSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
+
+      const mockRetrievePageAuth = sandbox.stub().resolves('cs-token');
+      const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          retrievePageAuthentication: mockRetrievePageAuth,
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
+        },
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
+        },
+      });
+      const controller = ControllerWithIms(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: { cookie: 'promiseToken=cookie-token' } },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        pathInfo: { headers: { cookie: 'promiseToken=cookie-token' } },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      const [, mystiOpts] = fetchStub.secondCall.args;
+      expect(mystiOpts.headers.Authorization).to.equal('Bearer cs-token');
+    });
+
+    it('falls back to profile.name and profile.email when first_name/last_name are absent', async () => {
+      // Covers the createdBy displayName fallback ladder (`first_name + last_name` empty → `name`)
+      // and the email '|| unknown' default.
+      const profileNameOnly = {
+        getProfile: () => ({ name: 'Solo Name', email: 'solo@example.com' }),
+      };
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: profileNameOnly },
+      });
+      expect(response.status).to.equal(202);
+      expect(mockDataAccess.Preflight.create).to.have.been.calledWithMatch({
+        createdBy: { email: 'solo@example.com', displayName: 'Solo Name' },
+      });
+    });
+
+    it('falls back to profile.email as displayName when first_name/last_name/name are all absent', async () => {
+      const profileEmailOnly = {
+        getProfile: () => ({ email: 'just-email@example.com' }),
+      };
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: profileEmailOnly },
+      });
+      expect(response.status).to.equal(202);
+      expect(mockDataAccess.Preflight.create).to.have.been.calledWithMatch({
+        createdBy: { email: 'just-email@example.com', displayName: 'just-email@example.com' },
+      });
+    });
+
+    it('returns 500 and rolls back the AsyncJob when Preflight.create throws', async () => {
+      const removeStub = sandbox.stub().resolves();
+      mockDataAccess.AsyncJob.create.resolves({ ...mockJob, remove: removeStub });
+      mockDataAccess.Preflight.create.rejects(new Error('preflight insert failed'));
+
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.equal('Failed to create preflight record');
+      expect(removeStub).to.have.been.calledOnce;
+    });
   });
 
   describe('getPreflightJobStatusAndResult', () => {
