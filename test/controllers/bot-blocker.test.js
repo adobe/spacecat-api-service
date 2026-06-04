@@ -250,6 +250,34 @@ describe('Bot Blocker Controller', () => {
       expect(detectBotBlockerStub).to.have.been.calledWith({ baseUrl: baseURL, headers: {} });
     });
 
+    it('falls back to empty headers when getConfig() returns null', async () => {
+      // Defensive `?.` on getConfig() must short-circuit cleanly if a site
+      // ever surfaces a null Config object (e.g. partially-initialized site).
+      mockDataAccess.Site.findById = sandbox.stub().resolves({
+        ...mockSite,
+        getConfig: () => null,
+      });
+      detectBotBlockerStub.resolves({ crawlable: true, type: 'none', confidence: 1.0 });
+
+      const response = await botBlockerController.checkBotBlocker({ params: { siteId } });
+
+      expect(response.status).to.equal(200);
+      expect(detectBotBlockerStub).to.have.been.calledWith({ baseUrl: baseURL, headers: {} });
+    });
+
+    it('falls back to empty headers when scraperConfig has no headers key', async () => {
+      // Sites may persist scraperConfig with other future fields (e.g. timeout)
+      // but no headers property. The `|| {}` fallback must catch the
+      // `undefined` headers and pass an empty object to the probe.
+      siteConfig.getScraperConfig = sandbox.stub().returns({ timeout: 5000 });
+      detectBotBlockerStub.resolves({ crawlable: true, type: 'none', confidence: 1.0 });
+
+      const response = await botBlockerController.checkBotBlocker({ params: { siteId } });
+
+      expect(response.status).to.equal(200);
+      expect(detectBotBlockerStub).to.have.been.calledWith({ baseUrl: baseURL, headers: {} });
+    });
+
     it('returns internal server error when detectBotBlocker throws an error', async () => {
       const error = new Error('Network error');
       detectBotBlockerStub.rejects(error);
