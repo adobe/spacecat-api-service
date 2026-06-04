@@ -1,3 +1,10 @@
+# [1.551.0](https://github.com/adobe/spacecat-api-service/compare/v1.550.0...v1.551.0) (2026-06-04)
+
+
+### Features
+
+* **bot-blocker:** forward scraperConfig.headers to detectBotBlocker probe ([#2556](https://github.com/adobe/spacecat-api-service/issues/2556)) ([18256a4](https://github.com/adobe/spacecat-api-service/commit/18256a43971ee4d20dafd26c760d3e7d1fbc8b17))
+
 # [1.550.0](https://github.com/adobe/spacecat-api-service/compare/v1.549.1...v1.550.0) (2026-06-04)
 
 
