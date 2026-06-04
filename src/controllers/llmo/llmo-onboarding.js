@@ -1270,6 +1270,8 @@ function extractImsBearer(context) {
  *
  * @param {object} context - The request context (env, log, dataAccess, auth).
  * @param {object} args
+ * @param {string} args.orgId - SpaceCat org ID, tagged on each per-tuple
+ *   `serenity_project_fanout` metric so Coralogix can group by cohort (LLMO-5206).
  * @param {string} args.brandId - The brand UUID (from M4 `upsertBrand`).
  * @param {string} args.workspaceId - The org's Semrush workspace ID (M5-validated).
  * @param {string} args.brandName - The brand name from the onboard request.
@@ -1278,7 +1280,7 @@ function extractImsBearer(context) {
  * @returns {Promise<{requested: object[], succeeded: object[], failed: object[]}>}
  */
 export async function performSerenityFanOut(context, {
-  brandId, workspaceId, brandName, baseURL, markets,
+  orgId, brandId, workspaceId, brandName, baseURL, markets,
 }) {
   const { env, log } = context;
   const requested = (Array.isArray(markets) ? markets : [])
@@ -1334,7 +1336,11 @@ export async function performSerenityFanOut(context, {
       brandNames: [brandName.trim()],
     };
 
+    // T4 (LLMO-5206): time each tuple so Coralogix can chart per-tuple fan-out
+    // latency. The clock spans only the upstream create+publish+row write.
+    const startedAt = Date.now();
     let outcome;
+    let thrown;
     try {
       // Sequential by design (prototype): one upstream create+publish at a time.
       // TODO(LLMO-GA): add a time-budget guard before GA — worst case 50 tuples
@@ -1350,25 +1356,32 @@ export async function performSerenityFanOut(context, {
         log,
       );
     } catch (e) {
-      // SerenityTransportError carries the full upstream URL (including workspace
-      // ID) in its message — never forward that to API callers. Unexpected errors
-      // may be safely echoed since they originate in our own code.
+      // SerenityTransportError (upstream non-2xx) or an unexpected throw — record
+      // it and fall through to the per-tuple metric; the loop continues. The
+      // message is sanitized below (it can carry the upstream URL + workspace ID).
+      thrown = e;
+    }
+    const durationMs = Date.now() - startedAt;
+
+    let success;
+    if (thrown) {
+      // SerenityTransportError.message contains the full upstream URL (including
+      // the workspace ID) — never forward it to API callers; map to a safe token.
+      // Unexpected errors originate in our own code and are safe to echo.
       failed.push({
         market,
         language,
-        status: e.status || 502,
-        error: e instanceof SerenityTransportError ? 'semrushUpstreamError' : e.message,
+        status: thrown.status || 502,
+        error: thrown instanceof SerenityTransportError ? 'semrushUpstreamError' : thrown.message,
       });
-      // eslint-disable-next-line no-continue
-      continue;
-    }
-
-    // 201 = newly created; 409 = slice already exists (idempotent success).
-    // Neither response echoes the project id or geo target, so this fan-out
-    // entry just records the tuple — M8 (`reconcileSerenityProjects`) reads the
-    // authoritative semrushProjectId + geoTargetId back from the DB.
-    if (outcome.status === 201 || outcome.status === 409) {
+      success = false;
+    } else if (outcome.status === 201 || outcome.status === 409) {
+      // 201 = newly created; 409 = slice already exists (idempotent success).
+      // Neither response echoes the project id or geo target, so this fan-out
+      // entry just records the tuple — M8 (`reconcileSerenityProjects`) reads the
+      // authoritative semrushProjectId + geoTargetId back from the DB.
       succeeded.push({ market, language });
+      success = true;
     } else {
       failed.push({
         market,
@@ -1376,7 +1389,18 @@ export async function performSerenityFanOut(context, {
         status: outcome.status,
         error: outcome.body?.error || 'unknownError',
       });
+      success = false;
     }
+
+    // T4 (LLMO-5206): one structured metric per tuple. No PII — orgId only.
+    log.info('serenity_project_fanout', {
+      event: 'serenity_project_fanout',
+      orgId,
+      market,
+      language,
+      success,
+      durationMs,
+    });
   }
 
   return { requested, succeeded, failed };
@@ -1511,8 +1535,29 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       imsOrgId,
       env,
     );
+    if (serenityEnabled) {
+      // T4 (LLMO-5206): emitted before M5 so the dashboard counts every cohort
+      // onboarding attempt as the denominator for the success rate. No PII —
+      // orgId/domain/marketCount only (domain is the customer's public site).
+      log.info('serenity_onboarding_start', {
+        event: 'serenity_onboarding_start',
+        orgId: organization.getId(),
+        // HTTP onboarding always supplies `domain`; the Slack path supplies only
+        // `baseURL`, so fall back to its hostname to never log `undefined`.
+        // `baseURL` is already URL-validated above (generateDataFolder parses it).
+        domain: domain || new URL(baseURL).hostname,
+        marketCount: markets?.length ?? 0,
+      });
+    }
     if (serenityEnabled && !organization.getSemrushWorkspaceId()) {
       const spaceCatId = organization.getId();
+      // T4 (LLMO-5206): the M5 fail-fast branch — counts cohort onboardings
+      // blocked because no Semrush workspace is bound to the org.
+      log.info('serenity_onboarding_blocked', {
+        event: 'serenity_onboarding_blocked',
+        reason: 'no_workspace',
+        orgId: spaceCatId,
+      });
       const workspaceError = new Error(
         `Semrush workspace not bound to org ${spaceCatId}. `
         + `Run PATCH /organizations/${spaceCatId} with { semrushWorkspaceId: ... } `
@@ -1670,8 +1715,12 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         // A failed M4 brand upsert leaves `upsertedBrand` undefined; the fan-out
         // detects the missing brand id and fails every tuple cleanly.
         const brandId = upsertedBrand?.id ?? null;
+        // T4 (LLMO-5206): time the whole fan-out + read-back so the dashboard
+        // can chart end-to-end provisioning latency per onboarding.
+        const provisioningStartedAt = Date.now();
         // M7: fan out one Semrush project per (market, language) tuple.
         const fanOut = await performSerenityFanOut(context, {
+          orgId: organization.getId(),
           brandId,
           workspaceId: organization.getSemrushWorkspaceId(),
           brandName,
@@ -1683,7 +1732,17 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           brandId,
           fanOut,
         });
+        const totalDurationMs = Date.now() - provisioningStartedAt;
         log.info(`Serenity provisioning for org ${organization.getId()}: ${serenityProvisioning.succeeded.length} of ${serenityProvisioning.requested.length} project(s) live, ${serenityProvisioning.failed.length} failed (LLMO-5007)`);
+        // T4 (LLMO-5206): the M8 readiness result — drives the success-rate
+        // numerator and end-to-end latency. No PII — orgId and counts only.
+        log.info('serenity_onboarding_complete', {
+          event: 'serenity_onboarding_complete',
+          orgId: organization.getId(),
+          succeeded: serenityProvisioning.succeeded.length,
+          failed: serenityProvisioning.failed.length,
+          totalDurationMs,
+        });
       }
 
       // Trigger Brandalf immediately after the v2 config exists so downstream

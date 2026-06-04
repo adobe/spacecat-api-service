@@ -3635,6 +3635,25 @@ describe('LLMO Onboarding Functions', () => {
         market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
       }]);
       expect(result.serenity.failed).to.be.empty;
+
+      // T4 (LLMO-5206): the start metric fires before M5 with the cohort denominator.
+      expect(mockLog.info).to.have.been.calledWith('serenity_onboarding_start', sinon.match({
+        event: 'serenity_onboarding_start',
+        orgId: 'org-serenity-cohort',
+        domain: 'example.com',
+        marketCount: 1,
+      }));
+      // T4 (LLMO-5206): the complete metric fires after the read-back with counts + latency.
+      const completeCall = mockLog.info.getCalls()
+        .find((c) => c.args[0] === 'serenity_onboarding_complete');
+      expect(completeCall, 'expected a serenity_onboarding_complete metric').to.exist;
+      expect(completeCall.args[1]).to.include({
+        event: 'serenity_onboarding_complete',
+        orgId: 'org-serenity-cohort',
+        succeeded: 1,
+        failed: 0,
+      });
+      expect(completeCall.args[1].totalDurationMs).to.be.a('number').and.to.be.at.least(0);
     });
 
     it('warns and skips provisioning when an allowlisted org resolves to v1 (LLMO-5007)', async () => {
@@ -3787,6 +3806,76 @@ describe('LLMO Onboarding Functions', () => {
       // neither site creation nor any later config/audit step.
       expect(mockDataAccess.Site.create).to.not.have.been.called;
       expect(mockDataAccess.Configuration.findLatest).to.not.have.been.called;
+      // T4 (LLMO-5206): the start metric still fires (denominator), then the
+      // blocked metric records the M5 fail-fast reason.
+      expect(mockLog.info).to.have.been.calledWith('serenity_onboarding_start', sinon.match({
+        event: 'serenity_onboarding_start', orgId: 'org-serenity-cohort', marketCount: 0,
+      }));
+      expect(mockLog.info).to.have.been.calledWith('serenity_onboarding_blocked', sinon.match({
+        event: 'serenity_onboarding_blocked', reason: 'no_workspace', orgId: 'org-serenity-cohort',
+      }));
+    });
+
+    it('derives the start-metric domain from baseURL hostname when no domain is supplied (Slack path, LLMO-5206)', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org-serenity-cohort'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+        // No workspace → fail fast right after the start metric fires.
+        getSemrushWorkspaceId: sinon.stub().returns(null),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves({ getId: sinon.stub().returns('site123') });
+
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, [SERENITY_SITE_ALLOWLIST]: 'org-serenity-cohort' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      // Slack path: pass baseURL (no domain). The start metric must fall back to
+      // the hostname rather than logging `domain: undefined`.
+      try {
+        await performLlmoOnboardingWithMocks({ baseURL: 'https://slack-cohort.example', brandName: 'Test Brand', imsOrgId: 'ABC123@AdobeOrg' }, context);
+      } catch {
+        // expected M5 fail-fast 404 — irrelevant to this assertion
+      }
+
+      expect(mockLog.info).to.have.been.calledWith('serenity_onboarding_start', sinon.match({
+        event: 'serenity_onboarding_start',
+        orgId: 'org-serenity-cohort',
+        domain: 'slack-cohort.example',
+        marketCount: 0,
+      }));
     });
 
     it('should skip serenity provisioning when org is not in SERENITY_SITE_ALLOWLIST', async () => {
@@ -3876,6 +3965,7 @@ describe('LLMO Onboarding Functions', () => {
     let createTransportStub;
 
     const baseArgs = {
+      orgId: 'org-1',
       brandId: 'brand-uuid-1',
       workspaceId: 'ws-1',
       brandName: 'Example Brand',
@@ -4105,6 +4195,35 @@ describe('LLMO Onboarding Functions', () => {
           market: 'US', language: 'en', status: 502, error: 'boom',
         },
       ]);
+    });
+
+    it('emits a serenity_project_fanout metric per tuple with orgId, success and durationMs (LLMO-5206)', async () => {
+      const hcp = sinon.stub();
+      hcp.onCall(0).resolves({ status: 201, body: { brandId: 'brand-uuid-1' } });
+      hcp.onCall(1).resolves({ status: 502, body: { error: 'semrushUpstreamError' } });
+      const performSerenityFanOut = await loadFanOut(hcp);
+
+      await performSerenityFanOut(makeContext(), baseArgs);
+
+      const fanoutEvents = log.info.getCalls()
+        .filter((c) => c.args[0] === 'serenity_project_fanout')
+        .map((c) => c.args[1]);
+      expect(fanoutEvents).to.have.length(2);
+
+      // US succeeded (201); DE failed (502). orgId tagged; durationMs is numeric.
+      expect(fanoutEvents[0]).to.include({
+        event: 'serenity_project_fanout', orgId: 'org-1', market: 'US', language: 'en', success: true,
+      });
+      expect(fanoutEvents[0].durationMs).to.be.a('number').and.to.be.at.least(0);
+      expect(fanoutEvents[1]).to.include({
+        event: 'serenity_project_fanout', orgId: 'org-1', market: 'DE', language: 'de', success: false,
+      });
+      expect(fanoutEvents[1].durationMs).to.be.a('number').and.to.be.at.least(0);
+
+      // No PII: the metric carries only orgId/market/language/success/durationMs.
+      expect(Object.keys(fanoutEvents[0]).sort()).to.deep.equal(
+        ['durationMs', 'event', 'language', 'market', 'orgId', 'success'],
+      );
     });
   });
 
