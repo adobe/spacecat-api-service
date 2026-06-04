@@ -1,3 +1,10 @@
+# [1.550.0](https://github.com/adobe/spacecat-api-service/compare/v1.549.1...v1.550.0) (2026-06-04)
+
+
+### Features
+
+* slack alert on skipping a suggestion in PLG ([#2505](https://github.com/adobe/spacecat-api-service/issues/2505)) ([7310afa](https://github.com/adobe/spacecat-api-service/commit/7310afa771ad231b335ca440075ea7da0d2be7ee))
+
 ## [1.549.1](https://github.com/adobe/spacecat-api-service/compare/v1.549.0...v1.549.1) (2026-06-04)
 
 
