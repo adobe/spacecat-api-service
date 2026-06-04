@@ -53,32 +53,41 @@ export async function handleBrandPromptsExport(sp, clients) {
     PROMPT_CATEGORY_ENUM.CITES_TARGET,
   ];
 
-  const promptsRequest = fromJson(
-    PromptsRequestSchema,
-    {
-      country,
-      llm: engine,
-      target: { domain, name: domain },
-      order: {
-        by: sortBy,
-        direction: sortDirection,
+  let exportRequest;
+  try {
+    const promptsRequest = fromJson(
+      PromptsRequestSchema,
+      {
+        country,
+        llm: engine,
+        target: { domain, name: domain },
+        order: {
+          by: sortBy,
+          direction: sortDirection,
+        },
+        range: { limit, offset },
+        categories,
+        dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
+        target_date: date,
       },
-      range: { limit, offset },
-      categories,
-      dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
-      target_date: date,
-    },
-    PROTO_FROM_JSON,
-  );
+      PROTO_FROM_JSON,
+    );
 
-  const exportRequest = fromJson(
-    PromptsExportRequestSchema,
-    {
-      request: promptsRequest,
-      format: EXPORT_FILE_FORMAT_ENUM.CSV,
-    },
-    PROTO_FROM_JSON,
-  );
+    exportRequest = fromJson(
+      PromptsExportRequestSchema,
+      {
+        request: promptsRequest,
+        format: EXPORT_FILE_FORMAT_ENUM.CSV,
+      },
+      PROTO_FROM_JSON,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid brand prompts export request';
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message },
+    };
+  }
 
   try {
     const exportMessage = await clients.promptClient.promptsExport(exportRequest);
