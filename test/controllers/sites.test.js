@@ -134,6 +134,7 @@ describe('Sites Controller', () => {
     'removeSite',
     'updateSite',
     'updateCdnLogsConfig',
+    'getScraperConfig',
     'updateScraperConfig',
     'getPageCitabilityCounts',
     'getTopPages',
@@ -305,6 +306,109 @@ describe('Sites Controller', () => {
     expect(response.status).to.equal(403);
     const error = await response.json();
     expect(error).to.have.property('message', 'Only admins can create new sites');
+  });
+
+  describe('POST /sites - S2S site:create capability', () => {
+    function makeS2SConsumer({ clientId = 'svc-sandbox', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
+      return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
+    }
+
+    function makeFreshConsumer({
+      id = 'consumer-id-sandbox',
+      capabilities = ['site:write'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) {
+      return {
+        getId: () => id,
+        getCapabilities: () => capabilities,
+        getStatus: () => status,
+        isRevoked: () => revoked,
+      };
+    }
+
+    beforeEach(() => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      mockDataAccess.Consumer = { findByClientIdAndImsOrgId: sandbox.stub() };
+    });
+
+    it('grants access to S2S consumer with capabilities: [site:create]', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:create'] }));
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    });
+
+    it('denies S2S consumer without capability (missing-capability) → 403', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: [] }));
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Only admins can create new sites');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/sites - reason=missing-capability/,
+      );
+    });
+
+    it('denies non-S2S non-admin caller (not-s2s) → 403', async () => {
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Only admins can create new sites');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/sites - reason=not-s2s/,
+      );
+    });
+
+    it('admin user bypasses capability check entirely → 201', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.not.have.been.called;
+    });
+
+    it('denies revoked S2S consumer (revoked) → 403', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ revoked: true }));
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Only admins can create new sites');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/sites - reason=revoked/,
+      );
+    });
+
+    it('denies suspended S2S consumer (not-active) → 403', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ status: 'SUSPENDED' }));
+
+      const result = await sitesController.createSite({ data: { baseURL: 'https://newsite.com' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Only admins can create new sites');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/sites - reason=not-active/,
+      );
+    });
   });
 
   it('returns bad request when creating a site without baseURL', async () => {
@@ -4691,6 +4795,152 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Failed to update CDN logs config');
+    });
+  });
+
+  describe('getScraperConfig', () => {
+    /* eslint-disable no-param-reassign */
+    const stubSiteWithScraperConfig = (site, headers) => {
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'getScraperConfig', {
+        value: () => (headers ? { headers } : undefined),
+        writable: true,
+        configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+      return wrapped;
+    };
+    /* eslint-enable no-param-reassign */
+
+    it('returns the persisted scraperConfig in the narrow response shape', async () => {
+      const site = sites[0];
+      const headers = { 'Accept-Language': 'en-US,en;q=0.9' };
+      stubSiteWithScraperConfig(site, headers);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        siteId: SITE_IDS[0],
+        scraperConfig: { headers },
+      });
+    });
+
+    it('returns an empty object when no scraperConfig is persisted', async () => {
+      const site = sites[0];
+      stubSiteWithScraperConfig(site, null);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      // Lock the "no missing case" contract: callers always get an object.
+      expect(body).to.deep.equal({ siteId: SITE_IDS[0], scraperConfig: {} });
+    });
+
+    it('returns bad request when site ID is invalid', async () => {
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: 'not-a-uuid' },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Invalid site ID');
+    });
+
+    it('returns not found when the site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(404);
+      expect((await response.json()).message).to.equal('Site not found');
+    });
+
+    it('returns forbidden when the user lacks access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('treats a null site.getConfig() as the documented "nothing persisted" case', async () => {
+      // Locks defensive-optional-chain behavior: even when the model returns
+      // null from getConfig() (which happens for sites without a persisted
+      // config row), the endpoint must not throw — it should return the
+      // documented `{}` envelope.
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(null);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.deep.equal({
+        siteId: SITE_IDS[0],
+        scraperConfig: {},
+      });
+    });
+
+    it('logs a warning when scraperConfig is null (vs undefined) and still returns empty', async () => {
+      // null specifically — vs the undefined "never written" case — should
+      // produce a forensics breadcrumb without changing the response shape.
+      const site = sites[0];
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'getScraperConfig', {
+        value: () => null, writable: true, configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+
+      const response = await sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.deep.equal({
+        siteId: SITE_IDS[0],
+        scraperConfig: {},
+      });
+      expect(loggerStub.warn).to.have.been.calledWithMatch(
+        sinon.match((val) => typeof val === 'string'
+          && val.includes('null scraperConfig')
+          && val.includes(SITE_IDS[0])),
+      );
+    });
+
+    it('propagates findById failures as 5xx after logging', async () => {
+      // Transient infra errors (DB throttling, IMS hiccup on hasAccess, etc.)
+      // must produce a CloudWatch breadcrumb so the on-call can find them.
+      const failure = new Error('Transient DB error');
+      mockDataAccess.Site.findById.rejects(failure);
+
+      await expect(sitesController.getScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      })).to.be.rejectedWith(/Transient DB error/);
+
+      expect(loggerStub.error).to.have.been.calledWithMatch(
+        sinon.match((val) => typeof val === 'string'
+          && val.includes('Error getting scraper config for site')
+          && val.includes(SITE_IDS[0])),
+      );
     });
   });
 

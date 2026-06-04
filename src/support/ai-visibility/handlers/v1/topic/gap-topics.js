@@ -20,8 +20,6 @@ import {
 import {
   GapTopicsRequestSchema,
   GapTopicsResponseSchema,
-  GapTopicsTotalsRequestSchema,
-  GapTopicsTotalsResponseSchema,
 } from '@quazar/ai-seo-ts/v2/topic/messages_pb.js';
 import { TOPICS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
 import {
@@ -39,7 +37,7 @@ import {
 } from '../../../grpc-utils.js';
 
 /* c8 ignore start */
-function buildGapTopicsDimensionFilterQl(sp) {
+export function buildGapTopicsDimensionFilterQl(sp) {
   const q = sp.get('searchQuery');
   if (!q) {
     return '';
@@ -50,7 +48,7 @@ function buildGapTopicsDimensionFilterQl(sp) {
 /**
  * @returns {{ ok: true, metricFilterQl: string } | { ok: false, status: number, body: object }}
  */
-function buildGapTopicsMetricFilterQl(sp) {
+export function buildGapTopicsMetricFilterQl(sp) {
   const volFrom = sp.get('volumeFrom');
   const volTo = sp.get('volumeTo');
   if (!isValidVolume(volFrom) || !isValidVolume(volTo)) {
@@ -75,6 +73,7 @@ export async function handleGapTopics(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || TOPICS_REQUEST_ORDER_BY_ENUM.TOTAL_COMPETITOR_MENTIONS;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
+  const date = sp.get('date');
   const { limit, offset } = parseLimitOffset(sp);
 
   const gapKindsRaw = sp.get('gapKinds');
@@ -87,7 +86,6 @@ export async function handleGapTopics(sp, clients) {
   }
 
   let listRequest;
-  let totalsRequest;
   try {
     listRequest = fromJson(
       GapTopicsRequestSchema,
@@ -104,19 +102,7 @@ export async function handleGapTopics(sp, clients) {
         range: { limit, offset },
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
-      },
-      PROTO_FROM_JSON,
-    );
-
-    totalsRequest = fromJson(
-      GapTopicsTotalsRequestSchema,
-      {
-        country,
-        llm: engine,
-        target: { domain, name: domain },
-        competitors: competitorDomains.map(brandTarget),
-        dimension_filter_ql: dimensionFilterQl,
-        metric_filter_ql: metricFilterResult.metricFilterQl,
+        target_date: date,
       },
       PROTO_FROM_JSON,
     );
@@ -129,23 +115,16 @@ export async function handleGapTopics(sp, clients) {
   }
 
   try {
-    const [topicsMessage, totalsMessage] = await Promise.all([
-      clients.topicClient.gapTopics(listRequest),
-      clients.topicClient.gapTopicsTotals(totalsRequest),
-    ]);
+    const topicsMessage = await clients.topicClient.gapTopics(listRequest);
 
     const topicsJson = /** @type {{ topics?: object[] }} */ (
       toJson(GapTopicsResponseSchema, topicsMessage, PROTO_TO_JSON)
-    );
-    const totalsJson = /** @type {{ totals?: object[] }} */ (
-      toJson(GapTopicsTotalsResponseSchema, totalsMessage, PROTO_TO_JSON)
     );
 
     return {
       status: 200,
       body: {
         data: topicsJson.topics ?? [],
-        totals: totalsJson.totals ?? [],
       },
     };
   } catch (error) {

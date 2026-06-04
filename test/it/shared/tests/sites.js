@@ -624,6 +624,71 @@ export default function siteTests(getHttpClient, resetData) {
       });
     });
 
+    describe('GET /sites/:siteId/config/scraper', () => {
+      let scraperSiteId;
+
+      before(async () => {
+        await resetData();
+        const http = getHttpClient();
+        const res = await http.admin.post('/sites', {
+          baseURL: 'https://scraper-config-get-test-scoped.example.com',
+        });
+        expect(res.status).to.equal(201);
+        scraperSiteId = res.body.id;
+      });
+
+      it('user: returns empty scraperConfig when none persisted', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${scraperSiteId}/config/scraper`);
+        expect(res.status).to.equal(200);
+        // Locks the "no missing case" contract — GET always returns an object,
+        // even before any PATCH has been applied.
+        expect(res.body).to.have.all.keys('siteId', 'scraperConfig');
+        expect(res.body.siteId).to.equal(scraperSiteId);
+        expect(res.body.scraperConfig).to.deep.equal({});
+      });
+
+      it('user: returns persisted scraperConfig after PATCH', async () => {
+        const http = getHttpClient();
+        const payload = {
+          scraperConfig: {
+            headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+          },
+        };
+        const patchRes = await http.user.patch(
+          `/sites/${scraperSiteId}/config/scraper`,
+          payload,
+        );
+        expect(patchRes.status).to.equal(200);
+
+        const getRes = await http.user.get(`/sites/${scraperSiteId}/config/scraper`);
+        expect(getRes.status).to.equal(200);
+        // GET response shape must equal what PATCH returned — same envelope,
+        // same body. If a writer-then-reader sees a different shape, callers
+        // would have to handle two formats. Lock equality here.
+        expect(getRes.body).to.deep.equal(patchRes.body);
+      });
+
+      it('user: returns 403 for a denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_3_ID}/config/scraper`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${NON_EXISTENT_SITE_ID}/config/scraper`);
+        expect(res.status).to.equal(404);
+      });
+
+      it('admin: returns 400 when site ID is malformed', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/not-a-uuid/config/scraper');
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/site id is invalid/i);
+      });
+    });
+
     describe('DELETE /sites/:siteId', () => {
       it('admin: returns 403 (restricted)', async () => {
         const http = getHttpClient();

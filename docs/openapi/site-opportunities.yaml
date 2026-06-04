@@ -598,7 +598,7 @@ site-opportunity-suggestions-edge-deploy:
                           type: integer
                         autoCovered:
                           type: integer
-                          description: Number of additional suggestions auto-marked as deployed by domain-wide config
+                          description: Number of additional suggestions auto-marked as deployed by domain-wide or path-level config
                         message:
                           type: string
                           description: Present when autoCovered > 0
@@ -873,6 +873,11 @@ site-opportunity-suggestions-auto-fix:
       is true (for assess or assess-urls), the worker runs only checks that do not require
       AEM CS access and does not need a valid promise token; when omitted or false, behavior
       is unchanged (full assessment with AEM when possible).
+
+      **S2S access:** S2S consumers registered with the `fixEntity:create` capability may
+      call this endpoint. The `auto_fix` IMS user-profile scope check is bypassed for S2S
+      callers; all other validations (site ownership, opportunity lookup, handler enablement)
+      apply unchanged.
     tags:
       - opportunity-suggestions
     requestBody:

@@ -19,10 +19,13 @@ import {
   accepted, noContent, badRequest, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import wrap from '@adobe/helix-shared-wrap';
-import { getSkipReason, EVENT_JOB_MAP, isMysticatTargetedSkip } from '../utils/github-trigger-rules.js';
+import {
+  getSkipReason, EVENT_JOB_MAP, isMysticatTargetedSkip, skipReasonLabel,
+} from '../utils/github-trigger-rules.js';
 import { createObservabilitySlackClient } from '../support/slack/observability-client.js';
 import { enqueuedParentText, skippedStandaloneText } from '../support/slack/observability-messages.js';
 import { shouldRateLimitSlackPost } from '../support/slack/observability-rate-limit.js';
+import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
 
 const DEFAULT_WORKSPACE_REPOS = [
   'adobe/mysticat-architecture',
@@ -80,6 +83,7 @@ function WebhooksController(context) {
         return await fn(ctx);
       } catch (e) {
         log.error('GitHub webhook handler error', e);
+        emitMetric({ name: 'WebhookHandlerError', dimensions: { Reason: 'uncaught_exception' } }, { environment: resolveEnvironment(env) });
         return internalServerError('Internal error');
       }
     };
@@ -94,154 +98,220 @@ function WebhooksController(context) {
     const deliveryId = ctx.pathInfo?.headers?.['x-github-delivery'];
     const { data } = ctx;
 
-    // Destination resolved by the HMAC handler (registry mode). Legacy mode has
-    // no profile target_id/app_slug -> fall back to env.GITHUB_APP_SLUG and emit
-    // no target_id (worker then resolves its flat keys).
-    const profile = ctx.attributes?.authInfo?.getProfile?.() || {};
-    const targetId = profile.target_id;
-    const appSlug = profile.app_slug || env.GITHUB_APP_SLUG;
+    const environment = resolveEnvironment(env);
+    const startedAt = Date.now();
+    let outcome = 'unknown';
 
-    // Security-relevant: which bot can trigger automated runs. In registry mode
-    // this comes from the target's appSlug; in legacy mode from env. A missing
-    // value must be a 5xx (GitHub retries) rather than a 204 (delivery lost).
-    if (!appSlug) {
-      log.error('No app slug resolved (GITHUB_APP_SLUG unset and no target app_slug)', { deliveryId });
-      return internalServerError('app slug not configured');
-    }
+    try {
+      // Filter on event type BEFORE validating payload fields or requiring a
+      // reviewer identity. Unmapped events (ping, push, issues, ...) do not
+      // necessarily carry `action`/`installation.id` — GitHub's app-install ping
+      // has neither — and must 204, not 400/500, or they surface as red Xs in the
+      // app's "Recent Deliveries" UI. Mapped events get full validation below.
+      const jobType = EVENT_JOB_MAP[event];
 
-    // Filter on event type BEFORE validating payload fields. Unmapped events
-    // (ping, push, issues, ...) do not necessarily carry `action` or
-    // `installation.id`. GitHub's app-install ping has neither — validating
-    // first would 400 the install handshake and surface as red Xs in the
-    // app's "Recent Deliveries" UI. Mapped events still get full validation
-    // below.
-    const jobType = EVENT_JOB_MAP[event];
-    if (!jobType) {
-      log.info('Skipping unmapped event', { event, deliveryId });
-      return noContent();
-    }
+      emitMetric({ name: 'WebhookReceived', dimensions: { Event: event } }, { environment });
 
-    // Validate required payload fields (mapped events only)
-    if (!data?.action) {
-      return badRequest('Missing required field: action');
-    }
-    if (!data?.installation?.id) {
-      return badRequest('Missing required field: installation.id');
-    }
-
-    const { action, pull_request: pr } = data;
-
-    // Validate pull_request-specific fields BEFORE getSkipReason. Doing so
-    // prevents a missing pull_request from surfacing as a misleading
-    // "non-default branch: undefined" 204 skip instead of a 400 bad request.
-    if (!pr?.number) {
-      return badRequest('Missing required field: pull_request.number');
-    }
-    if (!data.repository?.owner?.login) {
-      return badRequest('Missing required field: repository.owner.login');
-    }
-    if (!data.repository?.name) {
-      return badRequest('Missing required field: repository.name');
-    }
-
-    // Apply trigger rules (returns skip reason string or null)
-    const skipReason = getSkipReason(data, action, env, appSlug);
-    if (skipReason) {
-      log.info('Skipping webhook', {
-        skipReason,
-        deliveryId,
-        event,
-        action,
-        owner: data.repository.owner.login,
-        repo: data.repository.name,
-        prNumber: pr.number,
-      });
-      // Post a standalone Slack note only when Mysticat WAS the requested
-      // reviewer (draft / bot / non-default branch). Foreign-reviewer and
-      // unsupported-action skips stay silent. Best-effort + rate-limited per PR;
-      // postMessage never throws.
-      if (
-        slack.enabled
-        && isMysticatTargetedSkip(skipReason)
-        && !shouldRateLimitSlackPost(`${data.repository.owner.login}/${data.repository.name}#${pr.number}`)
-      ) {
-        await slack.postMessage({
-          text: skippedStandaloneText({
-            owner: data.repository.owner.login,
-            repo: data.repository.name,
-            prNumber: pr.number,
-            reason: skipReason,
-          }),
-        });
+      if (!jobType) {
+        log.info('Skipping unmapped event', { event, deliveryId });
+        emitMetric(
+          { name: 'WebhookSkipped', dimensions: { SkipReason: 'unmapped_event' } },
+          { environment },
+        );
+        outcome = 'skipped';
+        return noContent();
       }
-      return noContent();
-    }
 
-    // Post the Slack thread root BEFORE enqueue (ordering invariant: parent
-    // before enqueue, never after). Best-effort - a Slack failure must never
-    // block the review, so we still enqueue. On parent-post failure we send
-    // slack_channel only (no thread_ts); the worker degrades to a standalone.
-    // When Slack is disabled or rate-limited we omit observability entirely.
-    let observability;
-    if (
-      slack.enabled
-      && !shouldRateLimitSlackPost(`${data.repository.owner.login}/${data.repository.name}#${pr.number}`)
-    ) {
-      const threadTs = await slack.postMessage({
-        text: enqueuedParentText({
+      // Destination + reviewer identity resolved by the HMAC handler from the
+      // consolidated GITHUB_DESTINATIONS registry (every authenticated webhook
+      // carries target_id + reviewer_login).
+      const profile = ctx.attributes?.authInfo?.getProfile?.() || {};
+      const targetId = profile.target_id;
+      const reviewerLogin = profile.reviewer_login;
+
+      // Security-relevant: which login may trigger automated runs. reviewer_login
+      // is required on every destination entry, so a missing value means a
+      // misconfigured registry or a request that bypassed the handler. Fail closed
+      // with a 5xx (GitHub retries; visible failed delivery), not a 204 (lost).
+      if (!reviewerLogin) {
+        log.error('No reviewer login resolved (auth profile missing reviewer_login)', { deliveryId });
+        emitMetric({ name: 'WebhookHandlerError', dimensions: { Reason: 'missing_reviewer_login' } }, { environment });
+        outcome = 'handler_error';
+        return internalServerError('reviewer login not configured');
+      }
+
+      // Validate required payload fields (mapped events only)
+      if (!data?.action) {
+        emitMetric(
+          { name: 'WebhookBadRequest', dimensions: { MissingField: 'action' } },
+          { environment },
+        );
+        outcome = 'bad_request';
+        return badRequest('Missing required field: action');
+      }
+      if (!data?.installation?.id) {
+        emitMetric(
+          { name: 'WebhookBadRequest', dimensions: { MissingField: 'installation.id' } },
+          { environment },
+        );
+        outcome = 'bad_request';
+        return badRequest('Missing required field: installation.id');
+      }
+
+      const { action, pull_request: pr } = data;
+
+      // Validate pull_request-specific fields BEFORE getSkipReason. Doing so
+      // prevents a missing pull_request from surfacing as a misleading
+      // "non-default branch: undefined" 204 skip instead of a 400 bad request.
+      if (!pr?.number) {
+        emitMetric(
+          { name: 'WebhookBadRequest', dimensions: { MissingField: 'pull_request.number' } },
+          { environment },
+        );
+        outcome = 'bad_request';
+        return badRequest('Missing required field: pull_request.number');
+      }
+      if (!data.repository?.owner?.login) {
+        emitMetric(
+          { name: 'WebhookBadRequest', dimensions: { MissingField: 'repository.owner.login' } },
+          { environment },
+        );
+        outcome = 'bad_request';
+        return badRequest('Missing required field: repository.owner.login');
+      }
+      if (!data.repository?.name) {
+        emitMetric(
+          { name: 'WebhookBadRequest', dimensions: { MissingField: 'repository.name' } },
+          { environment },
+        );
+        outcome = 'bad_request';
+        return badRequest('Missing required field: repository.name');
+      }
+
+      // Apply trigger rules (returns skip reason string or null)
+      const skipReason = getSkipReason(data, action, reviewerLogin);
+      if (skipReason) {
+        log.info('Skipping webhook', {
+          skipReason,
+          deliveryId,
+          event,
+          action,
           owner: data.repository.owner.login,
           repo: data.repository.name,
           prNumber: pr.number,
-          action,
-          jobType,
-          requestedBy: data.sender?.login,
-          author: pr.user?.login,
-        }),
+        });
+        // Post a standalone Slack note only when Mysticat WAS the requested
+        // reviewer (draft / bot / non-default branch). Foreign-reviewer and
+        // unsupported-action skips stay silent. Best-effort + rate-limited per PR;
+        // postMessage never throws.
+        if (
+          slack.enabled
+          && isMysticatTargetedSkip(skipReason)
+          && !shouldRateLimitSlackPost(`${data.repository.owner.login}/${data.repository.name}#${pr.number}`)
+        ) {
+          await slack.postMessage({
+            text: skippedStandaloneText({
+              owner: data.repository.owner.login,
+              repo: data.repository.name,
+              prNumber: pr.number,
+              reason: skipReason,
+            }),
+          });
+        }
+        emitMetric(
+          { name: 'WebhookSkipped', dimensions: { SkipReason: skipReasonLabel(skipReason) } },
+          { environment },
+        );
+        outcome = 'skipped';
+        return noContent();
+      }
+
+      // Post the Slack thread root BEFORE enqueue (ordering invariant: parent
+      // before enqueue, never after). Best-effort - a Slack failure must never
+      // block the review, so we still enqueue. On parent-post failure we send
+      // slack_channel only (no thread_ts); the worker degrades to a standalone.
+      // When Slack is disabled or rate-limited we omit observability entirely.
+      let observability;
+      if (
+        slack.enabled
+        && !shouldRateLimitSlackPost(`${data.repository.owner.login}/${data.repository.name}#${pr.number}`)
+      ) {
+        const threadTs = await slack.postMessage({
+          text: enqueuedParentText({
+            owner: data.repository.owner.login,
+            repo: data.repository.name,
+            prNumber: pr.number,
+            action,
+            jobType,
+            requestedBy: data.sender?.login,
+            author: pr.user?.login,
+          }),
+        });
+        observability = threadTs
+          ? { slack_channel: slackChannel, slack_thread_ts: threadTs }
+          : { slack_channel: slackChannel };
+      }
+
+      // Computed per webhook request (not per controller construction) so the
+      // env-var validation log fires only on genuine deliveries, not all traffic.
+      const workspaceRepos = getWorkspaceRepos(env, log);
+
+      // Build and enqueue job payload
+      const jobPayload = {
+        owner: data.repository.owner.login,
+        repo: data.repository.name,
+        event_type: event,
+        event_action: action,
+        event_ref: String(pr.number),
+        installation_id: String(data.installation.id),
+        delivery_id: deliveryId,
+        job_type: jobType,
+        workspace_repos: workspaceRepos,
+        retry_count: 0,
+        ...(targetId ? { target_id: targetId } : {}),
+        ...(observability ? { observability } : {}),
+      };
+
+      const queueUrl = env.MYSTICAT_GITHUB_JOBS_QUEUE_URL;
+      try {
+        await sqs.sendMessage(queueUrl, jobPayload);
+      } catch (e) {
+        emitMetric({ name: 'WebhookEnqueueFailure' }, { environment });
+        outcome = 'enqueue_failure';
+        throw e;
+      }
+
+      log.info('Enqueued webhook job', {
+        jobType,
+        deliveryId,
+        event,
+        action,
+        owner: jobPayload.owner,
+        repo: jobPayload.repo,
+        prNumber: pr.number,
+        installationId: jobPayload.installation_id,
+        // Resolved destination id, for traffic-distribution observability (per the
+        // PR #2503 review recommendation).
+        targetId,
       });
-      observability = threadTs
-        ? { slack_channel: slackChannel, slack_thread_ts: threadTs }
-        : { slack_channel: slackChannel };
+
+      emitMetric(
+        { name: 'WebhookEnqueued', dimensions: { JobType: jobType, TargetId: targetId } },
+        { environment },
+      );
+      outcome = 'enqueued';
+      return accepted({ status: 'accepted' });
+    } finally {
+      emitMetric(
+        {
+          name: 'WebhookProcessingMillis',
+          value: Date.now() - startedAt,
+          unit: 'Milliseconds',
+          dimensions: { Outcome: outcome },
+        },
+        { environment },
+      );
     }
-
-    // Computed per webhook request (not per controller construction) so the
-    // env-var validation log fires only on genuine deliveries, not all traffic.
-    const workspaceRepos = getWorkspaceRepos(env, log);
-
-    // Build and enqueue job payload
-    const jobPayload = {
-      owner: data.repository.owner.login,
-      repo: data.repository.name,
-      event_type: event,
-      event_action: action,
-      event_ref: String(pr.number),
-      installation_id: String(data.installation.id),
-      delivery_id: deliveryId,
-      job_type: jobType,
-      workspace_repos: workspaceRepos,
-      retry_count: 0,
-      ...(targetId ? { target_id: targetId } : {}),
-      ...(observability ? { observability } : {}),
-    };
-
-    const queueUrl = env.MYSTICAT_GITHUB_JOBS_QUEUE_URL;
-    await sqs.sendMessage(queueUrl, jobPayload);
-
-    log.info('Enqueued webhook job', {
-      jobType,
-      deliveryId,
-      event,
-      action,
-      owner: jobPayload.owner,
-      repo: jobPayload.repo,
-      prNumber: pr.number,
-      installationId: jobPayload.installation_id,
-      // Classification outcome, for traffic-distribution observability (per the
-      // PR #2503 review recommendation). 'legacy' = GITHUB_TARGETS unset, so the
-      // worker resolves its flat keys; otherwise the resolved destination id.
-      targetId: targetId || 'legacy',
-    });
-
-    return accepted({ status: 'accepted' });
   })
     .with(errorHandler);
 

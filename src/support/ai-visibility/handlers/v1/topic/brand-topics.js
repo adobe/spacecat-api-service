@@ -19,8 +19,6 @@ import {
 import {
   BrandTopicsRequestSchema,
   BrandTopicsResponseSchema,
-  BrandTopicsTotalsRequestSchema,
-  BrandTopicsTotalsResponseSchema,
 } from '@quazar/ai-seo-ts/v2/topic/messages_pb.js';
 import {
   BRAND_TOPICS_ORDER_BY_ENUM,
@@ -40,7 +38,7 @@ import {
 } from '../../../grpc-utils.js';
 
 /* c8 ignore start */
-function buildBrandTopicsDimensionFilterQl(sp) {
+export function buildBrandTopicsDimensionFilterQl(sp) {
   const q = sp.get('searchQuery');
   if (!q) {
     return '';
@@ -51,7 +49,7 @@ function buildBrandTopicsDimensionFilterQl(sp) {
 /**
  * @returns {{ ok: true, metricFilterQl: string } | { ok: false, status: number, body: object }}
  */
-function buildBrandTopicsMetricFilterQl(sp) {
+export function buildBrandTopicsMetricFilterQl(sp) {
   const volFrom = sp.get('volumeFrom');
   const volTo = sp.get('volumeTo');
   if (!isValidVolume(volFrom) || !isValidVolume(volTo)) {
@@ -96,6 +94,7 @@ export async function handleBrandTopics(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
+  const date = sp.get('date');
   const { limit, offset } = parseLimitOffset(sp);
 
   const dimensionFilterQl = buildBrandTopicsDimensionFilterQl(sp);
@@ -124,41 +123,22 @@ export async function handleBrandTopics(sp, clients) {
       categories,
       dimension_filter_ql: dimensionFilterQl,
       metric_filter_ql: metricFilterQl,
-    },
-    PROTO_FROM_JSON,
-  );
-
-  const totalsRequest = fromJson(
-    BrandTopicsTotalsRequestSchema,
-    {
-      country,
-      llm: engine,
-      target: { domain, name: domain },
-      categories,
-      dimension_filter_ql: dimensionFilterQl,
-      metric_filter_ql: metricFilterQl,
+      target_date: date,
     },
     PROTO_FROM_JSON,
   );
 
   try {
-    const [topicsMessage, totalsMessage] = await Promise.all([
-      clients.topicClient.brandTopics(listRequest),
-      clients.topicClient.brandTopicsTotals(totalsRequest),
-    ]);
+    const topicsMessage = await clients.topicClient.brandTopics(listRequest);
 
     const topicsJson = /** @type {{ topics?: object[] }} */ (
       toJson(BrandTopicsResponseSchema, topicsMessage, PROTO_TO_JSON)
-    );
-    const totalsJson = /** @type {{ total?: string|number }} */ (
-      toJson(BrandTopicsTotalsResponseSchema, totalsMessage, PROTO_TO_JSON)
     );
 
     return {
       status: 200,
       body: {
         data: topicsJson.topics ?? [],
-        total: totalsJson.total ?? 0,
       },
     };
   } catch (error) {
