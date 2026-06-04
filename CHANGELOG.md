@@ -1,3 +1,59 @@
+# [1.550.0](https://github.com/adobe/spacecat-api-service/compare/v1.549.1...v1.550.0) (2026-06-04)
+
+
+### Features
+
+* slack alert on skipping a suggestion in PLG ([#2505](https://github.com/adobe/spacecat-api-service/issues/2505)) ([7310afa](https://github.com/adobe/spacecat-api-service/commit/7310afa771ad231b335ca440075ea7da0d2be7ee))
+
+## [1.549.1](https://github.com/adobe/spacecat-api-service/compare/v1.549.0...v1.549.1) (2026-06-04)
+
+
+### Bug Fixes
+
+* bump @adobe/spacecat-shared-utils to 1.116.6 ([#2553](https://github.com/adobe/spacecat-api-service/issues/2553)) ([2121fce](https://github.com/adobe/spacecat-api-service/commit/2121fce8978aa6563b77fb4e27b618b19985f98b)), closes [#2552](https://github.com/adobe/spacecat-api-service/issues/2552)
+
+# [1.549.0](https://github.com/adobe/spacecat-api-service/compare/v1.548.0...v1.549.0) (2026-06-04)
+
+
+### Features
+
+* **s2s:** expose GET /sites/:siteId/user-activities to S2S consumers via trialUser:read ([#2554](https://github.com/adobe/spacecat-api-service/issues/2554)) ([ab5db2f](https://github.com/adobe/spacecat-api-service/commit/ab5db2fd79ec74f8cc25c51eabc5ada13b99e1cc))
+
+# [1.548.0](https://github.com/adobe/spacecat-api-service/compare/v1.547.0...v1.548.0) (2026-06-03)
+
+
+### Features
+
+* **serenity:** server-side tag filtering for prompts list ([#2547](https://github.com/adobe/spacecat-api-service/issues/2547)) ([ef3a226](https://github.com/adobe/spacecat-api-service/commit/ef3a22695929e9f4d384cb975c52915863f713d1))
+
+# [1.547.0](https://github.com/adobe/spacecat-api-service/compare/v1.546.0...v1.547.0) (2026-06-03)
+
+
+### Features
+
+* **preflight:** resolve x-promise-token header to create a preflight job ([#2548](https://github.com/adobe/spacecat-api-service/issues/2548)) ([aa7191e](https://github.com/adobe/spacecat-api-service/commit/aa7191e919c4e7b185da8af6144d570f731f09a3))
+
+# [1.546.0](https://github.com/adobe/spacecat-api-service/compare/v1.545.0...v1.546.0) (2026-06-03)
+
+
+### Features
+
+* **serenity:** PUT /serenity/models — update AI models for a market slice ([#2545](https://github.com/adobe/spacecat-api-service/issues/2545)) ([1454f48](https://github.com/adobe/spacecat-api-service/commit/1454f489f67a65023e278090b89dcb7c15f43b71))
+
+# [1.545.0](https://github.com/adobe/spacecat-api-service/compare/v1.544.0...v1.545.0) (2026-06-03)
+
+
+### Features
+
+* add site-scoped preflight REST endpoints | SITES-44686 ([#2478](https://github.com/adobe/spacecat-api-service/issues/2478)) ([824e020](https://github.com/adobe/spacecat-api-service/commit/824e02071824aa9b8552d029af84025e4d97ad94)), closes [#2377](https://github.com/adobe/spacecat-api-service/issues/2377) [#2480](https://github.com/adobe/spacecat-api-service/issues/2480) [#2544](https://github.com/adobe/spacecat-api-service/issues/2544)
+
+# [1.544.0](https://github.com/adobe/spacecat-api-service/compare/v1.543.0...v1.544.0) (2026-06-03)
+
+
+### Features
+
+* Add info-level log message for each preflight start ([#2539](https://github.com/adobe/spacecat-api-service/issues/2539)) ([257ac4e](https://github.com/adobe/spacecat-api-service/commit/257ac4e7942ce637cade90bda1e8baccf436e46c))
+
 # [1.543.0](https://github.com/adobe/spacecat-api-service/compare/v1.542.2...v1.543.0) (2026-06-03)
 
 

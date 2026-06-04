@@ -76,7 +76,7 @@ All endpoints require `Authorization: Bearer <ims_user_token>` and `organization
 
 | Method | Path | Purpose | OperationId |
 |---|---|---|---|
-| GET | `/serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=` | List prompts for one slice. Both filters required. | `listSerenityPrompts` |
+| GET | `/serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds=` | List prompts for one slice. geoTargetId and languageCode required. tagIds is repeatable (OR semantics, max 50). | `listSerenityPrompts` |
 | POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode) | `createSerenityPrompts` |
 | PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + new fields | `updateSerenityPrompt` |
 | POST | `/serenity/prompts/bulk-delete` | Delete prompts; body is `{ prompts: [{semrushPromptId, geoTargetId, languageCode}] }` | `bulkDeleteSerenityPrompts` |
