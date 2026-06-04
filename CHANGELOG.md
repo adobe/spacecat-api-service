@@ -1,3 +1,10 @@
+# [1.549.0](https://github.com/adobe/spacecat-api-service/compare/v1.548.0...v1.549.0) (2026-06-04)
+
+
+### Features
+
+* **s2s:** expose GET /sites/:siteId/user-activities to S2S consumers via trialUser:read ([#2554](https://github.com/adobe/spacecat-api-service/issues/2554)) ([ab5db2f](https://github.com/adobe/spacecat-api-service/commit/ab5db2fd79ec74f8cc25c51eabc5ada13b99e1cc))
+
 # [1.548.0](https://github.com/adobe/spacecat-api-service/compare/v1.547.0...v1.548.0) (2026-06-03)
 
 
