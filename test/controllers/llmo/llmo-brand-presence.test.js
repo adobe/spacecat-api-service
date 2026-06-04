@@ -22,6 +22,7 @@ import {
   promptIdForDetailResponse,
   topicLabelForDetailResponse,
   aggregateDetailSources,
+  aggregateSentimentByDay,
   aggregateSentimentByWeek,
   aggregateTopicData,
   aggregateWeeklyDetailStats,
@@ -2508,6 +2509,141 @@ describe('llmo-brand-presence', () => {
     });
   });
 
+  describe('aggregateSentimentByDay', () => {
+    it('returns empty array for empty input', () => {
+      expect(aggregateSentimentByDay([])).to.deep.equal([]);
+    });
+
+    it('deduplicates same prompt key within a day', () => {
+      const rows = [
+        {
+          execution_date: '2026-06-01', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-06-01', sentiment: 'negative', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByDay(rows);
+
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].totalPrompts).to.equal(1);
+      expect(result[0].promptsWithSentiment).to.equal(1);
+    });
+
+    it('produces two buckets for same prompt on two different days', () => {
+      const rows = [
+        {
+          execution_date: '2026-06-01', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-06-02', sentiment: 'negative', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByDay(rows);
+
+      expect(result).to.have.lengthOf(2);
+      expect(result[0].date).to.equal('2026-06-01');
+      expect(result[1].date).to.equal('2026-06-02');
+    });
+
+    it('first-seen wins for brands/all multi-brand dedup within a day', () => {
+      const rows = [
+        {
+          execution_date: '2026-06-01', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-06-01', sentiment: 'negative', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByDay(rows);
+
+      expect(result[0].totalPrompts).to.equal(1);
+      const sentimentMap = {};
+      result[0].sentiment.forEach((s) => {
+        sentimentMap[s.name] = s.value;
+      });
+      expect(sentimentMap.Positive).to.equal(100);
+    });
+
+    it('percentages sum to 100', () => {
+      const rows = [
+        {
+          execution_date: '2026-06-01', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-06-01', sentiment: 'negative', prompt: 'p2', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-06-01', sentiment: 'neutral', prompt: 'p3', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByDay(rows);
+      const total = result[0].sentiment.reduce((sum, s) => sum + s.value, 0);
+
+      expect(total).to.equal(100);
+    });
+
+    it('empty/unknown sentiment increments totalPrompts but not promptsWithSentiment', () => {
+      const rows = [
+        {
+          execution_date: '2026-06-01', sentiment: null, prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-06-01', sentiment: 'positive', prompt: 'p2', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByDay(rows);
+
+      expect(result[0].totalPrompts).to.equal(2);
+      expect(result[0].promptsWithSentiment).to.equal(1);
+    });
+
+    it('sorts ascending by date', () => {
+      const rows = [
+        {
+          execution_date: '2026-06-03', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-06-01', sentiment: 'positive', prompt: 'p2', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-06-02', sentiment: 'positive', prompt: 'p3', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByDay(rows);
+
+      expect(result.map((r) => r.date)).to.deep.equal(['2026-06-01', '2026-06-02', '2026-06-03']);
+    });
+
+    it('populates week/weekNumber/year from execution_date', () => {
+      const rows = [
+        {
+          execution_date: '2026-06-01', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByDay(rows);
+
+      expect(result[0].date).to.equal('2026-06-01');
+      expect(result[0].week).to.equal('2026-W23');
+      expect(result[0].weekNumber).to.equal(23);
+      expect(result[0].year).to.equal(2026);
+    });
+
+    it('includes color hex codes in sentiment entries', () => {
+      const rows = [
+        {
+          execution_date: '2026-06-01', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByDay(rows);
+      const colors = result[0].sentiment.map((s) => s.color);
+
+      expect(colors).to.include('#047857');
+      expect(colors).to.include('#4B5563');
+      expect(colors).to.include('#B91C1C');
+    });
+  });
+
   describe('createSentimentOverviewHandler', () => {
     const RPC_NAME = 'rpc_brand_presence_sentiment_overview';
 
@@ -2873,6 +3009,134 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
+    });
+
+    it('default missing granularity returns weeklyTrends and empty dailyTrends', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult([makeRpcRow()]),
+      );
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.granularity).to.equal('week');
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      expect(body.dailyTrends).to.deep.equal([]);
+    });
+
+    it('granularity=week returns weeklyTrends and empty dailyTrends', async () => {
+      mockContext.data = { granularity: 'week' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult([makeRpcRow()]),
+      );
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+      const body = await result.json();
+
+      expect(body.granularity).to.equal('week');
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      expect(body.dailyTrends).to.deep.equal([]);
+    });
+
+    it('granularity=day calls RPC with p_granularity day and returns dailyTrends', async () => {
+      const dayRow = {
+        week_str: '2026-W23',
+        week_number: 23,
+        year: 2026,
+        date_str: '2026-06-01',
+        total_prompts: 10,
+        prompts_with_sentiment: 8,
+        positive_pct: 50,
+        neutral_pct: 25,
+        negative_pct: 25,
+      };
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        { data: [dayRow], error: null },
+      );
+      mockContext.data = {
+        granularity: 'day',
+        startDate: '2026-05-06',
+        endDate: '2026-06-02',
+      };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_granularity: 'day' }),
+      );
+      const body = await result.json();
+      expect(body.granularity).to.equal('day');
+      expect(body.weeklyTrends).to.deep.equal([]);
+      expect(body.dailyTrends).to.have.lengthOf(1);
+      const [trend] = body.dailyTrends;
+      expect(trend.date).to.equal('2026-06-01');
+      expect(trend.week).to.equal('2026-W23');
+      expect(trend.weekNumber).to.equal(23);
+      expect(trend.year).to.equal(2026);
+      expect(trend.totalPrompts).to.equal(10);
+      expect(trend.sentiment).to.deep.equal([
+        { name: 'Positive', value: 50, color: '#047857' },
+        { name: 'Neutral', value: 25, color: '#4B5563' },
+        { name: 'Negative', value: 25, color: '#B91C1C' },
+      ]);
+    });
+
+    it('granularity=day with invalid value returns 400', async () => {
+      mockContext.data = { granularity: 'month' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal("granularity must be 'week' or 'day'");
+    });
+
+    it('granularity=day with range > 90 days returns 400', async () => {
+      mockContext.data = {
+        granularity: 'day',
+        startDate: '2026-01-01',
+        endDate: '2026-04-15',
+      };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+      );
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Date range too large for daily granularity (max 90 days)');
+    });
+
+    it('granularity=day with exactly 90-day range succeeds', async () => {
+      mockContext.data = {
+        granularity: 'day',
+        startDate: '2026-03-06',
+        endDate: '2026-06-03',
+      };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult([]),
+      );
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
     });
   });
 
