@@ -135,8 +135,7 @@ export const INTERNAL_ROUTES = [
   'PATCH /plg/records/:plgOnboardingId',
   'DELETE /plg/records/:plgOnboardingId',
 
-  // Tier-specific - user activities, trial users, user details: end-user/admin flows only
-  'GET /sites/:siteId/user-activities',
+  // Tier-specific - user activities (POST only), trial users, user details: end-user/admin flows
   'POST /sites/:siteId/user-activities',
   'GET /organizations/:organizationId/trial-users',
   'GET /admin/users/:userId',
@@ -595,6 +594,9 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
+
+  // User Activities
+  'GET /sites/:siteId/user-activities': 'trialUser:read',
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
