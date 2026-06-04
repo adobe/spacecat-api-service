@@ -253,6 +253,101 @@ describe('prompts-storage', () => {
       expect(result.page).to.equal(1);
     });
 
+    it('returns intent from row when present', async () => {
+      const row = {
+        id: 'prompt-pk-uuid',
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Prompt',
+        regions: ['us'],
+        status: 'active',
+        origin: 'ai',
+        intent: 'informational',
+        source: 'citation_attempt',
+        created_at: null,
+        created_by: null,
+        updated_at: null,
+        updated_by: null,
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          return makeChain({ data: [row], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].intent).to.equal('informational');
+    });
+
+    it('returns null intent when row has no intent', async () => {
+      const row = {
+        id: 'prompt-pk-uuid',
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Prompt',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: null,
+        source: 'config',
+        created_at: null,
+        created_by: null,
+        updated_at: null,
+        updated_by: null,
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          return makeChain({ data: [row], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].intent).to.be.null;
+    });
+
+    it('filters by intent', async () => {
+      const eqCalls = [];
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          const chain = {
+            select: () => chain,
+            eq: (...args) => {
+              eqCalls.push(args);
+              return chain;
+            },
+            neq: () => chain,
+            order: () => chain,
+            contains: () => chain,
+            or: () => chain,
+            in: () => chain,
+            range: () => thenable({ data: [], error: null, count: 0 }),
+          };
+          return chain;
+        },
+      };
+      await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, intent: 'comparative', postgrestClient: client,
+      });
+      expect(eqCalls.some((args) => args[0] === 'intent' && args[1] === 'comparative')).to.be.true;
+    });
+
     it('filters by topicId only (no categoryId)', async () => {
       const row = {
         prompt_id: PROMPT_ID,
@@ -762,6 +857,62 @@ describe('prompts-storage', () => {
       expect(result.created).to.equal(1);
       expect(result.updated).to.equal(0);
       expect(result.prompts).to.have.lengthOf(1);
+    });
+
+    it('includes intent in inserted row when provided', async () => {
+      const insertedRows = [];
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => thenable({ data: [], error: null }) }),
+              }),
+              insert: (rows) => {
+                insertedRows.push(...rows);
+                return { select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) };
+              },
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'New prompt', regions: ['us'], intent: 'transactional' }],
+        postgrestClient: client,
+      });
+      expect(insertedRows[0].intent).to.equal('transactional');
+    });
+
+    it('sets intent to null when not provided', async () => {
+      const insertedRows = [];
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => thenable({ data: [], error: null }) }),
+              }),
+              insert: (rows) => {
+                insertedRows.push(...rows);
+                return { select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) };
+              },
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'New prompt', regions: ['us'] }],
+        postgrestClient: client,
+      });
+      expect(insertedRows[0].intent).to.be.null;
     });
 
     it('updates existing prompts by id', async () => {
@@ -1637,6 +1788,31 @@ describe('prompts-storage', () => {
           postgrestClient: client,
         }),
       ).to.be.rejectedWith('Failed to update prompt');
+    });
+
+    it('updates intent when provided', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'ai',
+        intent: 'instructional',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const client = { from: () => makeChain({ data: row, error: null }) };
+      const result = await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { intent: 'instructional' },
+        postgrestClient: client,
+      });
+      expect(result).to.not.be.null;
+      expect(result.intent).to.equal('instructional');
     });
 
     it('sets categoryId and topicId to null when empty string', async () => {

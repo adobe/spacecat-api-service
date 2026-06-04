@@ -70,6 +70,13 @@ v2-prompts-by-brand:
         type: string
         enum: [ai, human]
       description: Filter by origin (ai or human)
+    - name: intent
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [informational, instructional, comparative, transactional, planning, delegation]
+      description: Filter by search intent
     - name: sort
       in: query
       required: false

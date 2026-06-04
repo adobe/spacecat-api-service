@@ -147,5 +147,103 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
         expect(matches[0].name).to.equal('Test');
       });
     });
+
+    // ── Prompt intent field (LLMO-5161) ──
+
+    describe('Prompt intent: upsert, retrieve, and filter', () => {
+      before(() => resetData());
+
+      it('upserted prompt with intent is returned in list and single-get responses', async () => {
+        const http = getHttpClient();
+
+        // 1. Upsert two prompts: one with intent, one without
+        const upsertRes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+          [
+            {
+              id: 'intent-test-prompt-1',
+              prompt: 'What are the best laptops for students?',
+              regions: ['us'],
+              intent: 'informational',
+            },
+            {
+              id: 'intent-test-prompt-2',
+              prompt: 'Buy the best laptop now',
+              regions: ['us'],
+              intent: 'transactional',
+            },
+            {
+              id: 'intent-test-prompt-3',
+              prompt: 'No intent prompt',
+              regions: ['us'],
+            },
+          ],
+        );
+        expect(upsertRes.status).to.equal(201);
+        expect(upsertRes.body.created).to.equal(3);
+
+        // 2. Single-get preserves intent
+        const getRes = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts/intent-test-prompt-1`,
+        );
+        expect(getRes.status).to.equal(200);
+        expect(getRes.body.intent).to.equal('informational');
+
+        // 3. List without filter returns all three
+        const listAll = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+        );
+        expect(listAll.status).to.equal(200);
+        const allIds = listAll.body.items.map((p) => p.id);
+        expect(allIds).to.include('intent-test-prompt-1');
+        expect(allIds).to.include('intent-test-prompt-2');
+        expect(allIds).to.include('intent-test-prompt-3');
+
+        // 4. Filter by intent=informational returns only the matching prompt
+        const listFiltered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?intent=informational`,
+        );
+        expect(listFiltered.status).to.equal(200);
+        const filteredIds = listFiltered.body.items.map((p) => p.id);
+        expect(filteredIds).to.include('intent-test-prompt-1');
+        expect(filteredIds).to.not.include('intent-test-prompt-2');
+        expect(filteredIds).to.not.include('intent-test-prompt-3');
+        const filteredPrompt = listFiltered.body.items.find((p) => p.id === 'intent-test-prompt-1');
+        expect(filteredPrompt.intent).to.equal('informational');
+
+        // 5. Prompt without intent has null intent field
+        const noIntentPrompt = listAll.body.items.find((p) => p.id === 'intent-test-prompt-3');
+        expect(noIntentPrompt).to.exist;
+        expect(noIntentPrompt.intent).to.be.null;
+      });
+
+      it('PATCH updates intent and null-clears it', async () => {
+        const http = getHttpClient();
+
+        // Seed a prompt with intent
+        await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+          [{
+            id: 'intent-patch-prompt', prompt: 'Compare these two tools', regions: ['us'], intent: 'comparative',
+          }],
+        );
+
+        // PATCH to a different intent
+        const patchRes = await http.admin.patch(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts/intent-patch-prompt`,
+          { intent: 'planning' },
+        );
+        expect(patchRes.status).to.equal(200);
+        expect(patchRes.body.intent).to.equal('planning');
+
+        // PATCH to clear intent
+        const clearRes = await http.admin.patch(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts/intent-patch-prompt`,
+          { intent: null },
+        );
+        expect(clearRes.status).to.equal(200);
+        expect(clearRes.body.intent).to.be.null;
+      });
+    });
   });
 }
