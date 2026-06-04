@@ -155,7 +155,17 @@ function RunAuditCommand(context) {
         await Promise.all(
           auditTypesToRun.map(async (enabledAuditType) => {
             try {
-              await triggerAuditForSite(site, enabledAuditType, undefined, slackContext, context);
+              // `run audit` is an explicit one-off command — pass onDemand so the
+              // audit worker bypasses the per-site handler enabled-list check
+              // (entitlement is still enforced downstream).
+              await triggerAuditForSite(
+                site,
+                enabledAuditType,
+                undefined,
+                slackContext,
+                context,
+                { onDemand: true },
+              );
             } catch (error) {
               log.error(`Error running audit ${enabledAuditType.id} for site ${baseURL}`, error);
               await postErrorMessage(say, error);
@@ -170,13 +180,16 @@ function RunAuditCommand(context) {
           return;
         }
 
-        // Check entitlements for all product codes
+        // Check site enrollment for all product codes. We check `siteEnrollment`
+        // (not `entitlement`) for parity with the audit worker's downstream gate
+        // (see audit-utils#checkProductCodeEntitlements). Org-level entitlement
+        // alone is insufficient — the specific site must be enrolled.
         const entitlementChecks = await Promise.all(
           handler.productCodes.map(async (productCode) => {
             try {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const tierResult = await tierClient.checkValidEntitlement();
-              return tierResult.entitlement || false;
+              return tierResult.siteEnrollment || false;
             } catch (error) {
               context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
               return false;
@@ -184,13 +197,21 @@ function RunAuditCommand(context) {
           }),
         );
 
-        // Block audit if site has no entitlement for any of the product codes
-        if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+        // Block audit if site has no enrollment for any of the product codes
+        if (!entitlementChecks.some((hasEnrollment) => hasEnrollment)) {
           await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
           return;
         }
 
-        await triggerAuditForSite(site, auditType, auditData, slackContext, context);
+        // One-off run: bypass enabled-list check downstream (entitlement already verified here).
+        await triggerAuditForSite(
+          site,
+          auditType,
+          auditData,
+          slackContext,
+          context,
+          { onDemand: true },
+        );
       }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
@@ -210,23 +231,20 @@ function RunAuditCommand(context) {
         return;
       }
 
-      if (!configuration.isHandlerEnabledForSite(auditType, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-        return;
-      }
-
       const handler = configuration.getHandlers()?.[auditType];
       if (!isNonEmptyArray(handler?.productCodes)) {
         await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${auditType}'.`);
         return;
       }
 
+      // Check site enrollment for all product codes (see runAuditForSite for rationale
+      // on using `siteEnrollment` instead of `entitlement`).
       const entitlementChecks = await Promise.all(
         handler.productCodes.map(async (productCode) => {
           try {
             const tierClient = await TierClient.createForSite(context, site, productCode);
             const tierResult = await tierClient.checkValidEntitlement();
-            return tierResult.entitlement || false;
+            return tierResult.siteEnrollment || false;
           } catch (error) {
             context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
             return false;
@@ -234,12 +252,20 @@ function RunAuditCommand(context) {
         }),
       );
 
-      if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+      if (!entitlementChecks.some((hasEnrollment) => hasEnrollment)) {
         await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
         return;
       }
 
-      await triggerAuditForSite(site, auditType, auditData, slackContext, context, { urls });
+      // One-off run: bypass enabled-list check downstream (entitlement already verified here).
+      await triggerAuditForSite(
+        site,
+        auditType,
+        auditData,
+        slackContext,
+        context,
+        { urls, onDemand: true },
+      );
       await say(`:white_check_mark: ${auditType} audit queued for ${urls.length} URLs.`);
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);

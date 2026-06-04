@@ -71,10 +71,12 @@ describe('RunAuditCommand', () => {
     };
     slackContext = { say: sinon.spy() };
 
-    // Reset and set default behavior for TierClient mock
+    // Reset and set default behavior for TierClient mock.
+    // The Slack run-audit handler checks `siteEnrollment` (matching the audit-worker's
+    // downstream gate); `entitlement` is intentionally not consulted.
     mockTierClient.createForSite.reset();
     mockTierClient.createForSite.resolves({
-      checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-123' } }),
+      checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: { id: 'enr-123' } }),
     });
   });
 
@@ -226,6 +228,7 @@ describe('RunAuditCommand', () => {
           'https://valid.site/page-1',
           'https://valid.site/page-2',
         ],
+        onDemand: true,
       });
       expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 2 URLs.');
     });
@@ -303,7 +306,7 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
-    it('blocks prerender CSV audits when the prerender handler is disabled', async () => {
+    it('allows prerender CSV audits even when the prerender handler is disabled (onDemand bypass)', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: sinon.stub().returns(false),
@@ -322,8 +325,12 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['site.com', 'prerender'], slackContext);
 
-      expect(slackContext.say.secondCall.args[0]).to.equal(':x: Will not audit site \'https://site.com\' because audits of type \'prerender\' are disabled for this site.');
-      expect(sqsStub.sendMessage.called).to.be.false;
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.deep.include({
+        onDemand: true,
+        urls: ['https://valid.site/page-1'],
+      });
+      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 1 URLs.');
     });
 
     it('blocks prerender CSV audits when no product codes are configured', async () => {
@@ -353,7 +360,7 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
       dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO', 'AEM']));
       mockTierClient.createForSite.resolves({
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: null }),
       });
       slackContext.files = [
         {
@@ -381,7 +388,7 @@ describe('RunAuditCommand', () => {
         .rejects(new Error('tier down'))
         .onSecondCall()
         .resolves({
-          checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-123' } }),
+          checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: { id: 'enr-123' } }),
         });
       slackContext.files = [
         {
@@ -742,10 +749,9 @@ describe('RunAuditCommand', () => {
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
-      // Mock TierClient to return valid entitlement
       const mockTierClientInstance = {
         checkValidEntitlement: sinon.stub().resolves({
-          entitlement: { id: 'ent-123' },
+          siteEnrollment: { id: 'enr-123' },
         }),
       };
       mockTierClient.createForSite.resolves(mockTierClientInstance);
@@ -759,7 +765,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit');
     });
 
-    it('should block audit when site has no entitlement', async () => {
+    it('should block audit when site has no site enrollment', async () => {
       const site = { getId: () => '123' };
       const handler = {
         productCodes: ['LLMO'],
@@ -771,10 +777,9 @@ describe('RunAuditCommand', () => {
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
-      // Mock TierClient to return no entitlement
       const mockTierClientInstance = {
         checkValidEntitlement: sinon.stub().resolves({
-          entitlement: null,
+          siteEnrollment: null,
         }),
       };
       mockTierClient.createForSite.resolves(mockTierClientInstance);
@@ -788,7 +793,31 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say).to.have.been.calledWith(':x: Will not audit site \'https://validsite.com\' because site is not entitled for this audit.');
     });
 
-    it('should allow audit when site has entitlement for any product code', async () => {
+    it('should block audit when org has entitlement but site has no site enrollment', async () => {
+      // Regression: parity with audit-worker. Org-level `entitlement` is not enough;
+      // the site must have explicit `siteEnrollment`.
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': { productCodes: ['LLMO'] } }),
+      });
+
+      mockTierClient.createForSite.resolves({
+        checkValidEntitlement: sinon.stub().resolves({
+          entitlement: { id: 'ent-123' },
+          siteEnrollment: null,
+        }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(':x: Will not audit site \'https://validsite.com\' because site is not entitled for this audit.');
+    });
+
+    it('should allow audit when site has enrollment for any product code', async () => {
       const site = { getId: () => '123' };
       const handler = {
         productCodes: ['LLMO', 'ASO'],
@@ -800,12 +829,11 @@ describe('RunAuditCommand', () => {
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
-      // Mock TierClient - first product code fails, second succeeds
       const mockTierClientInstance1 = {
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: null }),
       };
       const mockTierClientInstance2 = {
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-456' } }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: { id: 'enr-456' } }),
       };
 
       mockTierClient.createForSite
@@ -833,9 +861,8 @@ describe('RunAuditCommand', () => {
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
-      // Mock TierClient - first product code throws error, second succeeds
       const mockTierClientInstance2 = {
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-456' } }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: { id: 'enr-456' } }),
       };
 
       mockTierClient.createForSite
@@ -865,12 +892,11 @@ describe('RunAuditCommand', () => {
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
-      // Mock TierClient - both product codes return no entitlement
       const mockTierClientInstance1 = {
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: null }),
       };
       const mockTierClientInstance2 = {
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: false }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: false }),
       };
 
       mockTierClient.createForSite
@@ -883,6 +909,51 @@ describe('RunAuditCommand', () => {
       expect(mockTierClient.createForSite).to.have.been.calledTwice;
       expect(sqsStub.sendMessage).to.not.have.been.called;
       expect(slackContext.say).to.have.been.calledWith(':x: Will not audit site \'https://validsite.com\' because site is not entitled for this audit.');
+    });
+
+    it('passes onDemand: true in the SQS auditContext for single-audit runs', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.called;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.deep.include({
+        onDemand: true,
+      });
+    });
+
+    it('passes onDemand: true in the SQS auditContext for `audit:all` runs', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'all'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.called;
+      sqsStub.sendMessage.getCalls().forEach((call) => {
+        expect(call.args[1].auditContext).to.deep.include({ onDemand: true });
+      });
+    });
+
+    it('triggers audit even when site is not in the handler enabled-list (relying on onDemand bypass downstream)', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => false,
+        getHandlers: () => ({ 'lhs-mobile': { productCodes: ['LLMO'] } }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.called;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.deep.include({
+        onDemand: true,
+      });
     });
 
     it('should handle checkValidEntitlement errors gracefully', async () => {
