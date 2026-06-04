@@ -1,3 +1,17 @@
+## [1.549.1](https://github.com/adobe/spacecat-api-service/compare/v1.549.0...v1.549.1) (2026-06-04)
+
+
+### Bug Fixes
+
+* bump @adobe/spacecat-shared-utils to 1.116.6 ([#2553](https://github.com/adobe/spacecat-api-service/issues/2553)) ([2121fce](https://github.com/adobe/spacecat-api-service/commit/2121fce8978aa6563b77fb4e27b618b19985f98b)), closes [#2552](https://github.com/adobe/spacecat-api-service/issues/2552)
+
+# [1.549.0](https://github.com/adobe/spacecat-api-service/compare/v1.548.0...v1.549.0) (2026-06-04)
+
+
+### Features
+
+* **s2s:** expose GET /sites/:siteId/user-activities to S2S consumers via trialUser:read ([#2554](https://github.com/adobe/spacecat-api-service/issues/2554)) ([ab5db2f](https://github.com/adobe/spacecat-api-service/commit/ab5db2fd79ec74f8cc25c51eabc5ada13b99e1cc))
+
 # [1.548.0](https://github.com/adobe/spacecat-api-service/compare/v1.547.0...v1.548.0) (2026-06-03)
 
 
