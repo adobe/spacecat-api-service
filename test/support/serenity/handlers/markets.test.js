@@ -439,6 +439,29 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     );
   });
 
+  // createProject throws SerenityTransportError (e.g. upstream 422 on bad body):
+  // the error must propagate out of handleCreateMarket so the fan-out can catch
+  // it, sanitise the message, and record a failure entry without aborting the
+  // remaining tuples. publishProject and DB write must never be reached.
+  it('propagates SerenityTransportError thrown by createProject', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().rejects(
+        new SerenityTransportError(422, 'Semrush POST https://sr.example.com/ws/ws-1/projects failed: 422', { error: 'invalid body' }),
+      ),
+      publishProject: sinon.stub(),
+    };
+
+    await expect(handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, fakeLog())).to.be.rejectedWith(SerenityTransportError);
+
+    expect(transport.publishProject).to.have.callCount(0);
+    expect(dataAccess.BrandSemrushProject.create).to.have.callCount(0);
+  });
+
   // Upstream contract: createProject must echo an id. If it doesn't, we have
   // nothing to publish or store, so 502 the request instead of writing a row
   // that points at an empty string.

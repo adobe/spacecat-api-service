@@ -435,6 +435,9 @@ export async function handleCreateMarket(
         error: e.message,
       },
     );
+    // Return 409 so the fan-out treats this tuple as idempotent success and
+    // M8 reclassifies it via DB read-back. Known gap: a re-onboarding retry
+    // after this path finds no DB row → creates a second upstream orphan.
     return {
       status: 409,
       body: {

@@ -1092,7 +1092,10 @@ llmo-onboard:
                 description: |
                   Optional list of market/language tuples for Semrush project provisioning (LLMO-5007).
                   Each entry maps to one Semrush project created during onboarding.
-                  Only consumed when the org is in the `SERENITY_SITE_ALLOWLIST` cohort.
+                  Format validation (count cap, ISO codes, BCP-47 language tags) applies to all callers —
+                  an invalid entry returns 400 regardless of cohort membership.
+                  Semrush provisioning only runs for orgs in the `SERENITY_SITE_ALLOWLIST` cohort;
+                  a valid `markets` array from a non-cohort org is accepted (200) but not provisioned.
                   If absent and `region` is present, a single `{ market: region, language: "en" }`
                   entry is synthesized for backward compatibility.
                 items:

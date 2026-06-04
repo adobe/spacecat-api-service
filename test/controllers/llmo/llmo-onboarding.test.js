@@ -16,6 +16,7 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { testDetermineOverrideBaseURL } from './test-helpers.js';
 import { SERENITY_SITE_ALLOWLIST } from '../../../src/support/llmo-onboarding-mode.js';
+import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 
 use(sinonChai);
 
@@ -3500,9 +3501,12 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      await performLlmoOnboardingWithMocks({ domain: 'example.com', brandName: 'Test Brand', imsOrgId: 'ABC123@AdobeOrg' }, context);
+      const result = await performLlmoOnboardingWithMocks({ domain: 'example.com', brandName: 'Test Brand', imsOrgId: 'ABC123@AdobeOrg' }, context);
 
-      expect(mockLog.info).to.have.been.calledWith(
+      // Cohort org detected (SpaceCat UUID allowlist path) but no markets were
+      // supplied → fan-out is skipped and result.serenity is absent (not empty arrays).
+      expect(result).to.not.have.property('serenity');
+      expect(mockLog.info).to.not.have.been.calledWith(
         sinon.match(/Serenity onboarding enabled for org org-serenity-cohort/),
       );
     });
@@ -3980,10 +3984,15 @@ describe('LLMO Onboarding Functions', () => {
       ]);
     });
 
-    it('records a thrown transport error as a failure and continues', async () => {
+    it('sanitizes SerenityTransportError to semrushUpstreamError (no URL leak)', async () => {
       const hcp = sinon.stub();
-      const err = new Error('upstream 503');
-      err.status = 502;
+      // Real SerenityTransportError — message contains the full upstream URL
+      // including workspace ID; must never reach the API response body.
+      const err = new SerenityTransportError(
+        503,
+        'Semrush POST https://sr.example.com/workspaces/ws-secret-id/projects failed: 503',
+        { error: 'upstream error' },
+      );
       hcp.onCall(0).rejects(err);
       hcp.onCall(1).resolves({ status: 201, body: { brandId: 'brand-uuid-1', geoTargetId: 2276, languageCode: 'de' } });
       const performSerenityFanOut = await loadFanOut(hcp);
@@ -3992,7 +4001,7 @@ describe('LLMO Onboarding Functions', () => {
 
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 502, error: 'upstream 503',
+          market: 'US', language: 'en', status: 503, error: 'semrushUpstreamError',
         },
       ]);
       expect(res.succeeded).to.have.length(1);

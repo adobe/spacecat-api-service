@@ -88,6 +88,7 @@ import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
+import { LANGUAGE_TAG_REGEX } from '../../support/serenity/validation.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
@@ -96,9 +97,6 @@ const { llmoConfig: llmoConfigSchema } = schemas;
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
 const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 const ISO_ALPHA2_UPPER_REGEX = /^[A-Z]{2}$/;
-// BCP-47 primary + optional script/region subtag (all lowercase as a normalization choice;
-// real BCP-47 script subtags are title-case but we enforce lowercase to prevent drift).
-const BCP47_LANGUAGE_REGEX = /^[a-z]{2,3}(-[a-z]{2,4})?$/;
 // Upper bound on markets[] (LLMO-5204). The fan-out is sequential — one upstream
 // create+publish+DB write per tuple on a single synchronous request — so an
 // unbounded array would blow the Lambda timeout. 50 covers adobe.com's ~19
@@ -992,7 +990,7 @@ function LlmoController(ctx) {
           if (!ISO_ALPHA2_UPPER_REGEX.test(entry.market)) {
             return badRequest(`Invalid market "${entry.market}". Must be an ISO 3166-1 alpha-2 uppercase code (e.g. US, DE)`);
           }
-          if (!BCP47_LANGUAGE_REGEX.test(entry.language)) {
+          if (!LANGUAGE_TAG_REGEX.test(entry.language)) {
             return badRequest(`Invalid language "${entry.language}". Must be a BCP-47 lowercase language tag (e.g. en, de, zh-hans)`);
           }
         }
@@ -1104,7 +1102,9 @@ function LlmoController(ctx) {
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
-        ...(region ? { region } : {}),
+        // Echo region only when it was actually used — not when markets[] was
+        // supplied and region was ignored in favour of it.
+        ...(region !== undefined && !Array.isArray(markets) ? { region } : {}),
       };
 
       // M8 (LLMO-5205): for cohort onboardings, surface the per-tuple Semrush

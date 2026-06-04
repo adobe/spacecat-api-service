@@ -39,7 +39,7 @@ import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
 import { handleCreateMarket, resolveLocation } from '../../support/serenity/handlers/markets.js';
-import { createSerenityTransport } from '../../support/serenity/rest-transport.js';
+import { createSerenityTransport, SerenityTransportError } from '../../support/serenity/rest-transport.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1337,6 +1337,9 @@ export async function performSerenityFanOut(context, {
     let outcome;
     try {
       // Sequential by design (prototype): one upstream create+publish at a time.
+      // TODO(LLMO-GA): add a time-budget guard before GA — worst case 50 tuples
+      // × ~30 s = 1 500 s, well past Lambda timeout. adobe.com's ~19 real tuples
+      // are fine today but the 50-tuple cap offers no safety margin in Lambda.
       // eslint-disable-next-line no-await-in-loop
       outcome = await handleCreateMarket(
         transport,
@@ -1347,10 +1350,14 @@ export async function performSerenityFanOut(context, {
         log,
       );
     } catch (e) {
-      // SerenityTransportError (upstream non-2xx) or an unexpected throw —
-      // record and continue with the next tuple.
+      // SerenityTransportError carries the full upstream URL (including workspace
+      // ID) in its message — never forward that to API callers. Unexpected errors
+      // may be safely echoed since they originate in our own code.
       failed.push({
-        market, language, status: e.status || 502, error: e.message,
+        market,
+        language,
+        status: e.status || 502,
+        error: e instanceof SerenityTransportError ? 'semrushUpstreamError' : e.message,
       });
       // eslint-disable-next-line no-continue
       continue;
@@ -1653,11 +1660,13 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
       }
 
-      if (serenityEnabled) {
+      if (serenityEnabled && Array.isArray(markets) && markets.length > 0) {
         // M6–M8 (LLMO-5007): Semrush provisioning path. M5 already validated the
         // workspace presence above. T3b fans out one project per market tuple;
         // T3c (LLMO-5205) will shape the 200/207 response from the result.
-        log.info(`Serenity onboarding enabled for org ${organization.getId()} — ${markets?.length ?? 0} market(s) to provision (LLMO-5007)`);
+        // Guard: cohort org with no markets → skip fan-out entirely so the
+        // response body stays clean (no empty requested/succeeded/failed arrays).
+        log.info(`Serenity onboarding enabled for org ${organization.getId()} — ${markets.length} market(s) to provision (LLMO-5007)`);
         // A failed M4 brand upsert leaves `upsertedBrand` undefined; the fan-out
         // detects the missing brand id and fails every tuple cleanly.
         const brandId = upsertedBrand?.id ?? null;
