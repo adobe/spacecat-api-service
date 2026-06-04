@@ -1,3 +1,31 @@
+# [1.552.0](https://github.com/adobe/spacecat-api-service/compare/v1.551.0...v1.552.0) (2026-06-04)
+
+
+### Features
+
+* added new countries to ai visibility ([#2546](https://github.com/adobe/spacecat-api-service/issues/2546)) ([9f48d0e](https://github.com/adobe/spacecat-api-service/commit/9f48d0e99cae957ecae05f1533a199658edce423))
+
+# [1.551.0](https://github.com/adobe/spacecat-api-service/compare/v1.550.0...v1.551.0) (2026-06-04)
+
+
+### Features
+
+* **bot-blocker:** forward scraperConfig.headers to detectBotBlocker probe ([#2556](https://github.com/adobe/spacecat-api-service/issues/2556)) ([18256a4](https://github.com/adobe/spacecat-api-service/commit/18256a43971ee4d20dafd26c760d3e7d1fbc8b17))
+
+# [1.550.0](https://github.com/adobe/spacecat-api-service/compare/v1.549.1...v1.550.0) (2026-06-04)
+
+
+### Features
+
+* slack alert on skipping a suggestion in PLG ([#2505](https://github.com/adobe/spacecat-api-service/issues/2505)) ([7310afa](https://github.com/adobe/spacecat-api-service/commit/7310afa771ad231b335ca440075ea7da0d2be7ee))
+
+## [1.549.1](https://github.com/adobe/spacecat-api-service/compare/v1.549.0...v1.549.1) (2026-06-04)
+
+
+### Bug Fixes
+
+* bump @adobe/spacecat-shared-utils to 1.116.6 ([#2553](https://github.com/adobe/spacecat-api-service/issues/2553)) ([2121fce](https://github.com/adobe/spacecat-api-service/commit/2121fce8978aa6563b77fb4e27b618b19985f98b)), closes [#2552](https://github.com/adobe/spacecat-api-service/issues/2552)
+
 # [1.549.0](https://github.com/adobe/spacecat-api-service/compare/v1.548.0...v1.549.0) (2026-06-04)
 
 
