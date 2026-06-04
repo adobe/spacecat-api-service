@@ -31,6 +31,7 @@ import {
   handleDeleteMarket,
   handleListTags,
   handleListModels,
+  handleUpdateModels,
 } from '../support/serenity/handlers/markets.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
@@ -58,7 +59,16 @@ function extractQuery(context) {
       const u = new URL(context.request.url);
       const out = {};
       for (const [k, v] of u.searchParams) {
-        out[k] = v;
+        // tagIds is multi-value — collected below via getAll(); excluded here
+        // to avoid last-write-wins clobbering the array. Any future multi-value
+        // param should follow the same pattern.
+        if (k !== 'tagIds') {
+          out[k] = v;
+        }
+      }
+      const tagIdsAll = u.searchParams.getAll('tagIds');
+      if (tagIdsAll.length > 0) {
+        out.tagIds = tagIdsAll;
       }
       return out;
     } catch { /* fall through to empty */ }
@@ -454,6 +464,28 @@ function SerenityController(context, log, env) {
     }
   };
 
+  const updateModels = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = await handleUpdateModels(
+        transport,
+        ctx.dataAccess,
+        auth.brandUuid,
+        auth.semrushWorkspaceId,
+        ctx.data || {},
+        log,
+      );
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   return {
     listPrompts,
     createPrompts,
@@ -465,6 +497,7 @@ function SerenityController(context, log, env) {
     deleteMarket,
     listTags,
     listModels,
+    updateModels,
   };
 }
 

@@ -39,6 +39,7 @@ export async function handleBrandTopicsTotals(sp, clients) {
   const domain = sp.get('domain');
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
+  const date = sp.get('date');
 
   const dimensionFilterQl = buildBrandTopicsDimensionFilterQl(sp);
   const metricFilterResult = buildBrandTopicsMetricFilterQl(sp);
@@ -61,6 +62,7 @@ export async function handleBrandTopicsTotals(sp, clients) {
       categories,
       dimension_filter_ql: dimensionFilterQl,
       metric_filter_ql: metricFilterQl,
+      target_date: date,
     },
     PROTO_FROM_JSON,
   );

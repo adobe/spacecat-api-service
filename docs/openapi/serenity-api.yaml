@@ -65,6 +65,22 @@ v2-serenity-prompts:
         required: false
         schema: { type: string }
         description: Free-text match against prompt text.
+      - name: tagIds
+        in: query
+        required: false
+        style: form
+        explode: true
+        schema:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 128 }
+        description: |
+          Filter prompts to those carrying any of these upstream tag ids.
+          Sent as repeated keys (`?tagIds=a&tagIds=b`); ids come from each
+          prompt's `tagMap`. Omitted/empty lists all prompts in the slice.
+          Maximum 50 ids; excess values are silently truncated (same pattern
+          as the `limit` cap). This matches the server-side `MAX_TAG_IDS`
+          constant in `handlers/prompts.js`.
     responses:
       '200':
         description: Prompts retrieved successfully.
@@ -450,21 +466,32 @@ v2-serenity-models:
         format: uuid
   get:
     tags: [serenity]
-    summary: List AI models for one slice
+    summary: List AI models
     description: |
-      Returns the AI models configured for the slice's upstream project.
-      `key` is the value the Reporting API expects as `CBF_model`.
+      Two modes depending on whether slice filters are provided:
+
+      **Slice mode** (`geoTargetId` + `languageCode` both present): returns the
+      AI models configured for that slice's upstream project. `key` is the
+      value the Reporting API expects as `CBF_model`.
+
+      **Catalog mode** (neither param present): returns the global catalog of
+      ALL AI models available for tracking via `GET /v1/ai_models` (not
+      workspace-scoped). Falls back to an empty list if the upstream endpoint
+      is unavailable. Use this to populate "available models" selectors in the
+      UI before a market is configured.
+
+      Providing exactly one of the two params returns 400.
     operationId: listSerenityModels
     security:
       - ims_key: []
     parameters:
       - name: geoTargetId
         in: query
-        required: true
+        required: false
         schema: { type: integer, minimum: 1 }
       - name: languageCode
         in: query
-        required: true
+        required: false
         schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
     responses:
       '200':

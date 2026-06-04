@@ -135,8 +135,7 @@ export const INTERNAL_ROUTES = [
   'PATCH /plg/records/:plgOnboardingId',
   'DELETE /plg/records/:plgOnboardingId',
 
-  // Tier-specific - user activities, trial users, user details: end-user/admin flows only
-  'GET /sites/:siteId/user-activities',
+  // Tier-specific - user activities (POST only), trial users, user details: end-user/admin flows
   'POST /sites/:siteId/user-activities',
   'GET /organizations/:organizationId/trial-users',
   'GET /admin/users/:userId',
@@ -275,6 +274,7 @@ const routeRequiredCapabilities = {
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:read',
+  'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
   'GET /org/:spaceCatId/brands/:brandId/fanout-report': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
@@ -321,11 +321,13 @@ const routeRequiredCapabilities = {
   'GET /projects/:projectId/sites': 'site:read',
   'GET /projects/by-project-name/:projectName/sites': 'site:read',
 
-  // preflight jobs
+  // preflight jobs (legacy)
   'POST /preflight/jobs': 'site:write',
   'GET /preflight/jobs/:jobId': 'site:read',
-  'POST /preflight/beta/jobs': 'site:write',
-  'GET /preflight/beta/jobs/:jobId': 'site:read',
+  // preflight site-scoped endpoints
+  'POST /sites/:siteId/preflights': 'site:write',
+  'GET /sites/:siteId/preflights': 'site:read',
+  'GET /sites/:siteId/preflights/:preflightId': 'site:read',
   // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
   'POST /sites/:siteId/autofix-checks': 'site:read',
 
@@ -582,12 +584,19 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/topics/research': 'report:read',
   'GET /llmo/ai-visibility/topics/stats': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/brand-topics': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/brand-topics-export': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/brand-topics-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/gap-topics': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/gap-topics-export': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
+
+  // User Activities
+  'GET /sites/:siteId/user-activities': 'trialUser:read',
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
