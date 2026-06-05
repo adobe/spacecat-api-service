@@ -1004,7 +1004,7 @@ function LlmoController(ctx) {
         // entry for the same slice.
         const seenTuples = new Set();
         resolvedMarkets = markets.filter(({ market, language }) => {
-          const key = `${market}:${language}`;
+          const key = `${market}::${language}`;
           if (seenTuples.has(key)) {
             return false;
           }

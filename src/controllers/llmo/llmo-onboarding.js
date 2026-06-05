@@ -1280,10 +1280,50 @@ function extractImsBearer(context) {
  * @param {Array<{market: string, language: string}>} [args.markets] - Tuples to provision.
  * @returns {Promise<{requested: object[], succeeded: object[], failed: object[]}>}
  */
+/**
+ * Resolves the fan-out pre-conditions (brand, IMS token, transport, URL) and
+ * returns either `{ transport, brandSlug, brandDomain }` on success or a
+ * `{ failAllResult }` sentinel that `performSerenityFanOut` returns immediately.
+ */
+function resolveFanOutContext(context, {
+  brandId, brandName, baseURL, failAll,
+}) {
+  const { env, log } = context;
+
+  if (!hasText(brandId)) {
+    log.warn('Serenity fan-out: brand row missing — cannot provision market(s)');
+    return { failAllResult: failAll(500, 'brandNotCreated') };
+  }
+
+  const imsToken = extractImsBearer(context);
+  if (!imsToken) {
+    log.warn(`Serenity fan-out: no IMS bearer — cannot provision market(s) for brand ${brandId}`);
+    return { failAllResult: failAll(401, 'missingImsBearer') };
+  }
+
+  let transport;
+  try {
+    transport = createSerenityTransport({ env, imsToken });
+  } catch (transportError) {
+    log.error(`Serenity fan-out: failed to build Semrush transport: ${transportError.message}`);
+    return { failAllResult: failAll(transportError.status || 502, 'transportUnavailable') };
+  }
+
+  const brandSlug = generateBrandId(brandName.trim());
+  let brandDomain;
+  try {
+    brandDomain = new URL(baseURL).hostname;
+  } catch {
+    return { failAllResult: failAll(400, 'invalidBaseURL') };
+  }
+
+  return { transport, brandSlug, brandDomain };
+}
+
 export async function performSerenityFanOut(context, {
   orgId, brandId, workspaceId, brandName, baseURL, markets,
 }) {
-  const { env, log } = context;
+  const { log } = context;
   const requested = (Array.isArray(markets) ? markets : [])
     .map(({ market, language }) => ({ market, language }));
   const succeeded = [];
@@ -1300,34 +1340,13 @@ export async function performSerenityFanOut(context, {
     return { requested, succeeded, failed };
   };
 
-  // The brand row is M4's responsibility; if it failed to write we have no
-  // slice key to provision against. Surface, don't throw.
-  if (!hasText(brandId)) {
-    log.warn(`Serenity fan-out: brand row missing — cannot provision ${requested.length} market(s)`);
-    return failAll(500, 'brandNotCreated');
+  const ctx = resolveFanOutContext(context, {
+    brandId, brandName, baseURL, failAll,
+  });
+  if (ctx.failAllResult) {
+    return ctx.failAllResult;
   }
-
-  const imsToken = extractImsBearer(context);
-  if (!imsToken) {
-    log.warn(`Serenity fan-out: no IMS bearer on the onboarding request — cannot provision ${requested.length} market(s) for brand ${brandId}`);
-    return failAll(401, 'missingImsBearer');
-  }
-
-  let transport;
-  try {
-    transport = createSerenityTransport({ env, imsToken });
-  } catch (transportError) {
-    log.error(`Serenity fan-out: failed to build Semrush transport: ${transportError.message}`);
-    return failAll(transportError.status || 502, 'transportUnavailable');
-  }
-
-  const brandSlug = generateBrandId(brandName.trim());
-  let brandDomain;
-  try {
-    brandDomain = new URL(baseURL).hostname;
-  } catch {
-    return failAll(400, 'invalidBaseURL');
-  }
+  const { transport, brandSlug, brandDomain } = ctx;
 
   for (const { market, language } of requested) {
     // The AIO Proxy's create-market body: `languageCode` (not `language`), no
@@ -1363,9 +1382,11 @@ export async function performSerenityFanOut(context, {
     let outcome;
     let thrown;
     try {
-      // Sequential by design (prototype): worst case 50 tuples × ~30 s = 1 500 s.
-      // The deadline guard above breaks the loop before Lambda timeout, ensuring
-      // the caller receives a structured 207 instead of an abrupt invocation error.
+      // Sequential by design for the prototype phase. GA migration path: move the
+      // fan-out to an SQS job — the {requested, succeeded, failed} interface maps
+      // directly to an SQS job result without changing the M8 read-back contract.
+      // Do NOT replace with in-process Promise.allSettled: the AIO Proxy's
+      // per-workspace rate limits make concurrent fan-out unsafe at scale.
       // eslint-disable-next-line no-await-in-loop
       outcome = await handleCreateMarket(
         transport,
@@ -1406,7 +1427,9 @@ export async function performSerenityFanOut(context, {
         market,
         language,
         status: outcome.status,
-        error: outcome.body?.error || 'unknownError',
+        // Use an opaque token — outcome.body?.error comes from the upstream proxy
+        // and may echo request-body content; treat it the same as thrown errors.
+        error: 'upstreamRejected',
       });
       success = false;
     }

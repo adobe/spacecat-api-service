@@ -4057,7 +4057,7 @@ describe('LLMO Onboarding Functions', () => {
 
     it('collects per-tuple failures without aborting the remaining tuples', async () => {
       const hcp = sinon.stub();
-      hcp.onCall(0).resolves({ status: 502, body: { error: 'semrushUpstreamError' } });
+      hcp.onCall(0).resolves({ status: 502, body: { error: 'someUpstreamDetail' } });
       hcp.onCall(1).resolves({ status: 201, body: { brandId: 'brand-uuid-1', geoTargetId: 2276, languageCode: 'de' } });
       const performSerenityFanOut = await loadFanOut(hcp);
 
@@ -4066,7 +4066,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(hcp).to.have.been.calledTwice;
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 502, error: 'semrushUpstreamError',
+          market: 'US', language: 'en', status: 502, error: 'upstreamRejected',
         },
       ]);
       expect(res.succeeded).to.deep.equal([
@@ -4193,8 +4193,10 @@ describe('LLMO Onboarding Functions', () => {
       ]);
     });
 
-    it('defaults the error to unknownError when a non-2xx outcome carries no body.error', async () => {
-      const hcp = sinon.stub().resolves({ status: 400 }); // no body
+    it('uses upstreamRejected opaque token for any non-2xx/non-409 outcome', async () => {
+      // outcome.body?.error comes from the upstream proxy and may echo request
+      // content — always replaced with the opaque token regardless of body shape.
+      const hcp = sinon.stub().resolves({ status: 400, body: { error: 'someUpstreamDetail' } });
       const performSerenityFanOut = await loadFanOut(hcp);
       const res = await performSerenityFanOut(
         makeContext(),
@@ -4202,7 +4204,7 @@ describe('LLMO Onboarding Functions', () => {
       );
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 400, error: 'unknownError',
+          market: 'US', language: 'en', status: 400, error: 'upstreamRejected',
         },
       ]);
     });
@@ -4273,6 +4275,43 @@ describe('LLMO Onboarding Functions', () => {
           market: 'DE', language: 'de', status: 503, error: 'timeout',
         },
       ]);
+    });
+
+    it('deadline fires mid-loop: first tuple succeeds, remaining marked as timeout', async () => {
+      // Regression guard for the requested.slice(succeeded.length + failed.length)
+      // calculation in the timeout branch — verifies the slice index is correct
+      // when the guard fires after N successful iterations, not at iteration 0.
+      const hcp = sinon.stub().resolves({ status: 201 });
+      const performSerenityFanOut = await loadFanOut(hcp);
+
+      // Use a deadline far in the future initially so the first iteration passes,
+      // then stub Date.now to advance past the safety margin before the second.
+      const FIXED_DEADLINE = Date.now() + 60_000;
+      let callCount = 0;
+      const originalDateNow = Date.now;
+      // First Date.now() call (inside first iteration guard): returns a value with
+      // plenty of budget. Subsequent calls (second iteration guard): exceed budget.
+      Date.now = () => {
+        callCount += 1;
+        // calls 1–3 are startedAt + guard inside iteration 1: still safe
+        // call 4+ is the guard check at the top of iteration 2: past deadline
+        return callCount <= 3 ? FIXED_DEADLINE - 60_000 : FIXED_DEADLINE - 5_000;
+      };
+
+      try {
+        const context = makeContext({ invocation: { deadline: FIXED_DEADLINE } });
+        const res = await performSerenityFanOut(context, baseArgs);
+
+        expect(hcp).to.have.been.calledOnce;
+        expect(res.succeeded).to.deep.equal([{ market: 'US', language: 'en' }]);
+        expect(res.failed).to.deep.equal([
+          {
+            market: 'DE', language: 'de', status: 503, error: 'timeout',
+          },
+        ]);
+      } finally {
+        Date.now = originalDateNow;
+      }
     });
 
     it('skips deadline guard when invocation context is absent (local dev / unit tests)', async () => {
