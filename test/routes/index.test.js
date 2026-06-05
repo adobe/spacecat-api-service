@@ -534,6 +534,10 @@ describe('getRouteHandlers', () => {
     remove: sinon.stub(),
   };
 
+  const mockProxyController = {
+    getPreview: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -593,6 +597,7 @@ describe('getRouteHandlers', () => {
       mockAgenticCategoriesController,
       mockAgenticPageTypesController,
       mockSerenityController,
+      mockProxyController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -622,6 +627,7 @@ describe('getRouteHandlers', () => {
       'POST /slack/channels/invite-by-user-id',
       'POST /tools/api-keys',
       'GET /tools/api-keys',
+      'GET /tools/proxy',
       'GET /monitoring/drs-bp-pg-audit',
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
@@ -689,6 +695,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /trigger']).to.equal(mockTrigger);
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
+    expect(staticRoutes['GET /tools/proxy']).to.equal(mockProxyController.getPreview);
     expect(staticRoutes['GET /monitoring/drs-bp-pg-audit']).to.equal(mockDrsBpPgAuditController.getProjectionAudit);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
