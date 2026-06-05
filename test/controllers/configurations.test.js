@@ -367,6 +367,9 @@ describe('Configurations Controller', () => {
 
       expect(result.status).to.equal(200);
       expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+      expect(context.log.info).to.have.been.calledWithMatch(
+        /\[s2s\] GET \/configurations\/:version granted clientId=svc-cfg consumerId=consumer-cfg-1 capability=configuration:read requestId=req-cfg-1/,
+      );
     });
 
     it('denies an S2S consumer lacking configuration:read', async () => {

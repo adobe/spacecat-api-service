@@ -66,6 +66,18 @@ describe('capability-constants drift coverage', () => {
     });
   });
 
+  it('every exported CAP_ constant is used by at least one route in routeRequiredCapabilities', () => {
+    // Generalizes the readAll coverage to all capability constants (e.g. configuration:read):
+    // an exported constant that no route requires is dead and should be removed or wired up.
+    const usedCaps = new Set(Object.values(routeRequiredCapabilities));
+    ALL_CAP_CONSTANTS.forEach((cap) => {
+      expect(usedCaps.has(cap)).to.equal(
+        true,
+        `Constant "${cap}" is exported but no route in required-capabilities.js requires it. Either map a route to it or remove the constant.`,
+      );
+    });
+  });
+
   it('every readAll constant has an actual hasS2SCapability(CONST) call site (Layer 2 opt-in)', () => {
     // Tighter assertion than "is the constant imported": there must be an actual
     // hasS2SCapability(...) invocation against the constant (or its literal value).
@@ -92,7 +104,7 @@ describe('capability-constants drift coverage', () => {
       const hasCallSite = callByName.test(controllerSource) || callByLiteral.test(controllerSource);
       expect(hasCallSite).to.equal(
         true,
-        `Constant ${name} ("${value}") has no hasS2SCapability(...) call site in sites.js / organizations.js. Without the Layer 2 check the endpoint stays admin-only - this is a silent denial of intended access.`,
+        `Constant ${name} ("${value}") has no hasS2SCapability(...) call site in any scanned controller (sites.js / organizations.js / suggestions.js / configuration.js). Without the Layer 2 check the endpoint stays admin-only - this is a silent denial of intended access.`,
       );
     });
   });
