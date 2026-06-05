@@ -20,6 +20,7 @@ import BaseCommand from './base.js';
 import {
   addUtcDays,
   formatUtcDate,
+  startOfUtcDay,
   startOfUtcIsoWeek,
 } from './status-command-helpers.js';
 
@@ -33,6 +34,12 @@ const AUDIT_TYPES = {
 };
 const CDN_LOGS_ANALYSIS_DELAY_SECONDS = 5;
 const SQS_MAX_DELAY_SECONDS = 900;
+
+// cdn-logs-report daily backfill knobs
+const CDN_LOGS_REPORT_DELAY_SECONDS = 5;
+const CDN_LOGS_REPORT_MAX_WEEKS = 4;
+const CDN_LOGS_REPORT_DEFAULT_WEEKS = 2;
+const CDN_LOGS_REPORT_MAX_DAYS = 31;
 
 function parseArgs(args) {
   const parsed = {};
@@ -48,10 +55,6 @@ function parseArgs(args) {
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');
-
-function isDbBackfillMode(parsed) {
-  return parsed.mode?.toLowerCase() === 'db';
-}
 
 function isWeeklyDbRefreshMode(parsed) {
   return parsed.mode?.toLowerCase() === 'weekly-db';
@@ -100,6 +103,72 @@ function isCompletedIsoWeek(weekRange, now = new Date()) {
   return weekRange.weekEndDate < startOfUtcIsoWeek(now);
 }
 
+/**
+ * Enumerates the UTC traffic days to backfill for cdn-logs-report, oldest first.
+ *
+ * Backfilling oldest→newest means each completed week's Sunday is imported after
+ * its earlier days, so the projector's automatic weekly rollup (which fires when a
+ * week's closing Sunday lands) rebuilds the week from a complete set of raw rows.
+ *
+ * Precedence: date= (single day) > days=M (trailing days) > weeks=N (ISO weeks).
+ *
+ * @returns {{ days: Date[], desc: string }}
+ */
+function buildCdnReportTrafficDays(parsed, now = new Date()) {
+  const today = startOfUtcDay(now);
+  const yesterday = addUtcDays(today, -1);
+
+  // Single explicit traffic day.
+  const trafficDate = parseTrafficDate(parsed);
+  if (trafficDate) {
+    if (trafficDate.date > yesterday) {
+      throw new Error('date must be yesterday (UTC) or earlier.');
+    }
+    return { days: [trafficDate.date], desc: `traffic day ${trafficDate.dateStr}` };
+  }
+
+  // Trailing N days ending yesterday.
+  if (parsed.days !== undefined) {
+    const n = parseInt(parsed.days, 10);
+    if (Number.isNaN(n) || n < 1) {
+      throw new Error('days must be a positive integer.');
+    }
+    if (n > CDN_LOGS_REPORT_MAX_DAYS) {
+      throw new Error(`Max ${CDN_LOGS_REPORT_MAX_DAYS} days for ${AUDIT_TYPES.CDN_LOGS_REPORT}.`);
+    }
+    const days = Array.from({ length: n }, (_, i) => addUtcDays(yesterday, -(n - 1 - i)));
+    return { days, desc: `last ${n} day${n === 1 ? '' : 's'}` };
+  }
+
+  // Last N completed ISO weeks (default). weeks=0 = current week to date.
+  const thisMonday = startOfUtcIsoWeek(now);
+  let weeks = parseInt(parsed.weeks, 10);
+  if (Number.isNaN(weeks)) {
+    weeks = CDN_LOGS_REPORT_DEFAULT_WEEKS;
+  }
+  if (weeks < 0 || weeks > CDN_LOGS_REPORT_MAX_WEEKS) {
+    throw new Error(`weeks must be between 0 and ${CDN_LOGS_REPORT_MAX_WEEKS} for ${AUDIT_TYPES.CDN_LOGS_REPORT}.`);
+  }
+
+  if (weeks === 0) {
+    // Monday of the current (in-progress) ISO week through yesterday.
+    const count = Math.round((yesterday - thisMonday) / 86_400_000) + 1;
+    if (count <= 0) {
+      return { days: [], desc: 'current week to date (no completed days yet)' };
+    }
+    const days = Array.from({ length: count }, (_, i) => addUtcDays(thisMonday, i));
+    return { days, desc: 'current week to date' };
+  }
+
+  const firstMonday = addUtcDays(thisMonday, -7 * weeks);
+  const lastSunday = addUtcDays(thisMonday, -1);
+  const days = Array.from({ length: 7 * weeks }, (_, i) => addUtcDays(firstMonday, i));
+  return {
+    days,
+    desc: `last ${weeks} completed ISO week${weeks === 1 ? '' : 's'} (${formatUtcDate(firstMonday)}..${formatUtcDate(lastSunday)})`,
+  };
+}
+
 async function refreshAgenticWeeklyRollup(context, siteId, weekRange) {
   const postgrestClient = context.dataAccess?.services?.postgrestClient;
   if (!postgrestClient?.rpc) {
@@ -125,6 +194,31 @@ async function refreshAgenticWeeklyRollup(context, siteId, weekRange) {
 
 function sumRowsInserted(rows) {
   return rows.reduce((sum, row) => sum + Number(row.rows_inserted || 0), 0);
+}
+
+/**
+ * Queues one date-based daily import message per traffic day. The worker exports
+ * the day BEFORE auditContext.date, so we send trafficDay + 1 as the reference.
+ */
+async function triggerCdnLogsReportBackfill(sqs, configuration, siteId, trafficDays) {
+  for (const [index, trafficDay] of trafficDays.entries()) {
+    const message = {
+      type: AUDIT_TYPES.CDN_LOGS_REPORT,
+      siteId,
+      auditContext: {
+        date: formatUtcDate(addUtcDays(trafficDay, 1)),
+      },
+    };
+    // eslint-disable-next-line no-await-in-loop
+    await sqs.sendMessage(
+      configuration.getQueues().audits,
+      message,
+      undefined,
+      {
+        delaySeconds: Math.min(index * CDN_LOGS_REPORT_DELAY_SECONDS, SQS_MAX_DELAY_SECONDS),
+      },
+    );
+  }
 }
 
 async function triggerBackfill(
@@ -189,36 +283,14 @@ async function triggerBackfill(
     }
 
     case AUDIT_TYPES.CDN_LOGS_REPORT: {
-      if (specificDate?.date) {
-        const message = {
-          type: auditType,
-          siteId,
-          auditContext: {
-            date: specificDate.date,
-            refreshAgenticDailyExport: true,
-          },
-        };
-        await sqs.sendMessage(configuration.getQueues().audits, message);
-        break;
-      }
-
-      const weeks = timeValue;
-
-      // Determine weekOffset values: [0] for current week, [-1, -2, -3, -4] for previous weeks
-      const weekOffsets = weeks === 0 ? [0] : Array.from({ length: weeks }, (_, i) => -(i + 1));
-
-      for (const weekOffset of weekOffsets) {
-        const message = {
-          type: auditType,
-          siteId,
-          auditContext: {
-            weekOffset,
-            refreshAgenticDailyExport: true,
-          },
-        };
-        // eslint-disable-next-line no-await-in-loop
-        await sqs.sendMessage(configuration.getQueues().audits, message);
-      }
+      // Daily backfill: one date-based import per traffic day (oldest first).
+      // (mode=weekly-db is handled synchronously before triggerBackfill is called.)
+      await triggerCdnLogsReportBackfill(
+        sqs,
+        configuration,
+        siteId,
+        specificDate?.trafficDays || [],
+      );
       break;
     }
 
@@ -274,7 +346,7 @@ function BackfillLlmoCommand(context) {
     name: 'Backfill LLMO',
     description: 'Backfills LLMO audits.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} baseurl={baseURL} audit={auditType} [days={days}|weeks={weeks}]`,
+    usageText: `${PHRASES[0]} baseurl={baseURL} audit={auditType} [days={days}|weeks={weeks}|date={YYYY-MM-DD}]`,
   });
 
   const { dataAccess, log } = context;
@@ -293,10 +365,8 @@ function BackfillLlmoCommand(context) {
         return;
       }
 
-      if (parsed.mode
-        && !isDbBackfillMode(parsed)
-        && !isWeeklyDbRefreshMode(parsed)) {
-        await say(':warning: Unsupported mode. Use mode=db for daily DB imports or mode=weekly-db for weekly DB refresh.');
+      if (parsed.mode && !isWeeklyDbRefreshMode(parsed)) {
+        await say(':warning: Unsupported mode. Use mode=weekly-db for a weekly DB rollup refresh (daily DB import is the default — just pass weeks/days/date).');
         return;
       }
 
@@ -306,12 +376,11 @@ function BackfillLlmoCommand(context) {
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} days=3\` (last 3 days)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=14\` (specific hour)`);
         await say(`• \`backfill-llmo baseurl=all audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=14\` (all enabled sites)`);
-        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=2\``);
-        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=0\` (current week)`);
-        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} mode=db date=2026-04-27\` (daily DB import for that traffic date)`);
-        await say('• `backfill-llmo baseurl=https://example.com mode=weekly-db date=2026-05-03` (weekly DB refresh for that completed ISO week)');
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=2\` (last 2 completed ISO weeks → DB)`);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} days=10\` (last 10 days → DB)`);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} date=2026-04-27\` (single traffic day → DB)`);
+        await say('• `backfill-llmo baseurl=https://example.com mode=weekly-db date=2026-05-03` (force weekly rollup refresh for that completed ISO week)');
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLM_ERROR_PAGES} weeks=2\``);
-        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLM_ERROR_PAGES} weeks=0\` (current week)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} weeks=2\``);
         return;
       }
@@ -356,67 +425,46 @@ function BackfillLlmoCommand(context) {
           break;
 
         case AUDIT_TYPES.CDN_LOGS_REPORT:
-          if (hasDateInput(parsed) && !isDbBackfillMode(parsed) && !isWeeklyDbRefreshMode(parsed)) {
-            await say(':warning: For cdn-logs-report DB refreshes, use mode=db or mode=weekly-db with date=YYYY-MM-DD.');
-            return;
-          }
-
-          if (isDbBackfillMode(parsed) && !hasDateInput(parsed)) {
-            await say(':warning: mode=db requires date=YYYY-MM-DD for the traffic date.');
-            return;
-          }
-
-          if (isWeeklyDbRefreshMode(parsed) && !hasDateInput(parsed)) {
-            await say(':warning: mode=weekly-db requires date=YYYY-MM-DD within the ISO week to refresh.');
-            return;
-          }
-
-          try {
-            const trafficDate = parseTrafficDate(parsed);
-            if (trafficDate) {
-              if (isWeeklyDbRefreshMode(parsed)) {
-                const weekRange = getIsoWeekRange(trafficDate.date);
-                if (!isCompletedIsoWeek(weekRange)) {
-                  await say(`:warning: mode=weekly-db only supports completed ISO weeks. Week ${weekRange.weekStart}..${weekRange.weekEnd} is not complete yet.`);
-                  return;
-                }
-                specificDate = {
-                  mode: 'weekly-db',
-                  anchorDate: trafficDate.dateStr,
-                  ...weekRange,
-                };
-                timeValue = 1;
-                timeDesc = `weekly DB refresh for ${weekRange.weekStart}..${weekRange.weekEnd} (from ${trafficDate.dateStr})`;
-                break;
+          // Force weekly rollup refresh for one completed ISO week (no data import).
+          if (isWeeklyDbRefreshMode(parsed)) {
+            if (!hasDateInput(parsed)) {
+              await say(':warning: mode=weekly-db requires date=YYYY-MM-DD within the ISO week to refresh.');
+              return;
+            }
+            try {
+              const trafficDate = parseTrafficDate(parsed);
+              const weekRange = getIsoWeekRange(trafficDate.date);
+              if (!isCompletedIsoWeek(weekRange)) {
+                await say(`:warning: mode=weekly-db only supports completed ISO weeks. Week ${weekRange.weekStart}..${weekRange.weekEnd} is not complete yet.`);
+                return;
               }
-              const auditContextDate = formatUtcDate(addUtcDays(trafficDate.date, 1));
               specificDate = {
-                date: auditContextDate,
-                trafficDate: trafficDate.dateStr,
+                mode: 'weekly-db',
+                anchorDate: trafficDate.dateStr,
+                ...weekRange,
               };
               timeValue = 1;
-              timeDesc = `daily DB import for ${trafficDate.dateStr} (audit context date ${auditContextDate})`;
-              break;
+              timeDesc = `weekly DB refresh for ${weekRange.weekStart}..${weekRange.weekEnd} (from ${trafficDate.dateStr})`;
+            } catch (e) {
+              await say(`:warning: ${e.message}`);
+              return;
             }
+            break;
+          }
+
+          // Daily DB backfill: enumerate traffic days (date | days | weeks).
+          try {
+            const { days, desc } = buildCdnReportTrafficDays(parsed);
+            if (days.length === 0) {
+              await say(':warning: No completed traffic days to backfill for the requested range.');
+              return;
+            }
+            specificDate = { trafficDays: days };
+            timeValue = days.length;
+            timeDesc = `${desc} → ${days.length} daily DB import${days.length === 1 ? '' : 's'}`;
           } catch (e) {
             await say(`:warning: ${e.message}`);
             return;
-          }
-
-          timeValue = parseInt(parsed.weeks, 10);
-          if (Number.isNaN(timeValue)) {
-            timeValue = 4;
-          }
-
-          if (timeValue > 4) {
-            await say(`:warning: Max 4 weeks for ${AUDIT_TYPES.CDN_LOGS_REPORT}`);
-            return;
-          }
-
-          if (timeValue === 0) {
-            timeDesc = 'current week only';
-          } else {
-            timeDesc = `${timeValue} previous weeks`;
           }
           break;
 
@@ -505,9 +553,9 @@ function BackfillLlmoCommand(context) {
         );
       }
 
-      const usesWeekOffsets = auditType === AUDIT_TYPES.CDN_LOGS_REPORT
-        || auditType === AUDIT_TYPES.LLM_ERROR_PAGES;
-      const msgsPerSite = usesWeekOffsets && timeValue === 0 ? 1 : timeValue;
+      const msgsPerSite = (auditType === AUDIT_TYPES.LLM_ERROR_PAGES && timeValue === 0)
+        ? 1
+        : timeValue;
       await say(`:white_check_mark: Done! ${sites.length * msgsPerSite} messages queued.`);
     } catch (error) {
       log.error('Error in LLMO backfill:', error);
