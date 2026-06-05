@@ -1,3 +1,10 @@
+# [1.553.0](https://github.com/adobe/spacecat-api-service/compare/v1.552.0...v1.553.0) (2026-06-05)
+
+
+### Features
+
+* **suggestions:** allow S2S consumers with suggestion:write to reject suggestions ([#2558](https://github.com/adobe/spacecat-api-service/issues/2558)) ([8d1150e](https://github.com/adobe/spacecat-api-service/commit/8d1150e09c577796d2a9aff6ffb0f94c1b6abd84))
+
 # [1.552.0](https://github.com/adobe/spacecat-api-service/compare/v1.551.0...v1.552.0) (2026-06-04)
 
 
