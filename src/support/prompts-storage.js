@@ -798,3 +798,48 @@ export async function bulkDeletePrompts({
     failures,
   };
 }
+
+export async function checkPromptsExist({ brandUuid, prompts, postgrestClient }) {
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient.rpc('rpc_check_prompts_exist', {
+    p_brand_id: brandUuid,
+    p_prompts: prompts,
+  });
+
+  if (error) {
+    throw new Error(`checkPromptsExist RPC failed: ${error.message}`);
+  }
+
+  return data ?? [];
+}
+
+const INTENT_VALUES = ['informational', 'instructional', 'comparative', 'transactional', 'planning', 'delegation'];
+
+export async function getPromptStats({ organizationId, brandUuid, postgrestClient }) {
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient.rpc('rpc_brand_prompt_stats', {
+    p_organization_id: organizationId,
+    p_brand_id: brandUuid,
+  });
+
+  if (error) {
+    throw new Error(`getPromptStats RPC failed: ${error.message}`);
+  }
+
+  const row = Array.isArray(data) ? (data[0] ?? {}) : (data ?? {});
+  const intents = Object.fromEntries(
+    INTENT_VALUES.map((k) => [k, Number(row[`intent_${k}`]) || 0]),
+  );
+
+  return {
+    branded: Number(row.branded) || 0,
+    unbranded: Number(row.unbranded) || 0,
+    intents,
+  };
+}

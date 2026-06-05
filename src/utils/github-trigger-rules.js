@@ -25,29 +25,28 @@ export const EVENT_JOB_MAP = {
  *
  * @param {object} data - Parsed webhook payload
  * @param {string} action - The event action (e.g. 'review_requested', 'labeled')
- * @param {object} env - Environment variables
+ * @param {string} reviewerLogin - The destination's reviewer login, attached to
+ *   the auth profile by GitHubWebhookHmacHandler from the consolidated
+ *   GITHUB_DESTINATIONS registry. The requested reviewer must equal this for
+ *   review_requested to proceed. Required: the controller resolves and validates
+ *   it before calling (a missing reviewer identity is a 5xx, not a silent skip).
  * @returns {string|null} Skip reason or null
  */
-export function getSkipReason(data, action, env) {
+export function getSkipReason(data, action, reviewerLogin) {
   const pr = data.pull_request;
-  // Caller must validate env.GITHUB_APP_SLUG before invoking (the controller
-  // returns 500 on missing config so GitHub retries, rather than 204 from a skip).
-  const appSlug = env.GITHUB_APP_SLUG;
 
   // Unsupported actions (auto-triggers deferred to Phase 3)
   if (action === 'opened' || action === 'ready_for_review') {
     return `auto-trigger not yet supported: ${action}`;
   }
 
-  // Invite-based trigger: reviewer must be the configured login.
-  // GITHUB_REVIEWER_LOGIN replaces the entire expected reviewer string — use this
-  // when the reviewer is a plain user account (e.g. a shared service account)
-  // rather than a GitHub App bot.
+  // Invite-based trigger: the requested reviewer must be the destination's
+  // configured reviewer login (a plain user, EMU user, or App bot - whatever
+  // the registry pins per destination).
   if (action === 'review_requested') {
     const reviewer = data.requested_reviewer?.login;
-    const expectedReviewer = env.GITHUB_REVIEWER_LOGIN?.trim() || `${appSlug}[bot]`;
-    if (reviewer !== expectedReviewer) {
-      return `reviewer ${reviewer} is not ${expectedReviewer}`;
+    if (reviewer !== reviewerLogin) {
+      return `reviewer ${reviewer} is not ${reviewerLogin}`;
     }
   }
 
@@ -82,6 +81,41 @@ export function getSkipReason(data, action, env) {
   }
 
   return null;
+}
+
+/**
+ * Maps a skip reason string from getSkipReason to a short, stable label
+ * suitable for use as a CloudWatch metric dimension value.
+ *
+ * Keep in lockstep with getSkipReason: these string checks mirror the exact
+ * literals / prefixes it returns.
+ *
+ * @param {string|null|undefined} reason - Skip reason from getSkipReason
+ * @returns {string} Stable label string
+ */
+export function skipReasonLabel(reason) {
+  if (!reason) {
+    return 'other';
+  }
+  if (reason === 'draft PR') {
+    return 'draft_pr';
+  }
+  if (reason === 'bot sender') {
+    return 'bot_sender';
+  }
+  if (reason.startsWith('non-default branch')) {
+    return 'non_default_branch';
+  }
+  if (reason.startsWith('auto-trigger not yet supported')) {
+    return 'auto_trigger';
+  }
+  if (reason.startsWith('reviewer ')) {
+    return 'wrong_reviewer';
+  }
+  if (reason.startsWith('unsupported action')) {
+    return 'unsupported_action';
+  }
+  return 'other';
 }
 
 /**
