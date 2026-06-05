@@ -28,8 +28,16 @@
 // (2-char segments stay out: they're indistinguishable from locale codes.)
 const MIN_TOKEN_LEN = 3;
 
-// API-side guard: keeps DB rows small and bounds backtracking risk.
+// API-side guard: keeps DB rows small. NOTE: length does NOT bound backtracking —
+// catastrophic patterns are tiny (e.g. "(a+)+$"). ReDoS is screened separately
+// (NESTED_QUANTIFIER_RE) and the evaluation engine is the primary guard.
 const MAX_REGEX_LEN = 512;
+
+// Reject obviously catastrophic backtracking shapes — a group that contains an
+// unbounded quantifier and is itself unbounded-quantified ("(a+)+", "(a*)*",
+// "([a-z]+){2,}"). Stored regex is UNTRUSTED at evaluation time; this is a
+// write-boundary screen (defense-in-depth for any JS consumer). Not exhaustive.
+const NESTED_QUANTIFIER_RE = /\([^()]*(?:[*+]|\{\d+,\d*\})[^()]*\)\s*(?:[*+]|\{\d+,\d*\})/;
 
 const CASE_INSENSITIVE_PREFIX = '(?i)';
 
@@ -88,6 +96,17 @@ function extractPath(raw) {
   } catch {
     return raw;
   }
+}
+
+/**
+ * Canonical path for cross-rule sample-URL comparison: runs the same
+ * extract → strip-extension → strip-locale pipeline as derivation, then folds
+ * case and a trailing slash. So "/products/a", "https://x/products/a", and
+ * "/en-us/products/a/" all compare equal (the regex they derive is identical).
+ */
+export function toComparablePath(url) {
+  const path = stripLeadingLocale(stripPageExtension(extractPath(String(url).trim())));
+  return path.replace(/\/+$/, '').toLowerCase();
 }
 
 /** Escape a string for safe inclusion inside a regex literal. */
@@ -293,6 +312,23 @@ export function regexFromUrls(urls) {
   if (paths.length === 0) {
     throw new Error('urls did not yield any extractable paths');
   }
+  // Root-path samples ("/") are legitimate — a customer classifying the homepage
+  // pastes the plain domain. Emit a PRECISE root/homepage rule (matches "", "/",
+  // "/home", "/index", and the locale-prefixed forms) — NOT a match-everything
+  // rule. Mixing the root with deeper paths in one rule is ambiguous → reject.
+  const isRoot = (p) => p === '/';
+  const rootCount = paths.filter(isRoot).length;
+  if (rootCount === paths.length) {
+    return {
+      regex: `${CASE_INSENSITIVE_PREFIX}^/?(?:[a-z]{2}(?:-[a-z]{2,4})?/)?(home|index)?$`,
+      method: 'common-prefix',
+      core: '',
+      evidence: 'Site homepage (root path)',
+    };
+  }
+  if (rootCount > 0) {
+    throw new Error('cannot mix the site root with other paths in one rule');
+  }
 
   // Derive from locale-stripped paths so the rule generalises across locales.
   // Anchored rules still tolerate a leading locale (OPTIONAL_LOCALE_PREFIX);
@@ -349,6 +385,9 @@ export function validateUserRegex(regex) {
     : `${CASE_INSENSITIVE_PREFIX}${regex}`;
   if (normalized.length > MAX_REGEX_LEN) {
     throw new Error(`regex exceeds ${MAX_REGEX_LEN} characters`);
+  }
+  if (NESTED_QUANTIFIER_RE.test(normalized)) {
+    throw new Error('regex has nested unbounded quantifiers (catastrophic backtracking risk)');
   }
   if (!isCompilable(normalized)) {
     throw new Error('regex is not a valid regular expression');

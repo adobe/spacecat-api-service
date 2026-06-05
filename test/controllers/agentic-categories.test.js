@@ -85,7 +85,10 @@ function buildContext({
   };
 }
 
-function loadController(mockHasAccess = sinon.stub().resolves(true)) {
+function loadController(
+  mockHasAccess = sinon.stub().resolves(true),
+  mockIsAdmin = sinon.stub().returns(true),
+) {
   // Restore prior stub before re-applying to keep tests independent.
   if (AccessControlUtil.fromContext.restore) {
     AccessControlUtil.fromContext.restore();
@@ -93,6 +96,7 @@ function loadController(mockHasAccess = sinon.stub().resolves(true)) {
   sinon.stub(AccessControlUtil, 'fromContext').returns({
     hasAccess: mockHasAccess,
     hasAdminAccess: sinon.stub().returns(false),
+    isLLMOAdministrator: mockIsAdmin,
   });
   return { controller: AgenticCategoriesController(), mockHasAccess };
 }
@@ -156,6 +160,24 @@ describe('AgenticCategoriesController', () => {
     expect(create.status).to.equal(403);
     expect(update.status).to.equal(403);
     expect(remove.status).to.equal(403);
+  });
+
+  it('create/update/remove require LLMO administrator (403 for org member, non-admin)', async () => {
+    // org member (hasAccess true) but NOT an LLMO admin → writes forbidden
+    const { controller } = loadController(sinon.stub().resolves(true), sinon.stub().returns(false));
+    const create = await controller.create(buildContext({ data: { name: 'c', urls: ['/a'] } }));
+    const update = await controller.update(buildContext({ params: { name: 'c' }, data: { urls: ['/a'] } }));
+    const remove = await controller.remove(buildContext({ params: { name: 'c' } }));
+    expect(create.status).to.equal(403);
+    expect(update.status).to.equal(403);
+    expect(remove.status).to.equal(403);
+  });
+
+  it('list does NOT require LLMO administrator (org membership is enough)', async () => {
+    const client = buildClient({ resolveWith: { data: [], error: null } });
+    const { controller } = loadController(sinon.stub().resolves(true), sinon.stub().returns(false));
+    const res = await controller.list(buildContext({ client }));
+    expect(res.status).to.equal(200);
   });
 
   // ───── list ─────
@@ -295,7 +317,7 @@ describe('AgenticCategoriesController', () => {
       client,
       data: { name: 'photoshop', urls: ['/products/photoshop/a', '/products/photoshop/b'] },
     }));
-    expect(res.status).to.equal(200);
+    expect(res.status).to.equal(201);
     const body = await res.json();
     expect(body.source).to.equal('human');
   });
@@ -518,6 +540,17 @@ describe('AgenticCategoriesController', () => {
     expect(res.status).to.equal(400);
   });
 
+  it('update returns 400 for a newRegex with catastrophic backtracking (ReDoS)', async () => {
+    const client = buildClient({ resolveWith: { data: { name: 'foo', source: 'human' }, error: null } });
+    const { controller } = loadController();
+    const res = await controller.update(buildContext({
+      client,
+      params: { name: 'foo' },
+      data: { newRegex: '(a+)+$' },
+    }));
+    expect(res.status).to.equal(400);
+  });
+
   it('update returns 500 on update error', async () => {
     let call = 0;
     const client = {
@@ -675,6 +708,19 @@ describe('AgenticCategoriesController', () => {
     expect(body.message).to.match(/already belongs to category rule "acrobat"/);
   });
 
+  it('create detects a cross-format sample-URL conflict (full URL / locale vs stored path)', async () => {
+    // Stored path is "/products/acrobat/a"; the new samples are the same content
+    // as a full URL and a locale-prefixed path — must still be detected.
+    const client = dedupClient([{ name: 'acrobat', sample_urls: ['/products/acrobat/a'] }]);
+    const { controller } = loadController();
+    const res = await controller.create(buildContext({
+      client,
+      data: { name: 'photoshop', urls: ['https://x.com/en-us/products/acrobat/a', '/products/photoshop/x'] },
+    }));
+    expect(res.status).to.equal(409);
+    expect((await res.json()).message).to.match(/already belongs to category rule "acrobat"/);
+  });
+
   it('create returns 409 when the site is at the 20-rule cap', async () => {
     const existing = Array.from({ length: 20 }, (_, i) => ({ name: `c${i}`, sample_urls: [] }));
     const client = dedupClient(existing);
@@ -696,7 +742,7 @@ describe('AgenticCategoriesController', () => {
       client,
       data: { name: 'twentieth', urls: ['/products/photoshop/a', '/products/photoshop/b'] },
     }));
-    expect(res.status).to.equal(200);
+    expect(res.status).to.equal(201);
   });
 
   it('create stamps both created_by and updated_by from the auth profile', async () => {
@@ -708,7 +754,7 @@ describe('AgenticCategoriesController', () => {
     ctx.attributes.authInfo = { getProfile: () => ({ email: 'editor@adobe.com' }) };
     const { controller } = loadController();
     const res = await controller.create(ctx);
-    expect(res.status).to.equal(200);
+    expect(res.status).to.equal(201);
     const insertOp = client.capturedOps.find((o) => o.op === 'insert');
     expect(insertOp.args[0].created_by).to.equal('editor@adobe.com');
     expect(insertOp.args[0].updated_by).to.equal('editor@adobe.com');
@@ -721,7 +767,7 @@ describe('AgenticCategoriesController', () => {
       client,
       data: { name: '  photoshop  ', urls: ['/products/photoshop/a', '/products/photoshop/b'] },
     }));
-    expect(res.status).to.equal(200);
+    expect(res.status).to.equal(201);
     const insertOp = client.capturedOps.find((o) => o.op === 'insert');
     expect(insertOp.args[0].name).to.equal('photoshop');
   });
@@ -735,7 +781,7 @@ describe('AgenticCategoriesController', () => {
     ctx.attributes.authInfo = {};
     const { controller } = loadController();
     const res = await controller.create(ctx);
-    expect(res.status).to.equal(200);
+    expect(res.status).to.equal(201);
     const insertOp = client.capturedOps.find((o) => o.op === 'insert');
     expect(insertOp.args[0].created_by).to.equal('system');
     expect(ctx.log.warn).to.have.been.called;

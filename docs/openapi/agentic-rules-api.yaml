@@ -52,7 +52,7 @@ agentic-categories-list:
           schema:
             $ref: '#/AgenticRuleCreateRequest'
     responses:
-      '200':
+      '201':
         description: Rule created
         content:
           application/json:
@@ -185,7 +185,7 @@ agentic-page-types-list:
           schema:
             $ref: '#/AgenticRuleCreateRequest'
     responses:
-      '200':
+      '201':
         description: Rule created
         content:
           application/json:

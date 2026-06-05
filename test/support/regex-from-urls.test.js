@@ -329,6 +329,29 @@ describe('regexFromUrls', () => {
     expect(applyRegex(result.regex, '/ipad/ipad-pro')).to.be.true;
   });
 
+  // ── root / homepage handling ──
+  it('derives a precise homepage rule from the plain domain (not match-everything)', () => {
+    const result = regexFromUrls(['https://x.com']);
+    expect(applyRegex(result.regex, '/')).to.be.true;
+    expect(applyRegex(result.regex, '')).to.be.true;
+    expect(applyRegex(result.regex, '/home')).to.be.true;
+    expect(applyRegex(result.regex, '/en/')).to.be.true;
+    // must NOT match arbitrary pages
+    expect(applyRegex(result.regex, '/products')).to.be.false;
+    expect(applyRegex(result.regex, '/products/photoshop')).to.be.false;
+  });
+
+  it('treats a trailing-slash root the same as the bare domain', () => {
+    const result = regexFromUrls(['https://x.com/']);
+    expect(applyRegex(result.regex, '/')).to.be.true;
+    expect(applyRegex(result.regex, '/anything')).to.be.false;
+  });
+
+  it('rejects mixing the site root with deeper paths in one rule', () => {
+    expect(() => regexFromUrls(['https://x.com/', 'https://x.com/products']))
+      .to.throw(/cannot mix the site root/);
+  });
+
   // ── strategy 4: literal fallback ──
   it('strategy 4: literal fallback when no token is reusable', () => {
     const result = regexFromUrls(['/a/b', '/c/d']);
@@ -463,5 +486,17 @@ describe('validateUserRegex', () => {
 
   it('throws on uncompilable regex', () => {
     expect(() => validateUserRegex('([unclosed')).to.throw(/not a valid/);
+  });
+
+  // ReDoS: reject nested unbounded quantifiers at the write boundary.
+  it('rejects catastrophic-backtracking patterns (nested unbounded quantifiers)', () => {
+    expect(() => validateUserRegex('(a+)+$')).to.throw(/nested unbounded quantifiers/);
+    expect(() => validateUserRegex('(a*)*')).to.throw(/nested unbounded quantifiers/);
+    expect(() => validateUserRegex('([a-z]+){2,}')).to.throw(/nested unbounded quantifiers/);
+  });
+
+  it('allows ordinary customer regexes (no nested quantifiers)', () => {
+    expect(validateUserRegex('^/products/photoshop')).to.equal('(?i)^/products/photoshop');
+    expect(validateUserRegex('/(foo|bar)/')).to.equal('(?i)/(foo|bar)/');
   });
 });

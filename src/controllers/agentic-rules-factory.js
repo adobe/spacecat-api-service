@@ -11,7 +11,7 @@
  */
 
 import {
-  badRequest, createResponse, forbidden, internalServerError, notFound, ok,
+  badRequest, created, createResponse, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText, isArray, isNonEmptyObject, isValidUUID,
@@ -19,7 +19,7 @@ import {
 
 import AccessControlUtil from '../support/access-control-util.js';
 import { AgenticRuleDto } from '../dto/agentic-rule.js';
-import { regexFromUrls, validateUserRegex } from '../support/regex-from-urls.js';
+import { regexFromUrls, validateUserRegex, toComparablePath } from '../support/regex-from-urls.js';
 
 /**
  * Factory for site-scoped customer-edit endpoints over an auto-derived URL
@@ -84,11 +84,12 @@ function getUserIdentifier(context) {
   return identity;
 }
 
-// Normalize a URL/path for cross-rule dedup: trim, drop a trailing slash,
-// lowercase. Comparison only — the stored sample_urls keep their original form.
-function normalizeUrl(url) {
-  return String(url).trim().replace(/\/+$/, '').toLowerCase();
-}
+// Normalize for cross-rule dedup through the SAME extract→strip-locale pipeline
+// derivation uses, so two URLs that derive the same regex are detected as a
+// conflict regardless of scheme/host/locale/extension (e.g. "/products/a",
+// "https://x/products/a", "/en-us/products/a" all collapse to one key).
+// Comparison only — the stored sample_urls keep their original form.
+const normalizeUrl = toComparablePath;
 
 /**
  * Scan the site+dimension's active rules: returns the cross-rule sample-URL
@@ -135,7 +136,11 @@ export function createRulesController({ tableName, dimensionLabel }) {
     throw new Error('tableName and dimensionLabel are required');
   }
 
-  async function authorize(context) {
+  // `requireAdmin` gates mutations (create/update/delete) behind the LLMO-admin
+  // claim, matching every sibling LLMO customer-edit endpoint; reads only need
+  // org membership. hasAccess() must precede isLLMOAdministrator() so the
+  // delegation-aware check works (see llmo.js convention).
+  async function authorize(context, { requireAdmin = false } = {}) {
     const { siteId } = context.params || {};
     if (!isValidUUID(siteId)) {
       return { error: badRequest('Site ID required') };
@@ -155,6 +160,9 @@ export function createRulesController({ tableName, dimensionLabel }) {
     const ac = AccessControlUtil.fromContext(context);
     if (!await ac.hasAccess(site)) {
       return { error: forbidden(`Only users belonging to the organization can manage ${dimensionLabel} rules`) };
+    }
+    if (requireAdmin && !ac.isLLMOAdministrator()) {
+      return { error: forbidden(`Only LLMO administrators can modify ${dimensionLabel} rules`) };
     }
     return { siteId, client };
   }
@@ -203,7 +211,7 @@ export function createRulesController({ tableName, dimensionLabel }) {
 
   /** POST /sites/:siteId/agentic-{dimension} */
   async function create(context) {
-    const auth = await authorize(context);
+    const auth = await authorize(context, { requireAdmin: true });
     if (auth.error) {
       return auth.error;
     }
@@ -271,7 +279,7 @@ export function createRulesController({ tableName, dimensionLabel }) {
     if (!data) {
       return internalServerError(`Failed to create ${dimensionLabel} rule`);
     }
-    return ok(AgenticRuleDto.toJSON(data));
+    return created(AgenticRuleDto.toJSON(data));
   }
 
   /**
@@ -279,7 +287,7 @@ export function createRulesController({ tableName, dimensionLabel }) {
    * Body may include `newName`, `urls`, `newRegex`.
    */
   async function update(context) {
-    const auth = await authorize(context);
+    const auth = await authorize(context, { requireAdmin: true });
     if (auth.error) {
       return auth.error;
     }
@@ -383,7 +391,7 @@ export function createRulesController({ tableName, dimensionLabel }) {
    * audit. The active-rows partial unique index lets the name be re-created.
    */
   async function remove(context) {
-    const auth = await authorize(context);
+    const auth = await authorize(context, { requireAdmin: true });
     if (auth.error) {
       return auth.error;
     }

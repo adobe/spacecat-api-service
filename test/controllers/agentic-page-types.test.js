@@ -74,6 +74,7 @@ function loadController(mockHasAccess = sinon.stub().resolves(true)) {
   sinon.stub(AccessControlUtil, 'fromContext').returns({
     hasAccess: mockHasAccess,
     hasAdminAccess: sinon.stub().returns(false),
+    isLLMOAdministrator: sinon.stub().returns(true),
   });
   return AgenticPageTypesController();
 }
