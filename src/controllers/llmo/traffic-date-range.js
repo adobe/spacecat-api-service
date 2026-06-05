@@ -45,8 +45,11 @@ function isRealDate(value) {
  */
 export function checkDateRange(data) {
   const q = data || {};
-  const startRaw = q.startDate || q.start_date;
-  const endRaw = q.endDate || q.end_date;
+  // Nullish coalescing: prefer the camelCase alias unless it is absent
+  // (null/undefined), so an empty-string value isn't silently swapped for the
+  // snake_case alias.
+  const startRaw = q.startDate ?? q.start_date;
+  const endRaw = q.endDate ?? q.end_date;
 
   // Both omitted → handler applies its default window; nothing to validate.
   if (startRaw == null && endRaw == null) {

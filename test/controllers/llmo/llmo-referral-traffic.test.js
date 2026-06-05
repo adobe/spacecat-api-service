@@ -165,6 +165,14 @@ describe('llmo-referral-traffic', () => {
       await handler(ctx);
       expect(stubbedValidateAccess).to.not.have.been.called;
     });
+
+    it('allows a valid in-range request through to the data layer', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-01-01', endDate: '2026-01-28' } });
+      const handler = createReferralTrafficKpisHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(stubbedValidateAccess).to.have.been.called;
+      expect(res.status).to.equal(200);
+    });
   });
 
   // ── parseParams branches ──────────────────────────────────────────────────
