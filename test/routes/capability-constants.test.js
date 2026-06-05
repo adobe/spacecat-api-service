@@ -78,7 +78,7 @@ describe('capability-constants drift coverage', () => {
     });
   });
 
-  it('every readAll constant has an actual hasS2SCapability(CONST) call site (Layer 2 opt-in)', () => {
+  it('every CAP_ constant with an S2S opt-in has an actual hasS2SCapability(CONST) call site (Layer 2 opt-in)', () => {
     // Tighter assertion than "is the constant imported": there must be an actual
     // hasS2SCapability(...) invocation against the constant (or its literal value).
     // An import alone could rot if the call site is removed but the import is kept,

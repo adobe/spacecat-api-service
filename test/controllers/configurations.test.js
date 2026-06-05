@@ -360,10 +360,8 @@ describe('Configurations Controller', () => {
       mockDataAccess.Consumer.findByClientIdAndImsOrgId
         .resolves(makeFreshConsumer({ capabilities: ['configuration:read'] }));
 
-      const result = await configurationsController.getByVersion({
-        params: { version: '1' },
-        invocation: { id: 'req-cfg-1' },
-      });
+      context.params = { version: '1' };
+      const result = await configurationsController.getByVersion(context);
 
       expect(result.status).to.equal(200);
       expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
@@ -396,6 +394,17 @@ describe('Configurations Controller', () => {
       expect(result.status).to.equal(403);
       expect(mockDataAccess.Configuration.findLatest).to.not.have.been.called;
       expect(context.log.info).to.have.been.calledWithMatch(/reason=revoked/);
+    });
+
+    it('logs requestId=unknown when the invocation id is missing', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:read'] }));
+      delete context.invocation;
+
+      const result = await configurationsController.getLatest(context);
+
+      expect(result.status).to.equal(403);
+      expect(context.log.info).to.have.been.calledWithMatch(/requestId=unknown/);
     });
   });
 
