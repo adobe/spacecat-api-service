@@ -331,6 +331,31 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Missing daily refresh: *1*');
   });
 
+  it('does not credit raw when projected_at is at/after dateStr + RAW_FALLBACK_WINDOW_DAYS', async () => {
+    // Raw fallback window is [dateStr+1, dateStr+7). A raw row projected on
+    // 2026-05-26 (== dateStr 2026-05-19 + 7 days) is outside it, so without daily
+    // proof for the date, raw must be reported missing.
+    const clock = sinon.useFakeTimers(new Date('2026-06-01T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://late-raw.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-26T00:00:00Z', // dateStr + 7 days (exclusive bound)
+        output_count: 5000,
+        metadata: {},
+        skipped: false,
+      },
+    ]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing raw projection: *1*');
+  });
+
   it('skips weekly check for traffic dates in the current (incomplete) ISO week', async () => {
     const clock = sinon.useFakeTimers(new Date('2026-05-20T12:00:00Z').getTime());
     context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://midweek.site')]);
@@ -491,24 +516,26 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   });
 
   it('gives up on non-transient errors without retry', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-06-01T12:00:00Z').getTime());
     context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://err.site')]);
     const pg = makePostgrest([]);
-    // Rejection with a non-transient code: must propagate after the first attempt.
+    // Non-transient rejection at the terminal: must propagate without retry.
     const originalFrom = pg.from;
     pg.from = sinon.stub().callsFake((...args) => {
       const chain = originalFrom(...args);
-      chain.eq = sinon.stub().rejects(Object.assign(
-        new Error('permission denied'),
-        { code: 'PGRST301' },
-      ));
+      chain.then = (_resolve, reject) => {
+        reject(Object.assign(new Error('permission denied'), { code: 'PGRST301' }));
+      };
       return chain;
     });
     context.dataAccess.services.postgrestClient = pg;
 
     await CheckAgenticTrafficDbStatusCommand(context)
       .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
 
-    expect(pg.from.callCount).to.equal(1); // no retry for non-transient
+    // 3 parallel per-handler queries, each attempted once (no retry for non-transient).
+    expect(pg.from.callCount).to.equal(3);
     expect(context.log.error).to.have.been.called;
   });
 

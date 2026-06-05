@@ -34,7 +34,9 @@ const HANDLERS = {
   weekly: 'wrpc_refresh_agentic_traffic_weekly',
 };
 
-const PROJECTION_LOOKAHEAD_DAYS = 7;
+// Upper bound (days after the traffic date) for crediting a raw import without a
+// matching daily refresh — wide enough to cover weekend and slow-pipeline delays.
+const RAW_FALLBACK_WINDOW_DAYS = 7;
 const SITE_ID_CHUNK_SIZE = 150;
 const RETRY_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 200;
@@ -147,7 +149,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       // (no upper bound — backfills run arbitrarily later). Match the exact date via
       // jsonb metadata containment so result sets stay small even across all sites.
       const rawProjectableAt = `${formatUtcDate(addUtcDays(targetDate, 1))}T00:00:00Z`;
-      const rawWindowEnd = `${formatUtcDate(addUtcDays(targetDate, PROJECTION_LOOKAHEAD_DAYS))}T00:00:00Z`;
+      const rawWindowEnd = `${formatUtcDate(addUtcDays(targetDate, RAW_FALLBACK_WINDOW_DAYS))}T00:00:00Z`;
 
       /* c8 ignore next 6 -- cosmetic per-scope prefix; logic tested via resolveSiteScope */
       let siteScopeText = '';
@@ -200,34 +202,37 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           return data ?? [];
         });
 
-        // Daily refresh for dateStr is a post-success message of the raw import,
-        // so a daily-for-X row proves raw succeeded for X too.
-        const dailyRows = await query((q) => q
-          .eq('handler_name', HANDLERS.daily)
-          .gte('projected_at', `${dateStr}T00:00:00Z`)
-          .contains('metadata->dailyRefreshDates', dailyContains));
+        // The three per-handler queries are independent — run them in parallel.
+        const [dailyRows, weeklyRows, rawRows] = await Promise.all([
+          // Daily refresh for dateStr is a post-success message of the raw import,
+          // so a daily-for-X row proves raw succeeded for X too.
+          query((q) => q
+            .eq('handler_name', HANDLERS.daily)
+            .gte('projected_at', `${dateStr}T00:00:00Z`)
+            .contains('metadata->dailyRefreshDates', dailyContains)),
+          weeklyExpected
+            ? query((q) => q
+              .eq('handler_name', HANDLERS.weekly)
+              .gte('projected_at', `${weekStartStr}T00:00:00Z`)
+              .contains('metadata->weeklyRefreshWeeks', weeklyContains))
+            : Promise.resolve([]),
+          // Fallback for "raw OK, daily not run yet": raw carries no per-date
+          // metadata, so credit it within the post-traffic window (RAW_FALLBACK_WINDOW_DAYS,
+          // covers weekend/pipeline delays) with positive output.
+          query((q) => q
+            .eq('handler_name', HANDLERS.raw)
+            .gte('projected_at', rawProjectableAt)
+            .lt('projected_at', rawWindowEnd)
+            .gt('output_count', 0)),
+        ]);
+
         for (const row of dailyRows) {
           ran.add(`${row.scope_prefix}:${HANDLERS.daily}`);
           ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
         }
-
-        if (weeklyExpected) {
-          const weeklyRows = await query((q) => q
-            .eq('handler_name', HANDLERS.weekly)
-            .gte('projected_at', `${weekStartStr}T00:00:00Z`)
-            .contains('metadata->weeklyRefreshWeeks', weeklyContains));
-          for (const row of weeklyRows) {
-            ran.add(`${row.scope_prefix}:${HANDLERS.weekly}`);
-          }
+        for (const row of weeklyRows) {
+          ran.add(`${row.scope_prefix}:${HANDLERS.weekly}`);
         }
-
-        // Fallback for "raw OK, daily not run yet": raw carries no per-date
-        // metadata, so credit it only within the day-after window with positive output.
-        const rawRows = await query((q) => q
-          .eq('handler_name', HANDLERS.raw)
-          .gte('projected_at', rawProjectableAt)
-          .lt('projected_at', rawWindowEnd)
-          .gt('output_count', 0));
         for (const row of rawRows) {
           ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
         }
