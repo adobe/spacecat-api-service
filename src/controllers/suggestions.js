@@ -992,6 +992,9 @@ function SuggestionsController(ctx, sqs, env) {
           };
         }
       } catch (e) {
+        if (e?.name !== VALIDATION_ERROR_NAME) {
+          context.log.error(`[patchSuggestionsStatus] unexpected error for suggestionId=${id}: ${e.message}`);
+        }
         return {
           index,
           uuid: id,

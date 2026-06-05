@@ -4123,6 +4123,7 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 500);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'auth service unavailable');
       expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
+      expect(context.log.error).to.have.been.calledWithMatch(/\[patchSuggestionsStatus\] unexpected error/);
     });
   });
 
