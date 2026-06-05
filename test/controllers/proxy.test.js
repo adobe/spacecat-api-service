@@ -48,6 +48,13 @@ describe('Proxy Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 400 for a malformed url', async () => {
+      const response = await proxyController.getPreview(
+        makeContext('https://api.example.com/tools/proxy?url=not-a-valid-url'),
+      );
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 400 for a non-http/https scheme', async () => {
       const response = await proxyController.getPreview(
         makeContext('https://api.example.com/tools/proxy?url=ftp%3A%2F%2Fevil.com'),
