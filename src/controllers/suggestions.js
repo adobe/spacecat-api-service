@@ -47,7 +47,7 @@ import {
   isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { CAP_FIX_ENTITY_CREATE } from '../routes/capability-constants.js';
+import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
@@ -923,8 +923,14 @@ function SuggestionsController(ctx, sqs, env) {
         if (currentStatus !== status) {
           // Validate REJECTED status transition
           if (status === SuggestionModel.STATUSES.REJECTED) {
-            // Check admin access for REJECTED status
-            if (!accessControlUtil.hasAdminAccess()) {
+            // S2S consumers with suggestion:write capability may also reject suggestions
+            const s2sResult = await accessControlUtil.hasS2SCapability(CAP_SUGGESTION_WRITE);
+            if (s2sResult.allowed) {
+              context.log.info(`[acl] S2S REJECT granted - suggestionId=${id} clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
+            } else if (!accessControlUtil.hasAdminAccess()) {
+              if (s2sResult.reason !== 'not-s2s') {
+                context.log.info(`[acl] Denied REJECTED - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+              }
               return {
                 index,
                 uuid: id,

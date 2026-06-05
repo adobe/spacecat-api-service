@@ -15,6 +15,7 @@ import {
   CAP_ORG_READ_ALL,
   CAP_SITE_CREATE,
   CAP_SITE_READ_ALL,
+  CAP_SUGGESTION_WRITE,
 } from './capability-constants.js';
 
 /**
@@ -390,11 +391,11 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fixEntity:read',
-  'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:write',
-  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': 'suggestion:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/suggestions': CAP_SUGGESTION_WRITE,
+  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': CAP_SUGGESTION_WRITE,
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': CAP_FIX_ENTITY_CREATE,
-  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
-  'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
+  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': CAP_SUGGESTION_WRITE,
+  'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': CAP_SUGGESTION_WRITE,
 
   // Traffic
   'GET /sites/:siteId/traffic/paid': 'site:read',
@@ -642,7 +643,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/tokens/:tokenId/grants': 'token:read',
 
   // Suggestion grants
-  'DELETE /sites/:siteId/suggestions/grants/:grantId': 'suggestion:write',
+  'DELETE /sites/:siteId/suggestions/grants/:grantId': CAP_SUGGESTION_WRITE,
 };
 
 export default routeRequiredCapabilities;

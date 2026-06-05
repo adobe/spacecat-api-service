@@ -3895,7 +3895,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil - allow hasAccess (for initial check), deny hasAdminAccess (for REJECTED check)
+      // Mock AccessControlUtil - allow hasAccess (for initial check), deny S2S and hasAdminAccess (for REJECTED check)
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
 
@@ -3931,7 +3932,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      // Mock AccessControlUtil - allow hasAccess and hasAdminAccess, no S2S
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
 
@@ -3968,7 +3970,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      // Mock AccessControlUtil - allow hasAccess and hasAdminAccess, no S2S
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
 
@@ -4005,7 +4008,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      // Mock AccessControlUtil - allow hasAccess and hasAdminAccess, no S2S
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
 
@@ -4024,6 +4028,69 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Can only reject suggestions with status PENDING_VALIDATION');
       expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+    });
+
+    it('allows S2S consumer with suggestion:write to reject a PENDING_VALIDATION suggestion', async () => {
+      const pendingSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'PENDING_VALIDATION',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      const suggestionEntity = mockSuggestionEntity(pendingSuggestion, removeStub);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(suggestionEntity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .resolves({ allowed: true, reason: 'granted', clientId: 'svc-suggestions', consumerId: 'consumer-1' });
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'REJECTED');
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+      expect(context.log.info).to.have.been.calledWithMatch(/\[acl\] S2S REJECT granted/);
+    });
+
+    it('returns 403 for S2S consumer missing suggestion:write when user is not admin', async () => {
+      const pendingSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'PENDING_VALIDATION',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(mockSuggestionEntity(pendingSuggestion, removeStub));
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .resolves({ allowed: false, reason: 'missing-capability', clientId: 'svc-suggestions', consumerId: 'consumer-1' });
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 403);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Only admins can reject suggestions');
     });
   });
 
