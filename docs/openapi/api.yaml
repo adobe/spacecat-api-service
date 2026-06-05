@@ -79,6 +79,11 @@ tags:
     description: Brand sentiment analysis topics and guidelines management
   - name: ai-visibility
     description: AI Visibility endpoints – proxy to Semrush gRPC for brand visibility, competitor gaps, topic research, and prompt analysis
+  - name: state-access-mappings
+    description: |
+      Hybrid permission model — state-layer access mappings + capability views.
+      Customer org admins assign / revoke per-resource bindings; product UIs
+      read the capability catalog and the caller's effective capability set.
 
 paths:
   /audits/latest/{auditType}:
@@ -676,6 +681,17 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
+
+  /state/access-mappings:
+    $ref: './state-access-mappings-api.yaml#/state-access-mappings'
+  /state/access-mappings/history:
+    $ref: './state-access-mappings-api.yaml#/state-access-mappings-history'
+  /state/access-mappings/{id}:
+    $ref: './state-access-mappings-api.yaml#/state-access-mapping-by-id'
+  /product/capabilities:
+    $ref: './state-access-mappings-api.yaml#/product-capabilities'
+  /user/capabilities/{resourceId}:
+    $ref: './state-access-mappings-api.yaml#/user-capabilities-by-resource'
 
 components:
   securitySchemes:

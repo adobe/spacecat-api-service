@@ -100,7 +100,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
- * @param {Object} facsAccessMappingsController - FACS Phase 2 state-layer mappings controller.
+ * @param {Object} stateAccessMappingsController - State-layer access mappings + caps.
  * @param {Object} serenityController - Semrush AIO proxy controller (prompts + projects).
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
@@ -160,7 +160,7 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
-  facsAccessMappingsController,
+  stateAccessMappingsController,
   serenityController,
 ) {
   const staticRoutes = {};
@@ -683,15 +683,20 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': aiVisibilityController.getV1TopicGapTopicsTotals,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
 
-    // FACS Phase 2 state-layer management endpoints. Gated by:
-    //  - facsWrapper (PRODUCTS_ROUTES.LLMO: llmo/can_manage_user on writes,
-    //    llmo/can_view on the list)
-    //  - required-capabilities.INTERNAL_ROUTES (S2S consumers excluded)
-    // See platform/decisions/mac-state-layer.md "State Layer Management Endpoints".
-    'GET /facs/access-mappings': facsAccessMappingsController.listMappings,
-    'GET /facs/access-mappings/history': facsAccessMappingsController.listHistory,
-    'POST /facs/access-mappings': facsAccessMappingsController.createMappings,
-    'DELETE /facs/access-mappings/:id': facsAccessMappingsController.revokeMappingById,
+    // Hybrid permission model — state-layer management + capability
+    // introspection endpoints. Gated by `facsWrapper` against
+    // `PRODUCTS_ROUTES.<product>` (state-layer CRUD requires
+    // `<product>/can_manage_users`; capability introspection requires
+    // `<product>/can_view`). See:
+    //   - platform/decisions/mac-state-layer.md §"State Layer Management Endpoints"
+    //   - platform/decisions/rebac-hybrid-permission-model.md
+    'GET /state/access-mappings': stateAccessMappingsController.listMappings,
+    'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
+    'POST /state/access-mappings': stateAccessMappingsController.createMapping,
+    'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
+    'DELETE /state/access-mappings/:id': stateAccessMappingsController.revokeMapping,
+    'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
+    'GET /user/capabilities/:resourceId': stateAccessMappingsController.getUserCapabilities,
 
     // AI Visibility (Semrush gRPC)
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': aiVisibilityController.getV1PromptBrandPromptsExport,

@@ -21,6 +21,21 @@ const testDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(testDir, '..', '..');
 
 /**
+ * Routes that the capabilities map declares **ahead** of their registration
+ * in `src/routes/index.js`. Now empty — H4 landed the controller + route
+ * registration for the hybrid-model surface, so all routes referenced by
+ * the capability map are live in `src/routes/index.js` and guarded by the
+ * regular stale-route check.
+ */
+const FORWARD_DECLARED_ROUTES = new Set([]);
+
+/**
+ * Params that appear only inside forward-declared routes. Now empty — see
+ * `FORWARD_DECLARED_ROUTES` above.
+ */
+const FORWARD_DECLARED_ROUTE_PARAMS = new Set([]);
+
+/**
  * Reads `src/routes/index.js` and returns the set of every `'METHOD /path'` literal
  * declared as a route key. Implementation mirrors the regex used elsewhere to lock
  * the route surface (e.g. `test/routes/index.test.js`).
@@ -37,22 +52,32 @@ function loadAllDeclaredRoutes() {
 
 /**
  * Pins the structural contract `facsWrapper` (in `@adobe/spacecat-shared-http-utils`)
- * depends on, plus the coverage invariant against `src/routes/index.js`:
+ * depends on, plus the **union-equality** coverage invariant against
+ * `src/routes/index.js`:
  *
- *   - top level has exactly two keys: `INTERNAL_ROUTES` (array) and `PRODUCTS_ROUTES` (object)
- *   - `INTERNAL_ROUTES` is an array of unique `'METHOD /path'` strings
- *   - `PRODUCTS_ROUTES` keys are uppercase product codes; each value is an object
- *   - each product route key is `'METHOD /path'`
- *   - each product permission value is `'<product>/<action>'` whose prefix equals
- *     the enclosing product key (case-insensitive)
- *   - every route in either bucket exists in `src/routes/index.js` (no stale entries)
- *   - for any populated product P:
- *       routes(P) ∪ INTERNAL_ROUTES = all declared routes
- *       routes(P) ∩ INTERNAL_ROUTES = ∅
+ *   - top level has the hybrid-model keys: `INTERNAL_ROUTES` (array),
+ *     `PRODUCTS_ROUTES` (object), `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES`,
+ *     `FACS_NON_RESOURCE_PARAMS`.
+ *   - `INTERNAL_ROUTES` is an array of unique `'METHOD /path'` strings.
+ *   - `PRODUCTS_ROUTES` keys are uppercase product codes; each value is an object.
+ *   - each product route key is `'METHOD /path'`.
+ *   - each product route value is a single `'<product>/<capability>'` string
+ *     whose prefix equals the enclosing product key (case-insensitive).
+ *   - every route in either bucket exists in `src/routes/index.js` (no
+ *     stale entries), modulo `FORWARD_DECLARED_ROUTES`.
+ *
+ * Union-equality invariant:
+ *
+ *   (∪ PRODUCTS_ROUTES[*]) ⊎ INTERNAL_ROUTES = all declared routes
+ *
+ * Disjoint union — every declared route is owned either by at least one
+ * product OR by INTERNAL_ROUTES, never both. Routes CAN appear under
+ * multiple products simultaneously; we do NOT enforce pairwise-disjoint
+ * product maps. The invariant applies once for the union, not per product.
  */
 describe('routeFacsCapabilities', () => {
   const METHOD_PATH_RE = /^(GET|POST|PATCH|PUT|DELETE) \/.+$/;
-  const PERMISSION_RE = /^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/;
+  const CAPABILITY_RE = /^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/;
 
   let allDeclaredRoutes;
   before(() => {
@@ -60,12 +85,13 @@ describe('routeFacsCapabilities', () => {
   });
 
   describe('top-level shape', () => {
-    it('exposes the Phase 1 + Phase 2 keys', () => {
+    it('exposes the hybrid-model keys', () => {
+      // Hybrid model dropped PRODUCTS_FACS_ADMIN_PERMISSIONS and
+      // PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS — universal grants now
+      // flow through JWT.facs_permissions + state-layer org-scoped rows.
       expect(routeFacsCapabilities).to.have.all.keys(
         'INTERNAL_ROUTES',
         'PRODUCTS_ROUTES',
-        'PRODUCTS_FACS_ADMIN_PERMISSIONS',
-        'PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS',
         'PRODUCTS_FACS_RESOURCE_PARAM_ALIASES',
         'FACS_NON_RESOURCE_PARAMS',
       );
@@ -109,7 +135,7 @@ describe('routeFacsCapabilities', () => {
       });
     });
 
-    it('declares the Phase 1 products LLMO, ASO, ACO', () => {
+    it('declares the products LLMO, ASO, ACO', () => {
       expect(routeFacsCapabilities.PRODUCTS_ROUTES).to.have.all.keys('LLMO', 'ASO', 'ACO');
     });
 
@@ -127,33 +153,48 @@ describe('routeFacsCapabilities', () => {
       });
     });
 
-    it('each route value is a non-empty array of "<product>/<action>" strings scoped to its product', () => {
+    it('each route value is a single "<product>/<capability>" string scoped to its product', () => {
       Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
         Object.entries(subMap).forEach(([route, value]) => {
-          expect(value, `${product} ${route}`).to.be.an('array').and.not.empty;
-          value.forEach((permission) => {
-            expect(permission, `${product} ${route}`)
-              .to.be.a('string').and.match(PERMISSION_RE);
-            const [prefix] = permission.split('/');
-            expect(
-              prefix,
-              `permission '${permission}' for ${product} ${route} must be prefixed with the product code`,
-            ).to.equal(product.toLowerCase());
-          });
+          expect(value, `${product} ${route}`).to.be.a('string').and.match(CAPABILITY_RE);
+          const [prefix] = value.split('/');
+          expect(
+            prefix,
+            `capability '${value}' for ${product} ${route} must be prefixed with the product code`,
+          ).to.equal(product.toLowerCase());
         });
       });
     });
 
-    it('every product route exists in src/routes/index.js (no stale routes)', () => {
+    it('the LLMO capability catalog does not reference the removed `can_view_all`', () => {
+      // Regression guard for the hybrid-model migration: `can_view_all` was
+      // collapsed into `can_view` (org-wide grant now arrives via an
+      // org-scoped state-layer row carrying granted_capabilities=['llmo/can_view']).
+      const llmoCaps = new Set(Object.values(routeFacsCapabilities.PRODUCTS_ROUTES.LLMO));
+      expect(llmoCaps.has('llmo/can_view_all'), 'llmo/can_view_all is removed in the hybrid model')
+        .to.be.false;
+    });
+
+    it('uses the plural `can_manage_users` capability (hybrid-model catalog)', () => {
+      // The previous revision used singular `can_manage_user`; the hybrid
+      // model renamed it. Guard the rename so it doesn't silently regress.
+      const llmoCaps = new Set(Object.values(routeFacsCapabilities.PRODUCTS_ROUTES.LLMO));
+      expect(llmoCaps.has('llmo/can_manage_user'), 'singular llmo/can_manage_user was renamed')
+        .to.be.false;
+    });
+
+    it('every product route exists in src/routes/index.js (no stale routes, modulo forward declarations)', () => {
       Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
-        const stale = Object.keys(subMap).filter((route) => !allDeclaredRoutes.has(route));
+        const stale = Object.keys(subMap)
+          .filter((route) => !allDeclaredRoutes.has(route))
+          .filter((route) => !FORWARD_DECLARED_ROUTES.has(route));
         expect(stale, `stale ${product} routes not found in src/routes/index.js: ${stale.join(', ')}`)
           .to.deep.equal([]);
       });
     });
   });
 
-  describe('invariant: routes(product) ∪ INTERNAL_ROUTES = all routes', () => {
+  describe('invariant: (∪ PRODUCTS_ROUTES[*]) ⊎ INTERNAL_ROUTES = all routes', () => {
     it('INTERNAL_ROUTES is disjoint from every product sub-map', () => {
       const internalSet = new Set(routeFacsCapabilities.INTERNAL_ROUTES);
       Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
@@ -163,143 +204,84 @@ describe('routeFacsCapabilities', () => {
       });
     });
 
-    it('every populated product P satisfies routes(P) ∪ INTERNAL_ROUTES = all declared routes', () => {
+    it('the union of all product sub-maps plus INTERNAL_ROUTES equals all declared routes', () => {
+      // Union-equality model: every declared route is owned by at least
+      // one product OR by INTERNAL_ROUTES (disjoint union); routes MAY
+      // appear under multiple products simultaneously (e.g. a site GET
+      // surfaces under both LLMO and ASO). We do NOT enforce
+      // pairwise-disjoint product maps — cross-product routes are
+      // expected.
       const internalSet = new Set(routeFacsCapabilities.INTERNAL_ROUTES);
+      const unionOfProducts = new Set();
+      Object.values(routeFacsCapabilities.PRODUCTS_ROUTES).forEach((subMap) => {
+        Object.keys(subMap).forEach((route) => unionOfProducts.add(route));
+      });
+
+      // No gaps: every declared route is owned somewhere.
+      const covered = new Set([...unionOfProducts, ...internalSet]);
+      const missing = [...allDeclaredRoutes].filter((route) => !covered.has(route));
+      expect(
+        missing,
+        `routes declared in src/routes/index.js but not in any PRODUCTS_ROUTES sub-map or INTERNAL_ROUTES: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`,
+      ).to.deep.equal([]);
+
+      // No stale entries: every owned route exists in src/routes/index.js
+      // (modulo forward declarations).
+      const owned = [...unionOfProducts, ...internalSet];
+      const extraneous = owned
+        .filter((route) => !allDeclaredRoutes.has(route))
+        .filter((route) => !FORWARD_DECLARED_ROUTES.has(route));
+      expect(
+        extraneous,
+        `routes owned by PRODUCTS_ROUTES/INTERNAL_ROUTES but not declared in src/routes/index.js: ${extraneous.slice(0, 10).join(', ')}${extraneous.length > 10 ? '…' : ''}`,
+      ).to.deep.equal([]);
+    });
+  });
+
+  /**
+   * PRODUCTS_CAPABILITIES catalog — the single source of truth for which
+   * capability strings the codebase recognises per product. The
+   * `PRODUCTS_ROUTES` value side must be a subset of this catalog (a route
+   * cannot guard a capability the product doesn't recognise).
+   */
+  describe('PRODUCTS_CAPABILITIES catalog', () => {
+    let PRODUCTS_CAPABILITIES;
+    before(async () => {
+      ({ PRODUCTS_CAPABILITIES } = await import('../../src/routes/facs-capabilities.js'));
+    });
+
+    it('exposes a per-product catalog with `<product>/<capability>` entries', () => {
+      Object.entries(PRODUCTS_CAPABILITIES).forEach(([product, caps]) => {
+        expect(product, `product key '${product}' must be uppercase`).to.equal(product.toUpperCase());
+        expect(caps, `${product} catalog`).to.be.an('array').that.is.not.empty;
+        caps.forEach((cap) => {
+          expect(cap, `${product} capability '${cap}'`).to.be.a('string').and.match(CAPABILITY_RE);
+          const [prefix] = cap.split('/');
+          expect(prefix, `capability '${cap}' must be prefixed with the product code`)
+            .to.equal(product.toLowerCase());
+        });
+        expect(new Set(caps).size, `${product} catalog has duplicates`).to.equal(caps.length);
+      });
+    });
+
+    it('every PRODUCTS_ROUTES value belongs to its product\'s catalog', () => {
       Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
-        const productRoutes = Object.keys(subMap);
-        if (productRoutes.length === 0) {
-          // ASO/ACO are stubs pending MAC policy — invariant kicks in once populated.
-          return;
-        }
-        const covered = new Set([...productRoutes, ...internalSet]);
-        const missing = [...allDeclaredRoutes].filter((route) => !covered.has(route));
+        const catalog = new Set(PRODUCTS_CAPABILITIES[product] || []);
+        const unknown = [...new Set(Object.values(subMap))].filter((cap) => !catalog.has(cap));
         expect(
-          missing,
-          `${product} is missing ${missing.length} routes that are not in INTERNAL_ROUTES: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`,
+          unknown,
+          `${product} routes reference capabilities not in PRODUCTS_CAPABILITIES.${product}: ${unknown.join(', ')}`,
         ).to.deep.equal([]);
       });
     });
   });
 
   /**
-   * Phase 2 — Resource Identification.
-   *
-   * Pins the structural contract for `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES`
-   * and the exhaustive classification invariant against every `:param` in
-   * `src/routes/index.js` (see mac-state-layer.md §"Resource Identification").
+   * Resource Identification — pins the structural contract for
+   * `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES` and the exhaustive classification
+   * invariant against every `:param` in `src/routes/index.js` (see
+   * mac-state-layer.md §"Resource Identification").
    */
-  describe('PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS', () => {
-    it('keys are uppercase product codes that exist in PRODUCTS_ROUTES', () => {
-      const productKeys = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES);
-      Object.keys(routeFacsCapabilities.PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS)
-        .forEach((p) => {
-          expect(p, `product '${p}' must be uppercase`).to.equal(p.toUpperCase());
-          expect(productKeys, `product '${p}' must also exist in PRODUCTS_ROUTES`).to.include(p);
-        });
-    });
-
-    it('each product value is an array of "<product>/<action>" strings scoped to that product', () => {
-      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS)
-        .forEach(([product, perms]) => {
-          expect(perms, `${product} exempt permissions`).to.be.an('array');
-          perms.forEach((permission) => {
-            expect(permission, `${product} exempt entry`).to.match(/^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/);
-            const [prefix] = permission.split('/');
-            expect(
-              prefix,
-              `exempt permission '${permission}' for ${product} must be prefixed with the product code`,
-            ).to.equal(product.toLowerCase());
-          });
-        });
-    });
-
-    it('every exempt permission appears as a required permission on at least one route', () => {
-      // Sanity check: an exempt permission that no route lists can never
-      // fire — flag it so the config stays honest. Per the design doc:
-      // "every permission listed in PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS[P]
-      //  either appears as a required permission on some route in
-      //  PRODUCTS_ROUTES[P]".
-      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS)
-        .forEach(([product, perms]) => {
-          if (perms.length === 0) {
-            return;
-          }
-          const productMap = routeFacsCapabilities.PRODUCTS_ROUTES[product] || {};
-          const requiredAcrossRoutes = new Set(Object.values(productMap).flat());
-          const orphans = perms.filter((p) => !requiredAcrossRoutes.has(p));
-          expect(
-            orphans,
-            `${product} declares exempt permissions that no route requires: ${orphans.join(', ')}`,
-          ).to.deep.equal([]);
-        });
-    });
-
-    it('admin permissions are NOT also in the state-layer-exempt list (disjoint by design)', () => {
-      // The two lists are conceptually distinct:
-      //   - PRODUCTS_FACS_ADMIN_PERMISSIONS is the early-bypass list
-      //     (wrapper step 9): holders skip the route gate entirely.
-      //   - PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS is the late-bypass
-      //     list (wrapper step 11): a held permission in this set skips
-      //     the per-resource binding lookup but still passes through the
-      //     route gate and held-permission resolution.
-      // Listing an admin permission in both lists is redundant config —
-      // step 9 already short-circuits before step 11 fires.
-      const adminByProduct = routeFacsCapabilities.PRODUCTS_FACS_ADMIN_PERMISSIONS || {};
-      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS)
-        .forEach(([product, exemptPerms]) => {
-          const adminPerms = new Set(adminByProduct[product] || []);
-          const overlap = exemptPerms.filter((p) => adminPerms.has(p));
-          expect(
-            overlap,
-            `${product} lists admin permissions in both ADMIN and STATE_LAYER_EXEMPT: ${overlap.join(', ')}`,
-          ).to.deep.equal([]);
-        });
-    });
-  });
-
-  /**
-   * Phase 2 — Product-admin early bypass.
-   *
-   * Pins the structural contract for `PRODUCTS_FACS_ADMIN_PERMISSIONS`,
-   * which the wrapper consults BEFORE route lookup or held-permission
-   * resolution. Holders of a product-admin permission bypass FACS entirely
-   * for that product (see mac-state-layer.md §"Product-admin permissions").
-   */
-  describe('PRODUCTS_FACS_ADMIN_PERMISSIONS', () => {
-    it('keys are uppercase product codes that exist in PRODUCTS_ROUTES', () => {
-      const productKeys = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES);
-      Object.keys(routeFacsCapabilities.PRODUCTS_FACS_ADMIN_PERMISSIONS)
-        .forEach((p) => {
-          expect(p, `product '${p}' must be uppercase`).to.equal(p.toUpperCase());
-          expect(productKeys, `product '${p}' must also exist in PRODUCTS_ROUTES`).to.include(p);
-        });
-    });
-
-    it('each product value is an array of "<product>/<action>" strings scoped to that product', () => {
-      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_ADMIN_PERMISSIONS)
-        .forEach(([product, perms]) => {
-          expect(perms, `${product} admin permissions`).to.be.an('array');
-          perms.forEach((permission) => {
-            expect(permission, `${product} admin entry`)
-              .to.match(/^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/);
-            const [prefix] = permission.split('/');
-            expect(
-              prefix,
-              `admin permission '${permission}' for ${product} must be prefixed with the product code`,
-            ).to.equal(product.toLowerCase());
-          });
-        });
-    });
-
-    it('LLMO declares llmo/can_manage_user as the admin permission', () => {
-      // Regression guard: this is the migration anchor from the previous
-      // revision where can_manage_user lived in the state-layer-exempt list.
-      // Moving it here is what enables the early bypass.
-      expect(routeFacsCapabilities.PRODUCTS_FACS_ADMIN_PERMISSIONS.LLMO)
-        .to.include('llmo/can_manage_user');
-    });
-  });
-
   describe('PRODUCTS_FACS_RESOURCE_PARAM_ALIASES', () => {
     let allRouteParams;
     before(() => {
@@ -310,6 +292,9 @@ describe('routeFacsCapabilities', () => {
       for (const m of source.matchAll(re)) {
         allRouteParams.add(m[1]);
       }
+      // Include params from forward-declared routes too — they're real
+      // params that will surface in `src/routes/index.js` once H4 lands.
+      FORWARD_DECLARED_ROUTE_PARAMS.forEach((p) => allRouteParams.add(p));
     });
 
     function unionOfProductAliases() {

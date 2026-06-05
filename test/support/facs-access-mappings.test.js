@@ -78,21 +78,32 @@ describe('facs-access-mappings helpers', () => {
     it('throws when imsOrgId is missing', async () => {
       const client = fakePostgrestClient();
       try {
-        await listFacsAccessMappings(client, {});
+        await listFacsAccessMappings(client, { product: 'LLMO' });
         throw new Error('expected to throw');
       } catch (e) {
         expect(e.message).to.equal('listFacsAccessMappings: imsOrgId is required');
       }
     });
 
-    it('filters on ims_org_id and revoked_at IS NULL (active rows only)', async () => {
+    it('throws when product is missing', async () => {
+      const client = fakePostgrestClient();
+      try {
+        await listFacsAccessMappings(client, { imsOrgId: 'org-1' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('listFacsAccessMappings: product is required');
+      }
+    });
+
+    it('filters on ims_org_id, product, and revoked_at IS NULL (active rows only)', async () => {
       const client = fakePostgrestClient({
         readResult: { data: [{ id: 'r1' }], error: null },
       });
-      const rows = await listFacsAccessMappings(client, { imsOrgId: 'org-1' });
+      const rows = await listFacsAccessMappings(client, { imsOrgId: 'org-1', product: 'LLMO' });
       expect(rows).to.deep.equal([{ id: 'r1' }]);
       const eqCalls = client.readBuilder.eq.getCalls().map((c) => c.args);
       expect(eqCalls).to.deep.include(['ims_org_id', 'org-1']);
+      expect(eqCalls).to.deep.include(['product', 'LLMO']);
       expect(client.readBuilder.is.calledOnceWithExactly('revoked_at', null)).to.be.true;
     });
 
@@ -100,6 +111,7 @@ describe('facs-access-mappings helpers', () => {
       const client = fakePostgrestClient({ readResult: { data: [], error: null } });
       await listFacsAccessMappings(client, {
         imsOrgId: 'org-1',
+        product: 'LLMO',
         subjectType: 'user',
         subjectId: 'ABC@AdobeID',
         resourceType: 'brand',
@@ -114,18 +126,18 @@ describe('facs-access-mappings helpers', () => {
 
     it('orders by created_at DESC and caps the limit at 500 (default 50)', async () => {
       const client = fakePostgrestClient();
-      await listFacsAccessMappings(client, { imsOrgId: 'org-1' });
+      await listFacsAccessMappings(client, { imsOrgId: 'org-1', product: 'LLMO' });
       expect(client.readBuilder.order.firstCall.args).to.deep.equal([
         'created_at', { ascending: false },
       ]);
       expect(client.readBuilder.limit.firstCall.args[0]).to.equal(50);
 
       const client2 = fakePostgrestClient();
-      await listFacsAccessMappings(client2, { imsOrgId: 'org-1', limit: 99999 });
+      await listFacsAccessMappings(client2, { imsOrgId: 'org-1', product: 'LLMO', limit: 99999 });
       expect(client2.readBuilder.limit.firstCall.args[0]).to.equal(500);
 
       const client3 = fakePostgrestClient();
-      await listFacsAccessMappings(client3, { imsOrgId: 'org-1', limit: -3 });
+      await listFacsAccessMappings(client3, { imsOrgId: 'org-1', product: 'LLMO', limit: -3 });
       expect(client3.readBuilder.limit.firstCall.args[0]).to.equal(50);
     });
 
@@ -134,7 +146,7 @@ describe('facs-access-mappings helpers', () => {
         readResult: { data: null, error: { message: 'boom' } },
       });
       try {
-        await listFacsAccessMappings(client, { imsOrgId: 'org-1' });
+        await listFacsAccessMappings(client, { imsOrgId: 'org-1', product: 'LLMO' });
         throw new Error('expected to throw');
       } catch (e) {
         expect(e.message).to.equal('listFacsAccessMappings failed: boom');
@@ -143,7 +155,7 @@ describe('facs-access-mappings helpers', () => {
 
     it('returns [] when PostgREST resolves data: null', async () => {
       const client = fakePostgrestClient({ readResult: { data: null, error: null } });
-      const out = await listFacsAccessMappings(client, { imsOrgId: 'org-1' });
+      const out = await listFacsAccessMappings(client, { imsOrgId: 'org-1', product: 'LLMO' });
       expect(out).to.deep.equal([]);
     });
   });
@@ -152,26 +164,39 @@ describe('facs-access-mappings helpers', () => {
     it('throws when imsOrgId is missing', async () => {
       const client = fakePostgrestClient();
       try {
-        await listFacsAccessMappingHistory(client, {});
+        await listFacsAccessMappingHistory(client, { product: 'LLMO' });
         throw new Error('expected to throw');
       } catch (e) {
         expect(e.message).to.equal('listFacsAccessMappingHistory: imsOrgId is required');
       }
     });
 
-    it('does NOT filter on revoked_at — surfaces active + tombstoned rows', async () => {
+    it('throws when product is missing', async () => {
+      const client = fakePostgrestClient();
+      try {
+        await listFacsAccessMappingHistory(client, { imsOrgId: 'org-1' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('listFacsAccessMappingHistory: product is required');
+      }
+    });
+
+    it('filters on ims_org_id + product and does NOT filter on revoked_at (surfaces active + tombstoned rows)', async () => {
       const client = fakePostgrestClient({
         readResult: { data: [{ id: 'r1' }, { id: 'r2', revoked_at: '2026-05-01' }], error: null },
       });
-      const rows = await listFacsAccessMappingHistory(client, { imsOrgId: 'org-1' });
+      const rows = await listFacsAccessMappingHistory(client, { imsOrgId: 'org-1', product: 'LLMO' });
       expect(rows).to.have.length(2);
+      const eqCalls = client.readBuilder.eq.getCalls().map((c) => c.args);
+      expect(eqCalls).to.deep.include(['ims_org_id', 'org-1']);
+      expect(eqCalls).to.deep.include(['product', 'LLMO']);
       expect(client.readBuilder.is.called).to.be.false;
     });
 
     it('applies the optional `since` filter as a >= on created_at', async () => {
       const client = fakePostgrestClient();
       await listFacsAccessMappingHistory(client, {
-        imsOrgId: 'org-1', since: '2026-05-01T00:00:00Z',
+        imsOrgId: 'org-1', product: 'LLMO', since: '2026-05-01T00:00:00Z',
       });
       expect(client.readBuilder.gte.calledOnceWithExactly('created_at', '2026-05-01T00:00:00Z'))
         .to.be.true;
@@ -182,7 +207,7 @@ describe('facs-access-mappings helpers', () => {
         readResult: { data: null, error: { message: 'boom' } },
       });
       try {
-        await listFacsAccessMappingHistory(client, { imsOrgId: 'org-1' });
+        await listFacsAccessMappingHistory(client, { imsOrgId: 'org-1', product: 'LLMO' });
         throw new Error('expected to throw');
       } catch (e) {
         expect(e.message).to.equal('listFacsAccessMappingHistory failed: boom');
@@ -191,7 +216,7 @@ describe('facs-access-mappings helpers', () => {
 
     it('returns [] when PostgREST resolves data: null', async () => {
       const client = fakePostgrestClient({ readResult: { data: null, error: null } });
-      const out = await listFacsAccessMappingHistory(client, { imsOrgId: 'org-1' });
+      const out = await listFacsAccessMappingHistory(client, { imsOrgId: 'org-1', product: 'LLMO' });
       expect(out).to.deep.equal([]);
     });
   });
@@ -200,7 +225,12 @@ describe('facs-access-mappings helpers', () => {
     it('returns immediately when subjects is empty', async () => {
       const client = fakePostgrestClient();
       const out = await createFacsAccessMappings(client, {
-        imsOrgId: 'org-1', resourceType: 'brand', resourceId: 'brand-x', subjects: [],
+        imsOrgId: 'org-1',
+        product: 'LLMO',
+        resourceType: 'brand',
+        resourceId: 'brand-x',
+        grantedCapabilities: ['llmo/can_view'],
+        subjects: [],
       });
       expect(out).to.deep.equal({ created: [], skipped: [] });
       expect(client.fromCalls).to.have.length(0);
@@ -209,19 +239,80 @@ describe('facs-access-mappings helpers', () => {
     it('returns immediately when subjects is not an array', async () => {
       const client = fakePostgrestClient();
       const out = await createFacsAccessMappings(client, {
-        imsOrgId: 'org-1', resourceType: 'brand', resourceId: 'brand-x', subjects: undefined,
+        imsOrgId: 'org-1',
+        product: 'LLMO',
+        resourceType: 'brand',
+        resourceId: 'brand-x',
+        grantedCapabilities: ['llmo/can_view'],
+        subjects: undefined,
       });
       expect(out).to.deep.equal({ created: [], skipped: [] });
     });
 
-    it('upserts rows WITHOUT a facs_permission column (capability lives in JWT)', async () => {
+    it('throws when imsOrgId is missing', async () => {
+      const client = fakePostgrestClient();
+      try {
+        await createFacsAccessMappings(client, {
+          product: 'LLMO',
+          resourceType: 'brand',
+          resourceId: 'brand-x',
+          grantedCapabilities: ['llmo/can_view'],
+          subjects: [{ type: 'user', id: 'A@AdobeID' }],
+        });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('createFacsAccessMappings: imsOrgId is required');
+      }
+    });
+
+    it('throws when product is missing', async () => {
+      const client = fakePostgrestClient();
+      try {
+        await createFacsAccessMappings(client, {
+          imsOrgId: 'org-1',
+          resourceType: 'brand',
+          resourceId: 'brand-x',
+          grantedCapabilities: ['llmo/can_view'],
+          subjects: [{ type: 'user', id: 'A@AdobeID' }],
+        });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('createFacsAccessMappings: product is required');
+      }
+    });
+
+    it('throws when grantedCapabilities is missing or empty', async () => {
+      const client = fakePostgrestClient();
+      for (const bad of [undefined, [], 'not-an-array']) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await createFacsAccessMappings(client, {
+            imsOrgId: 'org-1',
+            product: 'LLMO',
+            resourceType: 'brand',
+            resourceId: 'brand-x',
+            grantedCapabilities: bad,
+            subjects: [{ type: 'user', id: 'A@AdobeID' }],
+          });
+          throw new Error('expected to throw');
+        } catch (e) {
+          expect(e.message).to.equal(
+            'createFacsAccessMappings: grantedCapabilities is required (non-empty array)',
+          );
+        }
+      }
+    });
+
+    it('upserts rows carrying product + granted_capabilities (no facs_permission column)', async () => {
       const client = fakePostgrestClient({
         upsertResult: { data: [{ id: 'r1', subject_type: 'user', subject_id: 'A@AdobeID' }], error: null },
       });
       await createFacsAccessMappings(client, {
         imsOrgId: 'org-1',
+        product: 'LLMO',
         resourceType: 'brand',
         resourceId: 'brand-x',
+        grantedCapabilities: ['llmo/can_view', 'llmo/can_configure'],
         subjects: [{ type: 'user', id: 'A@AdobeID' }],
         createdBy: 'admin@AdobeID',
       });
@@ -235,10 +326,12 @@ describe('facs-access-mappings helpers', () => {
         resource_type: 'brand',
         resource_id: 'brand-x',
         ims_org_id: 'org-1',
+        product: 'LLMO',
         created_by: 'admin@AdobeID',
       });
+      expect(row.granted_capabilities).to.deep.equal(['llmo/can_view', 'llmo/can_configure']);
       expect(opts.onConflict).to.equal(
-        'subject_type,subject_id,resource_type,resource_id,ims_org_id',
+        'subject_type,subject_id,resource_type,resource_id,ims_org_id,product',
       );
       expect(opts.ignoreDuplicates).to.be.true;
     });
@@ -252,8 +345,10 @@ describe('facs-access-mappings helpers', () => {
       });
       const out = await createFacsAccessMappings(client, {
         imsOrgId: 'org-1',
+        product: 'LLMO',
         resourceType: 'brand',
         resourceId: 'brand-x',
+        grantedCapabilities: ['llmo/can_view'],
         subjects: [
           { type: 'user', id: 'A@AdobeID' },
           { type: 'user', id: 'B@AdobeID' }, // already bound; not returned
@@ -272,8 +367,10 @@ describe('facs-access-mappings helpers', () => {
       try {
         await createFacsAccessMappings(client, {
           imsOrgId: 'org-1',
+          product: 'LLMO',
           resourceType: 'brand',
           resourceId: 'brand-x',
+          grantedCapabilities: ['llmo/can_view'],
           subjects: [{ type: 'user', id: 'A@AdobeID' }],
         });
         throw new Error('expected to throw');
@@ -288,8 +385,10 @@ describe('facs-access-mappings helpers', () => {
       });
       const out = await createFacsAccessMappings(client, {
         imsOrgId: 'org-1',
+        product: 'LLMO',
         resourceType: 'brand',
         resourceId: 'brand-x',
+        grantedCapabilities: ['llmo/can_view'],
         subjects: [{ type: 'user', id: 'A@AdobeID' }],
       });
       expect(out.created).to.deep.equal([]);
@@ -304,8 +403,10 @@ describe('facs-access-mappings helpers', () => {
       });
       await createFacsAccessMappings(client, {
         imsOrgId: 'org-1',
+        product: 'LLMO',
         resourceType: 'brand',
         resourceId: 'brand-x',
+        grantedCapabilities: ['llmo/can_view'],
         subjects: [{ type: 'user', id: 'A@AdobeID' }],
       });
       const [rows] = client.upsertBuilder.upsertArgs;

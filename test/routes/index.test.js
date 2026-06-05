@@ -508,11 +508,14 @@ describe('getRouteHandlers', () => {
     getFanoutReport: sinon.stub(),
   };
 
-  const mockFacsAccessMappingsController = {
+  const mockStateAccessMappingsController = {
     listMappings: sinon.stub(),
     listHistory: sinon.stub(),
-    createMappings: sinon.stub(),
-    revokeMappingById: sinon.stub(),
+    createMapping: sinon.stub(),
+    patchMapping: sinon.stub(),
+    revokeMapping: sinon.stub(),
+    getProductCapabilities: sinon.stub(),
+    getUserCapabilities: sinon.stub(),
   };
 
   const mockSerenityController = {
@@ -595,7 +598,7 @@ describe('getRouteHandlers', () => {
       mockWebhooksController,
       mockAiVisibilityController,
       mockFanoutReportController,
-      mockFacsAccessMappingsController,
+      mockStateAccessMappingsController,
       mockSemrushController,
       mockSerenityController,
     );
@@ -675,9 +678,10 @@ describe('getRouteHandlers', () => {
       'POST /consumers/register',
       'POST /ephemeral-run/batch',
       'GET /v2/regions',
-      'GET /facs/access-mappings',
-      'GET /facs/access-mappings/history',
-      'POST /facs/access-mappings',
+      'GET /state/access-mappings',
+      'GET /state/access-mappings/history',
+      'POST /state/access-mappings',
+      'GET /product/capabilities',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -1135,7 +1139,9 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/referral-traffic/business-impact',
       'GET /sites/:siteId/referral-traffic/weeks',
       'GET /admin/users/:userId',
-      'DELETE /facs/access-mappings/:id',
+      'PATCH /state/access-mappings/:id',
+      'DELETE /state/access-mappings/:id',
+      'GET /user/capabilities/:resourceId',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 

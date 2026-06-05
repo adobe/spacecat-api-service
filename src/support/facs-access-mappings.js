@@ -11,31 +11,38 @@
  */
 
 /**
- * PostgREST helpers for the `facs_access_mappings` table — management
- * endpoints only.
+ * PostgREST helpers for the `facs_access_mappings` table — state-layer
+ * management endpoints only.
  *
- * Phase 2 of the MAC/FACS integration. The table itself lives in
- * `mysticat-data-service` (db/migrations/20260528000000_facs_access_mappings.sql)
- * and is a capability-less binding: `(subject, resource, ims_org_id)` plus
- * a soft-revoke lifecycle. Capability is decided by FACS / MacGiver at
- * login and lives in the JWT — no helper in this module reads or writes
- * `facs_permission`.
+ * Backs the new `/state/access-mappings/*` URL grammar (see
+ * `mysticat-architecture/platform/decisions/mac-state-layer.md`
+ * §"State Layer Management Endpoints") under the hybrid permission model
+ * (`mysticat-architecture/platform/decisions/rebac-hybrid-permission-model.md`).
  *
- * The wrapper-side resource-binding check (`findFacsResourceBinding`)
- * lives in `@adobe/spacecat-shared-http-utils/src/auth/facs-state-layer.js`
- * next to `facsWrapper`. This module hosts the variants the management
- * endpoints need (list active, list history, create, revoke-by-id).
+ * Schema (per mac-state-layer.md §"State Layer Schema"):
  *
- * Every read and write is **always** scoped to `imsOrgId`. Cross-org
- * access is structurally impossible via this module — there is no helper
- * that accepts a row id without also requiring an `imsOrgId` filter.
+ *   (id, subject_type, subject_id, resource_type, resource_id,
+ *    ims_org_id, product, granted_capabilities text[],
+ *    created_by, created_at, revoked_at, revoked_by, revoke_reason)
  *
- * Page-size caps (per the design's minor item): the list endpoints
- * default to **50** rows per request and hard-cap at **500**.
+ * - `product` is the uppercase product code (e.g. `'LLMO'`), sourced from
+ *   the `x-product` header upstream. Every read and write is scoped to it
+ *   together with `ims_org_id`.
+ * - `granted_capabilities` is the per-resource capability set the binding
+ *   confers; the wrapper unions it with the JWT to form the caller's
+ *   effective set.
+ *
+ * Page-size caps: list endpoints default to **50** rows per request and
+ * hard-cap at **500**.
+ *
+ * Every read and write is **always** scoped to both `imsOrgId` and `product`.
+ * Cross-org / cross-product access is structurally impossible via this module
+ * — there is no helper that accepts a row id without also requiring an
+ * `imsOrgId` filter, and every list/create requires `product`.
  */
 
 // `requirePostgrestForFacsMappings` is re-exported from a shared module so
-// the V2 brand controller and the FACS state-layer endpoints share one
+// the V2 brand controller and the state-layer endpoints share one
 // availability check (with their own error messages). See
 // `src/support/postgrest-availability.js` for the implementation.
 export { requirePostgrestForFacsMappings } from './postgrest-availability.js';
@@ -78,9 +85,10 @@ function applyResourceFilter(query, { resourceType, resourceId }) {
 }
 
 /**
- * Lists **active** access bindings within the caller's org. Filters are
- * optional — absence narrows nothing. The caller MUST pass `imsOrgId` so
- * cross-org queries are structurally impossible.
+ * Lists **active** access bindings within the caller's org + product.
+ * Filters are optional — absence narrows nothing. `imsOrgId` and `product`
+ * are REQUIRED so cross-org / cross-product queries are structurally
+ * impossible.
  *
  * Active = `revoked_at IS NULL`. Tombstoned (revoked) bindings are
  * excluded; use `listFacsAccessMappingHistory` to see them.
@@ -88,6 +96,7 @@ function applyResourceFilter(query, { resourceType, resourceId }) {
  * @param {object} postgrestClient
  * @param {object} filters
  * @param {string} filters.imsOrgId            - REQUIRED.
+ * @param {string} filters.product             - REQUIRED. Uppercase product code.
  * @param {'user'|'org'} [filters.subjectType]
  * @param {string} [filters.subjectId]
  * @param {string} [filters.resourceType]
@@ -96,14 +105,18 @@ function applyResourceFilter(query, { resourceType, resourceId }) {
  * @returns {Promise<object[]>}
  */
 export async function listFacsAccessMappings(postgrestClient, filters = {}) {
-  const { imsOrgId, limit } = filters;
+  const { imsOrgId, product, limit } = filters;
   if (!imsOrgId) {
     throw new Error('listFacsAccessMappings: imsOrgId is required');
+  }
+  if (!product) {
+    throw new Error('listFacsAccessMappings: product is required');
   }
   let query = postgrestClient
     .from('facs_access_mappings')
     .select('*')
     .eq('ims_org_id', imsOrgId)
+    .eq('product', product)
     .is('revoked_at', null)
     .order('created_at', { ascending: false })
     .limit(clampLimit(limit));
@@ -118,12 +131,13 @@ export async function listFacsAccessMappings(postgrestClient, filters = {}) {
 
 /**
  * Lists access bindings including tombstones (active + revoked) within the
- * caller's org. Powers `GET /facs/access-mappings/history` for audit
- * forensics. Filters are optional; ordering is by `created_at DESC`.
+ * caller's org + product. Powers `GET /state/access-mappings/history` for
+ * audit forensics. Filters are optional; ordering is by `created_at DESC`.
  *
  * @param {object} postgrestClient
  * @param {object} filters
  * @param {string} filters.imsOrgId            - REQUIRED.
+ * @param {string} filters.product             - REQUIRED. Uppercase product code.
  * @param {'user'|'org'} [filters.subjectType]
  * @param {string} [filters.subjectId]
  * @param {string} [filters.resourceType]
@@ -134,14 +148,20 @@ export async function listFacsAccessMappings(postgrestClient, filters = {}) {
  * @returns {Promise<object[]>}
  */
 export async function listFacsAccessMappingHistory(postgrestClient, filters = {}) {
-  const { imsOrgId, since, limit } = filters;
+  const {
+    imsOrgId, product, since, limit,
+  } = filters;
   if (!imsOrgId) {
     throw new Error('listFacsAccessMappingHistory: imsOrgId is required');
+  }
+  if (!product) {
+    throw new Error('listFacsAccessMappingHistory: product is required');
   }
   let query = postgrestClient
     .from('facs_access_mappings')
     .select('*')
     .eq('ims_org_id', imsOrgId)
+    .eq('product', product)
     .order('created_at', { ascending: false })
     .limit(clampLimit(limit));
   query = applySubjectFilter(query, filters);
@@ -158,33 +178,47 @@ export async function listFacsAccessMappingHistory(postgrestClient, filters = {}
 
 /**
  * Bulk-inserts subject↔resource bindings for one resource within the
- * caller's org. Duplicates (matching the active-row partial unique index
- * `(subject_type, subject_id, resource_type, resource_id, ims_org_id) WHERE
- * revoked_at IS NULL`) land in `skipped` rather than failing the whole
- * batch — idempotent by design.
+ * caller's org + product. Duplicates (matching the active-row partial
+ * unique index `(subject_type, subject_id, resource_type, resource_id,
+ * ims_org_id, product) WHERE revoked_at IS NULL`) land in `skipped` rather
+ * than failing the whole batch — idempotent by design.
  *
- * No `facsPermission` argument: capability lives in the JWT, not in the
- * row. Each binding row carries only the identifying tuple plus audit
- * columns.
+ * Each binding row carries `granted_capabilities` (the per-resource
+ * capability set the wrapper unions with the JWT to form the caller's
+ * effective set) — REQUIRED, non-empty. See mac-state-layer.md
+ * §"State Layer Schema".
  *
  * @param {object} postgrestClient
  * @param {object} args
  * @param {string} args.imsOrgId
+ * @param {string} args.product          - Uppercase product code (e.g. 'LLMO').
  * @param {string} args.resourceType
  * @param {string} args.resourceId
+ * @param {string[]} args.grantedCapabilities  - REQUIRED, non-empty.
  * @param {Array<{ type: 'user'|'org', id: string }>} args.subjects
  * @param {string} [args.createdBy] - IMS user id of the grantor (audit).
  * @returns {Promise<{ created: object[], skipped: Array<{ subject: object, reason: string }> }>}
  */
 export async function createFacsAccessMappings(postgrestClient, {
   imsOrgId,
+  product,
   resourceType,
   resourceId,
+  grantedCapabilities,
   subjects,
   createdBy,
 }) {
   if (!Array.isArray(subjects) || subjects.length === 0) {
     return { created: [], skipped: [] };
+  }
+  if (!imsOrgId) {
+    throw new Error('createFacsAccessMappings: imsOrgId is required');
+  }
+  if (!product) {
+    throw new Error('createFacsAccessMappings: product is required');
+  }
+  if (!Array.isArray(grantedCapabilities) || grantedCapabilities.length === 0) {
+    throw new Error('createFacsAccessMappings: grantedCapabilities is required (non-empty array)');
   }
   const rows = subjects.map(({ type, id }) => ({
     subject_type: type,
@@ -192,6 +226,8 @@ export async function createFacsAccessMappings(postgrestClient, {
     resource_type: resourceType,
     resource_id: resourceId,
     ims_org_id: imsOrgId,
+    product,
+    granted_capabilities: grantedCapabilities,
     created_by: createdBy ?? null,
   }));
 
@@ -200,13 +236,13 @@ export async function createFacsAccessMappings(postgrestClient, {
   // diff against the requested rows to compute the `skipped` array.
   //
   // Note: the index is partial (WHERE revoked_at IS NULL), so a previously-
-  // revoked binding for the same (subject, resource, org) does NOT conflict
-  // — it gets a fresh row with a new id. This is the design's "re-grant
-  // after revoke = new row, not reactivation" property.
+  // revoked binding for the same (subject, resource, org, product) does NOT
+  // conflict — it gets a fresh row with a new id. This is the design's
+  // "re-grant after revoke = new row, not reactivation" property.
   const { data, error } = await postgrestClient
     .from('facs_access_mappings')
     .upsert(rows, {
-      onConflict: 'subject_type,subject_id,resource_type,resource_id,ims_org_id',
+      onConflict: 'subject_type,subject_id,resource_type,resource_id,ims_org_id,product',
       ignoreDuplicates: true,
     })
     .select('*');

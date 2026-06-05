@@ -10338,3 +10338,174 @@ SerenityErrorResponse:
   properties:
     error: { type: string }
     message: { type: string }
+
+# ---------------------------------------------------------------------------
+# Hybrid permission model — state-layer access mappings + capability views.
+# Backs:
+#   /state/access-mappings (GET, POST, GET history)
+#   /state/access-mappings/{id} (PATCH, DELETE)
+#   /product/capabilities (GET)
+#   /user/capabilities/{resourceId} (GET)
+# See `mysticat-architecture/platform/decisions/mac-state-layer.md`.
+# ---------------------------------------------------------------------------
+StateAccessMappingSubjectType:
+  type: string
+  enum: [user, org]
+  description: |
+    Subject identifier kind. `user` is an `<ident>@<authSrc>` canonical IMS
+    user id; `org` is an `<ident>@AdobeOrg` canonical IMS org id (must equal
+    the caller's own org on POST).
+
+StateAccessMappingResourceType:
+  type: string
+  description: |
+    Product-specific resource kind. LLMO uses `brand`; ASO uses `site`.
+  example: brand
+
+StateGrantedCapability:
+  type: string
+  description: |
+    Fully-qualified capability string of the form `<product-lower>/<name>`.
+    Must belong to the product's capability catalog (see
+    `GET /product/capabilities`).
+  example: llmo/can_view
+  pattern: '^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$'
+
+StateAccessMapping:
+  type: object
+  description: |
+    One state-layer binding row. Identifies a subject (user or org) bound to
+    a resource within an IMS org under a product, with the per-resource
+    capability set the binding confers. Tombstoned rows carry non-null
+    `revokedAt` / `revokedBy` / `revokeReason`.
+  required:
+    - id
+    - subjectType
+    - subjectId
+    - resourceType
+    - resourceId
+    - imsOrgId
+    - product
+    - grantedCapabilities
+    - createdAt
+  properties:
+    id: { $ref: '#/Id' }
+    subjectType: { $ref: '#/StateAccessMappingSubjectType' }
+    subjectId:
+      type: string
+      example: someone@AdobeID
+    resourceType: { $ref: '#/StateAccessMappingResourceType' }
+    resourceId:
+      type: string
+      example: '11111111-2222-4333-9444-555555555555'
+    imsOrgId:
+      type: string
+      example: ABC123@AdobeOrg
+    product:
+      type: string
+      enum: [LLMO, ASO, ACO]
+      example: LLMO
+    grantedCapabilities:
+      type: array
+      items: { $ref: '#/StateGrantedCapability' }
+    createdBy:
+      type: [string, 'null']
+      example: admin@AdobeID
+    createdAt: { $ref: '#/DateTime' }
+    revokedAt:
+      oneOf:
+        - { $ref: '#/DateTime' }
+        - type: 'null'
+    revokedBy:
+      type: [string, 'null']
+    revokeReason:
+      type: [string, 'null']
+
+StateAccessMappingCreateRequest:
+  type: object
+  required:
+    - subjectType
+    - subjectId
+    - resourceType
+    - resourceId
+    - grantedCapabilities
+  properties:
+    subjectType: { $ref: '#/StateAccessMappingSubjectType' }
+    subjectId:
+      type: string
+      example: someone@AdobeID
+    resourceType: { $ref: '#/StateAccessMappingResourceType' }
+    resourceId:
+      type: string
+      example: '11111111-2222-4333-9444-555555555555'
+    grantedCapabilities:
+      type: array
+      minItems: 1
+      items: { $ref: '#/StateGrantedCapability' }
+
+StateAccessMappingPatchRequest:
+  type: object
+  required:
+    - grantedCapabilities
+  properties:
+    grantedCapabilities:
+      type: array
+      minItems: 1
+      items: { $ref: '#/StateGrantedCapability' }
+
+StateAccessMappingsListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/StateAccessMapping' }
+    cursor:
+      type: [string, 'null']
+      description: Opaque cursor for fetching the next page, or null when the result is the final page.
+
+StateAccessMappingConflictResponse:
+  type: object
+  required: [message]
+  properties:
+    message: { type: string, example: Active access mapping already exists for this subject and resource }
+    id:
+      type: [string, 'null']
+      description: ID of the existing active row when known.
+
+ProductCapabilitiesResponse:
+  type: object
+  required: [product, capabilities]
+  properties:
+    product:
+      type: string
+      enum: [LLMO, ASO, ACO]
+    capabilities:
+      type: array
+      items: { $ref: '#/StateGrantedCapability' }
+
+UserCapabilitiesResponse:
+  type: object
+  required: [product, resourceType, resourceId, capabilities, provenance]
+  description: |
+    Caller's effective capability set for one resource under the current
+    product. `capabilities` is the union over the JWT `facs_permissions` and
+    state-layer user-scoped + org-scoped bindings. `provenance` maps each
+    capability to the set of sources that contributed it (tags from
+    `jwt`, `state:user`, `state:org`).
+  properties:
+    product:
+      type: string
+      enum: [LLMO, ASO, ACO]
+    resourceType: { $ref: '#/StateAccessMappingResourceType' }
+    resourceId: { type: string }
+    capabilities:
+      type: array
+      items: { $ref: '#/StateGrantedCapability' }
+    provenance:
+      type: object
+      additionalProperties:
+        type: array
+        items:
+          type: string
+          enum: [jwt, 'state:user', 'state:org']
