@@ -78,7 +78,7 @@ const intentColumnSupported = new WeakMap();
  * @param {*} error - Error object from a PostgREST response (`{ message, details, hint, code }`)
  * @returns {boolean} true when the error is specifically about a missing `intent` column
  */
-function isMissingIntentColumnError(error) {
+export function isMissingIntentColumnError(error) {
   if (!error) {
     return false;
   }

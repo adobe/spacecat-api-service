@@ -27,6 +27,7 @@ import {
   checkPromptsExist,
   getPromptStats,
   normalizeIntent,
+  isMissingIntentColumnError,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -2550,6 +2551,61 @@ describe('prompts-storage', () => {
       expect(updateStub.secondCall.args[0]).to.not.have.property('intent');
     });
 
+    it('upsertPrompts update-loop strips intent up front on a second call with the same client', async () => {
+      const existingData = {
+        data: [{
+          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [], status: 'active',
+        }],
+        error: null,
+      };
+      const updateStub = sinon.stub();
+      // Call 0: with-intent error, Call 1: retry success (marks unsupported),
+      // Call 2: second upsert's update goes straight to the stripped patch.
+      updateStub.onCall(0).returns({ eq: () => thenable({ error: MISSING_INTENT_INSERT }) });
+      updateStub.onCall(1).returns({ eq: () => thenable({ error: null }) });
+      updateStub.onCall(2).returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const args = {
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        postgrestClient: client,
+      };
+      await upsertPrompts({
+        ...args,
+        prompts: [{
+          id: 'p1', prompt: 'Updated', regions: [], intent: 'transactional',
+        }],
+      });
+      await upsertPrompts({
+        ...args,
+        prompts: [{
+          id: 'p1', prompt: 'Updated again', regions: [], intent: 'planning',
+        }],
+      });
+      // 2 update calls for the first upsert (error + retry), 1 for the second.
+      expect(updateStub.callCount).to.equal(3);
+      // Known-unsupported client: the second upsert's update patch carries no intent.
+      expect(updateStub.getCall(2).args[0]).to.not.have.property('intent');
+    });
+
     it('listPrompts retries the select without intent when the column is missing', async () => {
       const row = {
         prompt_id: PROMPT_ID,
@@ -2665,6 +2721,131 @@ describe('prompts-storage', () => {
       ).to.be.rejectedWith('Failed to get prompt');
       // No retry for a non-intent error.
       expect(call).to.equal(1);
+    });
+
+    describe('isMissingIntentColumnError', () => {
+      it('returns false for a null/undefined/falsy error', () => {
+        // Covers the defensive early-return guard; in production every call site
+        // is `error && isMissingIntentColumnError(error)`, so exercise it directly.
+        expect(isMissingIntentColumnError(null)).to.be.false;
+        expect(isMissingIntentColumnError(undefined)).to.be.false;
+        expect(isMissingIntentColumnError(0)).to.be.false;
+      });
+
+      it('matches the insert/upsert missing-column error (PGRST204, schema cache)', () => {
+        expect(isMissingIntentColumnError(MISSING_INTENT_INSERT)).to.be.true;
+      });
+
+      it('matches the select missing-column error (42703, column does not exist)', () => {
+        expect(isMissingIntentColumnError(MISSING_INTENT_SELECT)).to.be.true;
+      });
+
+      it('does not match a generic error mentioning neither intent nor column', () => {
+        expect(isMissingIntentColumnError({ message: 'DB exploded' })).to.be.false;
+      });
+
+      it('does not match an error that mentions intent but not column/schema cache', () => {
+        // Exercises the negative side of the `column || schema cache` branch:
+        // "intent" present, but neither qualifier — must NOT be swallowed.
+        expect(isMissingIntentColumnError({ message: 'invalid intent value supplied' })).to.be.false;
+      });
+
+      it('does not match an error that mentions column but not intent', () => {
+        expect(isMissingIntentColumnError({ message: 'column foo does not exist' })).to.be.false;
+      });
+    });
+
+    it('updatePromptById updates without intent when the column is missing, then retries clean', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Updated',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub();
+      const updateChain = (result) => ({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({ select: () => ({ maybeSingle: () => thenable(result) }) }),
+          }),
+        }),
+      });
+      // First update (with intent) -> missing-column error; retry -> success.
+      updateStub.onFirstCall().returns(updateChain({ data: null, error: MISSING_INTENT_INSERT }));
+      updateStub.onSecondCall().returns(updateChain({ data: row, error: null }));
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return { update: updateStub, select: () => makeChain({ data: row, error: null }) };
+          }
+          return makeChain({ data: row, error: null });
+        },
+      };
+      const result = await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { prompt: 'Updated', intent: 'transactional' },
+        postgrestClient: client,
+      });
+      expect(result).to.not.be.null;
+      expect(updateStub.callCount).to.equal(2);
+      // First attempt carried intent; retry stripped it.
+      expect(updateStub.firstCall.args[0]).to.have.property('intent', 'transactional');
+      expect(updateStub.secondCall.args[0]).to.not.have.property('intent');
+    });
+
+    it('updatePromptById skips intent up front on a second call with the same client', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Updated',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub();
+      const updateChain = (result) => ({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({ select: () => ({ maybeSingle: () => thenable(result) }) }),
+          }),
+        }),
+      });
+      // Call 0: with-intent error, Call 1: retry success, Call 2: second update
+      // for the same client never carries intent (known-unsupported pre-strip).
+      updateStub.onCall(0).returns(updateChain({ data: null, error: MISSING_INTENT_INSERT }));
+      updateStub.onCall(1).returns(updateChain({ data: row, error: null }));
+      updateStub.onCall(2).returns(updateChain({ data: row, error: null }));
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return { update: updateStub, select: () => makeChain({ data: row, error: null }) };
+          }
+          return makeChain({ data: row, error: null });
+        },
+      };
+      const args = {
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        postgrestClient: client,
+      };
+      await updatePromptById({ ...args, updates: { prompt: 'a', intent: 'planning' } });
+      await updatePromptById({ ...args, updates: { prompt: 'b', intent: 'planning' } });
+      // 2 update calls for the first (error + retry), 1 for the second (no error).
+      expect(updateStub.callCount).to.equal(3);
+      // Known-unsupported client: intent never set on the patch up front, so the
+      // second update's patch carries no `intent` key.
+      expect(updateStub.getCall(2).args[0]).to.not.have.property('intent');
     });
   });
 });
