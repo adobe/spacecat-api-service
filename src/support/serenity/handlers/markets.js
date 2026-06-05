@@ -71,6 +71,33 @@ export function resolveLocation(market) {
   };
 }
 
+// Reverse of resolveLocation's country mapping: keyed by the (zero-padded) ISO
+// 3166-1 numeric string, value is the alpha-2 code. Built once at module load.
+const numericToAlpha2 = Object.entries(iso31661Alpha2ToNumeric)
+  .reduce((acc, [alpha2, numeric]) => {
+    acc[numeric] = alpha2;
+    return acc;
+  }, {});
+
+/**
+ * Inverse of `resolveLocation` for country geo targets: maps a Google Ads
+ * `criterion_id` (`2000 + ISO numeric`) back to its ISO 3166-1 alpha-2 code.
+ * Returns null for non-country ids (region/city/etc.) or unknown numerics —
+ * consistent with `resolveLocation` returning null for unknown markets.
+ *
+ * @param {number|string} geoTargetId
+ * @returns {string|null} Uppercase alpha-2 code (e.g. 2840 → 'US'), or null.
+ */
+export function marketFromGeoTargetId(geoTargetId) {
+  const n = Number(geoTargetId);
+  if (!Number.isInteger(n) || n <= 2000) {
+    return null;
+  }
+  // ISO numeric codes are 3-digit, zero-padded (e.g. US=840, AF=004).
+  const numeric = String(n - 2000).padStart(3, '0');
+  return numericToAlpha2[numeric] ?? null;
+}
+
 /**
  * Module-scoped Semrush language UUID cache. 1h TTL — the catalog is stable
  * but languages do get added occasionally, so we don't pin it for the
@@ -152,6 +179,41 @@ export async function handleListMarkets(transport, dataAccess, brandId, semrushW
       languageCode: row.getLanguageCode(),
       createdAt: row.getCreatedAt(),
       updatedAt: row.getUpdatedAt(),
+    })),
+  };
+}
+
+/**
+ * GET /serenity/projects — list a brand's provisioned market projects in the
+ * shape the onboarding UI consumes (project-elmo-ui `SerenityProject`): each
+ * row mapped to `{ market, language, status }`.
+ *
+ * Differs from `handleListMarkets` (which returns the raw geoTargetId slice
+ * keys) by translating geoTargetId back to an ISO alpha-2 `market` so the UI's
+ * provisioning poll can match on the {market, language} tuples it requested.
+ *
+ * `status` is a derived constant: a row exists only after the upstream project
+ * has been created AND published (`handleCreateMarket` publishes before the row
+ * write), so presence === live. There is no status column yet; a real
+ * pending→live lifecycle would need a BrandSemrushProject schema migration.
+ *
+ * Stays provider-free (no `semrushProjectId`), per LLMO-5190 — the upstream id
+ * surfaces only on the single-slice detail endpoint.
+ *
+ * `transport` and `semrushWorkspaceId` are kept on the signature for the
+ * controller's parity with the other handlers; they are unused here.
+ */
+// eslint-disable-next-line no-unused-vars
+export async function handleListProjects(transport, dataAccess, brandId, semrushWorkspaceId) {
+  const rows = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
+  if (!rows || rows.length === 0) {
+    return { items: [] };
+  }
+  return {
+    items: rows.map((row) => ({
+      market: marketFromGeoTargetId(row.getGeoTargetId()),
+      language: row.getLanguageCode(),
+      status: 'live',
     })),
   };
 }

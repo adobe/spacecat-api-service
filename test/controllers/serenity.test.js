@@ -584,7 +584,7 @@ describe('SerenityController', () => {
   });
 
   describe('controller surface', () => {
-    it('exposes the new method names and does NOT expose listProjects / listWorkspaceProjects', () => {
+    it('exposes the markets-named methods (plus the UI-shaped listProjects) and not the removed project-CRUD names', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       expect(controller.listPrompts).to.be.a('function');
       expect(controller.createPrompts).to.be.a('function');
@@ -597,8 +597,10 @@ describe('SerenityController', () => {
       expect(controller.listTags).to.be.a('function');
       expect(controller.listModels).to.be.a('function');
       expect(controller.updateModels).to.be.a('function');
+      // listProjects is the read-only, UI-shaped market list (GET /serenity/projects,
+      // LLMO-5211) — distinct from the removed project-CRUD surface below.
+      expect(controller.listProjects).to.be.a('function');
 
-      expect(controller.listProjects).to.be.undefined;
       expect(controller.createProject).to.be.undefined;
       expect(controller.listProjectTags).to.be.undefined;
       expect(controller.listProjectModels).to.be.undefined;

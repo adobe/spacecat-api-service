@@ -26,6 +26,7 @@ import {
 } from '../support/serenity/handlers/prompts.js';
 import {
   handleListMarkets,
+  handleListProjects,
   handleGetMarket,
   handleCreateMarket,
   handleDeleteMarket,
@@ -343,6 +344,29 @@ function SerenityController(context, log, env) {
     }
   };
 
+  // GET /serenity/projects — same DB read as listMarkets but shaped for the
+  // onboarding UI ({ market, language, status }); see handleListProjects.
+  const listProjects = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = await handleListProjects(
+        transport,
+        ctx.dataAccess,
+        auth.brandUuid,
+        auth.semrushWorkspaceId,
+        log,
+      );
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   const getMarket = async (ctx) => {
     try {
       // Enforce the IMS-only contract (throws 401 on non-IMS / missing bearer)
@@ -492,6 +516,7 @@ function SerenityController(context, log, env) {
     updatePrompt,
     bulkDeletePrompts,
     listMarkets,
+    listProjects,
     getMarket,
     createMarket,
     deleteMarket,

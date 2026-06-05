@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 
 import {
   handleListMarkets,
+  handleListProjects,
   handleGetMarket,
   handleCreateMarket,
   handleDeleteMarket,
@@ -24,6 +25,7 @@ import {
   handleListModels,
   handleUpdateModels,
   resolveLocation,
+  marketFromGeoTargetId,
   clearLanguageCache,
   clearTagCache,
 } from '../../../../src/support/serenity/handlers/markets.js';
@@ -128,6 +130,59 @@ describe('handlers/markets.js — handleListMarkets', () => {
 
     const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE);
     expect(result.items).to.have.lengthOf(1);
+  });
+});
+
+describe('handlers/markets.js — marketFromGeoTargetId', () => {
+  it('reverses (2000 + ISO numeric) back to the ISO-2 code', () => {
+    expect(marketFromGeoTargetId(2840)).to.equal('US');
+    expect(marketFromGeoTargetId(2276)).to.equal('DE');
+    expect(marketFromGeoTargetId(2250)).to.equal('FR');
+  });
+
+  it('round-trips with resolveLocation', () => {
+    const { geoTargetId } = resolveLocation('AU');
+    expect(marketFromGeoTargetId(geoTargetId)).to.equal('AU');
+  });
+
+  it('returns null for non-country ids and unknown numerics', () => {
+    expect(marketFromGeoTargetId(1234)).to.equal(null); // region/metro range
+    expect(marketFromGeoTargetId(2000)).to.equal(null); // no offset
+    expect(marketFromGeoTargetId(2999)).to.equal(null); // unassigned numeric
+    expect(marketFromGeoTargetId('not-a-number')).to.equal(null);
+  });
+});
+
+describe('handlers/markets.js — handleListProjects', () => {
+  it('returns empty when no rows', async () => {
+    const transport = {};
+    const dataAccess = makeDataAccess([]);
+    const result = await handleListProjects(transport, dataAccess, BRAND, WORKSPACE);
+    expect(result).to.deep.equal({ items: [] });
+  });
+
+  it('shapes rows as { market, language, status } — market reverse-mapped, status derived live', async () => {
+    const row = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([row]);
+
+    const result = await handleListProjects({}, dataAccess, BRAND, WORKSPACE);
+
+    expect(result.items).to.have.lengthOf(1);
+    expect(result.items[0]).to.deep.equal({ market: 'US', language: 'en', status: 'live' });
+    // Stays provider-free — no upstream project id on the list surface (LLMO-5190).
+    expect(result.items[0]).not.to.have.property('semrushProjectId');
+  });
+
+  it('does not call upstream — list is a pure DB read', async () => {
+    const row = makeProject({
+      semrushProjectId: 'proj-de-de', geoTargetId: 2276, languageCode: 'de',
+    });
+    const dataAccess = makeDataAccess([row]);
+    // No upstream methods stubbed — calling any would throw.
+    const result = await handleListProjects({}, dataAccess, BRAND, WORKSPACE);
+    expect(result.items[0]).to.deep.equal({ market: 'DE', language: 'de', status: 'live' });
   });
 });
 

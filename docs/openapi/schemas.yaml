@@ -10242,6 +10242,33 @@ SerenityMarketListResponse:
       type: array
       items: { $ref: '#/SerenityMarket' }
 
+SerenityProject:
+  type: object
+  description: |
+    A provisioned market project shaped for the onboarding UI. `market` is the
+    ISO 3166-1 alpha-2 code (translated back from the slice's geoTargetId);
+    `status` is a derived constant (`live`) since a row exists only after the
+    upstream project was published. Provider-free by design (no semrushProjectId).
+  required: [market, language, status]
+  properties:
+    market:
+      type: string
+      pattern: '^[A-Z]{2}$'
+    language:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    status:
+      type: string
+      example: live
+
+SerenityProjectListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityProject' }
+
 SerenityMarketDetail:
   description: |
     A single market slice, including the resolved upstream `semrushProjectId`.

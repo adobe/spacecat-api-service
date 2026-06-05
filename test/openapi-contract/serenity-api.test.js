@@ -146,6 +146,14 @@ const FIXTURES = {
       }],
     },
   },
+  listSerenityProjects: {
+    expectedStatus: 200,
+    controllerMethod: 'listProjects',
+    handlerName: 'handleListProjects',
+    handlerResult: {
+      items: [{ market: 'US', language: 'en', status: 'live' }],
+    },
+  },
   createSerenityMarket: {
     expectedStatus: 201,
     controllerMethod: 'createMarket',
@@ -248,6 +256,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleUpdatePrompt: sinon.stub(),
         handleBulkDeletePrompts: sinon.stub(),
         handleListMarkets: sinon.stub(),
+        handleListProjects: sinon.stub(),
         handleGetMarket: sinon.stub(),
         handleCreateMarket: sinon.stub(),
         handleDeleteMarket: sinon.stub(),
@@ -280,6 +289,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           },
           '../../src/support/serenity/handlers/markets.js': {
             handleListMarkets: handlerStubs.handleListMarkets,
+            handleListProjects: handlerStubs.handleListProjects,
             handleGetMarket: handlerStubs.handleGetMarket,
             handleCreateMarket: handlerStubs.handleCreateMarket,
             handleDeleteMarket: handlerStubs.handleDeleteMarket,
