@@ -927,19 +927,23 @@ function SuggestionsController(ctx, sqs, env) {
             const s2sResult = await accessControlUtil.hasS2SCapability(CAP_SUGGESTION_WRITE);
             if (s2sResult.allowed) {
               context.log.info(`[acl] S2S REJECT granted - suggestionId=${id} clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
-            } else {
-              if (s2sResult.reason !== 'not-s2s') {
-                // S2S call but missing the required capability — audit trail
-                context.log.error(`[acl] S2S REJECT denied - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
-              }
-              if (!accessControlUtil.hasAdminAccess()) {
-                return {
-                  index,
-                  uuid: id,
-                  message: 'Only admins can reject suggestions',
-                  statusCode: 403,
-                };
-              }
+            } else if (s2sResult.reason !== 'not-s2s') {
+              // S2S call but missing the required capability — audit trail + immediate denial
+              context.log.error(`[acl] S2S REJECT denied - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+              return {
+                index,
+                uuid: id,
+                message: 'S2S consumer does not have the required capability to reject suggestions',
+                statusCode: 403,
+              };
+            } else if (!accessControlUtil.hasAdminAccess()) {
+              // Not an S2S call — original admin gate, unchanged
+              return {
+                index,
+                uuid: id,
+                message: 'Only admins can reject suggestions',
+                statusCode: 403,
+              };
             }
 
             // Only allow REJECTED from PENDING_VALIDATION

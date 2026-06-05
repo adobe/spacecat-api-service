@@ -4063,7 +4063,7 @@ describe('Suggestions Controller', () => {
       expect(context.log.info).to.have.been.calledWithMatch(/\[acl\] S2S REJECT granted/);
     });
 
-    it('logs an error for S2S consumer missing suggestion:write and falls through to admin check', async () => {
+    it('returns 403 immediately for S2S consumer missing suggestion:write without consulting admin check', async () => {
       const pendingSuggestion = {
         id: SUGGESTION_IDS[0],
         opportunityId: OPPORTUNITY_ID,
@@ -4090,9 +4090,8 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const bulkPatchResponse = await response.json();
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 403);
-      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Only admins can reject suggestions');
-      // admin check is still consulted after the S2S audit log
-      expect(hasAdminStub).to.have.been.called;
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'S2S consumer does not have the required capability to reject suggestions');
+      expect(hasAdminStub).to.not.have.been.called;
       expect(context.log.error).to.have.been.calledWithMatch(/\[acl\] S2S REJECT denied/);
     });
   });
