@@ -318,6 +318,84 @@ describe('Configurations Controller', () => {
     expect(error).to.have.property('message', 'Only admins can view configurations');
   });
 
+  describe('configuration read - S2S configuration:read capability', () => {
+    const makeS2SConsumer = ({
+      clientId = 'svc-cfg', imsOrgId = 'AAA111111111111111111111@AdobeOrg',
+    } = {}) => ({ getClientId: () => clientId, getImsOrgId: () => imsOrgId });
+
+    const makeFreshConsumer = ({
+      id = 'consumer-cfg-1',
+      capabilities = ['configuration:read'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) => ({
+      getId: () => id,
+      getCapabilities: () => capabilities,
+      getStatus: () => status,
+      isRevoked: () => revoked,
+    });
+
+    beforeEach(() => {
+      // Non-admin caller so the S2S capability path (not the admin bypass) runs.
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-cfg-1' };
+      mockDataAccess.Consumer = { findByClientIdAndImsOrgId: sandbox.stub() };
+    });
+
+    it('grants getLatest to an S2S consumer holding configuration:read', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:read'] }));
+
+      const result = await configurationsController.getLatest(context);
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+      expect(context.log.info).to.have.been.calledWithMatch(
+        /\[s2s\] GET \/configurations\/latest granted clientId=svc-cfg consumerId=consumer-cfg-1 capability=configuration:read requestId=req-cfg-1/,
+      );
+    });
+
+    it('grants getByVersion to an S2S consumer holding configuration:read', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:read'] }));
+
+      const result = await configurationsController.getByVersion({
+        params: { version: '1' },
+        invocation: { id: 'req-cfg-1' },
+      });
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+    });
+
+    it('denies an S2S consumer lacking configuration:read', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:read'] }));
+
+      const result = await configurationsController.getLatest(context);
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only admins can view configurations');
+      expect(mockDataAccess.Configuration.findLatest).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied GET \/configurations\/latest - reason=missing-capability clientId=svc-cfg consumerId=consumer-cfg-1/,
+      );
+    });
+
+    it('denies a revoked S2S consumer', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ revoked: true }));
+
+      const result = await configurationsController.getLatest(context);
+
+      expect(result.status).to.equal(403);
+      expect(mockDataAccess.Configuration.findLatest).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(/reason=revoked/);
+    });
+  });
+
   it('returns not found when a configuration is not found by version', async () => {
     mockDataAccess.Configuration.findByVersion.resolves(null);
 
