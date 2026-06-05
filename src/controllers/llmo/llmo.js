@@ -987,12 +987,12 @@ function LlmoController(ctx) {
           if (!entry || typeof entry !== 'object') {
             return badRequest('Each markets entry must be an object with market and language');
           }
-          if (!ISO_ALPHA2_UPPER_REGEX.test(entry.market)) {
-            const displayMarket = String(entry.market).slice(0, 20);
+          if (typeof entry.market !== 'string' || !ISO_ALPHA2_UPPER_REGEX.test(entry.market)) {
+            const displayMarket = typeof entry.market === 'string' ? entry.market.slice(0, 16) : '[invalid type]';
             return badRequest(`Invalid market "${displayMarket}". Must be an ISO 3166-1 alpha-2 uppercase code (e.g. US, DE)`);
           }
-          if (!LANGUAGE_TAG_REGEX.test(entry.language)) {
-            const displayLanguage = String(entry.language).slice(0, 20);
+          if (typeof entry.language !== 'string' || !LANGUAGE_TAG_REGEX.test(entry.language)) {
+            const displayLanguage = typeof entry.language === 'string' ? entry.language.slice(0, 16) : '[invalid type]';
             return badRequest(`Invalid language "${displayLanguage}". Must be a BCP-47 lowercase language tag (e.g. en, de, zh-hans)`);
           }
         }

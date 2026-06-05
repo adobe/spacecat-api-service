@@ -3782,6 +3782,38 @@ describe('LlmoController', () => {
       expect(performLlmoOnboardingStub).to.not.have.been.called;
     });
 
+    it('should return 400 with [invalid type] when market is a non-string (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      for (const bad of [42, { code: 'US' }, ['US'], true]) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await ctrl.onboardCustomer({
+          ...onboardingContext,
+          data: { ...onboardingContext.data, markets: [{ market: bad, language: 'en' }] },
+        });
+        expect(result.status).to.equal(400);
+        // eslint-disable-next-line no-await-in-loop
+        const body = await result.json();
+        expect(body.message).to.include('[invalid type]');
+      }
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 with [invalid type] when language is a non-string (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      for (const bad of [99, { tag: 'en' }, ['en'], false]) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await ctrl.onboardCustomer({
+          ...onboardingContext,
+          data: { ...onboardingContext.data, markets: [{ market: 'US', language: bad }] },
+        });
+        expect(result.status).to.equal(400);
+        // eslint-disable-next-line no-await-in-loop
+        const body = await result.json();
+        expect(body.message).to.include('[invalid type]');
+      }
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
     it('should return 400 when markets[] exceeds the cap (LLMO-5204)', async () => {
       const ctrl = await makeOnboardController(performLlmoOnboardingStub);
       // 51 valid, distinct tuples (> MAX_MARKETS = 50) so the 400 is the cap,

@@ -1322,7 +1322,12 @@ export async function performSerenityFanOut(context, {
   }
 
   const brandSlug = generateBrandId(brandName.trim());
-  const brandDomain = new URL(baseURL).hostname;
+  let brandDomain;
+  try {
+    brandDomain = new URL(baseURL).hostname;
+  } catch {
+    return failAll(400, 'invalidBaseURL');
+  }
 
   for (const { market, language } of requested) {
     // The AIO Proxy's create-market body: `languageCode` (not `language`), no
@@ -1464,7 +1469,8 @@ export async function reconcileSerenityProjects(context, { brandId, fanOut }) {
   rows.forEach((row) => {
     const key = `${row.getGeoTargetId()}::${row.getLanguageCode()}`;
     if (rowBySlice.has(key)) {
-      log.warn(`Serenity M8: duplicate DB row for slice ${key} under brand ${brandId} — last-write-wins`);
+      log.warn(`Serenity M8: duplicate DB row for slice ${key} under brand ${brandId} — keeping first row`);
+      return;
     }
     rowBySlice.set(key, row);
   });

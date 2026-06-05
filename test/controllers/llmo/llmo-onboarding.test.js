@@ -4153,6 +4153,18 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.failed.map((f) => f.error)).to.deep.equal(['missingImsBearer', 'missingImsBearer']);
     });
 
+    it('fails all tuples with invalidBaseURL when baseURL cannot be parsed', async () => {
+      const hcp = sinon.stub();
+      const performSerenityFanOut = await loadFanOut(hcp);
+      const res = await performSerenityFanOut(
+        makeContext(),
+        { ...baseArgs, baseURL: 'not-a-url' },
+      );
+      expect(hcp).to.not.have.been.called;
+      expect(res.failed.map((f) => f.error)).to.deep.equal(['invalidBaseURL', 'invalidBaseURL']);
+      expect(res.failed.every((f) => f.status === 400)).to.be.true;
+    });
+
     it('fails all tuples when the brand row is missing', async () => {
       const hcp = sinon.stub();
       const performSerenityFanOut = await loadFanOut(hcp);
@@ -4439,7 +4451,7 @@ describe('LLMO Onboarding Functions', () => {
       ]);
     });
 
-    it('logs a warning when allByBrandId returns duplicate rows for the same slice', async () => {
+    it('logs a warning and uses first-write-wins when allByBrandId returns duplicate rows for the same slice', async () => {
       const reconcileSerenityProjects = await loadReconcile();
       const fanOut = {
         requested: [{ market: 'US', language: 'en' }],
@@ -4451,8 +4463,8 @@ describe('LLMO Onboarding Functions', () => {
       const ctx = makeContext(rows);
       const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
       expect(ctx.log.warn).to.have.been.calledWithMatch(/duplicate DB row/);
-      // Last-write-wins: proj-second is used.
-      expect(res.succeeded[0].semrushProjectId).to.equal('proj-second');
+      // First-write-wins: proj-first is used, proj-second is dropped.
+      expect(res.succeeded[0].semrushProjectId).to.equal('proj-first');
     });
   });
 
