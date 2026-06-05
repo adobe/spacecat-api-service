@@ -6263,6 +6263,21 @@ V2Prompt:
       description: The source system or process that created the prompt
       example: "config"
       default: "config"
+    intent:
+      type: [string, 'null']
+      description: >-
+        Canonical search-intent bucket persisted for the prompt, or null when
+        unknown/unclassified. One of the canonical buckets (mirrors DRS prompt
+        generation).
+      enum:
+        - informational
+        - instructional
+        - comparative
+        - transactional
+        - planning
+        - delegation
+        - null
+      example: informational
     updatedAt:
       $ref: '#/DateTime'
     updatedBy:
@@ -6342,6 +6357,24 @@ V2PromptInput:
       type: string
       description: The source system or process that created the prompt
       default: "config"
+    intent:
+      type: string
+      description: >-
+        Optional search-intent bucket for the prompt. Normalized on write:
+        the value is lowercased, legacy labels are remapped
+        (`statistical`/`navigational` -> `informational`,
+        `commercial` -> `transactional`), and the result is validated against
+        the canonical buckets below. An absent, empty, or (post-remap) invalid
+        value is stored as null (NULL) — it is NOT coerced to a default
+        bucket. Canonical buckets mirror DRS prompt generation.
+      enum:
+        - informational
+        - instructional
+        - comparative
+        - transactional
+        - planning
+        - delegation
+      example: informational
 
 V2PromptBulkDeleteRequest:
   type: object

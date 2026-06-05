@@ -26,6 +26,7 @@ import {
   bulkDeletePrompts,
   checkPromptsExist,
   getPromptStats,
+  normalizeIntent,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -60,6 +61,41 @@ describe('prompts-storage', () => {
   }
 
   afterEach(() => sandbox.restore());
+
+  describe('normalizeIntent', () => {
+    it('returns null for absent, empty, or whitespace values', () => {
+      expect(normalizeIntent(undefined)).to.be.null;
+      expect(normalizeIntent(null)).to.be.null;
+      expect(normalizeIntent('')).to.be.null;
+      expect(normalizeIntent('   ')).to.be.null;
+    });
+
+    it('passes through canonical buckets unchanged', () => {
+      for (const v of [
+        'informational', 'instructional', 'comparative',
+        'transactional', 'planning', 'delegation',
+      ]) {
+        expect(normalizeIntent(v)).to.equal(v);
+      }
+    });
+
+    it('lowercases and trims uppercase/padded input', () => {
+      expect(normalizeIntent('INFORMATIONAL')).to.equal('informational');
+      expect(normalizeIntent('  Transactional  ')).to.equal('transactional');
+    });
+
+    it('remaps legacy labels onto canonical buckets', () => {
+      expect(normalizeIntent('statistical')).to.equal('informational');
+      expect(normalizeIntent('navigational')).to.equal('informational');
+      expect(normalizeIntent('commercial')).to.equal('transactional');
+      expect(normalizeIntent('COMMERCIAL')).to.equal('transactional');
+    });
+
+    it('returns null for values that are invalid after remap', () => {
+      expect(normalizeIntent('bogus')).to.be.null;
+      expect(normalizeIntent('navigation')).to.be.null;
+    });
+  });
 
   describe('resolveBrandUuid', () => {
     it('returns null when brandId is empty', async () => {
@@ -762,6 +798,55 @@ describe('prompts-storage', () => {
       expect(result.created).to.equal(1);
       expect(result.updated).to.equal(0);
       expect(result.prompts).to.have.lengthOf(1);
+    });
+
+    it('persists normalized intent on insert (lowercases, remaps; invalid -> null)', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'a', prompt: 'lower', regions: [], intent: 'informational',
+          },
+          {
+            id: 'b', prompt: 'upper', regions: [], intent: 'TRANSACTIONAL',
+          },
+          {
+            id: 'c', prompt: 'legacy', regions: [], intent: 'commercial',
+          },
+          {
+            id: 'd', prompt: 'invalid', regions: [], intent: 'bogus',
+          },
+          { id: 'e', prompt: 'absent', regions: [] },
+        ],
+        postgrestClient: client,
+      });
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted.map((r) => r.intent)).to.deep.equal([
+        'informational', 'transactional', 'transactional', null, null,
+      ]);
     });
 
     it('updates existing prompts by id', async () => {
@@ -1637,6 +1722,85 @@ describe('prompts-storage', () => {
           postgrestClient: client,
         }),
       ).to.be.rejectedWith('Failed to update prompt');
+    });
+
+    it('persists normalized intent on update (lowercases and remaps)', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: 'transactional',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const result = await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { intent: 'COMMERCIAL' },
+        postgrestClient: client,
+      });
+      expect(updateStub.firstCall.args[0].intent).to.equal('transactional');
+      expect(result.intent).to.equal('transactional');
+    });
+
+    it('sets intent to null on update when value is empty or invalid', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: null,
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const result = await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { intent: 'bogus' },
+        postgrestClient: client,
+      });
+      expect(Object.prototype.hasOwnProperty.call(updateStub.firstCall.args[0], 'intent')).to.be.true;
+      expect(updateStub.firstCall.args[0].intent).to.be.null;
+      expect(result.intent).to.be.null;
     });
 
     it('sets categoryId and topicId to null when empty string', async () => {

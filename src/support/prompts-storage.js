@@ -15,6 +15,47 @@ import crypto from 'node:crypto';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 /**
+ * The 6 canonical intent buckets persisted in `prompts.intent`. Mirrors the
+ * buckets DRS emits (see DRS `prompt_generation_agentic_traffic` generation
+ * prompts) and that the stats intent breakdown aggregates over.
+ */
+const INTENT_VALUES = ['informational', 'instructional', 'comparative', 'transactional', 'planning', 'delegation'];
+const CANONICAL_INTENTS = new Set(INTENT_VALUES);
+
+/**
+ * Legacy intent labels remapped onto the canonical buckets. Mirrors DRS
+ * `INTENT_REMAP` (src/providers/prompt_generation_agentic_traffic/utils/
+ * hard_validate.py) so values produced by older generations or external
+ * callers collapse onto the supported set instead of dropping to NULL.
+ */
+const INTENT_REMAP = {
+  statistical: 'informational',
+  navigational: 'informational',
+  commercial: 'transactional',
+};
+
+/**
+ * Normalizes a caller-supplied intent for persistence into `prompts.intent`.
+ *
+ * Lowercases the value, applies the legacy remap, then validates against the
+ * 6 canonical buckets. Absent, empty, or values that are still invalid after
+ * remapping yield `null` — gap-filling (e.g. LLM classification of
+ * human-added prompts) is handled elsewhere, so we never coerce to a default
+ * bucket here.
+ *
+ * @param {*} intent - Raw intent value from the request body
+ * @returns {string|null} Canonical lowercase intent, or null
+ */
+export function normalizeIntent(intent) {
+  if (!hasText(intent)) {
+    return null;
+  }
+  const lowered = intent.trim().toLowerCase();
+  const remapped = INTENT_REMAP[lowered] || lowered;
+  return CANONICAL_INTENTS.has(remapped) ? remapped : null;
+}
+
+/**
  * Resolves brandId (path param) to Postgres brands.id (uuid).
  * Tries: 1) valid uuid lookup, 2) case-insensitive name lookup.
  *
@@ -238,6 +279,7 @@ function mapRowToPrompt(row) {
     status: row.status || 'active',
     origin: row.origin || 'human',
     source: row.source || 'config',
+    intent: row.intent ?? null,
     createdAt: row.created_at,
     createdBy: row.created_by,
     updatedAt: row.updated_at,
@@ -335,6 +377,7 @@ export async function listPrompts({
     status,
     origin,
     source,
+    intent,
     category_id,
     topic_id,
     brand_id,
@@ -457,6 +500,7 @@ export async function getPromptById({
       status,
       origin,
       source,
+      intent,
       category_id,
       topic_id,
       brand_id,
@@ -574,6 +618,7 @@ export async function upsertPrompts({
       status: p.status || 'active',
       origin: p.origin || 'human',
       source: p.source || 'config',
+      intent: normalizeIntent(p.intent),
       updated_by: updatedBy,
     };
 
@@ -620,6 +665,7 @@ export async function upsertPrompts({
     status: r.status,
     origin: r.origin,
     source: r.source,
+    intent: r.intent,
     createdAt: r.created_at,
     createdBy: r.created_by,
     updatedBy: r.updated_by,
@@ -670,6 +716,9 @@ export async function updatePromptById({
   }
   if (updates.origin !== undefined) {
     patch.origin = updates.origin;
+  }
+  if (updates.intent !== undefined) {
+    patch.intent = normalizeIntent(updates.intent);
   }
   if (updates.categoryId !== undefined) {
     patch.category_id = hasText(updates.categoryId)
@@ -815,8 +864,6 @@ export async function checkPromptsExist({ brandUuid, prompts, postgrestClient })
 
   return data ?? [];
 }
-
-const INTENT_VALUES = ['informational', 'instructional', 'comparative', 'transactional', 'planning', 'delegation'];
 
 export async function getPromptStats({ organizationId, brandUuid, postgrestClient }) {
   if (!postgrestClient?.rpc) {
