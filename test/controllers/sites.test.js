@@ -818,6 +818,19 @@ describe('Sites Controller', () => {
     expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
   });
 
+  it('emits [sites][legacy-shape] log on every legacy-path hit', async () => {
+    // The [sites][legacy-shape] marker is the sunset gate for removing the legacy
+    // branch — Coralogix must show zero hits before removal. Pin the format here so
+    // a rename or accidental drop is caught by tests, not 30 days of silent lying.
+    mockDataAccess.Site.all.resolves(sites);
+
+    await sitesController.getAll({ ...context, invocation: { id: 'req-legacy-1' } });
+
+    expect(loggerStub.info).to.have.been.calledWithMatch(
+      /\[sites\]\[legacy-shape\] GET \/sites called without limit\/cursor requestId=req-legacy-1/,
+    );
+  });
+
   it('gets all sites for a read-only admin user', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
     mockDataAccess.Site.all.resolves(sites);
@@ -856,6 +869,193 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(200);
     expect(body).to.be.an('array').with.lengthOf(2);
+  });
+
+  describe('GET /sites - cursor-based pagination', () => {
+    it('returns paginated envelope when limit is provided', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '100' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.have.all.keys('sites', 'pagination');
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(body.pagination).to.deep.equal({
+        limit: 100,
+        cursor: null,
+        hasMore: false,
+      });
+    });
+
+    it('returns paginated envelope when only cursor is provided', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: 'some-cursor' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.have.all.keys('sites', 'pagination');
+      expect(body.pagination.limit).to.equal(100); // DEFAULT_LIMIT
+    });
+
+    it('returns flat array when no limit or cursor is provided (legacy)', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll(context);
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('routes an empty-string cursor to the legacy path (no envelope)', async () => {
+      // `?cursor=` coerces to null via `|| null`, so hasText() is false and the
+      // request falls through to the legacy flat-array shape. Pinned so a future
+      // switch from `||` to `??` (which would keep "") is caught.
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: '' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+        {},
+        sinon.match({ fetchAllPages: true }),
+      );
+    });
+
+    it('uses provided limit and returns cursor when more pages exist', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: 'next-page-cursor' });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '1' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.deep.equal({
+        limit: 1,
+        cursor: 'next-page-cursor',
+        hasMore: true,
+      });
+    });
+
+    it('clamps limit to MAX_LIMIT (500)', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '9999' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination.limit).to.equal(500);
+    });
+
+    ['abc', '0', '-1', '-100'].forEach((badLimit) => {
+      it(`returns 400 when limit is "${badLimit}"`, async () => {
+        mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+        const result = await sitesController.getAll({ ...context, data: { limit: badLimit } });
+        const error = await result.json();
+
+        expect(result.status).to.equal(400);
+        expect(error).to.have.property('message', 'limit must be a positive integer');
+        expect(mockDataAccess.Site.all).to.not.have.been.called;
+      });
+    });
+
+    it('passes limit, cursor, and returnCursor to data access', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      await sitesController.getAll({ ...context, data: { limit: '10', cursor: 'some-cursor' } });
+
+      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+        {},
+        sinon.match({ limit: 10, cursor: 'some-cursor', returnCursor: true }),
+      );
+    });
+
+    it('rejects cursor longer than 256 characters with 400', async () => {
+      const longCursor = 'a'.repeat(257);
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: longCursor } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'cursor exceeds maximum length');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+
+    it('accepts cursor of exactly 256 characters (boundary)', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+      const exactCursor = 'a'.repeat(256);
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: exactCursor } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.sites).to.be.an('array');
+      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+        {},
+        sinon.match({ cursor: exactCursor }),
+      );
+    });
+
+    [
+      { label: 'number', value: 42 },
+      { label: 'array', value: [1, 2, 3] },
+      { label: 'object', value: { foo: 'bar' } },
+    ].forEach(({ label, value }) => {
+      it(`rejects non-string cursor (${label}) with 400`, async () => {
+        const result = await sitesController.getAll({ ...context, data: { cursor: value } });
+        const error = await result.json();
+
+        expect(result.status).to.equal(400);
+        expect(error).to.have.property('message', 'cursor must be a string');
+        expect(mockDataAccess.Site.all).to.not.have.been.called;
+      });
+    });
+
+    it('returns sites with slim DTO shape in paginated response', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '100' } });
+      const body = await result.json();
+
+      expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
+      expect(body.sites[0]).to.have.property('baseURL', 'https://site1.com');
+      expect(body.sites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
+    });
+
+    it('denies non-admin caller in paginated path', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '10' } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+
+    [
+      { label: 'null', value: null },
+      { label: 'undefined', value: undefined },
+      { label: 'empty object', value: {} },
+    ].forEach(({ label, value }) => {
+      it(`logs an error and returns an empty paginated envelope when Site.all resolves ${label}`, async () => {
+        mockDataAccess.Site.all.resolves(value);
+
+        const result = await sitesController.getAll({ ...context, data: { limit: '10' } });
+        const body = await result.json();
+
+        expect(result.status).to.equal(200);
+        expect(body.sites).to.be.an('array').with.lengthOf(0);
+        expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
+        expect(loggerStub.error).to.have.been.calledWithMatch(
+          /\[sites\] Site\.all returned unexpected shape with returnCursor=true/,
+        );
+      });
+    });
   });
 
   describe('GET /sites - S2S readAll capability', () => {
@@ -898,6 +1098,24 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
       expect(loggerStub.info).to.have.been.calledWithMatch(
         /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-abc-123/,
+      );
+    });
+
+    it('grants access to S2S consumer with site:readAll on the paginated path', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-paginated-1' };
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '10' } });
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-paginated-1/,
       );
     });
 
