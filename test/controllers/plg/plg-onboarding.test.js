@@ -3368,28 +3368,129 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(findDeliveryTypeStub).to.have.been.calledOnce;
     });
 
-    it('calls findDeliveryType for existing site and updates delivery type when detected type differs', async () => {
+    it('alerts via Slack when detected delivery type differs from stored type', async () => {
       rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
       findDeliveryTypeStub.resetHistory();
       findDeliveryTypeStub.resolves('aem_edge');
       const existingSite = createMockSite({ deliveryType: 'aem_cs', orgId: TEST_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
-      const context = buildContext({ domain: TEST_DOMAIN });
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const AlertController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            created: (data) => ({ status: 201, value: data }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            noContent: () => ({ status: 204 }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+              },
+              REVIEW_DECISIONS: {
+                BYPASSED: 'BYPASSED',
+                UPHELD: 'UPHELD',
+              },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+            postSlackMessage: postSlackMessageStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
+          '../../../src/support/access-control-util.js': {
+            default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+          },
+          '../../../src/support/rum-config-service.js': { updateRumConfig: updateRumConfigStub },
+        },
+      )).default;
 
-      const res = await controller.onboard(context);
+      const alertController = AlertController({ log: mockLog });
+      const context = buildContext({ domain: TEST_DOMAIN });
+      context.env = {
+        ...context.env,
+        SLACK_DELIVERY_TYPE_ALERT_CHANNEL_ID: 'C_ALERT',
+        SLACK_BOT_TOKEN: 'xoxb-test',
+      };
+
+      const res = await alertController.onboard(context);
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(findDeliveryTypeStub).to.have.been.calledOnceWith(TEST_BASE_URL);
-      expect(existingSite.setDeliveryType).to.have.been.calledWith('aem_edge');
-      expect(existingSite.setDeliveryConfig).to.have.been.calledWith(null);
-      expect(existingSite.setHlxConfig).to.have.been.calledWith(null);
-      expect(mockLog.info).to.have.been.calledWithMatch(/Updated delivery type.*aem_cs.*aem_edge/);
-      expect(mockLog.info).to.have.been.calledWithMatch(/Clearing stale config/);
+      // site must NOT be mutated — alert only
+      expect(existingSite.setDeliveryType).to.not.have.been.called;
+      expect(existingSite.setDeliveryConfig).to.not.have.been.called;
+      expect(existingSite.setHlxConfig).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Delivery type mismatch/);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      const [channelId, message] = postSlackMessageStub.firstCall.args;
+      expect(channelId).to.equal('C_ALERT');
+      expect(message).to.include('aem_cs');
+      expect(message).to.include('aem_edge');
+      expect(message).to.include(existingSite.getId());
+      expect(message).to.include(TEST_ORG_ID);
     });
 
-    it('does not mutate delivery type when detected type matches existing', async () => {
+    it('does not alert when detected delivery type matches existing', async () => {
       findDeliveryTypeStub.resetHistory();
       findDeliveryTypeStub.resolves('aem_edge');
       const existingSite = createMockSite({ deliveryType: 'aem_edge', orgId: TEST_ORG_ID });
@@ -3400,8 +3501,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(existingSite.setDeliveryType).to.not.have.been.called;
-      expect(existingSite.setDeliveryConfig).to.not.have.been.called;
-      expect(existingSite.setHlxConfig).to.not.have.been.called;
+      expect(mockLog.warn).to.not.have.been.calledWithMatch(/Delivery type mismatch/);
     });
 
     it('skips Step 5a entirely for a new site — no redundant findDeliveryType call', async () => {
