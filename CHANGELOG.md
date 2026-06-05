@@ -1,3 +1,10 @@
+# [1.555.0](https://github.com/adobe/spacecat-api-service/compare/v1.554.2...v1.555.0) (2026-06-05)
+
+
+### Features
+
+* **agentic-rules:** customer-edit endpoints for URL classification rules (LLMO-5037) ([#2536](https://github.com/adobe/spacecat-api-service/issues/2536)) ([9af94e2](https://github.com/adobe/spacecat-api-service/commit/9af94e2a1e3ecbdb4055c5bda324278681355914)), closes [#2539](https://github.com/adobe/spacecat-api-service/issues/2539)
+
 ## [1.554.2](https://github.com/adobe/spacecat-api-service/compare/v1.554.1...v1.554.2) (2026-06-05)
 
 
