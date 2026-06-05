@@ -6361,19 +6361,16 @@ V2PromptInput:
       type: string
       description: >-
         Optional search-intent bucket for the prompt. Normalized on write:
-        the value is lowercased, legacy labels are remapped
+        the value is lowercased, legacy aliases are remapped
         (`statistical`/`navigational` -> `informational`,
         `commercial` -> `transactional`), and the result is validated against
-        the canonical buckets below. An absent, empty, or (post-remap) invalid
+        the canonical buckets. An absent, empty, or (post-remap) invalid
         value is stored as null (NULL) — it is NOT coerced to a default
-        bucket. Canonical buckets mirror DRS prompt generation.
-      enum:
-        - informational
-        - instructional
-        - comparative
-        - transactional
-        - planning
-        - delegation
+        bucket. Canonical buckets (mirror DRS prompt generation):
+        `informational`, `instructional`, `comparative`, `transactional`,
+        `planning`, `delegation`. No `enum` constraint is applied to the
+        input: legacy aliases (`statistical`, `navigational`, `commercial`)
+        are accepted and normalized on write.
       example: informational
 
 V2PromptBulkDeleteRequest:

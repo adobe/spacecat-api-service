@@ -2406,4 +2406,265 @@ describe('prompts-storage', () => {
       expect(result.intents.informational).to.equal(410);
     });
   });
+
+  // Best-effort behavior against environments where `prompts.intent` is absent
+  // (the IT PostgREST image is pinned to a data-service version predating the
+  // intent migration). Writing/reading `intent` there 500s with a missing-
+  // column error; the storage layer detects this per-client (WeakMap) and
+  // retries without intent so prompts still persist/read.
+  describe('intent column best-effort fallback', () => {
+    const MISSING_INTENT_INSERT = {
+      code: 'PGRST204',
+      message: "Could not find the 'intent' column of 'prompts' in the schema cache",
+    };
+    const MISSING_INTENT_SELECT = {
+      code: '42703',
+      message: 'column prompts.intent does not exist',
+    };
+
+    it('upsertPrompts inserts without intent when the column is missing, then retries clean', async () => {
+      const insertStub = sinon.stub();
+      // First insert (with intent) -> missing-column error; retry -> success.
+      insertStub.onFirstCall().returns({
+        select: () => thenable({ data: null, error: MISSING_INTENT_INSERT }),
+      });
+      insertStub.onSecondCall().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'a', prompt: 'hello', regions: [], intent: 'informational',
+        }],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+      expect(insertStub.callCount).to.equal(2);
+      // First attempt carried intent; retry stripped it.
+      expect(insertStub.firstCall.args[0][0]).to.have.property('intent', 'informational');
+      expect(insertStub.secondCall.args[0][0]).to.not.have.property('intent');
+    });
+
+    it('upsertPrompts skips intent up front on a second call with the same client', async () => {
+      const insertStub = sinon.stub();
+      insertStub.onCall(0).returns({
+        select: () => thenable({ data: null, error: MISSING_INTENT_INSERT }),
+      });
+      insertStub.onCall(1).returns({
+        select: () => thenable({ data: [{ prompt_id: 'p1' }], error: null }),
+      });
+      insertStub.onCall(2).returns({
+        select: () => thenable({ data: [{ prompt_id: 'p2' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const args = {
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        postgrestClient: client,
+      };
+      await upsertPrompts({ ...args, prompts: [{ id: 'p1', prompt: 'x', intent: 'planning' }] });
+      await upsertPrompts({ ...args, prompts: [{ id: 'p2', prompt: 'y', intent: 'planning' }] });
+      // 2 calls for the first upsert (error + retry), 1 for the second (no error).
+      expect(insertStub.callCount).to.equal(3);
+      expect(insertStub.getCall(2).args[0][0]).to.not.have.property('intent');
+    });
+
+    it('upsertPrompts updates without intent when the column is missing, then retries clean', async () => {
+      const existingData = {
+        data: [{
+          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [], status: 'active',
+        }],
+        error: null,
+      };
+      const updateStub = sinon.stub();
+      updateStub.onFirstCall().returns({ eq: () => thenable({ error: MISSING_INTENT_INSERT }) });
+      updateStub.onSecondCall().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'p1', prompt: 'Updated', regions: [], intent: 'transactional',
+        }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      expect(updateStub.callCount).to.equal(2);
+      expect(updateStub.firstCall.args[0]).to.have.property('intent', 'transactional');
+      expect(updateStub.secondCall.args[0]).to.not.have.property('intent');
+    });
+
+    it('listPrompts retries the select without intent when the column is missing', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        text: 'Prompt',
+        regions: ['us'],
+        status: 'active',
+        origin: 'human',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      let promptCall = 0;
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          promptCall += 1;
+          // First select (with intent) errors; retry (without intent) succeeds.
+          return promptCall === 1
+            ? makeChain({ data: null, error: MISSING_INTENT_SELECT, count: null })
+            : makeChain({ data: [row], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(promptCall).to.equal(2);
+      expect(result.items).to.have.lengthOf(1);
+      expect(result.items[0].intent).to.be.null;
+    });
+
+    it('listPrompts skips intent up front on a second call with the same client', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        text: 'Prompt',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      let promptCall = 0;
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          promptCall += 1;
+          return promptCall === 1
+            ? makeChain({ data: null, error: MISSING_INTENT_SELECT, count: null })
+            : makeChain({ data: [row], error: null, count: 1 });
+        },
+      };
+      const args = { organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client };
+      await listPrompts(args);
+      await listPrompts(args);
+      // Call 1: with-intent error, Call 2: retry, Call 3: second list goes
+      // straight to no-intent (no error) — 3 total, not 4.
+      expect(promptCall).to.equal(3);
+    });
+
+    it('getPromptById retries the select without intent when the column is missing', async () => {
+      const row = {
+        id: 'pk-uuid',
+        prompt_id: PROMPT_ID,
+        text: 'Prompt',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      let call = 0;
+      const client = {
+        from: () => {
+          call += 1;
+          return call === 1
+            ? makeChain({ data: null, error: MISSING_INTENT_SELECT })
+            : makeChain({ data: row, error: null });
+        },
+      };
+      const result = await getPromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        postgrestClient: client,
+      });
+      expect(call).to.equal(2);
+      expect(result).to.not.be.null;
+      expect(result.intent).to.be.null;
+    });
+
+    it('still throws on a non-intent query error (no spurious retry)', async () => {
+      let call = 0;
+      const client = {
+        from: () => {
+          call += 1;
+          return makeChain({ data: null, error: { message: 'DB exploded' } });
+        },
+      };
+      await expect(
+        getPromptById({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          promptId: PROMPT_ID,
+          postgrestClient: client,
+        }),
+      ).to.be.rejectedWith('Failed to get prompt');
+      // No retry for a non-intent error.
+      expect(call).to.equal(1);
+    });
+  });
 });
