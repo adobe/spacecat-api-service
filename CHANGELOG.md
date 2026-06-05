@@ -1,3 +1,10 @@
+# [1.554.0](https://github.com/adobe/spacecat-api-service/compare/v1.553.0...v1.554.0) (2026-06-05)
+
+
+### Features
+
+* cursor-based pagination for GET /sites ([#2497](https://github.com/adobe/spacecat-api-service/issues/2497)) ([ac0dab4](https://github.com/adobe/spacecat-api-service/commit/ac0dab47a744135c6dee8f844ebb13d4ab073473))
+
 # [1.553.0](https://github.com/adobe/spacecat-api-service/compare/v1.552.0...v1.553.0) (2026-06-05)
 
 
