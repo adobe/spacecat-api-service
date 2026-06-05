@@ -48,13 +48,14 @@ export function checkDateRange(data) {
   const startRaw = q.startDate || q.start_date;
   const endRaw = q.endDate || q.end_date;
 
-  // Only enforce when BOTH bounds are explicitly provided. If one (or neither)
-  // is omitted, the handler applies its default window unchanged — preserving
-  // the prior contract for existing callers (SITES-46098 PR review). The
-  // incident's abusive pattern always sent both dates; the partial-date path
-  // is covered by the planned edge rate-limit.
-  if (startRaw == null || endRaw == null) {
+  // Both omitted → handler applies its default window; nothing to validate.
+  if (startRaw == null && endRaw == null) {
     return null;
+  }
+  // The UI always sends both dates together, so a single bound is not a real
+  // caller pattern — reject it rather than guessing a default for the other.
+  if (startRaw == null || endRaw == null) {
+    return 'Both startDate and endDate are required when either is provided';
   }
   if (!isRealDate(startRaw)) {
     return 'Invalid startDate: expected a real YYYY-MM-DD date';

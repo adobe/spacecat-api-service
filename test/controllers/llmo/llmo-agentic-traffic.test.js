@@ -240,11 +240,11 @@ describe('llmo-agentic-traffic', () => {
       expect(res.status).to.equal(200);
     });
 
-    it('does not reject when only one date bound is provided (back-compat)', async () => {
+    it('rejects when only one date bound is provided', async () => {
       const ctx = makeContext({ data: { startDate: '2020-01-01', endDate: undefined } });
       const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
       const res = await handler(ctx);
-      expect(res.status).to.equal(200);
+      expect(res.status).to.equal(400);
     });
   });
 
