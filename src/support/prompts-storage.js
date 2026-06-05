@@ -23,6 +23,41 @@ import { INTENT_VALUES, normalizeIntent } from './intent.js';
 export { INTENT_VALUES, normalizeIntent };
 
 /**
+ * Per-client cache of whether `prompts.intent` is selectable/writable. Keyed by
+ * the PostgREST client so unit tests (fresh mock clients) never bleed state and
+ * production detects once per client instance. Absent = unknown (try with
+ * intent); `false` = known-missing (skip intent up front).
+ *
+ * Why best-effort instead of bumping the IT image: the integration PostgREST
+ * image is pinned to a data-service version that predates the `intent`
+ * migration, and bumping it pulls in unrelated migrations + a constraint that
+ * rejects the IT seed brand. So the code self-defends: when `intent` is absent,
+ * prompts are still written/read WITHOUT intent rather than 500-ing.
+ */
+const intentColumnSupported = new WeakMap();
+
+/**
+ * Detects a PostgREST/Postgres error that indicates the `intent` column is
+ * absent. Covers the insert/upsert error (`PGRST204`, "Could not find the
+ * 'intent' column of 'prompts' in the schema cache") and the select error
+ * (`42703`, "column prompts.intent does not exist").
+ *
+ * @param {*} error - Error object from a PostgREST response (`{ message, details, hint, code }`)
+ * @returns {boolean} true when the error is specifically about a missing `intent` column
+ */
+function isMissingIntentColumnError(error) {
+  if (!error) {
+    return false;
+  }
+  const haystack = [error.message, error.details, error.hint, error.code]
+    .filter((v) => v != null)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes('intent')
+    && (haystack.includes('column') || haystack.includes('schema cache'));
+}
+
+/**
  * Resolves brandId (path param) to Postgres brands.id (uuid).
  * Tries: 1) valid uuid lookup, 2) case-insensitive name lookup.
  *
@@ -335,7 +370,18 @@ export async function listPrompts({
   const pageNum = Math.max(1, Number(page) || 1);
   const offset = (pageNum - 1) * limitNum;
 
-  const select = `
+  let categoryUuid = null;
+  let topicUuid = null;
+  if (hasText(categoryId) || hasText(topicId)) {
+    categoryUuid = hasText(categoryId)
+      ? await resolveCategoryUuid(organizationId, categoryId, postgrestClient)
+      : null;
+    topicUuid = hasText(topicId)
+      ? await resolveTopicUuid(organizationId, topicId, postgrestClient)
+      : null;
+  }
+
+  const buildSelect = (includeIntent) => `
     id,
     prompt_id,
     name,
@@ -343,8 +389,7 @@ export async function listPrompts({
     regions,
     status,
     origin,
-    source,
-    intent,
+    source,${includeIntent ? '\n    intent,' : ''}
     category_id,
     topic_id,
     brand_id,
@@ -357,66 +402,71 @@ export async function listPrompts({
     topics(id,topic_id,name)
   `;
 
-  let baseQuery = postgrestClient
-    .from('prompts')
-    .select(select, { count: 'exact' })
-    .eq('organization_id', organizationId);
+  // Best-effort against environments where `prompts.intent` is absent (see
+  // intentColumnSupported): try with intent, and on a missing-column error
+  // remember it for this client and re-run the select without intent.
+  const run = (includeIntent) => {
+    let baseQuery = postgrestClient
+      .from('prompts')
+      .select(buildSelect(includeIntent), { count: 'exact' })
+      .eq('organization_id', organizationId);
 
-  // Sorting
-  const sortCol = SORT_COLUMN_MAP[sort];
-  if (sortCol) {
-    const ascending = order === 'asc';
-    if (sortCol.includes('(')) {
-      const [foreignTable, col] = sortCol.replace(')', '').split('(');
-      baseQuery = baseQuery.order(col, { ascending, foreignTable });
+    // Sorting
+    const sortCol = SORT_COLUMN_MAP[sort];
+    if (sortCol) {
+      const ascending = order === 'asc';
+      if (sortCol.includes('(')) {
+        const [foreignTable, col] = sortCol.replace(')', '').split('(');
+        baseQuery = baseQuery.order(col, { ascending, foreignTable });
+      } else {
+        baseQuery = baseQuery.order(sortCol, { ascending });
+      }
+      baseQuery = baseQuery.order('id', { ascending: true });
     } else {
-      baseQuery = baseQuery.order(sortCol, { ascending });
+      baseQuery = baseQuery
+        .order('updated_at', { ascending: false })
+        .order('id', { ascending: true });
     }
-    baseQuery = baseQuery.order('id', { ascending: true });
-  } else {
-    baseQuery = baseQuery
-      .order('updated_at', { ascending: false })
-      .order('id', { ascending: true });
-  }
 
-  if (brandUuid) {
-    baseQuery = baseQuery.eq('brand_id', brandUuid);
-  }
-  if (hasText(status)) {
-    baseQuery = baseQuery.eq('status', status);
-  } else {
-    baseQuery = baseQuery.neq('status', 'deleted');
-  }
+    if (brandUuid) {
+      baseQuery = baseQuery.eq('brand_id', brandUuid);
+    }
+    if (hasText(status)) {
+      baseQuery = baseQuery.eq('status', status);
+    } else {
+      baseQuery = baseQuery.neq('status', 'deleted');
+    }
 
-  if (hasText(origin)) {
-    baseQuery = baseQuery.eq('origin', origin);
-  }
+    if (hasText(origin)) {
+      baseQuery = baseQuery.eq('origin', origin);
+    }
 
-  if (hasText(region)) {
-    baseQuery = baseQuery.contains('regions', [region]);
-  }
+    if (hasText(region)) {
+      baseQuery = baseQuery.contains('regions', [region]);
+    }
 
-  if (hasText(search)) {
-    const term = `%${search}%`;
-    baseQuery = baseQuery.or(`text.ilike.${term},name.ilike.${term}`);
-  }
+    if (hasText(search)) {
+      const term = `%${search}%`;
+      baseQuery = baseQuery.or(`text.ilike.${term},name.ilike.${term}`);
+    }
 
-  if (hasText(categoryId) || hasText(topicId)) {
-    const categoryUuid = hasText(categoryId)
-      ? await resolveCategoryUuid(organizationId, categoryId, postgrestClient)
-      : null;
-    const topicUuid = hasText(topicId)
-      ? await resolveTopicUuid(organizationId, topicId, postgrestClient)
-      : null;
     if (categoryUuid) {
       baseQuery = baseQuery.eq('category_id', categoryUuid);
     }
     if (topicUuid) {
       baseQuery = baseQuery.eq('topic_id', topicUuid);
     }
-  }
 
-  const { data: rows, error, count } = await baseQuery.range(offset, offset + limitNum - 1);
+    return baseQuery.range(offset, offset + limitNum - 1);
+  };
+
+  const tryIntent = intentColumnSupported.get(postgrestClient) !== false;
+  let { data: rows, error, count } = await run(tryIntent);
+
+  if (error && isMissingIntentColumnError(error)) {
+    intentColumnSupported.set(postgrestClient, false);
+    ({ data: rows, error, count } = await run(false));
+  }
 
   if (error) {
     throw new Error(`Failed to list prompts: ${error.message}`);
@@ -456,7 +506,9 @@ export async function getPromptById({
     return null;
   }
 
-  const { data, error } = await postgrestClient
+  // Best-effort against environments where `prompts.intent` is absent: try with
+  // intent, and on a missing-column error remember it and re-run without intent.
+  const run = (includeIntent) => postgrestClient
     .from('prompts')
     .select(`
       id,
@@ -466,8 +518,7 @@ export async function getPromptById({
       regions,
       status,
       origin,
-      source,
-      intent,
+      source,${includeIntent ? '\n      intent,' : ''}
       category_id,
       topic_id,
       brand_id,
@@ -483,6 +534,13 @@ export async function getPromptById({
     .eq('brand_id', brandUuid)
     .eq('prompt_id', promptId)
     .maybeSingle();
+
+  let { data, error } = await run(intentColumnSupported.get(postgrestClient) !== false);
+
+  if (error && isMissingIntentColumnError(error)) {
+    intentColumnSupported.set(postgrestClient, false);
+    ({ data, error } = await run(false));
+  }
 
   if (error) {
     throw new Error(`Failed to get prompt: ${error.message}`);
@@ -639,8 +697,25 @@ export async function upsertPrompts({
   let updated = 0;
   const skipped = prompts.length - toInsert.length - toUpdate.length;
 
+  // Best-effort against environments where `prompts.intent` is absent (see
+  // intentColumnSupported): strip `intent` from rows known-unsupported up
+  // front, and on a missing-column error remember it and retry without intent.
+  const stripIntent = (row) => {
+    const { intent: _, ...rest } = row;
+    return rest;
+  };
+
   if (toInsert.length > 0) {
-    const { data: inserted, error } = await postgrestClient.from('prompts').insert(toInsert).select();
+    const knownUnsupported = intentColumnSupported.get(postgrestClient) === false;
+    const insertRows = knownUnsupported ? toInsert.map(stripIntent) : toInsert;
+    let { data: inserted, error } = await postgrestClient.from('prompts').insert(insertRows).select();
+    if (error && isMissingIntentColumnError(error)) {
+      intentColumnSupported.set(postgrestClient, false);
+      ({ data: inserted, error } = await postgrestClient
+        .from('prompts')
+        .insert(toInsert.map(stripIntent))
+        .select());
+    }
     if (error) {
       throw new Error(`Failed to insert prompts: ${error.message}`);
     }
@@ -649,8 +724,14 @@ export async function upsertPrompts({
 
   for (const row of toUpdate) {
     const { id, ...patch } = row;
+    const knownUnsupported = intentColumnSupported.get(postgrestClient) === false;
     // eslint-disable-next-line no-await-in-loop, max-len
-    const { error } = await postgrestClient.from('prompts').update(patch).eq('id', id);
+    let { error } = await postgrestClient.from('prompts').update(knownUnsupported ? stripIntent(patch) : patch).eq('id', id);
+    if (error && isMissingIntentColumnError(error)) {
+      intentColumnSupported.set(postgrestClient, false);
+      // eslint-disable-next-line no-await-in-loop, max-len
+      ({ error } = await postgrestClient.from('prompts').update(stripIntent(patch)).eq('id', id));
+    }
     if (error) {
       throw new Error(`Failed to update prompt: ${error.message}`);
     }
@@ -722,7 +803,10 @@ export async function updatePromptById({
   if (updates.origin !== undefined) {
     patch.origin = updates.origin;
   }
-  if (updates.intent !== undefined) {
+  // Only set patch.intent when the column is not known-unsupported for this
+  // client (see intentColumnSupported); a missing-column error below triggers
+  // a retry with intent dropped.
+  if (updates.intent !== undefined && intentColumnSupported.get(postgrestClient) !== false) {
     patch.intent = normalizeIntent(updates.intent);
   } else if (typeof classifyIntent === 'function' && hasText(patch.text)) {
     // No intent supplied but the text changed: best-effort classify the new
@@ -743,14 +827,22 @@ export async function updatePromptById({
       : null;
   }
 
-  const { data, error } = await postgrestClient
+  const runUpdate = (p) => postgrestClient
     .from('prompts')
-    .update(patch)
+    .update(p)
     .eq('organization_id', organizationId)
     .eq('brand_id', brandUuid)
     .eq('prompt_id', promptId)
     .select()
     .maybeSingle();
+
+  let { data, error } = await runUpdate(patch);
+
+  if (error && isMissingIntentColumnError(error)) {
+    intentColumnSupported.set(postgrestClient, false);
+    const { intent: _, ...patchWithoutIntent } = patch;
+    ({ data, error } = await runUpdate(patchWithoutIntent));
+  }
 
   if (error) {
     throw new Error(`Failed to update prompt: ${error.message}`);
