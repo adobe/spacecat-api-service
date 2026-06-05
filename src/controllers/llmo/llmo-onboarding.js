@@ -1252,7 +1252,8 @@ function extractImsBearer(context) {
   if (!hasText(header) || !header.startsWith('Bearer ')) {
     return null;
   }
-  return header.substring('Bearer '.length);
+  const token = header.substring('Bearer '.length);
+  return hasText(token) ? token : null;
 }
 
 /**
@@ -1336,16 +1337,30 @@ export async function performSerenityFanOut(context, {
       brandNames: [brandName.trim()],
     };
 
+    // Deadline guard: leave at least 15 s for M8 read-back + response serialization.
+    // context.invocation.deadline is set by helix-universal to
+    // Date.now() + getRemainingTimeInMillis() at Lambda entry. When absent (local
+    // dev / unit tests), the guard is skipped.
+    const deadline = context.invocation?.deadline;
+    if (deadline !== undefined && Date.now() + 15_000 > deadline) {
+      log.warn(`Serenity fan-out: Lambda deadline too close — aborting after ${succeeded.length} of ${requested.length} tuple(s); remaining marked as 'timeout'`);
+      for (const remaining of requested.slice(succeeded.length + failed.length)) {
+        failed.push({
+          market: remaining.market, language: remaining.language, status: 503, error: 'timeout',
+        });
+      }
+      break;
+    }
+
     // T4 (LLMO-5206): time each tuple so Coralogix can chart per-tuple fan-out
     // latency. The clock spans only the upstream create+publish+row write.
     const startedAt = Date.now();
     let outcome;
     let thrown;
     try {
-      // Sequential by design (prototype): one upstream create+publish at a time.
-      // TODO(LLMO-GA): add a time-budget guard before GA — worst case 50 tuples
-      // × ~30 s = 1 500 s, well past Lambda timeout. adobe.com's ~19 real tuples
-      // are fine today but the 50-tuple cap offers no safety margin in Lambda.
+      // Sequential by design (prototype): worst case 50 tuples × ~30 s = 1 500 s.
+      // The deadline guard above breaks the loop before Lambda timeout, ensuring
+      // the caller receives a structured 207 instead of an abrupt invocation error.
       // eslint-disable-next-line no-await-in-loop
       outcome = await handleCreateMarket(
         transport,
@@ -1356,23 +1371,22 @@ export async function performSerenityFanOut(context, {
         log,
       );
     } catch (e) {
-      // SerenityTransportError (upstream non-2xx) or an unexpected throw — record
-      // it and fall through to the per-tuple metric; the loop continues. The
-      // message is sanitized below (it can carry the upstream URL + workspace ID).
+      // Record the throw and fall through to the per-tuple metric; the loop continues.
       thrown = e;
     }
     const durationMs = Date.now() - startedAt;
 
     let success;
     if (thrown) {
-      // SerenityTransportError.message contains the full upstream URL (including
-      // the workspace ID) — never forward it to API callers; map to a safe token.
-      // Unexpected errors originate in our own code and are safe to echo.
+      // Never forward raw error messages to API callers — SerenityTransportError
+      // carries the upstream URL with workspace ID; unexpected internal errors may
+      // contain file paths or internal hostnames. Log the raw message server-side.
+      log.error(`Serenity fan-out error for ${market}::${language}: ${thrown.message}`);
       failed.push({
         market,
         language,
         status: thrown.status || 502,
-        error: thrown instanceof SerenityTransportError ? 'semrushUpstreamError' : thrown.message,
+        error: thrown instanceof SerenityTransportError ? 'semrushUpstreamError' : 'internalError',
       });
       success = false;
     } else if (outcome.status === 201 || outcome.status === 409) {
@@ -1448,7 +1462,11 @@ export async function reconcileSerenityProjects(context, { brandId, fanOut }) {
 
   const rowBySlice = new Map();
   rows.forEach((row) => {
-    rowBySlice.set(`${row.getGeoTargetId()}::${row.getLanguageCode()}`, row);
+    const key = `${row.getGeoTargetId()}::${row.getLanguageCode()}`;
+    if (rowBySlice.has(key)) {
+      log.warn(`Serenity M8: duplicate DB row for slice ${key} under brand ${brandId} — last-write-wins`);
+    }
+    rowBySlice.set(key, row);
   });
   const failureByTuple = new Map();
   fanOut.failed.forEach((f) => failureByTuple.set(`${f.market}::${f.language}`, f));
@@ -1551,18 +1569,21 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     }
     if (serenityEnabled && !organization.getSemrushWorkspaceId()) {
       const spaceCatId = organization.getId();
-      // T4 (LLMO-5206): the M5 fail-fast branch — counts cohort onboardings
-      // blocked because no Semrush workspace is bound to the org.
+      // T4 (LLMO-5206): structured metric — counts cohort onboardings blocked because
+      // no Semrush workspace is bound to the org.
       log.info('serenity_onboarding_blocked', {
         event: 'serenity_onboarding_blocked',
         reason: 'no_workspace',
         orgId: spaceCatId,
       });
-      const workspaceError = new Error(
-        `Semrush workspace not bound to org ${spaceCatId}. `
+      // Log operator-actionable detail server-side; surface only a generic message
+      // to API callers so internal org IDs and API paths are not disclosed.
+      log.warn(
+        `Serenity M5: Semrush workspace not bound to org ${spaceCatId}. `
         + `Run PATCH /organizations/${spaceCatId} with { semrushWorkspaceId: ... } `
         + 'then retry onboarding.',
       );
+      const workspaceError = new Error('Semrush workspace not configured for this organization.');
       // Surfaced as HTTP 404 by the controller (matches the AIO Proxy convention,
       // LLMO-5007 §M5). `preflight` tells the cleanup handler below there is no
       // Adobe-side state to roll back — this throw precedes site creation.

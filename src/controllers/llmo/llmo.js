@@ -955,7 +955,7 @@ function LlmoController(ctx) {
       } = data;
       const tempOnboarding = data['temp-onboarding'] === true;
 
-      if (!domain || !brandName) {
+      if (!domain || !hasText(brandName)) {
         return badRequest('domain and brandName are required');
       }
 
@@ -988,10 +988,12 @@ function LlmoController(ctx) {
             return badRequest('Each markets entry must be an object with market and language');
           }
           if (!ISO_ALPHA2_UPPER_REGEX.test(entry.market)) {
-            return badRequest(`Invalid market "${entry.market}". Must be an ISO 3166-1 alpha-2 uppercase code (e.g. US, DE)`);
+            const displayMarket = String(entry.market).slice(0, 20);
+            return badRequest(`Invalid market "${displayMarket}". Must be an ISO 3166-1 alpha-2 uppercase code (e.g. US, DE)`);
           }
           if (!LANGUAGE_TAG_REGEX.test(entry.language)) {
-            return badRequest(`Invalid language "${entry.language}". Must be a BCP-47 lowercase language tag (e.g. en, de, zh-hans)`);
+            const displayLanguage = String(entry.language).slice(0, 20);
+            return badRequest(`Invalid language "${displayLanguage}". Must be a BCP-47 lowercase language tag (e.g. en, de, zh-hans)`);
           }
         }
         if (region !== undefined) {

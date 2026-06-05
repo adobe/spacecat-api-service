@@ -3135,6 +3135,37 @@ describe('LlmoController', () => {
       });
     });
 
+    it('should return bad request when brandName is whitespace-only', async () => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: () => 'dev/example-com',
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => `https://${domain}`,
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+      const ctx = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, brandName: '   ' },
+      };
+      const result = await testController.onboardCustomer(ctx);
+      expect(result.status).to.equal(400);
+    });
+
     it('should return bad request when validation fails', async () => {
       validateSiteNotOnboardedStub.reset();
       validateSiteNotOnboardedStub.resolves({

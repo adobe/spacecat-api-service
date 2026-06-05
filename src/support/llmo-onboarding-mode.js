@@ -24,6 +24,11 @@ export const SERENITY_SITE_ALLOWLIST = 'SERENITY_SITE_ALLOWLIST';
  * gates the Semrush provisioning path (M5–M8) during the cohort prototype phase.
  * Matches against both the SpaceCat org ID and the IMS org ID.
  *
+ * TRANSITIONAL — env-var allowlist is intentional for the prototype phase (small
+ * cohort, fast iteration). Once the cohort exceeds ~10 orgs or requires real-time
+ * add/remove without a deploy, migrate to a DB flag. Env-var changes require a
+ * deployment, cannot be audited in real-time, and have no rollback semantics.
+ *
  * @param {string} organizationId - SpaceCat org ID
  * @param {string} imsOrgId - IMS org ID
  * @param {object} env - Environment variables object

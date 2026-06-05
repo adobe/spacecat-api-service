@@ -3801,7 +3801,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(thrown, 'expected performLlmoOnboarding to throw').to.exist;
       expect(thrown.status).to.equal(404);
       expect(thrown.preflight).to.be.true;
-      expect(thrown.message).to.match(/Semrush workspace not bound to org org-serenity-cohort/);
+      expect(thrown.message).to.match(/Semrush workspace not configured for this organization/);
       // Fail-fast: nothing downstream of the org lookup should have run —
       // neither site creation nor any later config/audit step.
       expect(mockDataAccess.Site.create).to.not.have.been.called;
@@ -4141,6 +4141,18 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.failed.map((f) => f.error)).to.deep.equal(['missingImsBearer', 'missingImsBearer']);
     });
 
+    it('fails all tuples when authorization header is "Bearer " (empty token)', async () => {
+      const hcp = sinon.stub();
+      const performSerenityFanOut = await loadFanOut(hcp);
+      const res = await performSerenityFanOut(
+        makeContext({ pathInfo: { headers: { authorization: 'Bearer ' } } }),
+        baseArgs,
+      );
+      expect(hcp).to.not.have.been.called;
+      expect(createTransportStub).to.not.have.been.called;
+      expect(res.failed.map((f) => f.error)).to.deep.equal(['missingImsBearer', 'missingImsBearer']);
+    });
+
     it('fails all tuples when the brand row is missing', async () => {
       const hcp = sinon.stub();
       const performSerenityFanOut = await loadFanOut(hcp);
@@ -4183,8 +4195,10 @@ describe('LLMO Onboarding Functions', () => {
       ]);
     });
 
-    it('defaults a thrown error with no status to 502', async () => {
-      const hcp = sinon.stub().rejects(new Error('boom')); // no .status
+    it('sanitizes non-SerenityTransportError thrown errors to internalError token', async () => {
+      // A TypeError, DB driver error, or JSON parse failure must not leak its raw
+      // message (may contain file paths, internal hostnames) to the API caller.
+      const hcp = sinon.stub().rejects(new Error('DB connection refused at 10.0.0.1:5432'));
       const performSerenityFanOut = await loadFanOut(hcp);
       const res = await performSerenityFanOut(
         makeContext(),
@@ -4192,7 +4206,7 @@ describe('LLMO Onboarding Functions', () => {
       );
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 502, error: 'boom',
+          market: 'US', language: 'en', status: 502, error: 'internalError',
         },
       ]);
     });
@@ -4224,6 +4238,41 @@ describe('LLMO Onboarding Functions', () => {
       expect(Object.keys(fanoutEvents[0]).sort()).to.deep.equal(
         ['durationMs', 'event', 'language', 'market', 'orgId', 'success'],
       );
+    });
+
+    it('breaks the loop and marks all tuples as timeout when deadline is already imminent', async () => {
+      // The deadline guard fires at the top of each iteration before the async
+      // handleCreateMarket call. With a deadline < 15 s away, the very first
+      // iteration aborts — handleCreateMarket is never called.
+      const hcp = sinon.stub().resolves({ status: 201 });
+      const performSerenityFanOut = await loadFanOut(hcp);
+
+      // Deadline 5 s from now — well below the 15 s safety margin.
+      const context = makeContext({ invocation: { deadline: Date.now() + 5_000 } });
+      const res = await performSerenityFanOut(context, baseArgs);
+
+      expect(hcp).to.have.callCount(0);
+      expect(res.succeeded).to.be.empty;
+      expect(res.failed).to.deep.equal([
+        {
+          market: 'US', language: 'en', status: 503, error: 'timeout',
+        },
+        {
+          market: 'DE', language: 'de', status: 503, error: 'timeout',
+        },
+      ]);
+    });
+
+    it('skips deadline guard when invocation context is absent (local dev / unit tests)', async () => {
+      const hcp = sinon.stub();
+      hcp.onCall(0).resolves({ status: 201 });
+      hcp.onCall(1).resolves({ status: 201 });
+      const performSerenityFanOut = await loadFanOut(hcp);
+      // No invocation key → guard must be skipped, both tuples processed.
+      const res = await performSerenityFanOut(makeContext({ invocation: undefined }), baseArgs);
+      expect(hcp).to.have.been.calledTwice;
+      expect(res.succeeded).to.have.length(2);
+      expect(res.failed).to.be.empty;
     });
   });
 
@@ -4388,6 +4437,22 @@ describe('LLMO Onboarding Functions', () => {
           market: 'US', language: 'en', status: 500, error: 'projectRowMissing',
         },
       ]);
+    });
+
+    it('logs a warning when allByBrandId returns duplicate rows for the same slice', async () => {
+      const reconcileSerenityProjects = await loadReconcile();
+      const fanOut = {
+        requested: [{ market: 'US', language: 'en' }],
+        succeeded: [{ market: 'US', language: 'en' }],
+        failed: [],
+      };
+      // Two rows with the same (geoTargetId=2840, languageCode='en') key.
+      const rows = [dbRow(2840, 'en', 'proj-first'), dbRow(2840, 'en', 'proj-second')];
+      const ctx = makeContext(rows);
+      const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
+      expect(ctx.log.warn).to.have.been.calledWithMatch(/duplicate DB row/);
+      // Last-write-wins: proj-second is used.
+      expect(res.succeeded[0].semrushProjectId).to.equal('proj-second');
     });
   });
 

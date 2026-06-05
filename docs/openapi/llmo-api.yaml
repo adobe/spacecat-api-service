@@ -1089,6 +1089,7 @@ llmo-onboard:
                 example: "IN"
               markets:
                 type: array
+                maxItems: 50
                 description: |
                   Optional list of market/language tuples for Semrush project provisioning (LLMO-5007).
                   Each entry maps to one Semrush project created during onboarding.
