@@ -34,7 +34,6 @@ const HANDLERS = {
   weekly: 'wrpc_refresh_agentic_traffic_weekly',
 };
 
-const PROJECTION_LOOKBACK_DAYS = 1;
 const PROJECTION_LOOKAHEAD_DAYS = 7;
 const SITE_ID_CHUNK_SIZE = 150;
 const RETRY_ATTEMPTS = 3;
@@ -144,8 +143,11 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const dateStr = formatUtcDate(targetDate);
       const weeklyExpected = isCompletedIsoWeek(targetDate);
       const weekStartStr = formatUtcDate(startOfUtcIsoWeek(targetDate));
-      const windowStart = formatUtcDate(addUtcDays(targetDate, -PROJECTION_LOOKBACK_DAYS));
-      const windowEnd = formatUtcDate(addUtcDays(targetDate, PROJECTION_LOOKAHEAD_DAYS));
+      // A refresh covering a date is projected on/after it, so a lower bound suffices
+      // (no upper bound — backfills run arbitrarily later). Match the exact date via
+      // jsonb metadata containment so result sets stay small even across all sites.
+      const rawProjectableAt = `${formatUtcDate(addUtcDays(targetDate, 1))}T00:00:00Z`;
+      const rawWindowEnd = `${formatUtcDate(addUtcDays(targetDate, PROJECTION_LOOKAHEAD_DAYS))}T00:00:00Z`;
 
       /* c8 ignore next 6 -- cosmetic per-scope prefix; logic tested via resolveSiteScope */
       let siteScopeText = '';
@@ -175,62 +177,62 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         return;
       }
 
-      const expectedHandlers = weeklyExpected
-        ? [HANDLERS.raw, HANDLERS.daily, HANDLERS.weekly]
-        : [HANDLERS.raw, HANDLERS.daily];
       const siteIds = enabledSites.map((s) => s.getId());
 
+      // jsonb containment must be a JSON string for postgrest-js (an array arg
+      // would emit a Postgres array literal `cs.{..}`, not jsonb `cs.[..]`).
+      const dailyContains = JSON.stringify([dateStr]);
+      const weeklyContains = JSON.stringify([weekStartStr]);
+
       const ran = new Set();
+      /* eslint-disable no-await-in-loop */
       for (let i = 0; i < siteIds.length; i += SITE_ID_CHUNK_SIZE) {
         const chunk = siteIds.slice(i, i + SITE_ID_CHUNK_SIZE);
-        // eslint-disable-next-line no-await-in-loop
-        const { data, error } = await withRetry(() => postgrestClient
-          .from('projection_audit')
-          .select('scope_prefix,handler_name,projected_at,output_count,metadata')
-          .in('scope_prefix', chunk)
-          .in('handler_name', expectedHandlers)
-          .gte('projected_at', `${windowStart}T00:00:00Z`)
-          .lt('projected_at', `${windowEnd}T00:00:00Z`)
-          .eq('skipped', false));
+        const query = (decorate) => withRetry(async () => {
+          const { data, error } = await decorate(postgrestClient
+            .from('projection_audit')
+            .select('scope_prefix')
+            .in('scope_prefix', chunk)
+            .eq('skipped', false));
+          if (error) {
+            throw new Error(`projection_audit: ${error.message}`);
+          }
+          return data ?? [];
+        });
 
-        if (error) {
-          throw new Error(`projection_audit: ${error.message}`);
+        // Daily refresh for dateStr is a post-success message of the raw import,
+        // so a daily-for-X row proves raw succeeded for X too.
+        const dailyRows = await query((q) => q
+          .eq('handler_name', HANDLERS.daily)
+          .gte('projected_at', `${dateStr}T00:00:00Z`)
+          .contains('metadata->dailyRefreshDates', dailyContains));
+        for (const row of dailyRows) {
+          ran.add(`${row.scope_prefix}:${HANDLERS.daily}`);
+          ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
         }
-        // Raw audit rows for `wrpc_import_agentic_traffic` do not carry per-date
-        // metadata, so a row alone cannot prove that *the requested* dateStr was
-        // covered (the same row may correspond to an earlier date inside the
-        // lookup window). We infer raw coverage from two date-specific signals:
-        //   1. Daily refresh metadata: dailyRefreshDates includes dateStr.
-        //      Daily refresh is a post-success message from the raw import
-        //      (see projector agenticTrafficAnalyticsConfig), so a daily-for-X
-        //      row proves raw succeeded for X.
-        //   2. Fallback for "raw OK, daily not run yet": a raw row whose
-        //      `projected_at` lands on or after dateStr+1 day UTC (the raw
-        //      projector runs the day after the traffic day) with a positive
-        //      `output_count`.
-        const rawProjectableAt = `${formatUtcDate(addUtcDays(targetDate, 1))}T00:00:00Z`;
-        for (const row of data ?? []) {
-          if (row.handler_name === HANDLERS.daily) {
-            const dates = row.metadata?.dailyRefreshDates ?? [];
-            if (dates.includes(dateStr)) {
-              ran.add(`${row.scope_prefix}:${HANDLERS.daily}`);
-              ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
-            }
-          } else if (row.handler_name === HANDLERS.weekly) {
-            const weeks = row.metadata?.weeklyRefreshWeeks ?? [];
-            if (weeks.includes(weekStartStr)) {
-              ran.add(`${row.scope_prefix}:${HANDLERS.weekly}`);
-            }
-          } else if (row.handler_name === HANDLERS.raw) {
-            if (
-              row.projected_at >= rawProjectableAt
-              && Number(row.output_count ?? 0) > 0
-            ) {
-              ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
-            }
+
+        if (weeklyExpected) {
+          const weeklyRows = await query((q) => q
+            .eq('handler_name', HANDLERS.weekly)
+            .gte('projected_at', `${weekStartStr}T00:00:00Z`)
+            .contains('metadata->weeklyRefreshWeeks', weeklyContains));
+          for (const row of weeklyRows) {
+            ran.add(`${row.scope_prefix}:${HANDLERS.weekly}`);
           }
         }
+
+        // Fallback for "raw OK, daily not run yet": raw carries no per-date
+        // metadata, so credit it only within the day-after window with positive output.
+        const rawRows = await query((q) => q
+          .eq('handler_name', HANDLERS.raw)
+          .gte('projected_at', rawProjectableAt)
+          .lt('projected_at', rawWindowEnd)
+          .gt('output_count', 0));
+        for (const row of rawRows) {
+          ran.add(`${row.scope_prefix}:${HANDLERS.raw}`);
+        }
       }
+      /* eslint-enable no-await-in-loop */
 
       const siteStatuses = enabledSites.map((site) => {
         const id = site.getId();
