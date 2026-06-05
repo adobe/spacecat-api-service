@@ -28,6 +28,7 @@ describe('EnsurePreflightCommand', () => {
   let isPreflightSiteConfigReadyStub;
   let promptPreflightConfigStub;
   let enablePreflightAuditForSiteStub;
+  let postErrorMessageStub;
 
   const site = {
     getId: () => 'site1',
@@ -39,6 +40,7 @@ describe('EnsurePreflightCommand', () => {
     isPreflightSiteConfigReadyStub = sandbox.stub();
     promptPreflightConfigStub = sandbox.stub().resolves();
     enablePreflightAuditForSiteStub = sandbox.stub().resolves();
+    postErrorMessageStub = sandbox.stub().resolves();
 
     configurationMock = {
       enableHandlerForSite: sandbox.stub(),
@@ -73,6 +75,10 @@ describe('EnsurePreflightCommand', () => {
         PREFLIGHT_AUDIT_TYPE: 'preflight',
         ERROR_MESSAGE_PREFIX,
         SUCCESS_MESSAGE_PREFIX,
+      },
+      '../../../../src/utils/slack/base.js': {
+        extractURLFromSlackInput: (value) => value,
+        postErrorMessage: postErrorMessageStub,
       },
     });
   });
@@ -147,5 +153,24 @@ describe('EnsurePreflightCommand', () => {
 
     expect(enablePreflightAuditForSiteStub).to.have.been.calledWith(site, dataAccessMock);
     expect(slackContextMock.say).to.have.been.calledWith(`${SUCCESS_MESSAGE_PREFIX}Preflight audit has been enabled for "https://example.com".`);
+  });
+
+  it('handles unexpected errors and reports them to Slack', async () => {
+    const error = new Error('enable failed');
+    isPreflightSiteConfigReadyStub.resolves({
+      ready: true,
+      missingLabels: [],
+      needsContentSourcePath: false,
+    });
+    enablePreflightAuditForSiteStub.rejects(error);
+
+    const command = EnsurePreflightCommand(contextMock);
+    await command.handleExecution(['https://example.com'], slackContextMock);
+
+    expect(contextMock.log.error).to.have.been.calledWith(error);
+    expect(slackContextMock.say).to.have.been.calledWith(
+      `${ERROR_MESSAGE_PREFIX}An error occurred while trying to ensure preflight for site "https://example.com": enable failed`,
+    );
+    expect(postErrorMessageStub).to.have.been.calledWith(slackContextMock.say, error);
   });
 });

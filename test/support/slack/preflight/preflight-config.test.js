@@ -18,6 +18,7 @@ import {
   isContentSourcePathRequired,
   isCSAuthoringType,
   isPreflightSiteConfigReady,
+  promptPreflightConfig,
   toExternalDeliveryIds,
 } from '../../../../src/support/slack/preflight/preflight-config.js';
 
@@ -85,6 +86,70 @@ describe('preflight-config helpers', () => {
       };
 
       expect(getPreflightMissingConfigLabels(site)).to.deep.equal(['AEM CS Preview URL']);
+    });
+
+    it('flags missing helix preview URL for document authoring type', () => {
+      const site = {
+        getAuthoringType: () => 'documentauthoring',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
+      };
+
+      expect(getPreflightMissingConfigLabels(site)).to.deep.equal(['Helix Preview URL']);
+    });
+
+    it('returns no missing labels when document authoring has helix config', () => {
+      const site = {
+        getAuthoringType: () => 'documentauthoring',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({
+          rso: {
+            ref: 'main',
+            site: 'site',
+            owner: 'owner',
+            tld: 'hlx.live',
+          },
+        }),
+      };
+
+      expect(getPreflightMissingConfigLabels(site)).to.deep.equal([]);
+    });
+
+    it('flags missing AMS URL for ams authoring type', () => {
+      const site = {
+        getAuthoringType: () => 'ams',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
+      };
+
+      expect(getPreflightMissingConfigLabels(site)).to.deep.equal(['AMS URL']);
+    });
+  });
+
+  describe('promptPreflightConfig', () => {
+    it('posts a configuration prompt with missing items and open modal button', async () => {
+      const site = {
+        getId: () => 'site1',
+        getBaseURL: () => 'https://example.com',
+        getAuthoringType: () => 'ams',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
+      };
+      const say = sandbox.stub().resolves();
+      const slackContext = { say };
+
+      await promptPreflightConfig(slackContext, site, 'preflight');
+
+      expect(say).to.have.been.calledOnce;
+      const message = say.firstCall.args[0];
+      expect(message.text).to.include('https://example.com');
+      expect(message.blocks[0].text.text).to.include('*Missing:*');
+      expect(message.blocks[0].text.text).to.include('AMS URL');
+      expect(message.blocks[1].elements[0].action_id).to.equal('open_preflight_config');
+      expect(JSON.parse(message.blocks[1].elements[0].value)).to.deep.equal({
+        siteId: 'site1',
+        auditType: 'preflight',
+      });
     });
   });
 
@@ -200,6 +265,26 @@ describe('preflight-config helpers', () => {
   });
 
   describe('isPreflightSiteConfigReady', () => {
+    it('returns not ready with needsContentSourcePath false when base config is missing', async () => {
+      const site = {
+        getAuthoringType: () => 'documentauthoring',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
+      };
+      const context = {
+        dataAccess: {
+          Site: { allByExternalOwnerIdAndExternalSiteId: sandbox.stub() },
+        },
+      };
+
+      const result = await isPreflightSiteConfigReady(site, context);
+
+      expect(result.ready).to.be.false;
+      expect(result.needsContentSourcePath).to.be.false;
+      expect(result.missingLabels).to.deep.equal(['Helix Preview URL']);
+      expect(context.dataAccess.Site.allByExternalOwnerIdAndExternalSiteId.called).to.be.false;
+    });
+
     it('returns not ready when CS site is missing content source path and siblings exist', async () => {
       const site = {
         getId: () => 'site1',
