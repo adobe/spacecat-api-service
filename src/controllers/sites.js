@@ -479,7 +479,9 @@ function SitesController(ctx, log, env) {
           sites,
           pagination: {
             limit: effectiveLimit,
-            cursor: results.cursor ?? null,
+            // `|| null` (not `??`) so an empty-string cursor normalizes to null,
+            // staying consistent with `hasMore: !!results.cursor` below.
+            cursor: results.cursor || null,
             hasMore: !!results.cursor,
           },
         };

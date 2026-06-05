@@ -179,7 +179,12 @@ sites:
 
                 This resolves to a single shape once the legacy path is sunset.
               oneOf:
+                # Per-usage deprecation: marks only the legacy branch of this
+                # endpoint as deprecated for codegen. The SiteList schema itself is
+                # not deprecated — it is still the active shape for
+                # getSitesByDeliveryType and getSitesForOrganization.
                 - $ref: './schemas.yaml#/SiteList'
+                  deprecated: true
                 - $ref: './schemas.yaml#/SitePagedResponse'
       '400':
         $ref: './responses.yaml#/400'
