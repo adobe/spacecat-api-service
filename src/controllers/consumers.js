@@ -26,7 +26,7 @@ import {
   STATUS_CREATED,
   STATUS_INTERNAL_SERVER_ERROR,
 } from '../utils/constants.js';
-
+import { getHeaderCaseInsensitive } from '../support/http-headers.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import { ConsumerDto } from '../dto/consumer.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -36,12 +36,6 @@ const IMS_TA_TOKEN_HEADER = 'x-ta-access-token';
 const IMMUTABLE_FIELDS = ['clientId', 'technicalAccountId', 'imsOrgId'];
 const UPDATABLE_STATUSES = Object.values(ConsumerModel.STATUS)
   .filter((s) => s !== ConsumerModel.STATUS.REVOKED);
-
-function getHeaderCaseInsensitive(headers, name) {
-  const lower = name.toLowerCase();
-  const key = Object.keys(headers).find((k) => k.toLowerCase() === lower);
-  return key ? headers[key] : undefined;
-}
 
 function validateCapabilities(Consumer, capabilities) {
   if (!Array.isArray(capabilities) || capabilities.length === 0) {

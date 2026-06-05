@@ -16,36 +16,6 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
 
-const ALL_METHOD_NAMES = [
-  'getBrandsStats',
-  'getBrandsTopics',
-  'getBrandsPrompts',
-  'getBrandsCitedPages',
-  'getBrandsTopicOpportunities',
-  'getBrandsTopBrands',
-  'getBrandsCitedSources',
-  'getBrandsSourceOpportunities',
-  'getBrandsCompetitors',
-  'getCompetitorsMetrics',
-  'getCompetitorsGapTopics',
-  'getCompetitorsGapSourceDomains',
-  'getCompetitorsGapPrompts',
-  'getMeta',
-  'getPromptsResponsesLatest',
-  'getPromptsResponses',
-  'getTopicsResearchStats',
-  'getTopicsResearchPrompts',
-  'getTopicsResearchBrands',
-  'getTopicsResearchSourceDomains',
-  'getTopicsResearch',
-  'getTopicsStats',
-  'getV1TopicBrandTopics',
-  'getV1TopicGapTopics',
-  'getV1PromptBrandPrompts',
-  'getV1PromptGapPrompts',
-  'getV1PromptPromptResponse',
-];
-
 describe('AiVisibilityController', () => {
   let sandbox;
   let AiVisibilityController;
@@ -78,9 +48,15 @@ describe('AiVisibilityController', () => {
   let mockHandleTopicsResearchBrands;
   let mockHandleTopicsResearchSourceDomains;
   let mockHandleV1TopicBrandTopics;
+  let mockHandleV1TopicBrandTopicsExport;
+  let mockHandleV1TopicBrandTopicsTotals;
   let mockHandleV1TopicGapTopics;
+  let mockHandleV1TopicGapTopicsExport;
+  let mockHandleV1TopicGapTopicsTotals;
   let mockHandleV1PromptBrandPrompts;
+  let mockHandleV1PromptBrandPromptsExport;
   let mockHandleV1PromptGapPrompts;
+  let mockHandleV1PromptGapPromptsExport;
   let mockHandleV1PromptPromptResponse;
 
   const log = {
@@ -168,13 +144,31 @@ describe('AiVisibilityController', () => {
     mockHandleV1TopicBrandTopics = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1TopicBrandTopicsExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1TopicBrandTopicsTotals = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1TopicGapTopics = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1TopicGapTopicsExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1TopicGapTopicsTotals = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
     mockHandleV1PromptBrandPrompts = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1PromptBrandPromptsExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1PromptGapPrompts = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1PromptGapPromptsExport = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
     mockHandleV1PromptPromptResponse = sandbox
@@ -227,15 +221,37 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/v1/topic/brand-topics.js': {
         handleBrandTopics: mockHandleV1TopicBrandTopics,
+        buildBrandTopicsDimensionFilterQl: sandbox.stub().returns(''),
+        buildBrandTopicsMetricFilterQl: sandbox.stub().returns({ ok: true, metricFilterQl: '' }),
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/brand-topics-export.js': {
+        handleBrandTopicsExport: mockHandleV1TopicBrandTopicsExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/brand-topics-totals.js': {
+        handleBrandTopicsTotals: mockHandleV1TopicBrandTopicsTotals,
       },
       '../../src/support/ai-visibility/handlers/v1/topic/gap-topics.js': {
         handleGapTopics: mockHandleV1TopicGapTopics,
+        buildGapTopicsDimensionFilterQl: sandbox.stub().returns(''),
+        buildGapTopicsMetricFilterQl: sandbox.stub().returns({ ok: true, metricFilterQl: '' }),
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/gap-topics-export.js': {
+        handleGapTopicsExport: mockHandleV1TopicGapTopicsExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/gap-topics-totals.js': {
+        handleGapTopicsTotals: mockHandleV1TopicGapTopicsTotals,
       },
       '../../src/support/ai-visibility/handlers/v1/prompt/brand-prompts.js': {
         handleBrandPrompts: mockHandleV1PromptBrandPrompts,
       },
+      '../../src/support/ai-visibility/handlers/v1/prompt/brand-prompts-export.js': {
+        handleBrandPromptsExport: mockHandleV1PromptBrandPromptsExport,
+      },
       '../../src/support/ai-visibility/handlers/v1/prompt/gap-prompts.js': {
         handleGapPrompts: mockHandleV1PromptGapPrompts,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/gap-prompts-export.js': {
+        handleGapPromptsExport: mockHandleV1PromptGapPromptsExport,
       },
       '../../src/support/ai-visibility/handlers/v1/prompt/prompt-response.js': {
         handlePromptResponse: mockHandleV1PromptPromptResponse,
@@ -303,23 +319,6 @@ describe('AiVisibilityController', () => {
 
     it('throws when log is undefined', () => {
       expect(() => AiVisibilityController({ some: 'data' }, undefined, env)).to.throw('Log required');
-    });
-  });
-
-  describe('returned handler object', () => {
-    it('returns an object with all 27 method names', () => {
-      const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      expect(Object.keys(handlers)).to.have.lengthOf(27);
-      for (const name of ALL_METHOD_NAMES) {
-        expect(handlers).to.have.property(name).that.is.a('function');
-      }
-    });
-
-    it('each returned method is a function', () => {
-      const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      for (const value of Object.values(handlers)) {
-        expect(value).to.be.a('function');
-      }
     });
   });
 
@@ -564,9 +563,13 @@ describe('AiVisibilityController', () => {
       getTopicsResearch: mockHandleTopicsResearch,
       getTopicsStats: mockHandleTopicsStats,
       getV1TopicBrandTopics: mockHandleV1TopicBrandTopics,
+      getV1TopicBrandTopicsExport: mockHandleV1TopicBrandTopicsExport,
       getV1TopicGapTopics: mockHandleV1TopicGapTopics,
+      getV1TopicGapTopicsExport: mockHandleV1TopicGapTopicsExport,
       getV1PromptBrandPrompts: mockHandleV1PromptBrandPrompts,
+      getV1PromptBrandPromptsExport: mockHandleV1PromptBrandPromptsExport,
       getV1PromptGapPrompts: mockHandleV1PromptGapPrompts,
+      getV1PromptGapPromptsExport: mockHandleV1PromptGapPromptsExport,
       getV1PromptPromptResponse: mockHandleV1PromptPromptResponse,
     });
 

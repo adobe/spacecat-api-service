@@ -21,3 +21,9 @@
 
 export const CAP_SITE_READ_ALL = 'site:readAll';
 export const CAP_ORG_READ_ALL = 'organization:readAll';
+
+export const CAP_SITE_CREATE = 'site:create';
+
+export const CAP_FIX_ENTITY_CREATE = 'fixEntity:create';
+
+export const CAP_SUGGESTION_WRITE = 'suggestion:write';

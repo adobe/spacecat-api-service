@@ -29,9 +29,17 @@ describe('WebhooksController', () => {
         'x-github-delivery': 'delivery-uuid-123',
       },
     },
+    // The HMAC handler attaches the resolved destination + reviewer identity to
+    // the auth profile; every authenticated webhook carries target_id +
+    // reviewer_login (the consolidated GITHUB_DESTINATIONS path).
+    attributes: {
+      authInfo: {
+        getProfile: () => ({ user_id: 'github-webhook', target_id: 'github-public', reviewer_login: 'MysticatBot' }),
+      },
+    },
     data: {
       action: 'review_requested',
-      requested_reviewer: { login: 'mysticat[bot]' },
+      requested_reviewer: { login: 'MysticatBot' },
       installation: { id: 12345678 },
       pull_request: {
         number: 456,
@@ -53,7 +61,6 @@ describe('WebhooksController', () => {
       log: mockLog,
       env: {
         MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
-        GITHUB_APP_SLUG: 'mysticat',
         ...envOverrides,
       },
     };
@@ -98,6 +105,8 @@ describe('WebhooksController', () => {
       'Adobe-AEM-Sites/aem-sites-architecture',
     ]);
     expect(payload.retry_count).to.equal(0);
+    // Every authenticated webhook now carries the resolved destination id.
+    expect(payload.target_id).to.equal('github-public');
   });
 
   it('returns 204 for non-pull_request event', async () => {
@@ -275,7 +284,7 @@ describe('WebhooksController', () => {
     WebhooksController({
       sqs: mockSqs,
       log: freshLog,
-      env: { MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl, GITHUB_APP_SLUG: 'mysticat' },
+      env: { MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl },
     });
     expect(freshLog.warn.called).to.be.false;
     expect(freshLog.debug.called).to.be.false;
@@ -332,14 +341,28 @@ describe('WebhooksController', () => {
     expect(fallbackWarn).to.not.be.undefined;
   });
 
-  it('returns 500 and logs error when GITHUB_APP_SLUG is not configured', async () => {
-    controller = buildController({ GITHUB_APP_SLUG: undefined });
+  it('enqueues without GITHUB_APP_SLUG configured (app-slug requirement removed)', async () => {
+    controller = buildController(); // env carries no GITHUB_APP_SLUG
 
     const response = await controller.processGitHubWebhook(validContext);
 
+    expect(response.status).to.equal(202);
+    expect(mockSqs.sendMessage.calledOnce).to.be.true;
+  });
+
+  it('returns 500 and logs error when the auth profile has no reviewer_login (fail closed)', async () => {
+    const ctx = {
+      ...validContext,
+      attributes: {
+        authInfo: { getProfile: () => ({ user_id: 'github-webhook', target_id: 'github-public' }) },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(ctx);
+
     expect(response.status).to.equal(500);
     const errorCall = mockLog.error.getCalls()
-      .find((c) => c.args[0].includes('No app slug resolved'));
+      .find((c) => c.args[0].includes('No reviewer login resolved'));
     expect(errorCall).to.not.be.undefined;
     expect(errorCall.args[1]).to.deep.include({ deliveryId: 'delivery-uuid-123' });
     expect(mockSqs.sendMessage.called).to.be.false;
@@ -364,15 +387,15 @@ describe('WebhooksController', () => {
 
   describe('multi-destination target_id', () => {
     function ghecAuthContext() {
-      // Mirrors what the HMAC handler attaches in registry mode.
+      // Mirrors what the HMAC handler attaches: target_id + reviewer_login.
       return {
         ...validContext,
         attributes: {
-          authInfo: { getProfile: () => ({ user_id: 'github-webhook', target_id: 'ghec', app_slug: 'mysticat-bot' }) },
+          authInfo: { getProfile: () => ({ user_id: 'github-webhook', target_id: 'ghec', reviewer_login: 'emu_reviewer' }) },
         },
         data: {
           ...validContext.data,
-          requested_reviewer: { login: 'mysticat-bot[bot]' },
+          requested_reviewer: { login: 'emu_reviewer' },
         },
       };
     }
@@ -384,20 +407,39 @@ describe('WebhooksController', () => {
       expect(payload.target_id).to.equal('ghec');
     });
 
-    it('uses the per-target app_slug for the reviewer check (mysticat-bot[bot])', async () => {
-      // env.GITHUB_APP_SLUG is 'mysticat', but the profile app_slug is
-      // 'mysticat-bot'; the requested reviewer mysticat-bot[bot] must match and
-      // the job must enqueue (not skip).
+    it('enqueues a non-default destination when the requested reviewer matches its reviewer_login', async () => {
+      // Positive per-destination gate: the profile reviewer_login (emu_reviewer)
+      // matches the requested reviewer, so the trigger fires (202). This is the
+      // successor to the removed global/app-slug reviewer resolution.
       const response = await controller.processGitHubWebhook(ghecAuthContext());
       expect(response.status).to.equal(202);
       expect(mockSqs.sendMessage.calledOnce).to.be.true;
     });
 
-    it('omits target_id when no auth profile target_id is present (legacy)', async () => {
-      const response = await controller.processGitHubWebhook(validContext);
-      expect(response.status).to.equal(202);
-      const [, payload] = mockSqs.sendMessage.firstCall.args;
-      expect(payload).to.not.have.property('target_id');
+    it('logs the resolved target id on the enqueue log', async () => {
+      await controller.processGitHubWebhook(ghecAuthContext());
+      const enqueueLog = mockLog.info.getCalls().find((c) => c.args[0] === 'Enqueued webhook job');
+      expect(enqueueLog, 'expected an "Enqueued webhook job" info log').to.exist;
+      expect(enqueueLog.args[1]).to.include({ targetId: 'ghec' });
+    });
+
+    it('skips when the requested reviewer does not match the profile reviewer_login', async () => {
+      const ctx = {
+        ...validContext,
+        attributes: {
+          authInfo: {
+            getProfile: () => ({
+              user_id: 'github-webhook', target_id: 'ghec', reviewer_login: 'emu_reviewer',
+            }),
+          },
+        },
+        data: { ...validContext.data, requested_reviewer: { login: 'someone-else' } },
+      };
+
+      const response = await controller.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(204);
+      expect(mockSqs.sendMessage.called).to.be.false;
     });
   });
 
@@ -438,7 +480,6 @@ describe('WebhooksController', () => {
         log: mockLog,
         env: {
           MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
-          GITHUB_APP_SLUG: 'mysticat',
           MYSTICAT_OBSERVABILITY_SLACK_TOKEN: 'xoxb-test',
           MYSTICAT_OBSERVABILITY_SLACK_CHANNEL: channel,
           ...envOverrides,
@@ -549,6 +590,140 @@ describe('WebhooksController', () => {
       expect(text).to.include('<https://github.com/adobe/spacecat-api-service/pull/');
       expect(text).to.include('requested by <https://github.com/alice|alice>');
       expect(text).to.include('author <https://github.com/bob|bob>');
+    });
+  });
+
+  describe('EMF metrics', () => {
+    let emitMetricStub;
+    let MockedEmfController;
+
+    before(async () => {
+      emitMetricStub = sinon.stub();
+      const mod = await esmock('../../src/controllers/webhooks.js', {
+        '../../src/support/metrics-emf.js': {
+          emitMetric: emitMetricStub,
+          resolveEnvironment: () => 'dev',
+        },
+      });
+      MockedEmfController = mod.default;
+    });
+
+    beforeEach(() => {
+      emitMetricStub.reset();
+    });
+
+    function buildEmfController(envOverrides = {}) {
+      return MockedEmfController({
+        sqs: mockSqs,
+        log: mockLog,
+        env: {
+          MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
+          ...envOverrides,
+        },
+      });
+    }
+
+    it('success path emits WebhookReceived, WebhookEnqueued, and WebhookProcessingMillis', async () => {
+      const emfController = buildEmfController();
+      const response = await emfController.processGitHubWebhook(validContext);
+
+      expect(response.status).to.equal(202);
+
+      const names = emitMetricStub.getCalls().map((c) => c.args[0].name);
+      expect(names).to.include('WebhookReceived');
+      expect(names).to.include('WebhookEnqueued');
+      expect(names).to.include('WebhookProcessingMillis');
+
+      // Event is the only dimension sourced from a request header; assert its
+      // value so a regression in header reading (ctx.pathInfo.headers) is caught
+      // rather than silently emitting an undefined-then-dropped dimension.
+      const received = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookReceived');
+      expect(received.args[0].dimensions).to.deep.include({ Event: 'pull_request' });
+
+      const enqueued = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookEnqueued');
+      expect(enqueued.args[0].dimensions).to.deep.include({
+        JobType: 'pr-review',
+        TargetId: 'github-public',
+      });
+
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'enqueued' });
+      expect(millis.args[0].unit).to.equal('Milliseconds');
+    });
+
+    it('draft PR skip emits WebhookSkipped with SkipReason draft_pr', async () => {
+      const emfController = buildEmfController();
+      const ctx = {
+        ...validContext,
+        data: {
+          ...validContext.data,
+          pull_request: { ...validContext.data.pull_request, draft: true },
+        },
+      };
+      const response = await emfController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(204);
+      const skipped = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookSkipped');
+      expect(skipped).to.exist;
+      expect(skipped.args[0].dimensions).to.deep.include({ SkipReason: 'draft_pr' });
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'skipped' });
+    });
+
+    it('SQS failure emits WebhookEnqueueFailure and returns 500', async () => {
+      mockSqs.sendMessage.rejects(new Error('SQS timeout'));
+      const emfController = buildEmfController();
+      const response = await emfController.processGitHubWebhook(validContext);
+
+      expect(response.status).to.equal(500);
+      const failure = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookEnqueueFailure');
+      expect(failure).to.exist;
+      // enqueue_failure rethrows: finally tags latency Outcome, then errorHandler
+      // catches and emits WebhookHandlerError{uncaught_exception}.
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'enqueue_failure' });
+      const handlerError = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookHandlerError');
+      expect(handlerError).to.exist;
+      expect(handlerError.args[0].dimensions).to.deep.include({ Reason: 'uncaught_exception' });
+    });
+
+    it('missing action field emits WebhookBadRequest with MissingField action', async () => {
+      const emfController = buildEmfController();
+      const ctx = {
+        ...validContext,
+        data: { ...validContext.data, action: undefined },
+      };
+      const response = await emfController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(400);
+      const bad = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookBadRequest');
+      expect(bad).to.exist;
+      expect(bad.args[0].dimensions).to.deep.include({ MissingField: 'action' });
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'bad_request' });
+    });
+
+    it('missing reviewer_login emits WebhookHandlerError with Reason missing_reviewer_login', async () => {
+      // Fail-closed path: returns 500 from inside the try (no throw), so the
+      // errorHandler catch does not run - WebhookHandlerError fires once, from the
+      // internal reviewer check, with the distinguishing Reason dimension.
+      const emfController = buildEmfController();
+      const ctx = {
+        ...validContext,
+        attributes: {
+          authInfo: {
+            getProfile: () => ({ user_id: 'github-webhook', target_id: 'github-public' }),
+          },
+        },
+      };
+      const response = await emfController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(500);
+      const handlerError = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookHandlerError');
+      expect(handlerError).to.exist;
+      expect(handlerError.args[0].dimensions).to.deep.include({ Reason: 'missing_reviewer_login' });
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'handler_error' });
     });
   });
 });

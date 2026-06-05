@@ -352,6 +352,67 @@ export default function siteTests(getHttpClient, resetData) {
         });
         expect(res.status).to.equal(403);
       });
+
+      it('admin: returns 400 for invalid x-product header', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(
+          '/sites',
+          { baseURL: 'https://invalid-product-header.example.com' },
+          { 'x-product': 'NOT_A_PRODUCT' },
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/Unsupported product code/);
+      });
+
+      it('admin: x-product enrolls new site under existing ASO PAID entitlement', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://aso-trial-provisioned.example.com';
+        const createRes = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(createRes.status).to.equal(201);
+        expectSiteDto(createRes.body);
+
+        const listRes = await http.admin.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(listRes.status).to.equal(200);
+        const siteIds = listRes.body.map((s) => s.id);
+        expect(siteIds).to.include(createRes.body.id);
+
+        const entitlementsRes = await http.admin.get(`/organizations/${ORG_1_ID}/entitlements`);
+        const asoEntitlement = entitlementsRes.body.find((e) => e.productCode === 'ASO');
+        expect(asoEntitlement.tier).to.equal('PAID');
+      });
+
+      it('admin: without x-product header does not enroll site for ASO listing', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://no-write-time-product.example.com';
+        const createRes = await http.admin.post(
+          '/sites',
+          { baseURL },
+          { 'x-product': null },
+        );
+        expect(createRes.status).to.equal(201);
+
+        const listRes = await http.admin.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(listRes.status).to.equal(200);
+        const siteIds = listRes.body.map((s) => s.id);
+        expect(siteIds).to.not.include(createRes.body.id);
+      });
+
+      it('admin: idempotent re-POST with x-product returns 200', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://idempotent-x-product.example.com';
+        const first = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(first.status).to.equal(201);
+
+        const second = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(second.status).to.equal(200);
+        expect(second.body.id).to.equal(first.body.id);
+      });
     });
 
     describe('PATCH /sites/:siteId', () => {
@@ -532,6 +593,71 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.admin.patch('/sites/not-a-uuid/config/scraper', {
           scraperConfig: { headers: { 'Accept-Language': 'en-US' } },
         });
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/site id is invalid/i);
+      });
+    });
+
+    describe('GET /sites/:siteId/config/scraper', () => {
+      let scraperSiteId;
+
+      before(async () => {
+        await resetData();
+        const http = getHttpClient();
+        const res = await http.admin.post('/sites', {
+          baseURL: 'https://scraper-config-get-test-scoped.example.com',
+        });
+        expect(res.status).to.equal(201);
+        scraperSiteId = res.body.id;
+      });
+
+      it('user: returns empty scraperConfig when none persisted', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${scraperSiteId}/config/scraper`);
+        expect(res.status).to.equal(200);
+        // Locks the "no missing case" contract — GET always returns an object,
+        // even before any PATCH has been applied.
+        expect(res.body).to.have.all.keys('siteId', 'scraperConfig');
+        expect(res.body.siteId).to.equal(scraperSiteId);
+        expect(res.body.scraperConfig).to.deep.equal({});
+      });
+
+      it('user: returns persisted scraperConfig after PATCH', async () => {
+        const http = getHttpClient();
+        const payload = {
+          scraperConfig: {
+            headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+          },
+        };
+        const patchRes = await http.user.patch(
+          `/sites/${scraperSiteId}/config/scraper`,
+          payload,
+        );
+        expect(patchRes.status).to.equal(200);
+
+        const getRes = await http.user.get(`/sites/${scraperSiteId}/config/scraper`);
+        expect(getRes.status).to.equal(200);
+        // GET response shape must equal what PATCH returned — same envelope,
+        // same body. If a writer-then-reader sees a different shape, callers
+        // would have to handle two formats. Lock equality here.
+        expect(getRes.body).to.deep.equal(patchRes.body);
+      });
+
+      it('user: returns 403 for a denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_3_ID}/config/scraper`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${NON_EXISTENT_SITE_ID}/config/scraper`);
+        expect(res.status).to.equal(404);
+      });
+
+      it('admin: returns 400 when site ID is malformed', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/not-a-uuid/config/scraper');
         expect(res.status).to.equal(400);
         expect(res.body.message).to.match(/site id is invalid/i);
       });

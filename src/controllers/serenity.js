@@ -13,7 +13,7 @@
 import {
   createResponse, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
+import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
@@ -25,12 +25,14 @@ import {
   handleBulkDeletePrompts,
 } from '../support/serenity/handlers/prompts.js';
 import {
-  handleListProjects,
-  handleCreateProject,
-  handleListProjectTags,
-  handleListProjectModels,
-  handleListWorkspaceProjects,
-} from '../support/serenity/handlers/projects.js';
+  handleListMarkets,
+  handleGetMarket,
+  handleCreateMarket,
+  handleDeleteMarket,
+  handleListTags,
+  handleListModels,
+  handleUpdateModels,
+} from '../support/serenity/handlers/markets.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
@@ -47,10 +49,9 @@ function safeError(msg) {
 }
 
 /**
- * Extracts query params from the request URL. Unlike the prior implementation
- * this does NOT fall back to `context.data` (the request body) on parse
- * failure — body keys must never become query keys on a GET, which would be
- * a silent attribute confusion vector.
+ * Extracts query params from the request URL. Does NOT fall back to
+ * `context.data` (the request body) — body keys must never become query keys
+ * on a GET (silent attribute-confusion vector).
  */
 function extractQuery(context) {
   if (context?.request?.url) {
@@ -58,7 +59,16 @@ function extractQuery(context) {
       const u = new URL(context.request.url);
       const out = {};
       for (const [k, v] of u.searchParams) {
-        out[k] = v;
+        // tagIds is multi-value — collected below via getAll(); excluded here
+        // to avoid last-write-wins clobbering the array. Any future multi-value
+        // param should follow the same pattern.
+        if (k !== 'tagIds') {
+          out[k] = v;
+        }
+      }
+      const tagIdsAll = u.searchParams.getAll('tagIds');
+      if (tagIdsAll.length > 0) {
+        out.tagIds = tagIdsAll;
       }
       return out;
     } catch { /* fall through to empty */ }
@@ -69,19 +79,21 @@ function extractQuery(context) {
 function parsedQuery(context) {
   const raw = extractQuery(context);
   const out = { ...raw };
-  if (raw.semrushLocationId !== undefined) {
-    const n = parseInt(raw.semrushLocationId, 10);
-    out.semrushLocationId = Number.isFinite(n) ? n : null;
+  if (raw.geoTargetId !== undefined) {
+    const n = parseInt(raw.geoTargetId, 10);
+    out.geoTargetId = Number.isFinite(n) ? n : null;
+  }
+  if (raw.page !== undefined) {
+    const n = parseInt(raw.page, 10);
+    out.page = Number.isFinite(n) ? n : null;
+  }
+  if (raw.limit !== undefined) {
+    const n = parseInt(raw.limit, 10);
+    out.limit = Number.isFinite(n) ? n : null;
   }
   return out;
 }
 
-/**
- * Stable machine-readable token per HTTP status class. Clients key on
- * `error` for UX flows (e.g. an `authenticationRequired` envelope drives a
- * token-refresh prompt) while `message` carries the sanitized human-facing
- * detail. Keep this map narrow — every entry is a published contract.
- */
 function errorTokenForStatus(status) {
   switch (status) {
     case 401: return 'authenticationRequired';
@@ -93,30 +105,32 @@ function errorTokenForStatus(status) {
   }
 }
 
-/**
- * Unified error envelope. All client-facing messages run through
- * `cleanupHeaderValue` and are length-capped. SerenityTransportError details
- * are deliberately NOT echoed — the upstream body may contain provider
- * internals; clients get a stable contract instead.
- */
 function mapError(e, log) {
   if (e instanceof ErrorWithStatusCode) {
     const status = Number.isInteger(e.status) ? e.status : 400;
+    // Handlers can set `e.code` (e.g. 'marketNotFound') to pin a specific
+    // error token in the response envelope; falls back to the status-based
+    // default for plain throws.
+    const errorToken = hasText(e.code) ? e.code : errorTokenForStatus(status);
     return createResponse(
-      { error: errorTokenForStatus(status), message: safeError(e.message) },
+      { error: errorToken, message: safeError(e.message) },
       status,
     );
   }
   if (e instanceof SerenityTransportError) {
-    // Log full upstream detail server-side, but do NOT leak the upstream body
-    // to clients (it may contain provider internals).
-    log.error('Semrush upstream error', e);
+    log.error('Serenity upstream error', e);
+    if (e.status === 401 || e.status === 403) {
+      return createResponse(
+        { error: errorTokenForStatus(e.status), message: safeError(e.message) },
+        e.status,
+      );
+    }
     return createResponse({
-      error: 'semrushUpstreamError',
-      message: 'Semrush upstream request failed',
+      error: 'serenityUpstreamError',
+      message: 'Upstream request failed',
     }, 502);
   }
-  log.error('Semrush controller error', e);
+  log.error('Serenity controller error', e);
   return createResponse(
     { error: 'internalServerError', message: 'Internal server error' },
     500,
@@ -125,15 +139,15 @@ function mapError(e, log) {
 
 /**
  * Pulls the IMS bearer from the inbound Authorization header. Throws 401 if
- * missing OR if the caller authenticated by some other mechanism (scoped API
- * key, S2S JWT). The Semrush gateway only understands IMS user tokens; we
- * refuse to forward anything else.
+ * missing OR if the caller authenticated by some other mechanism. The
+ * upstream gateway only understands IMS user tokens; we refuse to forward
+ * anything else.
  */
 function requireImsBearer(ctx) {
   const authInfo = ctx?.attributes?.authInfo;
   if (authInfo?.getType && authInfo.getType() !== 'ims') {
     throw new ErrorWithStatusCode(
-      'Semrush proxy requires IMS authentication',
+      'Serenity proxy requires IMS authentication',
       401,
     );
   }
@@ -156,16 +170,30 @@ function SerenityController(context, log, env) {
   }
 
   /**
-   * Verifies the caller has access to the addressed org AND the brand belongs
-   * to that org, then resolves the org's Semrush workspace and 404s if
-   * missing. All 9 endpoints today are brand-scoped + workspace-scoped, so
-   * the shape is uniform.
+   * Verifies the caller has access to the addressed org AND the brand
+   * belongs to that org, then resolves the org's upstream workspace.
    *
-   * Returns either `{ error: Response }` or `{ brandUuid, workspaceId }`.
+   * UUID-only brand guard: serenity endpoints reject non-UUID `:brandId`
+   * with 400 at the controller boundary. UUIDs are immutable; a renamed
+   * brand between page load and a PATCH/DELETE would otherwise silently
+   * 404 (or worse, resolve to a different row on a name collision).
+   *
+   * Returns either `{ error: Response }` or `{ brandUuid, semrushWorkspaceId }`.
    */
   async function authorize(ctx) {
     const spaceCatId = ctx?.params?.spaceCatId;
     const brandId = ctx?.params?.brandId;
+    if (!isValidUUID(brandId)) {
+      return {
+        error: createResponse(
+          {
+            error: 'invalidRequest',
+            message: 'brandId must be a UUID on the /serenity/* surface',
+          },
+          400,
+        ),
+      };
+    }
     const Organization = ctx?.dataAccess?.Organization;
     if (!Organization || typeof Organization.findById !== 'function') {
       return { error: internalServerError('Organization data-access not available') };
@@ -178,10 +206,6 @@ function SerenityController(context, log, env) {
     if (!await accessControl.hasAccess(organization)) {
       return { error: forbidden('User does not have access to this organization') };
     }
-    // Brand <-> org binding. Mirrors brands.js — UUID lookup scoped to the
-    // org, so a cross-tenant brandId in the path returns 404 instead of
-    // proxying to Semrush. Required because there is no Brand entity in
-    // spacecat-shared yet; brand membership lives in mysticat-data-service.
     const postgrestClient = ctx.dataAccess?.services?.postgrestClient;
     if (!postgrestClient?.from) {
       return {
@@ -195,30 +219,11 @@ function SerenityController(context, log, env) {
     if (!brandUuid) {
       return { error: notFound(`Brand not found for organization: ${brandId}`) };
     }
-    const workspaceId = await resolveWorkspaceId(ctx, spaceCatId);
-    if (!hasText(workspaceId)) {
+    const semrushWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
+    if (!hasText(semrushWorkspaceId)) {
       return { error: notFound('Organization has no semrush_workspace_id') };
     }
-    return { brandUuid, workspaceId };
-  }
-
-  /**
-   * For the 3 workspace-scoped lookups (tags / models / workspaceProjects)
-   * we additionally verify the path `:workspaceId` matches the org's
-   * resolved workspace. Defense-in-depth on top of Semrush's ACL.
-   */
-  function verifyPathWorkspace(ctx, resolvedWorkspaceId) {
-    const pathWs = ctx?.params?.workspaceId;
-    if (!hasText(pathWs)) {
-      throw new ErrorWithStatusCode('Missing workspaceId', 400);
-    }
-    if (pathWs !== resolvedWorkspaceId) {
-      throw new ErrorWithStatusCode(
-        'Path workspaceId does not match the organization workspace',
-        403,
-      );
-    }
-    return pathWs;
+    return { brandUuid, semrushWorkspaceId };
   }
 
   function buildTransport(ctx, imsToken) {
@@ -237,7 +242,7 @@ function SerenityController(context, log, env) {
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.workspaceId,
+        auth.semrushWorkspaceId,
         parsedQuery(ctx),
       );
       return ok(result);
@@ -258,7 +263,7 @@ function SerenityController(context, log, env) {
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.workspaceId,
+        auth.semrushWorkspaceId,
         ctx.data || {},
         log,
       );
@@ -271,9 +276,9 @@ function SerenityController(context, log, env) {
   const updatePrompt = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
-      const { promptId } = ctx?.params || {};
-      if (!hasText(promptId)) {
-        throw new ErrorWithStatusCode('Missing promptId', 400);
+      const { semrushPromptId } = ctx?.params || {};
+      if (!hasText(semrushPromptId)) {
+        throw new ErrorWithStatusCode('Missing semrushPromptId', 400);
       }
       const auth = await authorize(ctx);
       if (auth.error) {
@@ -284,8 +289,8 @@ function SerenityController(context, log, env) {
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.workspaceId,
-        promptId,
+        auth.semrushWorkspaceId,
+        semrushPromptId,
         ctx.data || {},
         log,
       );
@@ -307,7 +312,7 @@ function SerenityController(context, log, env) {
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.workspaceId,
+        auth.semrushWorkspaceId,
         ctx.data || {},
         log,
       );
@@ -317,7 +322,7 @@ function SerenityController(context, log, env) {
     }
   };
 
-  const listProjects = async (ctx) => {
+  const listMarkets = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
       const auth = await authorize(ctx);
@@ -325,12 +330,11 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleListProjects(
+      const result = await handleListMarkets(
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.workspaceId,
-        parsedQuery(ctx),
+        auth.semrushWorkspaceId,
         log,
       );
       return ok(result);
@@ -339,7 +343,34 @@ function SerenityController(context, log, env) {
     }
   };
 
-  const createProject = async (ctx) => {
+  const getMarket = async (ctx) => {
+    try {
+      // Enforce the IMS-only contract (throws 401 on non-IMS / missing bearer)
+      // even though this is a pure DB read with no upstream call — keeps the
+      // whole /serenity/* surface uniformly IMS-gated. Token is intentionally
+      // not captured: there is no upstream transport to build here.
+      requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { geoTargetId: pGeo, languageCode: pLang } = ctx?.params || {};
+      // Strict digit match — same rationale as deleteMarket: parseInt would
+      // coerce '2840abc' → 2840 and silently resolve a different slice.
+      const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
+      const result = await handleGetMarket(
+        ctx.dataAccess,
+        auth.brandUuid,
+        geoTargetId,
+        pLang ? String(pLang).toLowerCase() : null,
+      );
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  const createMarket = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
       const auth = await authorize(ctx);
@@ -347,11 +378,11 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleCreateProject(
+      const result = await handleCreateMarket(
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.workspaceId,
+        auth.semrushWorkspaceId,
         ctx.data || {},
         log,
       );
@@ -361,56 +392,94 @@ function SerenityController(context, log, env) {
     }
   };
 
-  const listProjectTags = async (ctx) => {
+  const deleteMarket = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
-      const pathWs = verifyPathWorkspace(ctx, auth.workspaceId);
-      const { projectId } = ctx?.params || {};
-      if (!hasText(projectId)) {
-        throw new ErrorWithStatusCode('Missing projectId', 400);
+      const { geoTargetId: pGeo, languageCode: pLang } = ctx?.params || {};
+      // Strict digit match: `parseInt('2840abc', 10)` returns 2840, which would
+      // silently route /markets/2840abc/en to the legit (2840, en) slice. The
+      // OpenAPI contract declares `geoTargetId: integer, minimum: 1`, so the
+      // path segment must be all digits.
+      const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
+      const transport = buildTransport(ctx, imsToken);
+      const result = await handleDeleteMarket(
+        transport,
+        ctx.dataAccess,
+        auth.brandUuid,
+        auth.semrushWorkspaceId,
+        geoTargetId,
+        pLang ? String(pLang).toLowerCase() : null,
+        log,
+      );
+      return createResponse(null, result.status);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  const listTags = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleListProjectTags(transport, pathWs, projectId);
+      const result = await handleListTags(
+        transport,
+        ctx.dataAccess,
+        auth.brandUuid,
+        auth.semrushWorkspaceId,
+        parsedQuery(ctx),
+        log,
+      );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
     }
   };
 
-  const listProjectModels = async (ctx) => {
+  const listModels = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
-      const pathWs = verifyPathWorkspace(ctx, auth.workspaceId);
-      const { projectId } = ctx?.params || {};
-      if (!hasText(projectId)) {
-        throw new ErrorWithStatusCode('Missing projectId', 400);
-      }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleListProjectModels(transport, pathWs, projectId);
+      const result = await handleListModels(
+        transport,
+        ctx.dataAccess,
+        auth.brandUuid,
+        auth.semrushWorkspaceId,
+        parsedQuery(ctx),
+      );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
     }
   };
 
-  const listWorkspaceProjects = async (ctx) => {
+  const updateModels = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
-      const pathWs = verifyPathWorkspace(ctx, auth.workspaceId);
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleListWorkspaceProjects(transport, pathWs);
+      const result = await handleUpdateModels(
+        transport,
+        ctx.dataAccess,
+        auth.brandUuid,
+        auth.semrushWorkspaceId,
+        ctx.data || {},
+        log,
+      );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -422,11 +491,13 @@ function SerenityController(context, log, env) {
     createPrompts,
     updatePrompt,
     bulkDeletePrompts,
-    listProjects,
-    createProject,
-    listProjectTags,
-    listProjectModels,
-    listWorkspaceProjects,
+    listMarkets,
+    getMarket,
+    createMarket,
+    deleteMarket,
+    listTags,
+    listModels,
+    updateModels,
   };
 }
 

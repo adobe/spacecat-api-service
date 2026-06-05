@@ -102,6 +102,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
  * @param {Object} facsAccessMappingsController - FACS Phase 2 state-layer mappings controller.
  * @param {Object} serenityController - Semrush AIO proxy controller (prompts + projects).
+ * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -208,13 +209,16 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
-    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:promptId': serenityController.updatePrompt,
-    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects': serenityController.listProjects,
-    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects': serenityController.createProject,
-    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/tags': serenityController.listProjectTags,
-    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/models': serenityController.listProjectModels,
-    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/workspaces/:workspaceId/projects': serenityController.listWorkspaceProjects,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': serenityController.updatePrompt,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.listMarkets,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.createMarket,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.getMarket,
+    'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.deleteMarket,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.listModels,
+    'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.getPromptByBrandAndId,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.updatePromptByBrandAndId,
@@ -235,8 +239,9 @@ export default function getRouteHandlers(
     'GET /projects/by-project-name/:projectName/sites': projectsController.getSitesByProjectName,
     'POST /preflight/jobs': preflightController.createPreflightJob,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
-    'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
-    'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
+    'POST /sites/:siteId/preflights': preflightController.createPreflight,
+    'GET /sites/:siteId/preflights': preflightController.getAllPreflights,
+    'GET /sites/:siteId/preflights/:preflightId': preflightController.getPreflightById,
     'POST /sites/detect/jobs': siteDetectionController.createSiteDetectionJob,
     'GET /sites/detect/jobs/:jobId': siteDetectionController.getSiteDetectionJobStatus,
     'GET /sites': sitesController.getAll,
@@ -246,6 +251,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId': sitesController.getByID,
     'PATCH /sites/:siteId': sitesController.updateSite,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
+    'GET /sites/:siteId/config/scraper': sitesController.getScraperConfig,
     'PATCH /sites/:siteId/config/scraper': sitesController.updateScraperConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/bot-blocker': botBlockerController.checkBotBlocker,
@@ -670,7 +676,11 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/topics/research': aiVisibilityController.getTopicsResearch,
     'GET /llmo/ai-visibility/topics/stats': aiVisibilityController.getTopicsStats,
     'GET /llmo/ai-visibility/v1/topic/brand-topics': aiVisibilityController.getV1TopicBrandTopics,
+    'GET /llmo/ai-visibility/v1/topic/brand-topics-export': aiVisibilityController.getV1TopicBrandTopicsExport,
+    'GET /llmo/ai-visibility/v1/topic/brand-topics-totals': aiVisibilityController.getV1TopicBrandTopicsTotals,
     'GET /llmo/ai-visibility/v1/topic/gap-topics': aiVisibilityController.getV1TopicGapTopics,
+    'GET /llmo/ai-visibility/v1/topic/gap-topics-export': aiVisibilityController.getV1TopicGapTopicsExport,
+    'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': aiVisibilityController.getV1TopicGapTopicsTotals,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
 
     // FACS Phase 2 state-layer management endpoints. Gated by:
@@ -684,7 +694,9 @@ export default function getRouteHandlers(
     'DELETE /facs/access-mappings/:id': facsAccessMappingsController.revokeMappingById,
 
     // AI Visibility (Semrush gRPC)
+    'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': aiVisibilityController.getV1PromptBrandPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
+    'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': aiVisibilityController.getV1PromptGapPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
   };
 

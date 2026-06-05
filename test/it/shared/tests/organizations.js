@@ -327,6 +327,59 @@ export default function organizationTests(getHttpClient, resetData) {
         });
         expect(res.status).to.equal(403);
       });
+
+      it('admin: returns 400 for invalid x-product header', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(
+          '/organizations',
+          {
+            name: 'Invalid Product Org',
+            imsOrgId: 'INVALIDPROD123456789012@AdobeOrg',
+          },
+          { 'x-product': 'NOT_A_PRODUCT' },
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/Unsupported product code/);
+      });
+
+      it('admin: x-product creates FREE_TRIAL ASO entitlement for new org', async () => {
+        const http = getHttpClient();
+        const imsOrgId = 'TRIALORG1234567890123456@AdobeOrg';
+        const createRes = await http.admin.post(
+          '/organizations',
+          { name: 'Trial Provisioned Org', imsOrgId },
+          { 'x-product': 'ASO' },
+        );
+        expect(createRes.status).to.equal(201);
+        expectOrgDto(createRes.body);
+
+        const entitlementsRes = await http.admin.get(
+          `/organizations/${createRes.body.id}/entitlements`,
+        );
+        expect(entitlementsRes.status).to.equal(200);
+        const asoEntitlement = entitlementsRes.body.find((e) => e.productCode === 'ASO');
+        expect(asoEntitlement).to.exist;
+        expect(asoEntitlement.tier).to.equal('FREE_TRIAL');
+      });
+
+      it('admin: idempotent re-POST with x-product returns 200', async () => {
+        const http = getHttpClient();
+        const imsOrgId = 'IDEMPORG12345678901234567@AdobeOrg';
+        const first = await http.admin.post(
+          '/organizations',
+          { name: 'Idempotent Org', imsOrgId },
+          { 'x-product': 'ASO' },
+        );
+        expect(first.status).to.equal(201);
+
+        const second = await http.admin.post(
+          '/organizations',
+          { name: 'Different Name', imsOrgId },
+          { 'x-product': 'ASO' },
+        );
+        expect(second.status).to.equal(200);
+        expect(second.body.id).to.equal(first.body.id);
+      });
     });
 
     describe('PATCH /organizations/:organizationId', () => {

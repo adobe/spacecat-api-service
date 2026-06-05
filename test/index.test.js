@@ -21,6 +21,7 @@ import AccessControlUtil from '../src/support/access-control-util.js';
 use(sinonChai);
 
 const s2sAuthWrapperStub = (fn) => fn;
+const authWrapperStub = (fn) => fn;
 
 const tokowakaTestShim = {
   default: class TokowakaClientStub {
@@ -51,6 +52,7 @@ const { main } = await esmock(
   {
     '@adobe/spacecat-shared-http-utils': {
       s2sAuthWrapper: s2sAuthWrapperStub,
+      authWrapper: authWrapperStub,
     },
   },
   {
@@ -360,20 +362,6 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Execution Id is invalid. Please provide a valid UUID.');
   });
 
-  it('rejects /serenity/projects/:workspaceId/:projectId/... with an invalid workspaceId UUID', async () => {
-    const path = '/v2/orgs/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/e730ec12-4325-4bdd-ac71-0f4aa5b18ce0/serenity/projects/not-a-uuid/proj-1/tags';
-    context.pathInfo.suffix = path;
-    request = new Request(`${baseUrl}${path}`, {
-      method: 'GET',
-      headers: { 'x-api-key': apiKey },
-    });
-
-    const resp = await main(request, context);
-
-    expect(resp.status).to.equal(400);
-    expect(resp.headers.plain()['x-error']).to.equal('Workspace Id is invalid. Please provide a valid UUID.');
-  });
-
   it('rejects bare /tools/scrape/jobs/by-url misroute with invalid jobId', async () => {
     context.pathInfo.suffix = '/tools/scrape/jobs/by-url';
 
@@ -383,6 +371,21 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(400);
     expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('rejects /sites/:siteId/preflights/:preflightId with invalid preflightId UUID', async () => {
+    const validSiteId = 'a1b2c3d4-1234-5678-9abc-def012345678';
+    context.pathInfo.suffix = `/sites/${validSiteId}/preflights/not-a-uuid`;
+
+    request = new Request(
+      `${baseUrl}/sites/${validSiteId}/preflights/not-a-uuid`,
+      { headers: { 'x-api-key': apiKey } },
+    );
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Preflight Id is invalid. Please provide a valid UUID.');
   });
 
   it('rejects bare /tools/scrape/jobs/by-base-url misroute with invalid jobId', async () => {

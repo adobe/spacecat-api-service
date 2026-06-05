@@ -27,8 +27,6 @@ use(sinonChai);
 
 const ORG = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const BRAND = '11111111-2222-3333-4444-555555555555';
-// Semrush workspace IDs are UUIDs per SemrushProjectRow.workspaceId schema;
-// use a v4 UUID so AJV's `format: uuid` validator accepts the fixtures.
 const WORKSPACE = '22222222-3333-4444-5555-666666666666';
 
 function fakeLog() {
@@ -37,7 +35,7 @@ function fakeLog() {
   };
 }
 
-function fakeContext({ params = {}, data = undefined } = {}) {
+function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
   return {
     env: {},
     pathInfo: { headers: { authorization: 'Bearer ims-token' } },
@@ -48,6 +46,7 @@ function fakeContext({ params = {}, data = undefined } = {}) {
     },
     params: { spaceCatId: ORG, brandId: BRAND, ...params },
     data,
+    query,
   };
 }
 
@@ -57,12 +56,19 @@ async function readJsonBody(response) {
 }
 
 /**
- * Fixtures: deterministic, OpenAPI-compliant handler responses for each
- * operation. The contract test stubs the handler to return these, calls the
- * controller, and validates the body against the OpenAPI response schema.
+ * Fixtures: deterministic handler responses for each operationId in
+ * docs/openapi/serenity-api.yaml. The contract test stubs the handler to
+ * return these, calls the controller, and AJV-validates the response body
+ * against the documented OpenAPI response schema.
  *
- * Per-operation `expectedStatus` lets the bulk runner pick the right schema
- * (createSerenityProject is 201, everything else is 200).
+ * Schema drift (handler adds an undocumented field, omits a required one,
+ * uses a wrong type) trips this immediately.
+ *
+ * `controllerMethod` is the function exported by `SerenityController(...)`;
+ * `handlerName` is the underlying handler stubbed via esmock; both match
+ * the surface introduced by LLMO-5190 (no `id`, no `semrushLocationId`).
+ * `expectedStatus` is the documented success status (deleteSerenityMarket
+ * is 204 no-body).
  */
 const FIXTURES = {
   listSerenityPrompts: {
@@ -70,21 +76,18 @@ const FIXTURES = {
     controllerMethod: 'listPrompts',
     handlerName: 'handleListPrompts',
     handlerResult: {
-      items: [
-        {
-          id: 'eyJiIjoiYSIsImwiOjI4NDAsImxhbmciOiJlbiIsInQiOiJzYW1wbGUifQ',
-          semrushId: 'sem-1',
-          semrushProjectId: 'proj-1',
-          semrushLocationId: 2840,
-          language: 'en',
-          text: 'sample',
-          tags: ['topic-a'],
-        },
-      ],
+      items: [{
+        semrushPromptId: 'sem-1',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        text: 'sample',
+        tagMap: { 'topic-a': 't-1' },
+      }],
       total: 1,
       page: 1,
       limit: 50,
     },
+    query: { geoTargetId: '2840', languageCode: 'en', tagIds: ['t-1'] },
   },
   createSerenityPrompts: {
     expectedStatus: 200,
@@ -92,17 +95,17 @@ const FIXTURES = {
     handlerName: 'handleCreatePrompts',
     handlerResult: {
       created: [{
-        id: 'eyJiIjoiYSIsImwiOjI4NDAsImxhbmciOiJlbiIsInQiOiJzYW1wbGUifQ',
-        semrushId: 'sem-1',
-        semrushProjectId: 'proj-1',
-        semrushLocationId: 2840,
-        language: 'en',
+        semrushPromptId: 'sem-1',
+        geoTargetId: 2840,
+        languageCode: 'en',
         text: 'sample',
-        tags: [],
       }],
-      skipped: [{ text: 'dup', reason: 'duplicate within batch' }],
-      failed: [{
-        text: 'bad', semrushProjectId: 'proj-1', status: 502, message: 'upstream',
+      skipped: [],
+      failed: [],
+    },
+    data: {
+      prompts: [{
+        text: 'sample', tags: ['topic-a'], geoTargetId: 2840, languageCode: 'en',
       }],
     },
   },
@@ -113,83 +116,88 @@ const FIXTURES = {
     handlerResult: {
       status: 200,
       body: {
-        id: 'eyJiIjoiYSIsImwiOjI4NDAsImxhbmciOiJlbiIsInQiOiJzYW1wbGUifQ',
-        semrushId: 'sem-2',
-        semrushProjectId: 'proj-1',
-        semrushLocationId: 2840,
-        language: 'en',
+        semrushPromptId: 'sem-new',
+        geoTargetId: 2840,
+        languageCode: 'en',
         text: 'new text',
-        tags: [],
       },
     },
-    params: { promptId: 'eyJiIjoiYSIsImwiOjI4NDAsImxhbmciOiJlbiIsInQiOiJzYW1wbGUifQ' },
+    params: { semrushPromptId: 'sem-1' },
+    data: { geoTargetId: 2840, languageCode: 'en', text: 'new text' },
   },
   bulkDeleteSerenityPrompts: {
     expectedStatus: 200,
     controllerMethod: 'bulkDeletePrompts',
     handlerName: 'handleBulkDeletePrompts',
-    handlerResult: {
-      deleted: 2,
-      failed: [{
-        semrushProjectId: 'proj-x', semrushPromptId: 's-y', status: 502, message: 'oh',
-      }],
+    handlerResult: { deleted: 1, failed: [] },
+    data: {
+      prompts: [{ semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' }],
     },
   },
-  listSerenityProjects: {
+  listSerenityMarkets: {
     expectedStatus: 200,
-    controllerMethod: 'listProjects',
-    handlerName: 'handleListProjects',
+    controllerMethod: 'listMarkets',
+    handlerName: 'handleListMarkets',
     handlerResult: {
       items: [{
         brandId: BRAND,
-        semrushProjectId: 'proj-1',
-        semrushLocationId: 2840,
-        language: 'en',
-        name: 'Adobe',
-        domain: 'adobe.com',
-        workspaceId: WORKSPACE,
+        geoTargetId: 2840,
+        languageCode: 'en',
       }],
     },
   },
-  createSerenityProject: {
+  createSerenityMarket: {
     expectedStatus: 201,
-    controllerMethod: 'createProject',
-    handlerName: 'handleCreateProject',
+    controllerMethod: 'createMarket',
+    handlerName: 'handleCreateMarket',
     handlerResult: {
       status: 201,
       body: {
-        semrushProjectId: 'new-1',
-        semrushLocationId: 2840,
-        language: 'en',
-        name: 'X',
-        workspaceId: WORKSPACE,
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
       },
     },
+    data: {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    },
   },
-  listSerenityProjectTags: {
+  getSerenityMarket: {
     expectedStatus: 200,
-    controllerMethod: 'listProjectTags',
-    handlerName: 'handleListProjectTags',
+    controllerMethod: 'getMarket',
+    handlerName: 'handleGetMarket',
+    handlerResult: {
+      brandId: BRAND,
+      geoTargetId: 2840,
+      languageCode: 'en',
+      semrushProjectId: 'proj-us-en',
+    },
+    params: { geoTargetId: '2840', languageCode: 'en' },
+  },
+  deleteSerenityMarket: {
+    expectedStatus: 204,
+    controllerMethod: 'deleteMarket',
+    handlerName: 'handleDeleteMarket',
+    handlerResult: { status: 204 },
+    params: { geoTargetId: '2840', languageCode: 'en' },
+  },
+  listSerenityTags: {
+    expectedStatus: 200,
+    controllerMethod: 'listTags',
+    handlerName: 'handleListTags',
     handlerResult: { items: [{ id: 't1', name: 'Topic A' }] },
-    params: { workspaceId: WORKSPACE, projectId: 'p' },
+    query: { geoTargetId: '2840', languageCode: 'en' },
   },
-  listSerenityProjectModels: {
+  listSerenityModels: {
     expectedStatus: 200,
-    controllerMethod: 'listProjectModels',
-    handlerName: 'handleListProjectModels',
+    controllerMethod: 'listModels',
+    handlerName: 'handleListModels',
     handlerResult: {
       items: [{
         id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: 'icon-url',
       }],
     },
-    params: { workspaceId: WORKSPACE, projectId: 'p' },
-  },
-  listSerenityWorkspaceProjects: {
-    expectedStatus: 200,
-    controllerMethod: 'listWorkspaceProjects',
-    handlerName: 'handleListWorkspaceProjects',
-    handlerResult: { items: [{ id: 'p1', name: 'Adobe', domain: 'adobe.com' }] },
-    params: { workspaceId: WORKSPACE },
+    query: { geoTargetId: '2840', languageCode: 'en' },
   },
 };
 
@@ -204,7 +212,12 @@ function makeAjv() {
   return ajv;
 }
 
-describe('OpenAPI contract — /serenity/* endpoints', () => {
+describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
+  // First esmock load of the controller takes ~2s in isolation, more under
+  // mocha --parallel where the worker process is contended. Bump the per-test
+  // timeout so the cold-start first run doesn't flake the suite.
+  this.timeout(30000);
+
   const spec = loadBundledSpec();
   const ops = operationsForTag(spec, 'serenity');
   const opsByOperationId = new Map(ops.map((o) => [o.operationId, o]));
@@ -222,27 +235,24 @@ describe('OpenAPI contract — /serenity/* endpoints', () => {
    * 3. asserts the response status matches what OpenAPI declares
    * 4. AJV-validates the response body against the operation's response schema
    *
-   * Schema drift (handler adds an undocumented field, omits a required one,
-   * uses a wrong type) trips this immediately.
+   * The 204 deleteMarket path has no response body — the AJV step is skipped.
    */
   Object.entries(FIXTURES).forEach(([operationId, fx]) => {
     it(`${operationId} response conforms to OpenAPI schema`, async () => {
       const op = opsByOperationId.get(operationId);
       expect(op, `operation ${operationId} not found in spec`).to.exist;
 
-      const responseSchema = op.responseSchema(fx.expectedStatus);
-      expect(responseSchema, `no ${fx.expectedStatus} schema for ${operationId}`).to.exist;
-
       const handlerStubs = {
         handleListPrompts: sinon.stub(),
         handleCreatePrompts: sinon.stub(),
         handleUpdatePrompt: sinon.stub(),
         handleBulkDeletePrompts: sinon.stub(),
-        handleListProjects: sinon.stub(),
-        handleCreateProject: sinon.stub(),
-        handleListProjectTags: sinon.stub(),
-        handleListProjectModels: sinon.stub(),
-        handleListWorkspaceProjects: sinon.stub(),
+        handleListMarkets: sinon.stub(),
+        handleGetMarket: sinon.stub(),
+        handleCreateMarket: sinon.stub(),
+        handleDeleteMarket: sinon.stub(),
+        handleListTags: sinon.stub(),
+        handleListModels: sinon.stub(),
       };
       handlerStubs[fx.handlerName].resolves(fx.handlerResult);
 
@@ -268,31 +278,44 @@ describe('OpenAPI contract — /serenity/* endpoints', () => {
             handleUpdatePrompt: handlerStubs.handleUpdatePrompt,
             handleBulkDeletePrompts: handlerStubs.handleBulkDeletePrompts,
           },
-          '../../src/support/serenity/handlers/projects.js': {
-            handleListProjects: handlerStubs.handleListProjects,
-            handleCreateProject: handlerStubs.handleCreateProject,
-            handleListProjectTags: handlerStubs.handleListProjectTags,
-            handleListProjectModels: handlerStubs.handleListProjectModels,
-            handleListWorkspaceProjects: handlerStubs.handleListWorkspaceProjects,
+          '../../src/support/serenity/handlers/markets.js': {
+            handleListMarkets: handlerStubs.handleListMarkets,
+            handleGetMarket: handlerStubs.handleGetMarket,
+            handleCreateMarket: handlerStubs.handleCreateMarket,
+            handleDeleteMarket: handlerStubs.handleDeleteMarket,
+            handleListTags: handlerStubs.handleListTags,
+            handleListModels: handlerStubs.handleListModels,
           },
         },
       )).default;
 
-      const ctx = fakeContext({ params: fx.params || {}, data: fx.data });
+      const ctx = fakeContext({
+        params: fx.params || {},
+        data: fx.data,
+        query: fx.query || {},
+      });
       const controller = SerenityController(ctx, fakeLog());
       const response = await controller[fx.controllerMethod](ctx);
 
       expect(response.status).to.equal(fx.expectedStatus);
 
+      // 204 No Content → no body to validate. The contract is just the status.
+      if (fx.expectedStatus === 204) {
+        return;
+      }
+
+      const responseSchema = op.responseSchema(fx.expectedStatus);
+      expect(responseSchema, `no ${fx.expectedStatus} schema for ${operationId}`).to.exist;
+
       const body = await readJsonBody(response);
       const ajv = makeAjv();
       const validate = ajv.compile(responseSchema);
-      const ok = validate(body);
-      if (!ok) {
+      const validBody = validate(body);
+      if (!validBody) {
         const detail = validate.errors.map((e) => `${e.instancePath || '/'} ${e.message} (${JSON.stringify(e.params)})`).join('\n  ');
         throw new Error(`AJV validation failed for ${operationId} ${fx.expectedStatus} response:\n  ${detail}\nbody: ${JSON.stringify(body, null, 2)}`);
       }
-      expect(ok).to.equal(true);
+      expect(validBody).to.equal(true);
     });
   });
 });
