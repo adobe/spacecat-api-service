@@ -929,7 +929,7 @@ function SuggestionsController(ctx, sqs, env) {
               context.log.info(`[acl] S2S REJECT granted - suggestionId=${id} clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
             } else if (s2sResult.reason !== 'not-s2s') {
               // S2S call but missing the required capability — audit trail + immediate denial
-              context.log.error(`[acl] S2S REJECT denied - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+              context.log.warn(`[acl] S2S REJECT denied - suggestionId=${id} reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
               return {
                 index,
                 uuid: id,
@@ -992,12 +992,11 @@ function SuggestionsController(ctx, sqs, env) {
           };
         }
       } catch (e) {
-        // Validation error on setStatus
         return {
           index,
           uuid: id,
           message: e.message,
-          statusCode: 400,
+          statusCode: e?.name === VALIDATION_ERROR_NAME ? 400 : 500,
         };
       }
       try {

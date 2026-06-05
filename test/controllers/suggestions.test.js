@@ -4092,7 +4092,37 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 403);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'S2S consumer does not have the required capability to reject suggestions');
       expect(hasAdminStub).to.not.have.been.called;
-      expect(context.log.error).to.have.been.calledWithMatch(/\[acl\] S2S REJECT denied/);
+      expect(context.log.warn).to.have.been.calledWithMatch(/\[acl\] S2S REJECT denied/);
+    });
+
+    it('returns 500 per-item when hasS2SCapability rejects unexpectedly during REJECTED transition', async () => {
+      const pendingSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'PENDING_VALIDATION',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(mockSuggestionEntity(pendingSuggestion, removeStub));
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .rejects(new Error('auth service unavailable'));
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 500);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'auth service unavailable');
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
     });
   });
 
