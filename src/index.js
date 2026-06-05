@@ -106,6 +106,7 @@ import AiVisibilityController from './controllers/ai-visibility.js';
 import AgenticCategoriesController from './controllers/agentic-categories.js';
 import AgenticPageTypesController from './controllers/agentic-page-types.js';
 import SerenityController from './controllers/serenity.js';
+import ProxyController from './controllers/proxy.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
@@ -278,6 +279,7 @@ async function run(request, context) {
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
     const serenityController = SerenityController(context, log, context.env);
+    const proxyController = ProxyController();
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -337,6 +339,7 @@ async function run(request, context) {
       agenticCategoriesController,
       agenticPageTypesController,
       serenityController,
+      proxyController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
