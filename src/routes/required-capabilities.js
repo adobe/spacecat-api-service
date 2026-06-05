@@ -11,6 +11,7 @@
  */
 
 import {
+  CAP_CONFIGURATION_READ,
   CAP_FIX_ENTITY_CREATE,
   CAP_ORG_READ_ALL,
   CAP_SITE_CREATE,
@@ -223,10 +224,10 @@ const routeRequiredCapabilities = {
   'GET /consent-banner/:jobId': 'organization:read',
 
   // Configuration
-  'GET /configurations/latest': 'configuration:read',
+  'GET /configurations/latest': CAP_CONFIGURATION_READ,
   'PATCH /configurations/latest': 'configuration:write',
   'POST /configurations/:version/restore': 'configuration:write',
-  'GET /configurations/:version': 'configuration:read',
+  'GET /configurations/:version': CAP_CONFIGURATION_READ,
   'POST /configurations/audits': 'configuration:write',
   'DELETE /configurations/audits/:auditType': 'configuration:write',
   'PUT /configurations/latest/queues': 'configuration:write',
