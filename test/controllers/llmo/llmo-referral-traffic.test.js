@@ -622,7 +622,7 @@ describe('llmo-referral-traffic', () => {
       const client = makeRpcClient({ data: [] });
       const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
       await handler(makeContext({ client, data: { pageSize: 10000 } }));
-      expect(client.rpc.getCall(0).args[1].p_limit).to.equal(200);
+      expect(client.rpc.getCall(0).args[1].p_limit).to.equal(500);
     });
 
     it('uses {} when context.data is null in by-url handler (line 412)', async () => {

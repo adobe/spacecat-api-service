@@ -47,11 +47,13 @@ describe('checkDateRange', () => {
       .to.equal('startDate must be on or before endDate');
   });
 
-  it('rejects only one bound provided', () => {
-    expect(checkDateRange({ startDate: '2026-01-01' }))
-      .to.match(/Both startDate and endDate are required/);
-    expect(checkDateRange({ endDate: '2026-01-28' }))
-      .to.match(/Both startDate and endDate are required/);
+  it('skips validation when only one bound is provided (handler applies its default)', () => {
+    expect(checkDateRange({ startDate: '2026-01-01' })).to.equal(null);
+    expect(checkDateRange({ endDate: '2026-01-28' })).to.equal(null);
+  });
+
+  it('passes a single-day range (startDate === endDate, span = 1 day)', () => {
+    expect(checkDateRange({ startDate: '2026-03-15', endDate: '2026-03-15' })).to.equal(null);
   });
 
   it('rejects a malformed date', () => {

@@ -395,6 +395,7 @@ async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handler
 
   const rangeError = checkDateRange(context.data);
   if (rangeError) {
+    log.info(`Agentic traffic ${handlerName} rejected (date range guardrail): ${rangeError}`);
     return badRequest(rangeError);
   }
 
