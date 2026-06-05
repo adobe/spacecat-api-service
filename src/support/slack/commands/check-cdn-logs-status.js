@@ -11,7 +11,7 @@
  */
 
 import { llmoConfig as llmo } from '@adobe/spacecat-shared-utils';
-import { ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import BaseCommand from './base.js';
 import {
   appendStatusDetails,
@@ -264,6 +264,18 @@ function CheckCdnLogsStatusCommand(context) {
       await say(`:gear: Checking ${enabledSites.length} enabled site${enabledSites.length === 1 ? '' : 's'}...`);
 
       const { s3Client } = s3;
+      // Aggregate buckets are per-region; reuse the runtime-region client and lazily
+      // create one client per other region (not per site) to avoid cross-region 301s.
+      const runtimeRegion = env.AWS_REGION || 'us-east-1';
+      const s3ClientsByRegion = new Map([[runtimeRegion, s3Client]]);
+      const getS3ClientForRegion = (region) => {
+        let client = s3ClientsByRegion.get(region);
+        if (!client) {
+          client = new S3Client({ region });
+          s3ClientsByRegion.set(region, client);
+        }
+        return client;
+      };
       const results = [];
 
       // Process in batches to avoid overwhelming S3
@@ -286,7 +298,11 @@ function CheckCdnLogsStatusCommand(context) {
             const expectedHours = isDailyOnly ? ['23'] : ALL_HOURS;
 
             const aggPrefix = `aggregated/${siteId}/${year}/${month}/${day}/`;
-            const presentHours = await listPresentHours(s3Client, aggregateBucket, aggPrefix);
+            const presentHours = await listPresentHours(
+              getS3ClientForRegion(region),
+              aggregateBucket,
+              aggPrefix,
+            );
             const presentSet = new Set(presentHours);
             const missingHours = expectedHours.filter((h) => !presentSet.has(h));
 
