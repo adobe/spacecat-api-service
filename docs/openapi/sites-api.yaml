@@ -167,6 +167,17 @@ sites:
         content:
           application/json:
             schema:
+              description: |
+                Two response shapes are possible, selected by the request and
+                unambiguous by JSON type, so no `discriminator` is used (nor can one
+                be expressed — the legacy branch is a top-level array, which has no
+                property to discriminate on):
+                - When `limit` and/or `cursor` is provided → **`SitePagedResponse`**,
+                  a JSON object with `sites` and `pagination`.
+                - When neither is provided → **`SiteList`**, the legacy top-level
+                  JSON array.
+
+                This resolves to a single shape once the legacy path is sunset.
               oneOf:
                 - $ref: './schemas.yaml#/SiteList'
                 - $ref: './schemas.yaml#/SitePagedResponse'

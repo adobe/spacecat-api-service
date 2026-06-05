@@ -3360,7 +3360,11 @@ SuggestionSummary:
     - rank
 PaginationMetadata:
   type: object
-  description: Metadata for paginated responses
+  description: |
+    Canonical pagination envelope metadata for cursor-based list endpoints. Reuse this
+    schema (rather than inlining `limit`/`cursor`/`hasMore`) in every paginated list
+    response so the envelope shape stays consistent across the API. Already used by
+    `SitePagedResponse` and `SuggestionPagedResponse`.
   properties:
     limit:
       description: The maximum number of items returned in this page

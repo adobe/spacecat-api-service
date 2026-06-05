@@ -993,7 +993,7 @@ describe('Sites Controller', () => {
         const error = await result.json();
 
         expect(result.status).to.equal(400);
-        expect(error).to.have.property('message', 'cursor exceeds maximum length');
+        expect(error).to.have.property('message', 'cursor must be a string');
         expect(mockDataAccess.Site.all).to.not.have.been.called;
       });
     });

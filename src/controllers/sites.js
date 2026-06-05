@@ -446,8 +446,13 @@ function SitesController(ctx, log, env) {
     const cursor = context?.data?.cursor || null;
     const paginated = hasText(limitParam) || hasText(cursor);
 
-    if (cursor !== null && (typeof cursor !== 'string' || cursor.length > 256)) {
-      return badRequest('cursor exceeds maximum length');
+    if (cursor !== null) {
+      if (typeof cursor !== 'string') {
+        return badRequest('cursor must be a string');
+      }
+      if (cursor.length > 256) {
+        return badRequest('cursor exceeds maximum length');
+      }
     }
 
     let sites;
