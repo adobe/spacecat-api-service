@@ -89,6 +89,80 @@ const MAX_PROMPT_CHARS = 2000;
 // Bound concurrent LLM calls so a bulk create (arrays up to 3000) does not fan
 // out an unbounded number of in-flight requests.
 const DEFAULT_MAX_CONCURRENCY = 10;
+// Wall-clock cap (ms) on a single `model.invoke()`. A hung Azure call must not
+// stall prompt creation: on timeout the classification is treated as a failure
+// (intent stays null) and the write proceeds. Overridable via env so it can be
+// tuned without a redeploy.
+const DEFAULT_INVOKE_TIMEOUT_MS = 10000;
+
+/**
+ * Resolves the per-call LLM invoke timeout (ms) from env, falling back to the
+ * default. Non-numeric / non-positive values fall back to the default so a
+ * misconfigured env var can't disable the guard.
+ *
+ * @param {object} env - Environment variables
+ * @returns {number} timeout in milliseconds
+ */
+function resolveInvokeTimeoutMs(env = {}) {
+  const raw = Number(env.PROMPT_INTENT_CLASSIFICATION_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_INVOKE_TIMEOUT_MS;
+}
+
+/**
+ * Races a promise against a timer. Rejects with a timeout error if `promise`
+ * does not settle within `timeoutMs`. The timer is always cleared so the event
+ * loop is not held open by a pending timeout once the race resolves.
+ *
+ * @param {Promise<*>} promise - Work to bound
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @returns {Promise<*>} resolves/rejects with `promise`, or rejects on timeout
+ */
+function withTimeout(promise, timeoutMs) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`intent classification timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Coerces an LLM message `content` into a plain string. `AzureChatOpenAI`
+ * `.invoke()` may return `content` as a string OR as an array of content parts
+ * (`[{ type: 'text', text: '...' }, ...]`). Array content is concatenated from
+ * its text parts so the downstream JSON parse sees the full model output rather
+ * than silently failing on a non-string.
+ *
+ * @param {*} content - `response.content` from the model
+ * @returns {string}
+ */
+export function contentToString(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') {
+          return part;
+        }
+        // LangChain text parts: { type: 'text', text: '...' }. Some providers
+        // use `content` instead of `text`; accept either, ignore non-text parts.
+        if (part && typeof part === 'object') {
+          if (typeof part.text === 'string') {
+            return part.text;
+          }
+          if (typeof part.content === 'string') {
+            return part.content;
+          }
+        }
+        return '';
+      })
+      .join('');
+  }
+  return String(content ?? '');
+}
 
 /**
  * Returns true when intent classification on write is enabled. Default-safe:
@@ -189,6 +263,8 @@ export function createIntentClassifier(context = {}) {
     return null;
   }
 
+  const invokeTimeoutMs = resolveInvokeTimeoutMs(env);
+
   return async function classify(text) {
     // Mirror DRS: skip empty / whitespace-only text (no LLM call, intent null).
     const trimmed = hasText(text) ? text.trim() : '';
@@ -196,13 +272,17 @@ export function createIntentClassifier(context = {}) {
       return null;
     }
     try {
-      const response = await model.invoke([
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: trimmed.slice(0, MAX_PROMPT_CHARS) },
-      ]);
-      const content = typeof response?.content === 'string'
-        ? response.content
-        : String(response?.content ?? '');
+      // Bound the call: a hung Azure request must not stall prompt creation.
+      // On timeout this rejects and falls through to the non-fatal catch below.
+      const response = await withTimeout(
+        model.invoke([
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: trimmed.slice(0, MAX_PROMPT_CHARS) },
+        ]),
+        invokeTimeoutMs,
+      );
+      // content may be a string OR an array of content parts; coerce either way.
+      const content = contentToString(response?.content);
       return parseIntent(content);
     } catch (e) {
       log.warn(`Intent classification failed for prompt; persisting null: ${e.message}`);

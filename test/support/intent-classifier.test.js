@@ -10,14 +10,22 @@
  * governing permissions and limitations under the License.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect } from 'chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
+import yaml from 'js-yaml';
 
 import {
   isIntentClassificationEnabled,
   classifyIntents,
+  contentToString,
 } from '../../src/support/intent-classifier.js';
+import { INTENT_VALUES } from '../../src/support/intent.js';
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
 
 const ENABLED_ENV = {
   ENABLE_PROMPT_INTENT_CLASSIFICATION: 'true',
@@ -35,11 +43,14 @@ const log = {
  * Loads intent-classifier.js with AzureChatOpenAI replaced by a fake whose
  * `invoke` returns `invokeImpl(messages)`.
  */
-async function loadWithModel(invokeImpl) {
+async function loadWithModel(invokeImpl, { constructorError } = {}) {
   const ctorSpy = sinon.spy();
   const FakeAzureChatOpenAI = class {
     constructor(opts) {
       ctorSpy(opts);
+      if (constructorError) {
+        throw constructorError;
+      }
     }
 
     // eslint-disable-next-line class-methods-use-this
@@ -189,6 +200,122 @@ describe('intent-classifier', () => {
       const texts = Array.from({ length: 25 }, (_, i) => `t${i}`);
       await classifyIntents(classify, texts, { maxConcurrency: 3 });
       expect(maxInFlight).to.be.at.most(3);
+    });
+  });
+
+  describe('contentToString', () => {
+    it('returns a string unchanged', () => {
+      expect(contentToString('{"intent":"planning"}')).to.equal('{"intent":"planning"}');
+    });
+
+    it('concatenates text parts of an array content', () => {
+      const parts = [
+        { type: 'text', text: '{"intent":' },
+        { type: 'text', text: '"comparative"}' },
+      ];
+      expect(contentToString(parts)).to.equal('{"intent":"comparative"}');
+    });
+
+    it('accepts string parts and a `content` field, ignores non-text parts', () => {
+      const parts = [
+        '{"intent":',
+        { type: 'something', other: 'x' },
+        { content: '"transactional"}' },
+      ];
+      expect(contentToString(parts)).to.equal('{"intent":"transactional"}');
+    });
+
+    it('coerces null/undefined/object to a (possibly empty) string', () => {
+      expect(contentToString(null)).to.equal('');
+      expect(contentToString(undefined)).to.equal('');
+      expect(contentToString(42)).to.equal('42');
+    });
+  });
+
+  describe('array-shaped model content', () => {
+    it('classifies when content is an array of text parts', async () => {
+      const { mod } = await loadWithModel(() => ({
+        content: [
+          { type: 'text', text: '{"intent": "comparative",' },
+          { type: 'text', text: ' "confidence": 0.8}' },
+        ],
+      }));
+      const classify = mod.createIntentClassifier({ env: ENABLED_ENV, log });
+      expect(await classify('Figma vs Sketch')).to.equal('comparative');
+    });
+
+    it('returns null when array content has no parseable JSON', async () => {
+      const { mod } = await loadWithModel(() => ({
+        content: [{ type: 'text', text: 'no json here' }],
+      }));
+      const classify = mod.createIntentClassifier({ env: ENABLED_ENV, log });
+      expect(await classify('something')).to.be.null;
+    });
+
+    it('returns null when array content concatenates to an empty string', async () => {
+      const { mod } = await loadWithModel(() => ({
+        content: [{ type: 'image', url: 'x' }, { foo: 'bar' }],
+      }));
+      const classify = mod.createIntentClassifier({ env: ENABLED_ENV, log });
+      expect(await classify('something')).to.be.null;
+    });
+  });
+
+  describe('model construction failure', () => {
+    it('returns null (no classifier) when the model constructor throws', async () => {
+      const { mod } = await loadWithModel(() => ({ content: '{}' }), {
+        constructorError: new Error('bad azure config'),
+      });
+      const classify = mod.createIntentClassifier({ env: ENABLED_ENV, log });
+      expect(classify).to.be.null;
+    });
+  });
+
+  describe('invoke timeout', () => {
+    it('treats a hung invoke as a classification failure (null) without throwing', async () => {
+      // invoke never resolves; the bounded timeout must reject and yield null.
+      const { mod } = await loadWithModel(() => new Promise(() => {}));
+      const classify = mod.createIntentClassifier({
+        env: { ...ENABLED_ENV, PROMPT_INTENT_CLASSIFICATION_TIMEOUT_MS: '20' },
+        log,
+      });
+      expect(await classify('something')).to.be.null;
+    });
+
+    it('returns the bucket when invoke resolves before the timeout', async () => {
+      const { mod } = await loadWithModel(() => new Promise((resolve) => {
+        setTimeout(() => resolve({ content: '{"intent":"informational"}' }), 1);
+      }));
+      const classify = mod.createIntentClassifier({
+        env: { ...ENABLED_ENV, PROMPT_INTENT_CLASSIFICATION_TIMEOUT_MS: '500' },
+        log,
+      });
+      expect(await classify('what is X')).to.equal('informational');
+    });
+
+    it('falls back to the default timeout for a non-numeric/zero env override', async () => {
+      // A 0/garbage value must not disable the guard: a resolving call still works.
+      const { mod } = await loadWithModel(() => ({ content: '{"intent":"planning"}' }));
+      const classify = mod.createIntentClassifier({
+        env: { ...ENABLED_ENV, PROMPT_INTENT_CLASSIFICATION_TIMEOUT_MS: 'nope' },
+        log,
+      });
+      expect(await classify('how to X')).to.equal('planning');
+    });
+  });
+
+  describe('INTENT_VALUES locked to the OpenAPI enum', () => {
+    it('matches the V2Prompt intent enum in docs/openapi/schemas.yaml', () => {
+      const schemasPath = path.resolve(testDir, '../../docs/openapi/schemas.yaml');
+      const doc = yaml.load(fs.readFileSync(schemasPath, 'utf8'));
+      const enumValues = doc?.V2Prompt?.properties?.intent?.enum;
+      expect(enumValues, 'V2Prompt.properties.intent.enum must exist').to.be.an('array');
+      // The schema enum includes `null` (intent is nullable); the code buckets
+      // are the non-null canonical values. Compare the two as sets.
+      const schemaBuckets = enumValues.filter((v) => v !== null);
+      expect([...schemaBuckets].sort()).to.deep.equal([...INTENT_VALUES].sort());
+      // Guard: schema must be nullable to match the null-on-unclassified contract.
+      expect(enumValues).to.include(null);
     });
   });
 });
