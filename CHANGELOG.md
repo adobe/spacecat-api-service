@@ -1,3 +1,10 @@
+## [1.556.1](https://github.com/adobe/spacecat-api-service/compare/v1.556.0...v1.556.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* add structured-data, sitemap, toc audits to paid profile ([#2566](https://github.com/adobe/spacecat-api-service/issues/2566)) ([33dec79](https://github.com/adobe/spacecat-api-service/commit/33dec794099ebbfd6baef55a26874087203b4ab4))
+
 # [1.556.0](https://github.com/adobe/spacecat-api-service/compare/v1.555.0...v1.556.0) (2026-06-05)
 
 
