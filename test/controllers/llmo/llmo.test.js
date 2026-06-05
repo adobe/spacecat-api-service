@@ -3814,6 +3814,44 @@ describe('LlmoController', () => {
       expect(performLlmoOnboardingStub).to.not.have.been.called;
     });
 
+    it('should truncate market values longer than 16 chars in the 400 message', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const longMarket = 'TOOLONGMARKETCODE'; // 17 chars — over the 16-char display cap
+      const result = await ctrl.onboardCustomer({
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{ market: longMarket, language: 'en' }] },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('TOOLONGMARKETCO'); // first 16 chars
+      expect(body.message).to.not.include(longMarket);
+    });
+
+    it('should truncate language values longer than 16 chars in the 400 message', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const longLang = 'toolonglanguagetag'; // 18 chars — over the 16-char display cap
+      const result = await ctrl.onboardCustomer({
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{ market: 'US', language: longLang }] },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('toolonglanguaget'); // first 16 chars
+      expect(body.message).to.not.include(longLang);
+    });
+
+    it('should return 400 with [invalid type] when entry is an empty object {}', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const result = await ctrl.onboardCustomer({
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{}] },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('[invalid type]');
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
     it('should return 400 when markets[] exceeds the cap (LLMO-5204)', async () => {
       const ctrl = await makeOnboardController(performLlmoOnboardingStub);
       // 51 valid, distinct tuples (> MAX_MARKETS = 50) so the 400 is the cap,
@@ -3830,7 +3868,7 @@ describe('LlmoController', () => {
       expect(performLlmoOnboardingStub).to.not.have.been.called;
     });
 
-    it('should collapse duplicate market tuples before forwarding (LLMO-5204)', async () => {
+    it('should collapse duplicate market tuples before forwarding and log the count (LLMO-5204)', async () => {
       const ctrl = await makeOnboardController(performLlmoOnboardingStub);
       const ctx = {
         ...onboardingContext,
@@ -3849,6 +3887,7 @@ describe('LlmoController', () => {
         { market: 'US', language: 'en' },
         { market: 'DE', language: 'de' },
       ]);
+      expect(onboardingContext.log.info).to.have.been.calledWithMatch(/collapsed 1 duplicate/);
     });
 
     it('should not set markets when neither markets nor region is supplied (LLMO-5202)', async () => {

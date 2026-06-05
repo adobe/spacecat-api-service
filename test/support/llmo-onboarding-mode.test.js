@@ -707,5 +707,24 @@ describe('llmo-onboarding-mode', () => {
     it('returns false when env is undefined', () => {
       expect(isSerenityOnboardingEnabled('org-1', 'ims-1', undefined)).to.be.false;
     });
+
+    it('returns false when env is null', () => {
+      expect(isSerenityOnboardingEnabled('org-1', 'ims-1', null)).to.be.false;
+    });
+
+    it('returns false when imsOrgId is null (no spurious match)', () => {
+      const env = { [SERENITY_SITE_ALLOWLIST]: 'org-1' };
+      expect(isSerenityOnboardingEnabled('org-other', null, env)).to.be.false;
+    });
+
+    it('returns false when imsOrgId is undefined', () => {
+      const env = { [SERENITY_SITE_ALLOWLIST]: 'org-1' };
+      expect(isSerenityOnboardingEnabled('org-other', undefined, env)).to.be.false;
+    });
+
+    it('returns false when allowlist contains only empty entries (e.g. ",,,,")', () => {
+      const env = { [SERENITY_SITE_ALLOWLIST]: ',,,,' };
+      expect(isSerenityOnboardingEnabled('org-1', 'ims-1', env)).to.be.false;
+    });
   });
 });
