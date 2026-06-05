@@ -1787,16 +1787,15 @@ export const onboardSingleSite = async (
 
     const latestConfiguration = await Configuration.findLatest();
 
-    // Enable audits in configuration only for scheduled runs (so they recur on schedule)
+    // Enable audits in configuration for all runs so the audit-worker creates opportunities.
+    // For non-scheduled runs the task processor disables them after the wait period.
     const auditsEnabled = [];
-    if (scheduledRun) {
-      for (const auditType of auditTypes) {
-        /* eslint-disable no-await-in-loop */
-        const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
-        if (!isEnabled) {
-          latestConfiguration.enableHandlerForSite(auditType, site);
-          auditsEnabled.push(auditType);
-        }
+    for (const auditType of auditTypes) {
+      /* eslint-disable no-await-in-loop */
+      const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
+      if (!isEnabled) {
+        latestConfiguration.enableHandlerForSite(auditType, site);
+        auditsEnabled.push(auditType);
       }
     }
 
@@ -1804,21 +1803,26 @@ export const onboardSingleSite = async (
       try {
         await latestConfiguration.save();
         log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
-        await say(
-          `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsEnabled.join(', ')}`,
-        );
+        if (scheduledRun) {
+          await say(
+            `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsEnabled.join(', ')}`,
+          );
+        }
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
         throw error;
       }
-    } else if (scheduledRun) {
+    } else {
       log.debug(`All the required audits for the given profile are already enabled for site ${siteID}`);
     }
 
     reportLine.audits = auditTypes.join(', ');
     const auditsMessage = reportLine.audits || 'None';
     const importsMessage = reportLine.imports || 'None';
-    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage} and audits: ${auditsMessage}`);
+    const statusMessage = scheduledRun
+      ? `:white_check_mark: *For site ${baseURL}*: Adding imports: ${importsMessage} and audits: ${auditsMessage} to scheduled run`
+      : `:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage} and audits: ${auditsMessage}`;
+    await say(statusMessage);
 
     // trigger audit runs
     if (auditTypes.length > 0) {
