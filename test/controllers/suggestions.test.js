@@ -4063,7 +4063,7 @@ describe('Suggestions Controller', () => {
       expect(context.log.info).to.have.been.calledWithMatch(/\[acl\] S2S REJECT granted/);
     });
 
-    it('returns 403 for S2S consumer missing suggestion:write when user is not admin', async () => {
+    it('logs an error for S2S consumer missing suggestion:write and falls through to admin check', async () => {
       const pendingSuggestion = {
         id: SUGGESTION_IDS[0],
         opportunityId: OPPORTUNITY_ID,
@@ -4079,7 +4079,7 @@ describe('Suggestions Controller', () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
         .resolves({ allowed: false, reason: 'missing-capability', clientId: 'svc-suggestions', consumerId: 'consumer-1' });
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
-      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      const hasAdminStub = sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
 
       const response = await suggestionsController.patchSuggestionsStatus({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -4091,6 +4091,9 @@ describe('Suggestions Controller', () => {
       const bulkPatchResponse = await response.json();
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 403);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Only admins can reject suggestions');
+      // admin check is still consulted after the S2S audit log
+      expect(hasAdminStub).to.have.been.called;
+      expect(context.log.error).to.have.been.calledWithMatch(/\[acl\] S2S REJECT denied/);
     });
   });
 
