@@ -1,3 +1,10 @@
+# [1.556.0](https://github.com/adobe/spacecat-api-service/compare/v1.555.0...v1.556.0) (2026-06-05)
+
+
+### Features
+
+* proxy endpoint for url inspector preview | LLMO-434 ([#2557](https://github.com/adobe/spacecat-api-service/issues/2557)) ([771c208](https://github.com/adobe/spacecat-api-service/commit/771c208da9409cf431492b41f98a1c003cfef490))
+
 # [1.555.0](https://github.com/adobe/spacecat-api-service/compare/v1.554.2...v1.555.0) (2026-06-05)
 
 
