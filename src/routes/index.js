@@ -100,6 +100,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
+ * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
+ * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -158,6 +160,8 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
+  agenticCategoriesController,
+  agenticPageTypesController,
   serenityController,
 ) {
   const staticRoutes = {};
@@ -264,6 +268,16 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/url-store': urlStoreController.addUrls,
     'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
     'POST /sites/:siteId/url-store/delete': urlStoreController.deleteUrls,
+
+    // Agentic URL classification rules (precede :auditType for static-segment match)
+    'GET /sites/:siteId/agentic-categories': agenticCategoriesController.list,
+    'POST /sites/:siteId/agentic-categories': agenticCategoriesController.create,
+    'PATCH /sites/:siteId/agentic-categories/:name': agenticCategoriesController.update,
+    'DELETE /sites/:siteId/agentic-categories/:name': agenticCategoriesController.remove,
+    'GET /sites/:siteId/agentic-page-types': agenticPageTypesController.list,
+    'POST /sites/:siteId/agentic-page-types': agenticPageTypesController.create,
+    'PATCH /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.update,
+    'DELETE /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.remove,
 
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
