@@ -909,6 +909,23 @@ describe('Sites Controller', () => {
       expect(body).to.be.an('array').with.lengthOf(2);
     });
 
+    it('routes an empty-string cursor to the legacy path (no envelope)', async () => {
+      // `?cursor=` coerces to null via `|| null`, so hasText() is false and the
+      // request falls through to the legacy flat-array shape. Pinned so a future
+      // switch from `||` to `??` (which would keep "") is caught.
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: '' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+        {},
+        sinon.match({ fetchAllPages: true }),
+      );
+    });
+
     it('uses provided limit and returns cursor when more pages exist', async () => {
       mockDataAccess.Site.all.resolves({ data: sites, cursor: 'next-page-cursor' });
 
