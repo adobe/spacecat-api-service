@@ -478,6 +478,14 @@ site-opportunity-suggestions-status:
     operationId: updateSiteOpportunitySuggestionsStatus
     summary: |
       Update the status of one or multiple suggestions in one transaction
+    description: |
+      Updates the status of one or more suggestions in a single bulk transaction. Returns
+      a 207 multi-status response with per-item success or failure details.
+
+      **S2S access:** S2S consumers registered with the `suggestion:write` capability may
+      call this endpoint. The admin-only gate for `REJECTED` status transitions is bypassed
+      for S2S callers holding this capability; all other validations (site membership,
+      opportunity lookup, valid status transition) apply unchanged.
     tags:
       - opportunity-suggestions
     requestBody:

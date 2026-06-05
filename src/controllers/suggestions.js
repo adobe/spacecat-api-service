@@ -47,7 +47,7 @@ import {
   isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { CAP_FIX_ENTITY_CREATE } from '../routes/capability-constants.js';
+import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
@@ -923,8 +923,21 @@ function SuggestionsController(ctx, sqs, env) {
         if (currentStatus !== status) {
           // Validate REJECTED status transition
           if (status === SuggestionModel.STATUSES.REJECTED) {
-            // Check admin access for REJECTED status
-            if (!accessControlUtil.hasAdminAccess()) {
+            // S2S consumers with suggestion:write capability may also reject suggestions
+            const s2sResult = await accessControlUtil.hasS2SCapability(CAP_SUGGESTION_WRITE);
+            if (s2sResult.allowed) {
+              context.log.info(`[acl] S2S REJECT granted - suggestionId=${id} clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
+            } else if (s2sResult.reason !== 'not-s2s') {
+              // S2S call but missing the required capability — audit trail + immediate denial
+              context.log.warn(`[acl] S2S REJECT denied - suggestionId=${id} reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+              return {
+                index,
+                uuid: id,
+                message: 'S2S consumer does not have the required capability to reject suggestions',
+                statusCode: 403,
+              };
+            } else if (!accessControlUtil.hasAdminAccess()) {
+              // Not an S2S call — original admin gate, unchanged
               return {
                 index,
                 uuid: id,
@@ -979,12 +992,14 @@ function SuggestionsController(ctx, sqs, env) {
           };
         }
       } catch (e) {
-        // Validation error on setStatus
+        if (e?.name !== VALIDATION_ERROR_NAME) {
+          context.log.error(`[patchSuggestionsStatus] unexpected error for suggestionId=${id}: ${e.message}`);
+        }
         return {
           index,
           uuid: id,
           message: e.message,
-          statusCode: 400,
+          statusCode: e?.name === VALIDATION_ERROR_NAME ? 400 : 500,
         };
       }
       try {
