@@ -1,3 +1,10 @@
+## [1.554.2](https://github.com/adobe/spacecat-api-service/compare/v1.554.1...v1.554.2) (2026-06-05)
+
+
+### Bug Fixes
+
+* guardrails on agentic/referral traffic read endpoints (SITES-46098) ([#2564](https://github.com/adobe/spacecat-api-service/issues/2564)) ([b4e1ed7](https://github.com/adobe/spacecat-api-service/commit/b4e1ed79f1372b16589b93af4d18d726c9706f58))
+
 ## [1.554.1](https://github.com/adobe/spacecat-api-service/compare/v1.554.0...v1.554.1) (2026-06-05)
 
 

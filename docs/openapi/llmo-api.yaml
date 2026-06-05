@@ -2784,13 +2784,25 @@ llmo-agentic-traffic-by-url:
     summary: Per-URL agentic traffic performance analysis (paginated)
     description: |
       Queries `rpc_agentic_traffic_by_url`. Powers the URL Performance table with
-      infinite-scroll pagination. Returns a page of `pageSize` rows (default 50, max 500)
+      infinite-scroll pagination. Returns a page of `pageSize` rows (default 50, max 200)
       plus `totalCount` for pagination context.
       Supports server-side substring search via `urlPathSearch`.
+
+      Date range guardrail (SITES-46098): `startDate` and `endDate` must be
+      supplied together — providing only one returns `400`. The requested span
+      may not exceed 62 days; a wider span returns `400`. Omitting both applies
+      the default 28-day window. This cap is enforced on every agentic-traffic
+      and referral-traffic read endpoint.
     operationId: getAgenticTrafficByUrl
     parameters:
-      - { name: startDate, in: query, schema: { type: string, format: date } }
-      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - name: startDate
+        in: query
+        description: Range start (`YYYY-MM-DD`). Required if `endDate` is set; span with `endDate` must be <= 62 days.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
+        schema: { type: string, format: date }
       - { name: platform, in: query, schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
@@ -2799,11 +2811,11 @@ llmo-agentic-traffic-by-url:
       - $ref: './parameters.yaml#/agentTypes'
       - name: pageSize
         in: query
-        description: Number of rows per page (default 50, max 500)
+        description: Number of rows per page (default 50, max 200)
         schema:
           type: integer
           minimum: 1
-          maximum: 500
+          maximum: 200
           default: 50
       - name: pageOffset
         in: query
