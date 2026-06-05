@@ -55,6 +55,7 @@ describe('onboard-llmo-modal', () => {
         getImports: sinonSandbox.stub().returns([]),
       }),
       setConfig: sinonSandbox.stub(),
+      getSiteEnrollments: sinonSandbox.stub().resolves([]),
       save: sinonSandbox.stub().resolves(),
     };
   };

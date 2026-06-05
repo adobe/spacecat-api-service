@@ -167,7 +167,7 @@ describe('getRouteHandlers', () => {
     updatePromptByBrandAndId: sinon.stub(),
     deletePromptByBrandAndId: sinon.stub(),
     bulkDeletePromptsByBrand: sinon.stub(),
-    triggerConfigSync: sinon.stub(),
+    checkPromptsByBrand: sinon.stub(),
   };
 
   const mockPreflightController = {
@@ -322,6 +322,7 @@ describe('getRouteHandlers', () => {
     onboardCustomer: () => null,
     offboardCustomer: () => null,
     queryFiles: () => null,
+    patchLlmoDataRow: () => null,
     getLlmoRationale: () => null,
     getBrandClaims: () => null,
     createOrUpdateEdgeConfig: () => null,
@@ -491,9 +492,15 @@ describe('getRouteHandlers', () => {
     getTopicsResearch: sinon.stub(),
     getTopicsStats: sinon.stub(),
     getV1TopicBrandTopics: sinon.stub(),
+    getV1TopicBrandTopicsExport: sinon.stub(),
+    getV1TopicBrandTopicsTotals: sinon.stub(),
     getV1TopicGapTopics: sinon.stub(),
+    getV1TopicGapTopicsExport: sinon.stub(),
+    getV1TopicGapTopicsTotals: sinon.stub(),
     getV1PromptBrandPrompts: sinon.stub(),
+    getV1PromptBrandPromptsExport: sinon.stub(),
     getV1PromptGapPrompts: sinon.stub(),
+    getV1PromptGapPromptsExport: sinon.stub(),
     getV1PromptPromptResponse: sinon.stub(),
   };
 
@@ -586,7 +593,6 @@ describe('getRouteHandlers', () => {
       'GET /projects',
       'POST /projects',
       'POST /preflight/jobs',
-      'POST /preflight/beta/jobs',
       'POST /sites/detect/jobs',
       'GET /sites',
       'POST /sites',
@@ -631,9 +637,15 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/topics/research',
       'GET /llmo/ai-visibility/topics/stats',
       'GET /llmo/ai-visibility/v1/topic/brand-topics',
+      'GET /llmo/ai-visibility/v1/topic/brand-topics-export',
+      'GET /llmo/ai-visibility/v1/topic/brand-topics-totals',
       'GET /llmo/ai-visibility/v1/topic/gap-topics',
+      'GET /llmo/ai-visibility/v1/topic/gap-topics-export',
+      'GET /llmo/ai-visibility/v1/topic/gap-topics-totals',
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts',
+      'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts',
+      'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export',
       'GET /llmo/ai-visibility/v1/prompt/prompt-response',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
@@ -691,9 +703,15 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research']).to.equal(mockAiVisibilityController.getTopicsResearch);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/stats']).to.equal(mockAiVisibilityController.getTopicsStats);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics']).to.equal(mockAiVisibilityController.getV1TopicBrandTopics);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics-export']).to.equal(mockAiVisibilityController.getV1TopicBrandTopicsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics-totals']).to.equal(mockAiVisibilityController.getV1TopicBrandTopicsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics']).to.equal(mockAiVisibilityController.getV1TopicGapTopics);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics-export']).to.equal(mockAiVisibilityController.getV1TopicGapTopicsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics-totals']).to.equal(mockAiVisibilityController.getV1TopicGapTopicsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts']).to.equal(mockAiVisibilityController.getV1PromptBrandPrompts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptBrandPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts']).to.equal(mockAiVisibilityController.getV1PromptGapPrompts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptGapPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompt-response']).to.equal(mockAiVisibilityController.getV1PromptPromptResponse);
     expect(staticRoutes['GET /v2/regions']).to.equal(mockLlmoMysticatController.getRegions);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
@@ -733,21 +751,24 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete',
-      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:promptId',
-      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects',
-      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects',
-      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/tags',
-      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/projects/:workspaceId/:projectId/models',
-      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/workspaces/:workspaceId/projects',
-      'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
+      'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
@@ -809,11 +830,14 @@ describe('getRouteHandlers', () => {
       'GET /projects/:projectId/sites',
       'GET /projects/by-project-name/:projectName/sites',
       'GET /preflight/jobs/:jobId',
-      'GET /preflight/beta/jobs/:jobId',
+      'POST /sites/:siteId/preflights',
+      'GET /sites/:siteId/preflights',
+      'GET /sites/:siteId/preflights/:preflightId',
       'GET /sites/detect/jobs/:jobId',
       'GET /sites/:siteId',
       'PATCH /sites/:siteId',
       'PATCH /sites/:siteId/config/cdn-logs',
+      'GET /sites/:siteId/config/scraper',
       'PATCH /sites/:siteId/config/scraper',
       'DELETE /sites/:siteId',
       'GET /sites/:siteId/bot-blocker',
@@ -975,6 +999,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/data/:dataSource',
       'GET /sites/:siteId/llmo/data/:sheetType/:dataSource',
       'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource',
+      'PATCH /sites/:siteId/llmo/data/:dataSource/row',
+      'PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row',
       'GET /sites/:siteId/llmo/config',
       'PATCH /sites/:siteId/llmo/config',
       'POST /sites/:siteId/llmo/config',
@@ -1255,6 +1281,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType'].paramNames).to.deep.equal(['baseURL', 'processingType']);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/cdn-logs'].handler).to.equal(mockSitesController.updateCdnLogsConfig);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/cdn-logs'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/config/scraper'].handler).to.equal(mockSitesController.getScraperConfig);
+    expect(dynamicRoutes['GET /sites/:siteId/config/scraper'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/scraper'].handler).to.equal(mockSitesController.updateScraperConfig);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/scraper'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/reports'].handler).to.equal(mockReportsController.createReport);
@@ -1343,6 +1371,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.queryFiles);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/data/:dataSource/row'].handler).to.equal(mockLlmoController.patchLlmoDataRow);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/data/:dataSource/row'].paramNames).to.deep.equal(['siteId', 'dataSource']);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row'].handler).to.equal(mockLlmoController.patchLlmoDataRow);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/url-store'].handler).to.equal(mockUrlStoreController.listUrls);
     expect(dynamicRoutes['GET /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/url-store/by-audit/:auditType'].handler).to.equal(mockUrlStoreController.listUrlsByAuditType);

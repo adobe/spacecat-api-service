@@ -1758,6 +1758,451 @@ describe('Brands Controller', () => {
     });
   });
 
+  describe('checkPromptsByBrand', () => {
+    const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
+    const VALID_PROMPTS = [
+      { text: 'What are generative credits?', region: 'gb' },
+      { text: 'How do I cancel?', region: 'us' },
+    ];
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            neq: sandbox.stub().returnsThis(),
+            order: sandbox.stub().returnsThis(),
+            range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+            maybeSingle: sandbox.stub().callsFake(() => {
+              if (table === 'brands') {
+                return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              }
+              if (table === 'llmo_customer_config') {
+                return Promise.resolve({
+                  data: { config: { customer: { brands: [] } } },
+                  error: null,
+                });
+              }
+              return Promise.resolve({ data: null, error: null });
+            }),
+          };
+          return chain;
+        }),
+        rpc: sandbox.stub().resolves({ data: [VALID_PROMPTS[0]], error: null }),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: undefined,
+        data: { prompts: VALID_PROMPTS },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { brandId: BRAND_UUID },
+        data: { prompts: VALID_PROMPTS },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        data: { prompts: VALID_PROMPTS },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { prompts: VALID_PROMPTS },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when prompts is missing', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('prompts');
+    });
+
+    it('returns 400 when prompts is empty', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when prompts exceeds 500', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: Array.from({ length: 501 }, (_, i) => ({ text: `p${i}`, region: 'us' })) },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when a prompt is missing region', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [{ text: 'some prompt' }] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when a prompt is missing text', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [{ region: 'us' }] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when a prompt item is null', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [null] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when prompt text is whitespace only', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [{ text: '   ', region: 'us' }] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when prompt region is whitespace only', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [{ text: 'some prompt', region: '   ' }] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when prompt text exceeds 2000 chars', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [{ text: 'x'.repeat(2001), region: 'us' }] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('accepts exactly 500 prompts', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: Array.from({ length: 500 }, (_, i) => ({ text: `p${i}`, region: 'us' })) },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('accepts prompt text of exactly 2000 chars', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: [{ text: 'x'.repeat(2000), region: 'us' }] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: VALID_PROMPTS },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: VALID_PROMPTS },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when brand is not found', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') {
+              return Promise.resolve({ data: null, error: null });
+            }
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({
+                data: { config: { customer: { brands: [] } } },
+                error: null,
+              });
+            }
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent' },
+        data: { prompts: VALID_PROMPTS },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.checkPromptsByBrand({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: VALID_PROMPTS },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 200 with matching results on happy path', async () => {
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: VALID_PROMPTS },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('results').that.is.an('array');
+      expect(body.results).to.deep.equal([VALID_PROMPTS[0]]);
+    });
+
+    it('returns 500 when storage throws and logs structured error', async () => {
+      const dbError = new Error('DB error');
+      mockDataAccess.services.postgrestClient.rpc = sandbox.stub().rejects(dbError);
+
+      const response = await brandsController.checkPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompts: VALID_PROMPTS },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+      expect(loggerStub.error).to.have.been.calledWith('Error checking prompts existence', {
+        brandId: BRAND_UUID,
+        error: dbError,
+      });
+    });
+  });
+
+  describe('getPromptStatsByBrand', () => {
+    const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
+    // RPC returns flat intent_* fields; the storage layer transforms them to nested intents
+    const STATS_RPC_ROW = {
+      branded: 42,
+      unbranded: 1208,
+      intent_informational: 410,
+      intent_instructional: 180,
+      intent_comparative: 95,
+      intent_transactional: 250,
+      intent_planning: 60,
+      intent_delegation: 15,
+    };
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') {
+              return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            }
+            return Promise.resolve({ data: null, error: null });
+          }),
+        })),
+        rpc: sandbox.stub().resolves({ data: STATS_RPC_ROW, error: null }),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.getPromptStatsByBrand({
+        ...context,
+        params: { brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.getPromptStatsByBrand({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.getPromptStatsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById = sinon.stub().resolves(null);
+      const response = await brandsController.getPromptStatsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access to the organization', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+      const response = await unauthorizedController.getPromptStatsByBrand({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      const response = await brandsController.getPromptStatsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when brand is not found', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
+        select: sandbox.stub().returnsThis(),
+        eq: sandbox.stub().returnsThis(),
+        maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+      }));
+      const response = await brandsController.getPromptStatsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 200 with the flat stats shape on success', async () => {
+      const response = await brandsController.getPromptStatsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('branded', 42);
+      expect(body).to.have.property('unbranded', 1208);
+      expect(body.intents).to.deep.include({ informational: 410, delegation: 15 });
+    });
+
+    it('returns 500 when storage throws and logs the error', async () => {
+      const dbError = new Error('RPC failure');
+      mockDataAccess.services.postgrestClient.rpc = sandbox.stub().rejects(dbError);
+      const response = await brandsController.getPromptStatsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+      expect(loggerStub.error).to.have.been.calledWith('Error fetching prompt stats', {
+        brandId: BRAND_UUID,
+        error: dbError,
+      });
+    });
+  });
+
   describe('listBrandsForOrg', () => {
     beforeEach(() => {
       mockDataAccess.services.postgrestClient = {
@@ -2254,7 +2699,7 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(404);
     });
 
-    it('returns 403 when site does not belong to the organization (matches triggerConfigSync)', async () => {
+    it('returns 403 when site does not belong to the organization', async () => {
       const otherOrgSite = {
         getOrganizationId: () => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
       };
@@ -3343,7 +3788,7 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(409);
       const body = await response.json();
-      expect(body.message).to.include('uq_topic_per_org');
+      expect(body.message).to.include('A topic with these attributes already exists');
       expect(loggerStub.warn).to.have.been.called;
       expect(loggerStub.error).to.not.have.been.called;
     });
@@ -4260,171 +4705,6 @@ describe('Brands Controller', () => {
         ...context,
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
         dataAccess: mockDataAccess,
-      });
-      expect(response.status).to.equal(500);
-    });
-  });
-
-  describe('triggerConfigSync', () => {
-    let sqsStub;
-    const SYNC_SITE_ID = '00000000-0000-0000-0000-000000000001';
-
-    beforeEach(() => {
-      sqsStub = sinon.stub().resolves();
-      mockEnv.AUDIT_JOBS_QUEUE_URL = 'https://sqs.example.com/queue';
-      mockDataAccess.Site.findById.withArgs(SYNC_SITE_ID).resolves(sites[0]);
-      brandsController = BrandsController(context, loggerStub, mockEnv);
-    });
-
-    it('enqueues SQS message for a valid site', async () => {
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
-        sqs: { sendMessage: sqsStub },
-        env: mockEnv,
-      });
-
-      expect(response.status).to.equal(200);
-      const body = await response.json();
-      expect(body.message).to.equal('Config sync triggered');
-      expect(body.siteId).to.equal(SYNC_SITE_ID);
-      expect(sqsStub).to.have.been.calledWith(
-        'https://sqs.example.com/queue',
-        { type: 'llmo-config-db-sync', siteId: SYNC_SITE_ID },
-      );
-    });
-
-    it('enqueues SQS message with dryRun flag when dryRun=true query param is provided', async () => {
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
-        invocation: { event: { rawQueryString: 'dryRun=true' } },
-        sqs: { sendMessage: sqsStub },
-        env: mockEnv,
-      });
-
-      expect(response.status).to.equal(200);
-      const body = await response.json();
-      expect(body.message).to.equal('Config sync (dry run) triggered');
-      expect(body.siteId).to.equal(SYNC_SITE_ID);
-      expect(body.dryRun).to.be.true;
-      expect(sqsStub).to.have.been.calledWith(
-        'https://sqs.example.com/queue',
-        { type: 'llmo-config-db-sync', siteId: SYNC_SITE_ID, dryRun: true },
-      );
-    });
-
-    it('returns 400 when organization ID is missing', async () => {
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: {},
-      });
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns 400 when params is undefined', async () => {
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: undefined,
-      });
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns 400 when organization ID is not a UUID', async () => {
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: { spaceCatId: 'not-a-uuid' },
-      });
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns 404 when organization is not found', async () => {
-      mockDataAccess.Organization.findById.resolves(null);
-      brandsController = BrandsController(context, loggerStub, mockEnv);
-
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-      });
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns 400 when siteId is missing', async () => {
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-      });
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns 400 when siteId is not a valid UUID', async () => {
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID, siteId: 'not-a-uuid' },
-      });
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns 404 when site is not found', async () => {
-      mockDataAccess.Site.findById.withArgs(SYNC_SITE_ID).resolves(null);
-      brandsController = BrandsController(context, loggerStub, mockEnv);
-
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
-      });
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns 403 when site does not belong to the organization', async () => {
-      const otherOrgSite = {
-        getOrganizationId: () => 'other-org-id',
-        getConfig: () => ({}),
-      };
-      mockDataAccess.Site.findById.withArgs(SYNC_SITE_ID).resolves(otherOrgSite);
-      brandsController = BrandsController(context, loggerStub, mockEnv);
-
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
-      });
-      expect(response.status).to.equal(403);
-    });
-
-    it('returns 400 when site is not in ALLOWED_SITE_IDS', async () => {
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
-      });
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns 403 when user does not have access to the organization', async () => {
-      const noAccessAuth = {
-        attributes: {
-          authInfo: new AuthInfo()
-            .withType('jwt')
-            .withScopes([{ name: 'user' }])
-            .withProfile({ is_admin: false })
-            .withAuthenticated(true),
-        },
-      };
-      const noAccessContext = { ...context, ...noAccessAuth };
-      const ctrl = BrandsController(noAccessContext, loggerStub, mockEnv);
-
-      const response = await ctrl.triggerConfigSync({
-        ...noAccessContext,
-        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
-      });
-      expect(response.status).to.equal(403);
-    });
-
-    it('returns 500 when SQS sendMessage throws', async () => {
-      const response = await brandsController.triggerConfigSync({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
-        sqs: { sendMessage: sinon.stub().rejects(new Error('SQS failure')) },
-        env: mockEnv,
       });
       expect(response.status).to.equal(500);
     });
