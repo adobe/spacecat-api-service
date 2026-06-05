@@ -18,6 +18,7 @@ import { S3Client } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 import { parseAgentTypes } from './llmo-agent-types.js';
+import { checkDateRange } from './traffic-date-range.js';
 import { cachedOk } from '../../support/cached-response.js';
 
 // Site-scoped agentic traffic handlers. Queries mysticat-data-service via PostgREST.
@@ -43,7 +44,7 @@ const VALID_SORT_COLUMNS_BY_USER_AGENT = new Set([
   'page_type', 'agent_type', 'unique_agents', 'total_hits',
 ]);
 const DEFAULT_BY_URL_LIMIT = 50;
-const MAX_BY_URL_LIMIT = 500;
+const MAX_BY_URL_LIMIT = 200;
 
 // UI platform code → DB value. 'all' / unknown → null (no filter). Applied
 // in parseAgenticTrafficParams, so it affects every site-scoped endpoint.
@@ -390,6 +391,11 @@ async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handler
   if (!Site?.postgrestService) {
     log.error('Agentic traffic APIs require PostgREST (DATA_SERVICE_PROVIDER=postgres)');
     return badRequest('Agentic traffic data is not available. PostgreSQL data service is required.');
+  }
+
+  const rangeError = checkDateRange(context.data);
+  if (rangeError) {
+    return badRequest(rangeError);
   }
 
   const { siteId } = context.params;

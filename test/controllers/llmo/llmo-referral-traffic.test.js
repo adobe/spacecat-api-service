@@ -147,6 +147,26 @@ describe('llmo-referral-traffic', () => {
     });
   });
 
+  // ── date range guardrail (SITES-46098) ────────────────────────────────────
+
+  describe('date range guardrail', () => {
+    it('returns 400 when the requested range exceeds the maximum', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-02-13', endDate: '2026-06-05' } });
+      const handler = createReferralTrafficKpisHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.match(/Date range too large/);
+    });
+
+    it('rejects the over-wide range before validating access', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-02-13', endDate: '2026-06-05' } });
+      const handler = createReferralTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(stubbedValidateAccess).to.not.have.been.called;
+    });
+  });
+
   // ── parseParams branches ──────────────────────────────────────────────────
 
   describe('parseParams', () => {
@@ -602,7 +622,7 @@ describe('llmo-referral-traffic', () => {
       const client = makeRpcClient({ data: [] });
       const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
       await handler(makeContext({ client, data: { pageSize: 10000 } }));
-      expect(client.rpc.getCall(0).args[1].p_limit).to.equal(1000);
+      expect(client.rpc.getCall(0).args[1].p_limit).to.equal(200);
     });
 
     it('uses {} when context.data is null in by-url handler (line 412)', async () => {

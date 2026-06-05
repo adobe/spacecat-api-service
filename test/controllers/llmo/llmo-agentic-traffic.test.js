@@ -213,6 +213,26 @@ describe('llmo-agentic-traffic', () => {
     });
   });
 
+  // ── Shared: date range guardrail (SITES-46098) ─────────────────────────────
+
+  describe('date range guardrail', () => {
+    it('returns 400 when the requested range exceeds the maximum', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-02-13', endDate: '2026-06-05' } });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.match(/Date range too large/);
+    });
+
+    it('rejects the over-wide range before touching the data access layer', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-02-13', endDate: '2026-06-05' } });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(stubbedValidateAccess).to.not.have.been.called;
+    });
+  });
+
   // ── Shared: Access control ─────────────────────────────────────────────────
 
   describe('access control', () => {
@@ -995,13 +1015,13 @@ describe('llmo-agentic-traffic', () => {
       ]);
     });
 
-    it('caps limit at 500 via legacy "limit" param', async () => {
+    it('caps limit at 200 via legacy "limit" param', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', limit: 99999 } });
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       const rpcCallArgs = client.rpc.firstCall.args[1];
-      expect(rpcCallArgs.p_page_limit).to.equal(500);
+      expect(rpcCallArgs.p_page_limit).to.equal(200);
     });
 
     it('accepts "pageSize" as the documented parameter name', async () => {
