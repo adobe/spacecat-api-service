@@ -520,6 +520,20 @@ describe('getRouteHandlers', () => {
     listWorkspaceProjects: sinon.stub(),
   };
 
+  const mockAgenticCategoriesController = {
+    list: sinon.stub(),
+    create: sinon.stub(),
+    update: sinon.stub(),
+    remove: sinon.stub(),
+  };
+
+  const mockAgenticPageTypesController = {
+    list: sinon.stub(),
+    create: sinon.stub(),
+    update: sinon.stub(),
+    remove: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -576,6 +590,8 @@ describe('getRouteHandlers', () => {
       mockWebhooksController,
       mockAiVisibilityController,
       mockFanoutReportController,
+      mockAgenticCategoriesController,
+      mockAgenticPageTypesController,
       mockSerenityController,
     );
 
@@ -1111,6 +1127,14 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/referral-traffic/business-impact',
       'GET /sites/:siteId/referral-traffic/weeks',
       'GET /admin/users/:userId',
+      'GET /sites/:siteId/agentic-categories',
+      'POST /sites/:siteId/agentic-categories',
+      'PATCH /sites/:siteId/agentic-categories/:name',
+      'DELETE /sites/:siteId/agentic-categories/:name',
+      'GET /sites/:siteId/agentic-page-types',
+      'POST /sites/:siteId/agentic-page-types',
+      'PATCH /sites/:siteId/agentic-page-types/:name',
+      'DELETE /sites/:siteId/agentic-page-types/:name',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
