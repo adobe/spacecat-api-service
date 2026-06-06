@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 27 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – 28 GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 
@@ -69,6 +69,15 @@ x-ai-vis-month: &monthParam
     type: string
     pattern: '^\d{4}-\d{2}$'
     example: '2026-01'
+
+x-ai-vis-date: &dateParam
+  name: date
+  in: query
+  required: false
+  description: Snapshot date forwarded to supported Semrush v1 gRPC requests as `target_date`
+  schema:
+    type: string
+    example: '2026-01-15'
 
 x-ai-vis-window-months: &windowMonthsParam
   name: windowMonths
@@ -253,6 +262,7 @@ x-ai-vis-v1-prompts-sort-by: &v1PromptsSortByParam
           - MENTIONED_BRANDS_COUNT
           - SOURCES_COUNT
           - TOPIC_VOLUME
+          - TOPIC_VISIBILITY
       - type: integer
         enum: [0, 1, 2, 3, 4, 5]
     example: MENTIONED_BRANDS_COUNT
@@ -337,15 +347,15 @@ x-ai-vis-fts-prompts-sort-by: &ftsPromptsSortByParam
   required: false
   description: |
     `PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY` for Semrush v2 `PromptsByTopicFTSRequest.order.by`.
-    Default when omitted: `MENTIONED_BRANDS_COUNT`. Returns `400 invalid_sort_by` for any other value.
+    Default when omitted: `RELEVANCE_SCORE`. Returns `400 invalid_sort_by` for any other value.
 
     Note: on the all-engines path (no `engine` query param) the sort is applied
     server-side per LLM and the merged page is re-sorted in-process, so ordering
     is fully consistent within each page but only approximate across pages.
   schema:
     type: string
-    enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT]
-    default: MENTIONED_BRANDS_COUNT
+    enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT, RELEVANCE_SCORE]
+    default: RELEVANCE_SCORE
 
 x-ai-vis-fts-brands-sort-by: &ftsBrandsSortByParam
   name: sortBy
@@ -1006,7 +1016,7 @@ ai-visibility-topics-research-prompts:
       the sum of per-LLM totals.
       Data from `PromptService/PromptsByTopicFTS` and `PromptsByTopicFTSTotals`.
 
-      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT` (default), `SOURCES_COUNT`)
+      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT`, `RELEVANCE_SCORE`, `RELEVANCE_SCORE` (default))
       and `sortDirection` (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is
       applied per LLM and the merged page is re-sorted in-process; cross-page ordering is
       approximate.
@@ -1137,6 +1147,7 @@ ai-visibility-v1-topic-brand-topics:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1BrandTopicsSortByParam
       - *sortDirectionParam
       - *v1BrandTopicsSearchQueryParam
@@ -1153,6 +1164,45 @@ ai-visibility-v1-topic-brand-topics:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1TopicBrandTopicsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-brand-topics-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export brand topics as CSV (Topic v2 JSON)
+    description: |
+      Exports brand-associated topics using Semrush `TopicService` v2 `BrandTopicsExport`.
+      The nested `BrandTopicsRequest` uses the same filters and sorting as
+      `/llmo/ai-visibility/v1/topic/brand-topics`: fixed prompt categories
+      `MENTIONS_TARGET` and `CITES_TARGET`, `searchQuery` as `topic CONTAINS "<searchQuery>"`,
+      volume and visibility range filters, `BRAND_TOPICS_ORDER_BY` sorting, and `limit` / `offset`.
+      The response is the native Semrush `ExportResponse` protobuf JSON with CSV
+      `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1TopicBrandTopicsExport
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *v1BrandTopicsSortByParam
+      - *sortDirectionParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+      - *v1BrandTopicsVisibilityFromParam
+      - *v1BrandTopicsVisibilityToParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Brand topics CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicBrandTopicsExportResponse'
       <<: *errorResponses
     security:
       - api_key: []
@@ -1174,6 +1224,7 @@ ai-visibility-v1-topic-brand-topics-totals:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1BrandTopicsSearchQueryParam
       - *v1BrandTopicsVolumeFromParam
       - *v1BrandTopicsVolumeToParam
@@ -1221,6 +1272,7 @@ ai-visibility-v1-topic-gap-topics:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1GapTopicsSortByParam
       - *sortDirectionParam
       - *v1GapTopicsGapKindsParam
@@ -1236,6 +1288,45 @@ ai-visibility-v1-topic-gap-topics:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1TopicGapTopicsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-gap-topics-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export gap topics as CSV (Topic v2 JSON)
+    description: |
+      Exports topics with the gap between the target brand and its competitors using Semrush
+      `TopicService` v2 `GapTopicsExport`. The nested `GapTopicsRequest` uses the same
+      filters and sorting as `/llmo/ai-visibility/v1/topic/gap-topics`: competitors,
+      `searchQuery` as `topic CONTAINS "<searchQuery>"`, volume range filters, `gapKinds`,
+      `TOPICS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`.
+      The response is the native Semrush `ExportResponse` protobuf JSON with CSV
+      `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1TopicGapTopicsExport
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *v1GapTopicsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *v1BrandTopicsSearchQueryParam
+      - *v1BrandTopicsVolumeFromParam
+      - *v1BrandTopicsVolumeToParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap topics CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicGapTopicsExportResponse'
       <<: *errorResponses
     security:
       - api_key: []
@@ -1260,6 +1351,7 @@ ai-visibility-v1-topic-gap-topics-totals:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1BrandTopicsSearchQueryParam
       - *v1BrandTopicsVolumeFromParam
       - *v1BrandTopicsVolumeToParam
@@ -1292,6 +1384,7 @@ ai-visibility-v1-prompt-brand-prompts:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1PromptsSortByParam
       - *sortDirectionParam
       - *topicIdOptionalParam
@@ -1304,6 +1397,41 @@ ai-visibility-v1-prompt-brand-prompts:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1PromptBrandPromptsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-brand-prompts-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export brand prompts as CSV (Prompt v2 JSON)
+    description: |
+      Exports prompts for the target domain using Semrush `PromptService` v2 `PromptsExport`.
+      The nested `PromptsRequest` uses the same filters and sorting as
+      `/llmo/ai-visibility/v1/prompt/brand-prompts`: fixed prompt categories
+      `MENTIONS_TARGET` and `CITES_TARGET`, optional `topicId` as
+      `topic_hash = <topicId>`, `PROMPTS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`.
+      The response is the native Semrush `ExportResponse` protobuf JSON with CSV
+      `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1PromptBrandPromptsExport
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *v1PromptsSortByParam
+      - *sortDirectionParam
+      - *topicIdOptionalParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Brand prompts CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptBrandPromptsExportResponse'
       <<: *errorResponses
     security:
       - api_key: []
@@ -1335,6 +1463,7 @@ ai-visibility-v1-prompt-gap-prompts:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
       - *v1GapPromptsSortByParam
       - *sortDirectionParam
       - *v1GapTopicsGapKindsParam
@@ -1349,6 +1478,44 @@ ai-visibility-v1-prompt-gap-prompts:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1PromptGapPromptsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-gap-prompts-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export gap prompts as CSV (Prompt v2 JSON)
+    description: |
+      Exports prompts with the gap between the target brand and its competitors using Semrush
+      `PromptService` v2 `GapPromptsExport`. The nested `GapPromptsRequest` uses the same
+      filters and sorting as `/llmo/ai-visibility/v1/prompt/gap-prompts`: competitors,
+      `gapKinds`, optional `topicId` as native `topic_hash`, optional `sourceDomain` as native
+      `source_domain`, `GAP_PROMPTS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`.
+      The response is the native Semrush `ExportResponse` protobuf JSON with CSV
+      `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1PromptGapPromptsExport
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *v1GapPromptsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *topicIdOptionalParam
+      - *v1GapPromptsSourceDomainParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap prompts CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptGapPromptsExportResponse'
       <<: *errorResponses
     security:
       - api_key: []
@@ -1370,6 +1537,7 @@ ai-visibility-v1-prompt-prompt-response:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *dateParam
     responses:
       '200':
         description: Prompt response retrieved successfully

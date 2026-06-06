@@ -39,6 +39,7 @@ export async function handleBrandTopicsTotals(sp, clients) {
   const domain = sp.get('domain');
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
+  const date = sp.get('date');
 
   const dimensionFilterQl = buildBrandTopicsDimensionFilterQl(sp);
   const metricFilterResult = buildBrandTopicsMetricFilterQl(sp);
@@ -52,18 +53,28 @@ export async function handleBrandTopicsTotals(sp, clients) {
     PROMPT_CATEGORY_ENUM.CITES_TARGET,
   ];
 
-  const totalsRequest = fromJson(
-    BrandTopicsTotalsRequestSchema,
-    {
-      country,
-      llm: engine,
-      target: { domain, name: domain },
-      categories,
-      dimension_filter_ql: dimensionFilterQl,
-      metric_filter_ql: metricFilterQl,
-    },
-    PROTO_FROM_JSON,
-  );
+  let totalsRequest;
+  try {
+    totalsRequest = fromJson(
+      BrandTopicsTotalsRequestSchema,
+      {
+        country,
+        llm: engine,
+        target: { domain, name: domain },
+        categories,
+        dimension_filter_ql: dimensionFilterQl,
+        metric_filter_ql: metricFilterQl,
+        target_date: date,
+      },
+      PROTO_FROM_JSON,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid brand topics totals request';
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message },
+    };
+  }
 
   try {
     const totalsMessage = await clients.topicClient.brandTopicsTotals(totalsRequest);

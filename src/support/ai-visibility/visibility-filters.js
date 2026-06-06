@@ -14,8 +14,10 @@
 
 export const SR_AI_SEO_SUPPORTED_MARKET_CODES = [
   'AE', 'AR', 'AT', 'AU', 'BE', 'BR', 'CA', 'CH', 'CL', 'CO',
-  'DE', 'DK', 'ES', 'FI', 'FR', 'IE', 'IL', 'IN', 'IT', 'JP',
-  'MX', 'NL', 'NO', 'PA', 'PE', 'PL', 'SA', 'SE', 'UK', 'US', 'UY', 'ZA',
+  'DE', 'DK', 'ES', 'FI', 'FR', 'HK', 'ID', 'IE', 'IL', 'IN',
+  'IT', 'JP', 'KR', 'MX', 'MY', 'NL', 'NO', 'PA', 'PE', 'PH',
+  'PL', 'SA', 'SE', 'SG', 'TH', 'TR', 'TW', 'UK', 'US', 'UY',
+  'VN', 'ZA',
 ];
 
 const SUPPORTED_MARKET = new Set(SR_AI_SEO_SUPPORTED_MARKET_CODES);

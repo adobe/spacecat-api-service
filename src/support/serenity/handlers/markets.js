@@ -16,9 +16,11 @@ import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
+import { SerenityTransportError } from '../rest-transport.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
+const MAX_MODEL_IDS = 50;
 
 // Reusable English region-name formatter (ICU-backed, built into Node). Used
 // for the `location_name` we send upstream — matches the form Semrush stores
@@ -734,8 +736,15 @@ async function fetchAllAiModels(transport, semrushWorkspaceId, projectId) {
 }
 
 /**
- * GET /serenity/models?geoTargetId=&languageCode= — AI models configured
- * for the slice's upstream project. Required filters.
+ * GET /serenity/models — AI models.
+ *
+ * With geoTargetId + languageCode: models configured for the slice's upstream
+ * project (existing behaviour).
+ *
+ * Without params: global catalog of ALL AI models available for tracking.
+ * Uses GET /v1/ai_models (not workspace-scoped) which returns the full
+ * model catalog independent of any project configuration. Falls back to an
+ * empty list if the endpoint is not available (e.g. 404/405 from upstream).
  */
 export async function handleListModels(
   transport,
@@ -746,13 +755,62 @@ export async function handleListModels(
 ) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
+
+  // No-params path: return global model catalog.
+  if (geoTargetId === null && languageCode === null) {
+    let rawItems = [];
+    try {
+      let page = 1;
+      while (page <= MAX_AI_MODELS_PAGES) {
+        // eslint-disable-next-line no-await-in-loop
+        const resp = await transport.listGlobalAiModels({
+          page,
+          limit: AI_MODELS_PAGE,
+        });
+        const batch = Array.isArray(resp?.items) ? resp.items : [];
+        if (batch.length === 0) {
+          break;
+        }
+        rawItems.push(...batch);
+        if (batch.length < AI_MODELS_PAGE) {
+          break;
+        }
+        page += 1;
+      }
+    } catch (e) {
+      // Only swallow "endpoint not available" responses (404/405). Auth
+      // errors (401/403) and server errors must propagate — silently
+      // returning an empty list on a 403 would look like "no models to
+      // choose from" rather than the auth failure it actually is.
+      if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+        rawItems = [];
+      } else {
+        throw e;
+      }
+    }
+    // Workspace items may be plain model objects { id, key, name, icon } or
+    // wrapped assignments { model: { id, key, name, icon } }. Normalise both.
+    const items = rawItems
+      .map((it) => (it?.model && typeof it.model === 'object' ? it.model : it))
+      .filter((m) => m && typeof m === 'object' && hasText(m.id) && hasText(m.key))
+      .map((m) => ({
+        id: m.id,
+        key: m.key,
+        name: m.name ?? null,
+        icon: m.icon ?? null,
+      }));
+    return { items };
+  }
+
+  // Partial params: both must be provided together.
   if (geoTargetId === null || languageCode === null) {
     throw new ErrorWithStatusCode(
-      'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
+      'Provide both geoTargetId and languageCode to query a specific market, or omit both for the workspace catalog',
       400,
     );
   }
 
+  // Slice path: return models for the specific (brand, geo, language) project.
   const row = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
     geoTargetId,
@@ -772,5 +830,159 @@ export async function handleListModels(
       name: m.name ?? null,
       icon: m.icon ?? null,
     }));
+  return { items };
+}
+
+/**
+ * Maps a raw Semrush assignment row to the shape returned by the models
+ * endpoints. Returns null for rows that lack a valid model id/key pair.
+ */
+function assignmentToItem(it) {
+  const m = it?.model;
+  if (!m || typeof m !== 'object' || !hasText(m.id) || !hasText(m.key)) {
+    return null;
+  }
+  return {
+    id: m.id,
+    key: m.key,
+    name: m.name ?? null,
+    icon: m.icon ?? null,
+  };
+}
+
+/**
+ * PUT /serenity/models — replaces the AI-model set for a (geoTargetId,
+ * languageCode) slice with the caller-supplied list. Implements a diff-based
+ * sync: models absent from `modelIds` are removed; models present in
+ * `modelIds` but not yet assigned are added. Already-assigned models are
+ * left untouched (no unnecessary re-create round-trips).
+ *
+ * `modelIds` contains catalog model IDs — the `id` field from
+ * `AIModelResponse` (i.e. `ProjectAIModelResponse.model.id`), NOT the
+ * assignment row's `id`. The caller gets these from a prior `GET /serenity/models`
+ * call on the same or any other slice. Duplicate IDs in `modelIds` are
+ * silently deduplicated before diffing.
+ *
+ * Assignment IDs (outer `id` on `ProjectAIModelResponse`) are resolved
+ * internally for the DELETE batch and are never exposed to callers.
+ *
+ * Returns the final model list in the same shape as `handleListModels`.
+ */
+export async function handleUpdateModels(
+  transport,
+  dataAccess,
+  brandId,
+  semrushWorkspaceId,
+  body,
+  log,
+) {
+  const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
+  const languageCode = normalizeLanguageCode(body?.languageCode);
+  if (geoTargetId === null || languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
+      400,
+    );
+  }
+  const modelIds = body?.modelIds;
+  if (!Array.isArray(modelIds) || !modelIds.every((id) => hasText(id))) {
+    throw new ErrorWithStatusCode(
+      'modelIds must be an array of non-empty strings',
+      400,
+    );
+  }
+  if (modelIds.length > MAX_MODEL_IDS) {
+    throw new ErrorWithStatusCode(
+      `modelIds must not exceed ${MAX_MODEL_IDS} entries`,
+      400,
+    );
+  }
+
+  const row = await dataAccess.BrandSemrushProject.findBySlice(
+    brandId,
+    geoTargetId,
+    languageCode,
+  );
+  if (!row) {
+    throw new ErrorWithStatusCode('Market not found for this brand', 404);
+  }
+  const projectId = row.getSemrushProjectId();
+
+  // Fetch current assignments: catalog-id → assignment-id mapping
+  const currentAssignments = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
+  const currentMap = new Map(
+    currentAssignments
+      .filter((it) => it && hasText(it.id) && hasText(it.model?.id))
+      .map((it) => [String(it.model.id), String(it.id)]),
+  );
+
+  const desiredSet = new Set(modelIds.map(String));
+  const currentSet = new Set(currentMap.keys());
+
+  const toAdd = [...desiredSet].filter((id) => !currentSet.has(id));
+  const toRemoveAssignmentIds = [...currentSet]
+    .filter((id) => !desiredSet.has(id))
+    .map((id) => currentMap.get(id))
+    .filter(Boolean);
+
+  // Short-circuit: nothing to do — return the already-fetched list as-is.
+  if (toAdd.length === 0 && toRemoveAssignmentIds.length === 0) {
+    const items = currentAssignments.map(assignmentToItem).filter(Boolean);
+    return { items };
+  }
+
+  // Apply removals first (fewer dangling adds if a later add fails)
+  if (toRemoveAssignmentIds.length > 0) {
+    try {
+      await transport.deleteAiModelsByIds(semrushWorkspaceId, projectId, toRemoveAssignmentIds);
+    } catch (e) {
+      log?.error?.('handleUpdateModels: failed to remove AI models', {
+        brandId,
+        semrushWorkspaceId,
+        projectId,
+        geoTargetId,
+        languageCode,
+        assignmentIds: toRemoveAssignmentIds,
+        error: e.message,
+      });
+      throw e;
+    }
+  }
+
+  // Apply additions sequentially — Semrush add endpoint takes one model at a
+  // time; parallel calls could race on the same project state.
+  const alreadyAdded = [];
+  for (const catalogId of toAdd) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await transport.addAiModel(semrushWorkspaceId, projectId, catalogId);
+      alreadyAdded.push(catalogId);
+    } catch (e) {
+      // Log which IDs were already added so operators can assess partial state.
+      log?.error?.('handleUpdateModels: failed to add AI model', {
+        brandId,
+        semrushWorkspaceId,
+        projectId,
+        geoTargetId,
+        languageCode,
+        catalogId,
+        alreadyAdded,
+        error: e.message,
+      });
+      throw e;
+    }
+  }
+
+  // Return the refreshed model list
+  const updated = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
+  const items = updated.map(assignmentToItem).filter(Boolean);
+  log?.info?.('handleUpdateModels: sync complete', {
+    brandId,
+    projectId,
+    geoTargetId,
+    languageCode,
+    added: toAdd.length,
+    removed: toRemoveAssignmentIds.length,
+  });
   return { items };
 }

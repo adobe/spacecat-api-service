@@ -1,3 +1,164 @@
+## [1.556.1](https://github.com/adobe/spacecat-api-service/compare/v1.556.0...v1.556.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* add structured-data, sitemap, toc audits to paid profile ([#2566](https://github.com/adobe/spacecat-api-service/issues/2566)) ([33dec79](https://github.com/adobe/spacecat-api-service/commit/33dec794099ebbfd6baef55a26874087203b4ab4))
+
+# [1.556.0](https://github.com/adobe/spacecat-api-service/compare/v1.555.0...v1.556.0) (2026-06-05)
+
+
+### Features
+
+* proxy endpoint for url inspector preview | LLMO-434 ([#2557](https://github.com/adobe/spacecat-api-service/issues/2557)) ([771c208](https://github.com/adobe/spacecat-api-service/commit/771c208da9409cf431492b41f98a1c003cfef490))
+
+# [1.555.0](https://github.com/adobe/spacecat-api-service/compare/v1.554.2...v1.555.0) (2026-06-05)
+
+
+### Features
+
+* **agentic-rules:** customer-edit endpoints for URL classification rules (LLMO-5037) ([#2536](https://github.com/adobe/spacecat-api-service/issues/2536)) ([9af94e2](https://github.com/adobe/spacecat-api-service/commit/9af94e2a1e3ecbdb4055c5bda324278681355914)), closes [#2539](https://github.com/adobe/spacecat-api-service/issues/2539)
+
+## [1.554.2](https://github.com/adobe/spacecat-api-service/compare/v1.554.1...v1.554.2) (2026-06-05)
+
+
+### Bug Fixes
+
+* guardrails on agentic/referral traffic read endpoints (SITES-46098) ([#2564](https://github.com/adobe/spacecat-api-service/issues/2564)) ([b4e1ed7](https://github.com/adobe/spacecat-api-service/commit/b4e1ed79f1372b16589b93af4d18d726c9706f58))
+
+## [1.554.1](https://github.com/adobe/spacecat-api-service/compare/v1.554.0...v1.554.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* **configuration:** allow S2S consumers with configuration:read to read configurations ([#2559](https://github.com/adobe/spacecat-api-service/issues/2559)) ([5f85cb4](https://github.com/adobe/spacecat-api-service/commit/5f85cb4b295ae8ec047f6a1e04955717b5d3349a))
+
+# [1.554.0](https://github.com/adobe/spacecat-api-service/compare/v1.553.0...v1.554.0) (2026-06-05)
+
+
+### Features
+
+* cursor-based pagination for GET /sites ([#2497](https://github.com/adobe/spacecat-api-service/issues/2497)) ([ac0dab4](https://github.com/adobe/spacecat-api-service/commit/ac0dab47a744135c6dee8f844ebb13d4ab073473))
+
+# [1.553.0](https://github.com/adobe/spacecat-api-service/compare/v1.552.0...v1.553.0) (2026-06-05)
+
+
+### Features
+
+* **suggestions:** allow S2S consumers with suggestion:write to reject suggestions ([#2558](https://github.com/adobe/spacecat-api-service/issues/2558)) ([8d1150e](https://github.com/adobe/spacecat-api-service/commit/8d1150e09c577796d2a9aff6ffb0f94c1b6abd84))
+
+# [1.552.0](https://github.com/adobe/spacecat-api-service/compare/v1.551.0...v1.552.0) (2026-06-04)
+
+
+### Features
+
+* added new countries to ai visibility ([#2546](https://github.com/adobe/spacecat-api-service/issues/2546)) ([9f48d0e](https://github.com/adobe/spacecat-api-service/commit/9f48d0e99cae957ecae05f1533a199658edce423))
+
+# [1.551.0](https://github.com/adobe/spacecat-api-service/compare/v1.550.0...v1.551.0) (2026-06-04)
+
+
+### Features
+
+* **bot-blocker:** forward scraperConfig.headers to detectBotBlocker probe ([#2556](https://github.com/adobe/spacecat-api-service/issues/2556)) ([18256a4](https://github.com/adobe/spacecat-api-service/commit/18256a43971ee4d20dafd26c760d3e7d1fbc8b17))
+
+# [1.550.0](https://github.com/adobe/spacecat-api-service/compare/v1.549.1...v1.550.0) (2026-06-04)
+
+
+### Features
+
+* slack alert on skipping a suggestion in PLG ([#2505](https://github.com/adobe/spacecat-api-service/issues/2505)) ([7310afa](https://github.com/adobe/spacecat-api-service/commit/7310afa771ad231b335ca440075ea7da0d2be7ee))
+
+## [1.549.1](https://github.com/adobe/spacecat-api-service/compare/v1.549.0...v1.549.1) (2026-06-04)
+
+
+### Bug Fixes
+
+* bump @adobe/spacecat-shared-utils to 1.116.6 ([#2553](https://github.com/adobe/spacecat-api-service/issues/2553)) ([2121fce](https://github.com/adobe/spacecat-api-service/commit/2121fce8978aa6563b77fb4e27b618b19985f98b)), closes [#2552](https://github.com/adobe/spacecat-api-service/issues/2552)
+
+# [1.549.0](https://github.com/adobe/spacecat-api-service/compare/v1.548.0...v1.549.0) (2026-06-04)
+
+
+### Features
+
+* **s2s:** expose GET /sites/:siteId/user-activities to S2S consumers via trialUser:read ([#2554](https://github.com/adobe/spacecat-api-service/issues/2554)) ([ab5db2f](https://github.com/adobe/spacecat-api-service/commit/ab5db2fd79ec74f8cc25c51eabc5ada13b99e1cc))
+
+# [1.548.0](https://github.com/adobe/spacecat-api-service/compare/v1.547.0...v1.548.0) (2026-06-03)
+
+
+### Features
+
+* **serenity:** server-side tag filtering for prompts list ([#2547](https://github.com/adobe/spacecat-api-service/issues/2547)) ([ef3a226](https://github.com/adobe/spacecat-api-service/commit/ef3a22695929e9f4d384cb975c52915863f713d1))
+
+# [1.547.0](https://github.com/adobe/spacecat-api-service/compare/v1.546.0...v1.547.0) (2026-06-03)
+
+
+### Features
+
+* **preflight:** resolve x-promise-token header to create a preflight job ([#2548](https://github.com/adobe/spacecat-api-service/issues/2548)) ([aa7191e](https://github.com/adobe/spacecat-api-service/commit/aa7191e919c4e7b185da8af6144d570f731f09a3))
+
+# [1.546.0](https://github.com/adobe/spacecat-api-service/compare/v1.545.0...v1.546.0) (2026-06-03)
+
+
+### Features
+
+* **serenity:** PUT /serenity/models — update AI models for a market slice ([#2545](https://github.com/adobe/spacecat-api-service/issues/2545)) ([1454f48](https://github.com/adobe/spacecat-api-service/commit/1454f489f67a65023e278090b89dcb7c15f43b71))
+
+# [1.545.0](https://github.com/adobe/spacecat-api-service/compare/v1.544.0...v1.545.0) (2026-06-03)
+
+
+### Features
+
+* add site-scoped preflight REST endpoints | SITES-44686 ([#2478](https://github.com/adobe/spacecat-api-service/issues/2478)) ([824e020](https://github.com/adobe/spacecat-api-service/commit/824e02071824aa9b8552d029af84025e4d97ad94)), closes [#2377](https://github.com/adobe/spacecat-api-service/issues/2377) [#2480](https://github.com/adobe/spacecat-api-service/issues/2480) [#2544](https://github.com/adobe/spacecat-api-service/issues/2544)
+
+# [1.544.0](https://github.com/adobe/spacecat-api-service/compare/v1.543.0...v1.544.0) (2026-06-03)
+
+
+### Features
+
+* Add info-level log message for each preflight start ([#2539](https://github.com/adobe/spacecat-api-service/issues/2539)) ([257ac4e](https://github.com/adobe/spacecat-api-service/commit/257ac4e7942ce637cade90bda1e8baccf436e46c))
+
+# [1.543.0](https://github.com/adobe/spacecat-api-service/compare/v1.542.2...v1.543.0) (2026-06-03)
+
+
+### Features
+
+* ai vis export for topics/prompts ([#2540](https://github.com/adobe/spacecat-api-service/issues/2540)) ([8faa803](https://github.com/adobe/spacecat-api-service/commit/8faa803105539f6410f87e11940952806e379ccb))
+
+## [1.542.2](https://github.com/adobe/spacecat-api-service/compare/v1.542.1...v1.542.2) (2026-06-03)
+
+
+### Bug Fixes
+
+* **topics:** return 422 instead of 500 on foreign-key violation (23503) ([#2543](https://github.com/adobe/spacecat-api-service/issues/2543)) ([1666840](https://github.com/adobe/spacecat-api-service/commit/16668400ffa84f3da328a64cc6127d1e80918332))
+
+## [1.542.1](https://github.com/adobe/spacecat-api-service/compare/v1.542.0...v1.542.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* Revert "feat: resolve promise token from the header required to create a preflight job" ([#2544](https://github.com/adobe/spacecat-api-service/issues/2544)) ([2f167a9](https://github.com/adobe/spacecat-api-service/commit/2f167a9ed063457f828cd614b0626efcc522b1d7)), closes [adobe/spacecat-api-service#2480](https://github.com/adobe/spacecat-api-service/issues/2480)
+
+# [1.542.0](https://github.com/adobe/spacecat-api-service/compare/v1.541.0...v1.542.0) (2026-06-03)
+
+
+### Features
+
+* **s2s:** expose auto-fix endpoint to S2S consumers via fixEntity:create ([#2542](https://github.com/adobe/spacecat-api-service/issues/2542)) ([c357593](https://github.com/adobe/spacecat-api-service/commit/c3575935eef29e4a1515e24cbee92278a15c83aa))
+
+# [1.541.0](https://github.com/adobe/spacecat-api-service/compare/v1.540.0...v1.541.0) (2026-06-03)
+
+
+### Features
+
+* resolve promise token from the header required to create a preflight job ([#2480](https://github.com/adobe/spacecat-api-service/issues/2480)) ([93ac940](https://github.com/adobe/spacecat-api-service/commit/93ac9403191f3879eed3a4c01544ae1f366a47c8))
+
+# [1.540.0](https://github.com/adobe/spacecat-api-service/compare/v1.539.0...v1.540.0) (2026-06-03)
+
+
+### Features
+
+* **trigger:** add rum-config-refresh audit type to /trigger endpoint ([#2538](https://github.com/adobe/spacecat-api-service/issues/2538)) ([1f0cc26](https://github.com/adobe/spacecat-api-service/commit/1f0cc269ca928fe88fbeb4bd295e5d624f4230d2))
+
 # [1.539.0](https://github.com/adobe/spacecat-api-service/compare/v1.538.0...v1.539.0) (2026-06-02)
 
 

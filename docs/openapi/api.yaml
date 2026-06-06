@@ -310,6 +310,14 @@ paths:
     $ref: './url-store-api.yaml#/url-store-get'
   /sites/{siteId}/url-store/delete:
     $ref: './url-store-api.yaml#/url-store-delete'
+  /sites/{siteId}/agentic-categories:
+    $ref: './agentic-rules-api.yaml#/agentic-categories-list'
+  /sites/{siteId}/agentic-categories/{name}:
+    $ref: './agentic-rules-api.yaml#/agentic-categories-one'
+  /sites/{siteId}/agentic-page-types:
+    $ref: './agentic-rules-api.yaml#/agentic-page-types-list'
+  /sites/{siteId}/agentic-page-types/{name}:
+    $ref: './agentic-rules-api.yaml#/agentic-page-types-one'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:
@@ -656,12 +664,24 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
   /llmo/ai-visibility/v1/topic/brand-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
+  /llmo/ai-visibility/v1/topic/brand-topics-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics-export'
+  /llmo/ai-visibility/v1/topic/brand-topics-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics-totals'
   /llmo/ai-visibility/v1/topic/gap-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics'
+  /llmo/ai-visibility/v1/topic/gap-topics-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-export'
+  /llmo/ai-visibility/v1/topic/gap-topics-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-totals'
   /llmo/ai-visibility/v1/prompt/brand-prompts:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts'
+  /llmo/ai-visibility/v1/prompt/brand-prompts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts-export'
   /llmo/ai-visibility/v1/prompt/gap-prompts:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts'
+  /llmo/ai-visibility/v1/prompt/gap-prompts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
 
