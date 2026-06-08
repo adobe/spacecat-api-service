@@ -114,27 +114,6 @@ import StateAccessMappingsController from './controllers/state-access-mappings.j
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
 
-// Compatibility shim — the gist-distributed facs-wrapper currently installed
-// validates that each route value is a non-empty array of capability strings
-// (old API). Our facs-capabilities.js uses single strings (H2 hybrid model).
-// Normalise here so unit tests (which check plain strings) and the runtime
-// wrapper (which expects arrays) both stay green.
-// TODO: remove once the gist is updated to the H2 wrapper.
-const adaptFacsCapabilitiesForLegacyWrapper = (caps) => ({
-  ...caps,
-  PRODUCTS_ROUTES: Object.fromEntries(
-    Object.entries(caps.PRODUCTS_ROUTES).map(([product, routes]) => [
-      product,
-      Object.fromEntries(
-        Object.entries(routes || {}).map(([route, cap]) => [
-          route,
-          Array.isArray(cap) ? cap : [cap],
-        ]),
-      ),
-    ]),
-  ),
-});
-
 // Accept any RFC 4122 / 9562-defined UUID version (v1..v8) instead of
 // v4-only. Version nibble `[1-8]` covers all allocated versions; v0/nil
 // (reserved) and v9..vF (unallocated) are still rejected. The clock-seq
@@ -466,9 +445,7 @@ const AUTH_HANDLERS = [
 ];
 
 const wrappedMain = wrap(run)
-  .with(facsWrapper, {
-    routeFacsCapabilities: adaptFacsCapabilitiesForLegacyWrapper(routeFacsCapabilities),
-  })
+  .with(facsWrapper, { routeFacsCapabilities })
   .with(readOnlyAdminWrapper, {
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,
