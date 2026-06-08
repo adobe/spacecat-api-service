@@ -17,8 +17,71 @@ import {
   createEntitlementsForProducts,
   postEntitlementMessages,
 } from './entitlement-modal-utils.js';
+import { createProject } from '../../utils.js';
 
 const MODAL_CALLBACK_ID = 'set_ims_org_modal';
+
+/**
+ * Re-parents a site's project so it ends up in the target Spacecat org alongside
+ * the site. Re-parenting only `site.organizationId` (as this flow used to) leaves
+ * the associated project in the old org, so the site shows in
+ * `/organizations/{orgId}/sites` but disappears from the ASO site picker, which
+ * groups sites under `/organizations/{orgId}/projects` (SITES-46200).
+ *
+ * Mutates `site` in place (and may set its projectId); the caller is responsible
+ * for persisting the site via `site.save()`.
+ *
+ * - No project on the site: nothing to do.
+ * - Project already in the target org: nothing to do.
+ * - Site is the only member of its project: move the project to the target org
+ *   (the site keeps its projectId).
+ * - Other sites still share the project: split — move this site to a project in
+ *   the target org (find-or-create by name) so the siblings keep their project
+ *   in the source org.
+ *
+ * @param {object} params
+ * @param {object} params.site - The site being re-parented (already has its new orgId set).
+ * @param {string} params.targetOrgId - The Spacecat org id the site is moving to.
+ * @param {string} params.baseURL - The site's base URL (used to derive a project name).
+ * @param {object} params.lambdaContext - The Lambda context (provides dataAccess + log).
+ * @param {Function} params.say - Slack say function for operator feedback.
+ */
+export async function reparentSiteProject({
+  site, targetOrgId, baseURL, lambdaContext, say,
+}) {
+  const { dataAccess, log } = lambdaContext;
+  const { Project, Site } = dataAccess;
+
+  const projectId = site.getProjectId();
+  if (!projectId) {
+    return;
+  }
+
+  const project = await Project.findById(projectId);
+  if (!project) {
+    log.warn(`set imsorg: site ${site.getId()} references missing project ${projectId}; skipping project re-parent`);
+    return;
+  }
+
+  if (project.getOrganizationId() === targetOrgId) {
+    return;
+  }
+
+  const sitesOnProject = await Site.allByProjectId(projectId);
+  if (sitesOnProject.length <= 1) {
+    // Solo site on the project — move the whole project to the target org.
+    project.setOrganizationId(targetOrgId);
+    await project.save();
+    await say(
+      `:information_source: Moved project *${project.getProjectName()}* to the new org so the site stays visible in the site picker.`,
+    );
+  } else {
+    // Project is shared with sites that are staying behind — split it so the
+    // moved site gets a project in the target org and the siblings keep theirs.
+    const newProject = await createProject(lambdaContext, { say }, baseURL, targetOrgId, null);
+    site.setProjectId(newProject.getId());
+  }
+}
 
 /**
  * Opens the product selection modal for set-ims-org command.
@@ -114,6 +177,13 @@ export function setImsOrgModal(lambdaContext) {
         await spaceCatOrg.save();
 
         site.setOrganizationId(spaceCatOrg.getId());
+        await reparentSiteProject({
+          site,
+          targetOrgId: spaceCatOrg.getId(),
+          baseURL,
+          lambdaContext,
+          say,
+        });
         await site.save();
 
         // Remove the button by updating the message
@@ -136,6 +206,13 @@ export function setImsOrgModal(lambdaContext) {
       } else {
         // we already have a matching spacecat org
         site.setOrganizationId(spaceCatOrg.getId());
+        await reparentSiteProject({
+          site,
+          targetOrgId: spaceCatOrg.getId(),
+          baseURL,
+          lambdaContext,
+          say,
+        });
         await site.save();
 
         // Remove the button by updating the message
