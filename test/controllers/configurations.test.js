@@ -408,6 +408,138 @@ describe('Configurations Controller', () => {
     });
   });
 
+  describe('configuration write - S2S configuration:write capability', () => {
+    const makeS2SConsumer = ({
+      clientId = 'svc-cfg-write', imsOrgId = 'BBB222222222222222222222@AdobeOrg',
+    } = {}) => ({ getClientId: () => clientId, getImsOrgId: () => imsOrgId });
+
+    const makeFreshConsumer = ({
+      id = 'consumer-cfg-write-1',
+      capabilities = ['configuration:write'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) => ({
+      getId: () => id,
+      getCapabilities: () => capabilities,
+      getStatus: () => status,
+      isRevoked: () => revoked,
+    });
+
+    beforeEach(() => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-cfg-write-1' };
+      mockDataAccess.Consumer = { findByClientIdAndImsOrgId: sandbox.stub() };
+    });
+
+    it('grants registerAudit to an S2S consumer holding configuration:write', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:write'] }));
+      context.data = {
+        auditType: 'lcp',
+        enabledByDefault: true,
+        interval: 'daily',
+        productCodes: ['ASO'],
+      };
+
+      const result = await configurationsController.registerAudit(context);
+
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+      expect(context.log.info).to.have.been.calledWithMatch(
+        /\[s2s\] POST \/configurations\/audits granted clientId=svc-cfg-write consumerId=consumer-cfg-write-1 capability=configuration:write requestId=req-cfg-write-1/,
+      );
+    });
+
+    it('sets updatedBy to s2s:<clientId> for S2S write callers', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:write'] }));
+      context.data = {
+        auditType: 'lcp',
+        enabledByDefault: true,
+        interval: 'daily',
+        productCodes: ['ASO'],
+      };
+
+      await configurationsController.registerAudit(context);
+
+      expect(configurations[1].setUpdatedBy).to.have.been.calledWith('s2s:svc-cfg-write');
+    });
+
+    it('denies an S2S consumer lacking configuration:write', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:read'] }));
+      context.data = {
+        auditType: 'lcp',
+        enabledByDefault: true,
+        interval: 'daily',
+        productCodes: ['ASO'],
+      };
+
+      const result = await configurationsController.registerAudit(context);
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only admins can register audits');
+      expect(mockDataAccess.Configuration.findLatest).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied POST \/configurations\/audits - reason=missing-capability clientId=svc-cfg-write consumerId=consumer-cfg-write-1/,
+      );
+    });
+
+    it('denies a revoked S2S consumer on write', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ revoked: true }));
+      context.data = {
+        auditType: 'lcp',
+        enabledByDefault: true,
+        interval: 'daily',
+        productCodes: ['ASO'],
+      };
+
+      const result = await configurationsController.registerAudit(context);
+
+      expect(result.status).to.equal(403);
+      expect(mockDataAccess.Configuration.findLatest).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(/reason=revoked/);
+    });
+
+    it('logs requestId=unknown when invocation id is missing on write', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:read'] }));
+      delete context.invocation;
+      context.data = {
+        auditType: 'lcp',
+        enabledByDefault: true,
+        interval: 'daily',
+        productCodes: ['ASO'],
+      };
+
+      const result = await configurationsController.registerAudit(context);
+
+      expect(result.status).to.equal(403);
+      expect(context.log.info).to.have.been.calledWithMatch(/requestId=unknown/);
+    });
+
+    it('grants updateConfiguration to an S2S consumer holding configuration:write', async () => {
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:write'] }));
+      const updateConfiguration = sandbox.stub();
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        updateConfiguration,
+      });
+      context.data = { handlers: { cwv: { enabledByDefault: true, productCodes: ['ASO'] } } };
+
+      const result = await configurationsController.updateConfiguration(context);
+
+      expect(result.status).to.equal(200);
+      expect(context.log.info).to.have.been.calledWithMatch(
+        /\[s2s\] PATCH \/configurations\/latest granted clientId=svc-cfg-write consumerId=consumer-cfg-write-1 capability=configuration:write requestId=req-cfg-write-1/,
+      );
+    });
+  });
+
   it('returns not found when a configuration is not found by version', async () => {
     mockDataAccess.Configuration.findByVersion.resolves(null);
 
