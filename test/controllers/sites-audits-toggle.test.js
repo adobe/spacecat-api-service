@@ -240,7 +240,7 @@ describe('Sites Audits Controller', () => {
       const error = await response.json();
 
       expect(
-        logMock.error.calledWith(privateInternalServerError),
+        contextMock.log.error.calledWith(privateInternalServerError),
         'Expected log.error to be called with the privateInternalServerError message',
       ).to.be.true;
 
@@ -934,6 +934,7 @@ describe('Sites Audits Controller', () => {
         data: requestData,
         log: logMock,
         invocation: { id: 'req-toggle-1' },
+        s2sConsumer: contextMock.s2sConsumer,
         attributes: contextMock.attributes,
       });
 
@@ -955,6 +956,7 @@ describe('Sites Audits Controller', () => {
         data: requestData,
         log: logMock,
         invocation: { id: 'req-toggle-1' },
+        s2sConsumer: contextMock.s2sConsumer,
         attributes: contextMock.attributes,
       });
 

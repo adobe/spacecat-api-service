@@ -39,7 +39,7 @@ export default (ctx) => {
   const { Configuration, Site, Organization } = dataAccess;
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
-  const authorizeConfigWrite = async (context, route) => {
+  const authorizeConfigWrite = async (context, route, message) => {
     const requestId = context?.invocation?.id || 'unknown';
     const isAdmin = accessControlUtil.hasAdminAccess();
     const s2sResult = isAdmin
@@ -47,7 +47,7 @@ export default (ctx) => {
       : await accessControlUtil.hasS2SCapability(CAP_CONFIGURATION_WRITE);
     if (!isAdmin && !s2sResult.allowed) {
       log.info(`[acl] Denied ${route} - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
-      return forbidden('Only admins can change configuration settings.');
+      return forbidden(message);
     }
     if (s2sResult.allowed) {
       log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_CONFIGURATION_WRITE} requestId=${requestId}`);
@@ -89,7 +89,7 @@ export default (ctx) => {
    * @returns {Promise<Response|*>}
    */
   const execute = async (context) => {
-    const denied = await authorizeConfigWrite(context, 'PATCH /configurations/sites/audits');
+    const denied = await authorizeConfigWrite(context, 'PATCH /configurations/sites/audits', 'Only admins can change configuration settings.');
     if (denied) {
       return denied;
     }
@@ -183,7 +183,7 @@ export default (ctx) => {
 
       if (hasUpdates === true) {
         const { authInfo: { profile } } = context.attributes;
-        const s2sClientId = ctx.s2sConsumer?.getClientId?.();
+        const s2sClientId = context.s2sConsumer?.getClientId?.();
         configuration.setUpdatedBy(
           profile.email || (s2sClientId ? `s2s:${s2sClientId}` : 'system'),
         );
@@ -192,7 +192,7 @@ export default (ctx) => {
 
       return createResponse(responses, 207);
     } catch (error) {
-      context.log.error(error.message);
+      log.error(error.message);
       return internalServerError('An error occurred while trying to enable or disable audits.');
     }
   };
