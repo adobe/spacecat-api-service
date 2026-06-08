@@ -93,8 +93,11 @@ The S2S Admin and SpaceCat Security Team will review your JIRA request:
 - **Write capabilities** (`*:write`): Require business justification and scrutiny
 - **Restricted capabilities**: The following are typically denied:
   - `fixEntity:write` - Never granted
+  - `fixEntity:create` - Never granted
   - `site:write` - Rarely granted, requires executive approval
+  - `site:create` - Rarely granted, requires executive approval
   - `organization:write` - Rarely granted, requires executive approval
+  - `configuration:write` - Rarely granted, requires executive approval
 
 The team will respond via JIRA with approval or request additional information.
 
@@ -650,12 +653,17 @@ the long-term fix is server-side cursor pagination (see
 | `organization:write` | Modify organizations | Update org settings (rarely granted) |
 | `opportunity:read` | Read opportunities | Access recommendations, issues |
 | `suggestion:read` | Read AI suggestions | Access AI-generated suggestions |
+| `configuration:read` | Read platform configuration | Access handlers, jobs, queue config |
+| `configuration:write` | Modify platform configuration | Update handlers, jobs, queues, audit types (rarely granted) |
 
 ### Restricted Capabilities (Typically Denied)
 
 - `fixEntity:write` - Never granted, internal use only
+- `fixEntity:create` - Never granted, internal use only
 - `site:write` - Rarely granted, requires executive approval
+- `site:create` - Rarely granted, requires executive approval
 - `organization:write` - Rarely granted, requires executive approval
+- `configuration:write` - Rarely granted, requires executive approval
 
 ---
 
