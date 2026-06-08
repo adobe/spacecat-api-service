@@ -365,7 +365,35 @@ function PreflightController(ctx, log, env) {
       return preflightError('PREFLIGHT_INVALID_REQUEST', 'url is missing or not a valid URI', 400);
     }
 
-    if (!hasText(env.MYSTIQUE_API_BASE_URL)) {
+    // mystiqueUrl override (SITES-46216): in non-prod, allow the caller to
+    // point this request at a specific Mysticat host instead of the
+    // env-configured one. Same shape as the legacy /preflight/beta/jobs
+    // override (PR #2140, hardened in 746138e4), restored here after the
+    // SITES-44686 redesign dropped it. Guards:
+    //   1. AWS_ENV !== 'prod' — dead code in prod regardless of body content
+    //   2. Valid URL parse
+    //   3. Hostname suffix-match against *.adobe.io — broader than the
+    //      original *.stage.cloud.adobe.io because corp-only Ethos hosts
+    //      proved unreachable from public Lambda networking, and m-dev.adobe.io
+    //      is the current publicly-reachable canonical dev host
+    //   4. Tenancy boundary unchanged — caller must still pass hasAccess(site)
+    const isDevForOverride = env.AWS_ENV !== 'prod';
+    const useMystiqueUrlOverride = isDevForOverride && hasText(data.mystiqueUrl);
+    if (useMystiqueUrlOverride) {
+      if (!isValidUrl(data.mystiqueUrl)) {
+        return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must be a valid URL', 400);
+      }
+      const overrideHost = new URL(data.mystiqueUrl).hostname;
+      if (!/\.adobe\.io$/.test(overrideHost)) {
+        return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must point at an *.adobe.io host', 400);
+      }
+    }
+
+    const mysticatBaseUrl = useMystiqueUrlOverride
+      ? data.mystiqueUrl
+      : env.MYSTIQUE_API_BASE_URL;
+
+    if (!hasText(mysticatBaseUrl)) {
       return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Analyze service not configured', 500);
     }
 
@@ -481,7 +509,7 @@ function PreflightController(ctx, log, env) {
 
     try {
       await callMysticatAnalyze(
-        env.MYSTIQUE_API_BASE_URL,
+        mysticatBaseUrl,
         asyncJob.getId(),
         siteId,
         url,
