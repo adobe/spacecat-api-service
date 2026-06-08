@@ -66,6 +66,28 @@ describe('gsc-prompts-storage', () => {
       })).to.be.rejectedWith(/text/);
     });
 
+    it('throws when region is missing', async () => {
+      await expect(upsertGscPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        items: [{
+          text: 'a', region: '', source: 'gsc', status: 'ignored',
+        }],
+        postgrestClient: { from: () => ({}) },
+      })).to.be.rejectedWith(/region/);
+    });
+
+    it('throws when source is missing', async () => {
+      await expect(upsertGscPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        items: [{
+          text: 'a', region: 'us', source: '', status: 'ignored',
+        }],
+        postgrestClient: { from: () => ({}) },
+      })).to.be.rejectedWith(/source/);
+    });
+
     it('throws when status is invalid', async () => {
       await expect(upsertGscPrompts({
         organizationId: ORG_ID,
