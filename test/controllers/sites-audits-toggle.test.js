@@ -974,6 +974,7 @@ describe('Sites Audits Controller', () => {
         data: requestData,
         log: logMock,
         invocation: { id: 'req-toggle-1' },
+        s2sConsumer: contextMock.s2sConsumer,
         attributes: contextMock.attributes,
       });
       const error = await response.json();
@@ -997,12 +998,35 @@ describe('Sites Audits Controller', () => {
         data: requestData,
         log: logMock,
         invocation: { id: 'req-toggle-1' },
+        s2sConsumer: contextMock.s2sConsumer,
         attributes: contextMock.attributes,
       });
 
       expect(response.status).to.equal(403);
       expect(dataAccessMock.Configuration.findLatest).to.not.have.been.called;
       expect(contextMock.log.info).to.have.been.calledWithMatch(/reason=revoked/);
+    });
+
+    it('prefers profile.email over s2s:<clientId> when both are present', async () => {
+      dataAccessMock.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:write'] }));
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+      // Override profile to include an email even though s2sConsumer is set
+      contextMock.attributes.authInfo.withProfile({ is_admin: false, email: 'svc@example.com' });
+      sitesAuditsToggleController = SitesAuditsToggleController(contextMock);
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+      ];
+      await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+        invocation: { id: 'req-toggle-1' },
+        s2sConsumer: contextMock.s2sConsumer,
+        attributes: contextMock.attributes,
+      });
+
+      expect(configurationMock.setUpdatedBy).to.have.been.calledWith('svc@example.com');
     });
 
     it('logs requestId=unknown when invocation id is missing', async () => {
@@ -1015,6 +1039,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsToggleController.execute({
         data: requestData,
         log: logMock,
+        s2sConsumer: contextMock.s2sConsumer,
         attributes: contextMock.attributes,
       });
 
