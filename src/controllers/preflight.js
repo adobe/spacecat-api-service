@@ -401,13 +401,7 @@ function PreflightController(ctx, log, env) {
       return preflightError('PREFLIGHT_INVALID_REQUEST', 'URL does not belong to this site', 400);
     }
 
-    // Eligibility (which audits run, whether the site's tier even enables
-    // preflight) is owned by Mysticat — see SITES-46202. SpaceCat's only gate
-    // is the tenancy boundary above (org-membership via hasAccess). A request
-    // that survives access + URL validation proceeds to Mysticat unconditionally;
-    // Mysticat's three-gate model (Gate 0 tier features + Gate 1
-    // enabled_opportunity_types + Gate 2 run_in_preflight + Gate 3 per-site
-    // goal_overrides) is the single source of truth.
+    // Eligibility is Mysticat's decision — see SITES-46202 + ADR-002.
 
     // Resolve page authentication if required.
     // checkEnableAuthentication does a bare HEAD fetch against the customer

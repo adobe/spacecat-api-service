@@ -1293,6 +1293,36 @@ describe('Preflight Controller', () => {
       expect(mysticatCall.args[0]).to.equal('https://mysticat.example.com/v1/preflight/analyze');
     });
 
+    it('returns 202 and does NOT roll back rows when Mysticat returns 200 with empty audits (tier-ineligible site)', async () => {
+      // Post-SITES-46202 contract: a site whose Mysticat tier disables preflight
+      // (Gate 0 features.preflight=false, or all goals opted out via Gate 3) gets
+      // a 200 with `audits: []` from Mysticat — NOT a 4xx. SpaceCat must treat
+      // this as a successful dispatch: the Preflight + AsyncJob rows remain in
+      // IN_PROGRESS, no FAILED rollback, no error response. The projector
+      // eventually flips the rows to COMPLETED with empty result.
+      fetchStub.onSecondCall().resolves({
+        ok: true,
+        status: 200,
+        json: async () => ({ pageUrl: 'https://main--example-site.aem.page/test.html', audits: [], profiling: {} }),
+      });
+
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+
+      // 202 with the Preflight payload — same as any other successful dispatch.
+      expect(response.status).to.equal(202);
+      const body = await response.json();
+      expect(body.preflightId).to.equal(preflightId);
+
+      // No FAILED rollback path was taken.
+      expect(mockPreflight.setStatus).to.not.have.been.calledWith('FAILED');
+      expect(mockJob.setStatus).to.not.have.been.calledWith('FAILED');
+      expect(mockPreflight.setError).to.not.have.been.called;
+    });
+
     it('returns 502 when Mysticat analyze returns non-ok status', async () => {
       fetchStub.onSecondCall().resolves({ ok: false, status: 503, text: async () => 'Service Unavailable' });
       const response = await preflightController.createPreflight({
