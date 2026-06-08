@@ -1,3 +1,10 @@
+# [1.557.0](https://github.com/adobe/spacecat-api-service/compare/v1.556.2...v1.557.0) (2026-06-08)
+
+
+### Features
+
+* **prompts:** persist intent on prompt upsert/update ([#2562](https://github.com/adobe/spacecat-api-service/issues/2562)) ([05f8d16](https://github.com/adobe/spacecat-api-service/commit/05f8d16a2139ab2b8536efcee11c0908aff4528a))
+
 ## [1.556.2](https://github.com/adobe/spacecat-api-service/compare/v1.556.1...v1.556.2) (2026-06-08)
 
 
