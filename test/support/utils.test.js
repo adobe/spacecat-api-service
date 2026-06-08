@@ -1340,22 +1340,30 @@ describe('utils', () => {
 
   describe('sendAutofixMessage', () => {
     let mockSqs;
+    let mockSns;
+    let mockLog;
 
     beforeEach(() => {
       mockSqs = { sendMessage: sinon.stub().resolves() };
+      mockSns = { publish: sinon.stub().resolves() };
+      mockLog = { warn: sinon.stub() };
     });
 
     it('sends message with relationshipContext.fixTargetPageId when provided', async () => {
       await sendAutofixMessage(
         mockSqs,
         'https://queue-url',
+        null,
+        null,
         'site-1',
         'opp-1',
+        'meta-tags',
         ['s-1', 's-2'],
         'token',
         null,
         null,
         null,
+        mockLog,
         {
           url: 'https://example.com',
           relationshipContext: { fixTargetPageId: 'page-uuid-123' },
@@ -1376,13 +1384,17 @@ describe('utils', () => {
       await sendAutofixMessage(
         mockSqs,
         'https://queue-url',
+        null,
+        null,
         'site-1',
         'opp-1',
+        'meta-tags',
         ['s-1'],
         'token',
         null,
         null,
         null,
+        mockLog,
         {
           url: 'https://example.com',
           relationshipContext: {
@@ -1409,13 +1421,17 @@ describe('utils', () => {
       await sendAutofixMessage(
         mockSqs,
         'https://queue-url',
+        null,
+        null,
         'site-1',
         'opp-1',
+        'meta-tags',
         ['s-1'],
         'token',
         null,
         null,
         null,
+        mockLog,
         { url: 'https://example.com' },
       );
 
@@ -1429,13 +1445,17 @@ describe('utils', () => {
       await sendAutofixMessage(
         mockSqs,
         'https://queue-url',
+        null,
+        null,
         'site-1',
         'opp-1',
+        'meta-tags',
         ['s-1'],
         'token',
         null,
         null,
         null,
+        mockLog,
         { url: 'https://example.com', relationshipContext: undefined },
       );
 
@@ -1449,13 +1469,17 @@ describe('utils', () => {
       await sendAutofixMessage(
         mockSqs,
         'https://queue-url',
+        null,
+        null,
         'site-1',
         'opp-1',
+        'meta-tags',
         ['s-1'],
         'token',
         null,
         null,
         customData,
+        mockLog,
         {
           url: 'https://example.com',
           relationshipContext: { fixTargetPageId: 'page-123' },
@@ -1467,6 +1491,55 @@ describe('utils', () => {
       expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-123' });
       expect(payload).to.have.property('customData');
       expect(payload.customData).to.deep.equal({ key: 'value' });
+    });
+
+    it('publishes to SNS when topic ARN is configured', async () => {
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        mockSns,
+        'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs',
+        'site-1',
+        'opp-1',
+        'meta-tags',
+        ['s-1'],
+        'token',
+        null,
+        'apply',
+        null,
+        mockLog,
+        { url: 'https://example.com' },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      expect(mockSns.publish).to.have.been.calledOnceWithExactly(
+        'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs',
+        sinon.match({ siteId: 'site-1', opportunityType: 'meta-tags' }),
+      );
+    });
+
+    it('logs a warning and keeps SQS delivery when SNS publish fails', async () => {
+      mockSns.publish.rejects(new Error('sns unavailable'));
+
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        mockSns,
+        'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs',
+        'site-1',
+        'opp-1',
+        'meta-tags',
+        ['s-1'],
+        'token',
+        null,
+        null,
+        null,
+        mockLog,
+        { url: 'https://example.com' },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      expect(mockLog.warn).to.have.been.calledOnce;
     });
   });
 });

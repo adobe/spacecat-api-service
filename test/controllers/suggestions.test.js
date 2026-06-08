@@ -187,6 +187,7 @@ describe('Suggestions Controller', () => {
   let mockConfiguration;
   let suggestionsController;
   let mockSqs;
+  let mockSns;
   let opportunity;
   let site;
   let siteNotEnabled;
@@ -507,12 +508,15 @@ describe('Suggestions Controller', () => {
     mockSqs = {
       sendMessage: sandbox.stub().resolves(),
     };
+    mockSns = {
+      publish: sandbox.stub().resolves(),
+    };
 
     suggestionsController = SuggestionsController({
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, mockSns, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
   });
 
   afterEach(() => {
@@ -4248,6 +4252,53 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
     });
 
+    it('keeps SQS delivery and mirrors suggestion autofix payloads to SNS when configured', async () => {
+      const suggestionControllerWithMock = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: async () => ({
+            promise_token: 'promiseTokenExample',
+            expires_in: 14399,
+            token_type: 'promise_token',
+          }),
+          getIsSummitPlgEnabled: async () => true,
+        },
+      });
+
+      const controllerWithSnsTopic = suggestionControllerWithMock({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, mockSns, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        AUTOFIX_JOBS_TOPIC_ARN: 'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs',
+      });
+
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await controllerWithSnsTopic.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.called;
+      expect(mockSns.publish).to.have.been.called;
+      expect(mockSns.publish.firstCall.args[0]).to.equal('arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs');
+      expect(mockSns.publish.firstCall.args[1]).to.include({
+        opportunityId: OPPORTUNITY_ID,
+        opportunityType: 'meta-tags',
+        siteId: SITE_ID,
+      });
+    });
+
     it('triggers autofix for suggestions in PENDING_VALIDATION status', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       const pendingSugg = { ...suggs[0], status: 'PENDING_VALIDATION' };
@@ -5863,6 +5914,57 @@ describe('Suggestions Controller', () => {
       expect(payload).to.have.property('siteId', SITE_ID);
       expect(payload).to.have.property('action', 'assess-urls');
       expect(payload).to.deep.include({ pages });
+    });
+
+    it('mirrors assess-urls jobs to SNS when AUTOFIX_JOBS_TOPIC_ARN is configured', async () => {
+      const controllerWithSnsTopic = SuggestionsController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, mockSns, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        AUTOFIX_JOBS_TOPIC_ARN: 'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs',
+      });
+      const pages = ['https://example.com/page1'];
+
+      const response = await controllerWithSnsTopic.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      expect(mockSns.publish).to.have.been.calledOnceWithExactly(
+        'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs',
+        sinon.match({ siteId: SITE_ID, action: 'assess-urls', pages }),
+      );
+    });
+
+    it('still returns 202 when SNS mirroring fails for assess-urls', async () => {
+      mockSns.publish.rejects(new Error('sns unavailable'));
+      const controllerWithSnsTopic = SuggestionsController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        log: context.log,
+        ...authContext,
+      }, mockSqs, mockSns, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        AUTOFIX_JOBS_TOPIC_ARN: 'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs',
+      });
+
+      const response = await controllerWithSnsTopic.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages: ['https://example.com/page1'] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      expect(context.log.warn).to.have.been.calledWith(
+        'Failed to publish assess-urls message to SNS, continuing with SQS delivery only',
+        sinon.match({ error: 'sns unavailable' }),
+      );
     });
 
     it('forwards precheckOnly to worker when action is assess-urls', async () => {

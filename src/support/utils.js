@@ -210,30 +210,51 @@ export const triggerTrafficAnalysisBackfill = async (
 export const sendAutofixMessage = async (
   sqs,
   queueUrl,
+  sns,
+  topicArn,
   siteId,
   opportunityId,
+  opportunityType,
   suggestionIds,
   promiseToken,
   variations,
   action,
   customData,
+  log,
   {
     url,
     precheckOnly,
     relationshipContext,
   } = {},
-) => sqs.sendMessage(queueUrl, {
-  opportunityId,
-  siteId,
-  suggestionIds,
-  promiseToken,
-  variations,
-  action,
-  url,
-  ...(isObject(relationshipContext) && { relationshipContext }),
-  ...(customData && { customData }),
-  ...(precheckOnly === true && { precheckOnly: true }),
-});
+) => {
+  const message = {
+    opportunityId,
+    opportunityType,
+    siteId,
+    suggestionIds,
+    promiseToken,
+    variations,
+    action,
+    url,
+    ...(isObject(relationshipContext) && { relationshipContext }),
+    ...(customData && { customData }),
+    ...(precheckOnly === true && { precheckOnly: true }),
+  };
+
+  await sqs.sendMessage(queueUrl, message);
+
+  if (sns && hasText(topicArn)) {
+    try {
+      await sns.publish(topicArn, message);
+    } catch (e) {
+      log?.warn?.('Failed to publish autofix message to SNS, continuing with SQS delivery only', {
+        topicArn,
+        queueUrl,
+        error: e?.message,
+      });
+    }
+  }
+};
 /* c8 ignore end */
 
 export const sendInternalReportRunMessage = async (
