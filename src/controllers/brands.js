@@ -52,7 +52,7 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
-import { createIntentClassifier } from '../support/intent-classifier.js';
+import { createIntentClassifier, resolveBatchTimeoutMs } from '../support/intent-classifier.js';
 import {
   listCategories,
   createCategory,
@@ -96,6 +96,10 @@ function BrandsController(ctx, log, env) {
   // configured, in which case intent is simply left null. Built once per
   // controller instance and passed into the prompt storage layer.
   const classifyIntent = createIntentClassifier({ env, log });
+  // Total wall-clock ceiling for the bulk-create classification batch, so a slow
+  // Azure can't stall the write past the Lambda timeout (per-call timeout only
+  // bounds a single call). On expiry, completed classifications are kept.
+  const classifyIntentBatchTimeoutMs = resolveBatchTimeoutMs(env);
 
   /**
    * Fetches an organization by ID and returns a 404 error if not found.
@@ -428,6 +432,7 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
         updatedBy,
         classifyIntent,
+        classifyIntentBatchTimeoutMs,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);

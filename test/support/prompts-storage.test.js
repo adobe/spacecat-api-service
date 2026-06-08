@@ -2066,6 +2066,48 @@ describe('prompts-storage', () => {
       expect(Object.prototype.hasOwnProperty.call(updateStub.firstCall.args[0], 'intent')).to.be.false;
     });
 
+    it('does NOT classify on update when only non-text fields change', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'New name',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: null,
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { name: 'New name' },
+        postgrestClient: client,
+        classifyIntent,
+      });
+      // No text change and no explicit intent -> classifier must not be invoked.
+      expect(classifyIntent.called).to.be.false;
+      expect(Object.prototype.hasOwnProperty.call(updateStub.firstCall.args[0], 'intent')).to.be.false;
+    });
+
     it('sets categoryId and topicId to null when empty string', async () => {
       const row = {
         prompt_id: PROMPT_ID,

@@ -216,6 +216,29 @@ describe('intent-classifier', () => {
       await classifyIntents(classify, texts, { maxConcurrency: 3 });
       expect(maxInFlight).to.be.at.most(3);
     });
+
+    it('returns partial results without hanging when the batch times out', async () => {
+      // classify never resolves -> only the batch timeout can settle the race.
+      const classify = () => new Promise(() => {});
+      const result = await classifyIntents(classify, ['a', 'b'], { timeoutMs: 10 });
+      expect(result.size).to.equal(0);
+    });
+
+    it('keeps already-completed classifications when the batch times out', async () => {
+      // 'fast' resolves immediately; 'slow' never does. The batch timeout fires
+      // and we keep the completed one rather than dropping the whole batch.
+      const classify = (t) => (t === 'fast' ? Promise.resolve('planning') : new Promise(() => {}));
+      const result = await classifyIntents(classify, ['fast', 'slow'], { maxConcurrency: 2, timeoutMs: 40 });
+      expect(result.get('fast')).to.equal('planning');
+      expect(result.has('slow')).to.be.false;
+    });
+
+    it('waits for all classifications when the batch timeout is disabled (0)', async () => {
+      const classify = sinon.stub().resolves('informational');
+      const result = await classifyIntents(classify, ['a', 'b'], { timeoutMs: 0 });
+      expect(result.get('a')).to.equal('informational');
+      expect(result.get('b')).to.equal('informational');
+    });
   });
 
   describe('contentToString', () => {

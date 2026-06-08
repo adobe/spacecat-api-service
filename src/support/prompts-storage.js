@@ -606,6 +606,7 @@ export async function upsertPrompts({
   postgrestClient,
   updatedBy = 'system',
   classifyIntent,
+  classifyIntentBatchTimeoutMs,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
@@ -707,11 +708,15 @@ export async function upsertPrompts({
       const intentByText = await classifyIntents(
         classifyIntent,
         rowsNeedingIntent.map((r) => r.text),
+        { timeoutMs: classifyIntentBatchTimeoutMs },
       );
       const apply = (r) => {
-        if (r.intent === null && hasText(r.text) && intentByText.has(r.text)) {
+        const classified = intentByText.get(r.text);
+        // Only overwrite when we actually got a bucket back — a null/absent
+        // result (failed or timed-out classification) leaves intent as null.
+        if (r.intent === null && hasText(r.text) && classified != null) {
           // eslint-disable-next-line no-param-reassign
-          r.intent = intentByText.get(r.text);
+          r.intent = classified;
         }
       };
       toInsert.forEach(apply);

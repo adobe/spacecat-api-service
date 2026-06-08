@@ -108,6 +108,26 @@ function resolveInvokeTimeoutMs(env = {}) {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_INVOKE_TIMEOUT_MS;
 }
 
+// Wall-clock cap (ms) on a whole bulk-classification batch. Per-call timeouts
+// bound a single hung call, but a slow-but-not-dead Azure (e.g. 8-9s per call)
+// across many unique prompts could otherwise stall a bulk write past the Lambda
+// timeout and 5xx a request that would have succeeded without classification.
+// On expiry the batch returns whatever completed so far; the rest stay null and
+// are recovered by the backfill/reconciliation path.
+const DEFAULT_BATCH_TIMEOUT_MS = 30000;
+
+/**
+ * Resolves the bulk-classification batch timeout (ms) from env, falling back to
+ * the default. Non-numeric / non-positive values fall back to the default.
+ *
+ * @param {object} env - Environment variables
+ * @returns {number} timeout in milliseconds
+ */
+export function resolveBatchTimeoutMs(env = {}) {
+  const raw = Number(env.PROMPT_INTENT_CLASSIFICATION_BATCH_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_BATCH_TIMEOUT_MS;
+}
+
 /**
  * Races a promise against a timer. Rejects with a timeout error if `promise`
  * does not settle within `timeoutMs`. The timer is always cleared so the event
@@ -300,12 +320,15 @@ export function createIntentClassifier(context = {}) {
  * @param {string[]} texts - Prompt texts to classify
  * @param {object} [options]
  * @param {number} [options.maxConcurrency] - Max in-flight LLM calls
+ * @param {number} [options.timeoutMs] - Total wall-clock cap for the batch. On
+ *   expiry the partially-filled result map is returned (best-effort); pass 0 to
+ *   disable. Defaults to DEFAULT_BATCH_TIMEOUT_MS.
  * @returns {Promise<Map<string, string|null>>} text -> intent (or null)
  */
 export async function classifyIntents(
   classify,
   texts,
-  { maxConcurrency = DEFAULT_MAX_CONCURRENCY } = {},
+  { maxConcurrency = DEFAULT_MAX_CONCURRENCY, timeoutMs = DEFAULT_BATCH_TIMEOUT_MS } = {},
 ) {
   const results = new Map();
   if (typeof classify !== 'function') {
@@ -336,6 +359,20 @@ export async function classifyIntents(
     { length: Math.min(maxConcurrency, unique.length) },
     () => worker(),
   );
-  await Promise.all(workers);
+  const all = Promise.all(workers);
+
+  // Bound total wall-clock. Workers populate `results` as they complete, so on
+  // timeout the map already holds the finished classifications; remaining
+  // prompts stay unclassified (null) and are handled by the backfill path. This
+  // keeps the best-effort contract while bounding worst-case write latency.
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    let timer;
+    const cap = new Promise((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    });
+    await Promise.race([all, cap]).finally(() => clearTimeout(timer));
+  } else {
+    await all;
+  }
   return results;
 }
