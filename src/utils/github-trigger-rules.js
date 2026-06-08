@@ -84,6 +84,41 @@ export function getSkipReason(data, action, reviewerLogin) {
 }
 
 /**
+ * Maps a skip reason string from getSkipReason to a short, stable label
+ * suitable for use as a CloudWatch metric dimension value.
+ *
+ * Keep in lockstep with getSkipReason: these string checks mirror the exact
+ * literals / prefixes it returns.
+ *
+ * @param {string|null|undefined} reason - Skip reason from getSkipReason
+ * @returns {string} Stable label string
+ */
+export function skipReasonLabel(reason) {
+  if (!reason) {
+    return 'other';
+  }
+  if (reason === 'draft PR') {
+    return 'draft_pr';
+  }
+  if (reason === 'bot sender') {
+    return 'bot_sender';
+  }
+  if (reason.startsWith('non-default branch')) {
+    return 'non_default_branch';
+  }
+  if (reason.startsWith('auto-trigger not yet supported')) {
+    return 'auto_trigger';
+  }
+  if (reason.startsWith('reviewer ')) {
+    return 'wrong_reviewer';
+  }
+  if (reason.startsWith('unsupported action')) {
+    return 'unsupported_action';
+  }
+  return 'other';
+}
+
+/**
  * Classifies a skip reason from getSkipReason as one that should post a
  * standalone Slack observability note. Only skips where Mysticat WAS the
  * requested reviewer (draft PR / bot sender / non-default branch) are

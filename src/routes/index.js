@@ -100,7 +100,10 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
+ * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
+ * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
+ * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -158,7 +161,10 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
+  agenticCategoriesController,
+  agenticPageTypesController,
   serenityController,
+  proxyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -213,6 +219,7 @@ export default function getRouteHandlers(
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.deleteMarket,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.listModels,
+    'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
@@ -235,8 +242,9 @@ export default function getRouteHandlers(
     'GET /projects/by-project-name/:projectName/sites': projectsController.getSitesByProjectName,
     'POST /preflight/jobs': preflightController.createPreflightJob,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
-    'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
-    'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
+    'POST /sites/:siteId/preflights': preflightController.createPreflight,
+    'GET /sites/:siteId/preflights': preflightController.getAllPreflights,
+    'GET /sites/:siteId/preflights/:preflightId': preflightController.getPreflightById,
     'POST /sites/detect/jobs': siteDetectionController.createSiteDetectionJob,
     'GET /sites/detect/jobs/:jobId': siteDetectionController.getSiteDetectionJobStatus,
     'GET /sites': sitesController.getAll,
@@ -262,6 +270,16 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/url-store': urlStoreController.addUrls,
     'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
     'POST /sites/:siteId/url-store/delete': urlStoreController.deleteUrls,
+
+    // Agentic URL classification rules (precede :auditType for static-segment match)
+    'GET /sites/:siteId/agentic-categories': agenticCategoriesController.list,
+    'POST /sites/:siteId/agentic-categories': agenticCategoriesController.create,
+    'PATCH /sites/:siteId/agentic-categories/:name': agenticCategoriesController.update,
+    'DELETE /sites/:siteId/agentic-categories/:name': agenticCategoriesController.remove,
+    'GET /sites/:siteId/agentic-page-types': agenticPageTypesController.list,
+    'POST /sites/:siteId/agentic-page-types': agenticPageTypesController.create,
+    'PATCH /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.update,
+    'DELETE /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.remove,
 
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
@@ -382,6 +400,7 @@ export default function getRouteHandlers(
     'POST /tools/api-keys': apiKeyController.createApiKey,
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,
+    'GET /tools/proxy': proxyController.getPreview,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
     'POST /tools/import/jobs': importController.createImportJob,
     'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
@@ -671,11 +690,15 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/topics/research': aiVisibilityController.getTopicsResearch,
     'GET /llmo/ai-visibility/topics/stats': aiVisibilityController.getTopicsStats,
     'GET /llmo/ai-visibility/v1/topic/brand-topics': aiVisibilityController.getV1TopicBrandTopics,
+    'GET /llmo/ai-visibility/v1/topic/brand-topics-export': aiVisibilityController.getV1TopicBrandTopicsExport,
     'GET /llmo/ai-visibility/v1/topic/brand-topics-totals': aiVisibilityController.getV1TopicBrandTopicsTotals,
     'GET /llmo/ai-visibility/v1/topic/gap-topics': aiVisibilityController.getV1TopicGapTopics,
+    'GET /llmo/ai-visibility/v1/topic/gap-topics-export': aiVisibilityController.getV1TopicGapTopicsExport,
     'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': aiVisibilityController.getV1TopicGapTopicsTotals,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
+    'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': aiVisibilityController.getV1PromptBrandPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
+    'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': aiVisibilityController.getV1PromptGapPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
   };
 

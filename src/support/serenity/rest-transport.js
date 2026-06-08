@@ -177,6 +177,8 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * POST /v2/.../aio/prompts/by_tags — paginated list of prompts in a
      * project. Pass an empty `tag_ids` array to list all prompts.
+     * Multiple tag IDs use OR semantics: any prompt carrying at least one of
+     * the supplied IDs is included. AND filtering must be done by the caller.
      *
      * Note: Semrush rejects `sort_field` / `sort_dir` on this endpoint (see
      * commit history on the prior `serenity` handler). Body is restricted to
@@ -256,6 +258,38 @@ export function createSerenityTransport({ env, imsToken }) {
     async deleteProject(semrushWorkspaceId, projectId) {
       const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}`;
       return request('DELETE', url, imsToken, undefined);
+    },
+
+    /**
+     * POST /v1/workspaces/{ws}/projects/{pid}/ai_models — adds one AI model
+     * to a project. `modelId` is the catalog model identifier from
+     * `AIModelResponse.id` on the GET listing. Returns the new assignment row.
+     */
+    async addAiModel(semrushWorkspaceId, projectId, modelId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models`;
+      return request('POST', url, imsToken, { model_id: modelId });
+    },
+
+    /**
+     * DELETE /v1/workspaces/{ws}/projects/{pid}/ai_models — removes AI model
+     * assignments by their assignment ids (the outer `id` on
+     * `ProjectAIModelResponse`, NOT the catalog `model.id`).
+     */
+    async deleteAiModelsByIds(semrushWorkspaceId, projectId, ids) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models`;
+      return request('DELETE', url, imsToken, { ids });
+    },
+
+    /**
+     * GET /v1/ai_models — global catalog of all AI models available for
+     * tracking across any workspace. Not scoped to a workspace or project.
+     * Used to populate the "available models" list in the UI.
+     * Returns {page, total, items: [{id, key, name, icon}]}.
+     */
+    async listGlobalAiModels({ page = 1, limit = 100 } = {}) {
+      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+      const url = `${root}${API_PREFIX}/v1/ai_models?${params.toString()}`;
+      return request('GET', url, imsToken, undefined);
     },
 
     /**

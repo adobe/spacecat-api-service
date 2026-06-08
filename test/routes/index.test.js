@@ -492,11 +492,15 @@ describe('getRouteHandlers', () => {
     getTopicsResearch: sinon.stub(),
     getTopicsStats: sinon.stub(),
     getV1TopicBrandTopics: sinon.stub(),
+    getV1TopicBrandTopicsExport: sinon.stub(),
     getV1TopicBrandTopicsTotals: sinon.stub(),
     getV1TopicGapTopics: sinon.stub(),
+    getV1TopicGapTopicsExport: sinon.stub(),
     getV1TopicGapTopicsTotals: sinon.stub(),
     getV1PromptBrandPrompts: sinon.stub(),
+    getV1PromptBrandPromptsExport: sinon.stub(),
     getV1PromptGapPrompts: sinon.stub(),
+    getV1PromptGapPromptsExport: sinon.stub(),
     getV1PromptPromptResponse: sinon.stub(),
   };
 
@@ -514,6 +518,24 @@ describe('getRouteHandlers', () => {
     listProjectTags: sinon.stub(),
     listProjectModels: sinon.stub(),
     listWorkspaceProjects: sinon.stub(),
+  };
+
+  const mockAgenticCategoriesController = {
+    list: sinon.stub(),
+    create: sinon.stub(),
+    update: sinon.stub(),
+    remove: sinon.stub(),
+  };
+
+  const mockAgenticPageTypesController = {
+    list: sinon.stub(),
+    create: sinon.stub(),
+    update: sinon.stub(),
+    remove: sinon.stub(),
+  };
+
+  const mockProxyController = {
+    getPreview: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -572,7 +594,10 @@ describe('getRouteHandlers', () => {
       mockWebhooksController,
       mockAiVisibilityController,
       mockFanoutReportController,
+      mockAgenticCategoriesController,
+      mockAgenticPageTypesController,
       mockSerenityController,
+      mockProxyController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -589,7 +614,6 @@ describe('getRouteHandlers', () => {
       'GET /projects',
       'POST /projects',
       'POST /preflight/jobs',
-      'POST /preflight/beta/jobs',
       'POST /sites/detect/jobs',
       'GET /sites',
       'POST /sites',
@@ -603,6 +627,7 @@ describe('getRouteHandlers', () => {
       'POST /slack/channels/invite-by-user-id',
       'POST /tools/api-keys',
       'GET /tools/api-keys',
+      'GET /tools/proxy',
       'GET /monitoring/drs-bp-pg-audit',
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
@@ -634,11 +659,15 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/topics/research',
       'GET /llmo/ai-visibility/topics/stats',
       'GET /llmo/ai-visibility/v1/topic/brand-topics',
+      'GET /llmo/ai-visibility/v1/topic/brand-topics-export',
       'GET /llmo/ai-visibility/v1/topic/brand-topics-totals',
       'GET /llmo/ai-visibility/v1/topic/gap-topics',
+      'GET /llmo/ai-visibility/v1/topic/gap-topics-export',
       'GET /llmo/ai-visibility/v1/topic/gap-topics-totals',
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts',
+      'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts',
+      'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export',
       'GET /llmo/ai-visibility/v1/prompt/prompt-response',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
@@ -666,6 +695,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /trigger']).to.equal(mockTrigger);
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
+    expect(staticRoutes['GET /tools/proxy']).to.equal(mockProxyController.getPreview);
     expect(staticRoutes['GET /monitoring/drs-bp-pg-audit']).to.equal(mockDrsBpPgAuditController.getProjectionAudit);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
@@ -696,11 +726,15 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research']).to.equal(mockAiVisibilityController.getTopicsResearch);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/stats']).to.equal(mockAiVisibilityController.getTopicsStats);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics']).to.equal(mockAiVisibilityController.getV1TopicBrandTopics);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics-export']).to.equal(mockAiVisibilityController.getV1TopicBrandTopicsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics-totals']).to.equal(mockAiVisibilityController.getV1TopicBrandTopicsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics']).to.equal(mockAiVisibilityController.getV1TopicGapTopics);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics-export']).to.equal(mockAiVisibilityController.getV1TopicGapTopicsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics-totals']).to.equal(mockAiVisibilityController.getV1TopicGapTopicsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts']).to.equal(mockAiVisibilityController.getV1PromptBrandPrompts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptBrandPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts']).to.equal(mockAiVisibilityController.getV1PromptGapPrompts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptGapPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompt-response']).to.equal(mockAiVisibilityController.getV1PromptPromptResponse);
     expect(staticRoutes['GET /v2/regions']).to.equal(mockLlmoMysticatController.getRegions);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
@@ -757,6 +791,7 @@ describe('getRouteHandlers', () => {
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
+      'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
@@ -818,7 +853,9 @@ describe('getRouteHandlers', () => {
       'GET /projects/:projectId/sites',
       'GET /projects/by-project-name/:projectName/sites',
       'GET /preflight/jobs/:jobId',
-      'GET /preflight/beta/jobs/:jobId',
+      'POST /sites/:siteId/preflights',
+      'GET /sites/:siteId/preflights',
+      'GET /sites/:siteId/preflights/:preflightId',
       'GET /sites/detect/jobs/:jobId',
       'GET /sites/:siteId',
       'PATCH /sites/:siteId',
@@ -1097,6 +1134,14 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/referral-traffic/business-impact',
       'GET /sites/:siteId/referral-traffic/weeks',
       'GET /admin/users/:userId',
+      'GET /sites/:siteId/agentic-categories',
+      'POST /sites/:siteId/agentic-categories',
+      'PATCH /sites/:siteId/agentic-categories/:name',
+      'DELETE /sites/:siteId/agentic-categories/:name',
+      'GET /sites/:siteId/agentic-page-types',
+      'POST /sites/:siteId/agentic-page-types',
+      'PATCH /sites/:siteId/agentic-page-types/:name',
+      'DELETE /sites/:siteId/agentic-page-types/:name',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 

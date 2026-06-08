@@ -27,6 +27,7 @@ import { checkConfiguration } from '@adobe/spacecat-shared-data-access';
 
 import { ConfigurationDto } from '../dto/configuration.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { CAP_CONFIGURATION_READ } from '../routes/capability-constants.js';
 
 function ConfigurationController(ctx) {
   if (!isNonEmptyObject(ctx)) {
@@ -52,13 +53,40 @@ function ConfigurationController(ctx) {
   };
 
   /**
+   * Authorizes a configuration read. Full and read-only admins pass as before.
+   * Additionally, an S2S consumer holding the `configuration:read` capability is
+   * allowed — the capability is also enforced at Layer 1 by `s2sAuthWrapper`, so
+   * this re-check (a fresh consumer fetch via `hasS2SCapability`) is the Layer-2
+   * guard that mirrors the readAll pattern in the sites/organizations controllers.
+   * @param {UniversalContext} context - Request context.
+   * @param {string} route - Route label used in structured logs.
+   * @returns {Promise<Response|null>} A `forbidden` response when denied, else null.
+   */
+  const authorizeConfigRead = async (context, route) => {
+    const requestId = context?.invocation?.id || 'unknown';
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_CONFIGURATION_READ);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied ${route} - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Only admins can view configurations');
+    }
+    if (s2sResult.allowed) {
+      log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_CONFIGURATION_READ} requestId=${requestId}`);
+    }
+    return null;
+  };
+
+  /**
    * Retrieves the configuration identified by the given version.
    * @param {UniversalContext} context - Context of the request.
    * @return {Promise<Response>} Configuration response.
    */
   const getByVersion = async (context) => {
-    if (!accessControlUtil.hasAdminReadAccess()) {
-      return forbidden('Only admins can view configurations');
+    const denied = await authorizeConfigRead(context, 'GET /configurations/:version');
+    if (denied) {
+      return denied;
     }
     const configurationVersion = context.params?.version;
 
@@ -76,11 +104,13 @@ function ConfigurationController(ctx) {
 
   /**
    * Retrieves the latest configuration with schema validation.
+   * @param {UniversalContext} context - Context of the request.
    * @return {Promise<Response>} Configuration response.
    */
-  const getLatest = async () => {
-    if (!accessControlUtil.hasAdminReadAccess()) {
-      return forbidden('Only admins can view configurations');
+  const getLatest = async (context) => {
+    const denied = await authorizeConfigRead(context, 'GET /configurations/latest');
+    if (denied) {
+      return denied;
     }
     const configuration = await Configuration.findLatest();
     if (!configuration) {

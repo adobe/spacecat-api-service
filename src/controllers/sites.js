@@ -45,7 +45,7 @@ import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
+import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
@@ -135,6 +135,8 @@ const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
+const DEFAULT_LIMIT = 100;
+const MAX_LIMIT = 500;
 
 /**
  * Filters Ahrefs top pages by site base URL
@@ -368,8 +370,13 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} HTTP 200 with existing site or 201 with new site
    */
   const createSite = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can create new sites');
+    const isAdmin = accessControlUtil.hasAdminAccess();
+    if (!isAdmin) {
+      const s2sResult = await accessControlUtil.hasS2SCapability(CAP_SITE_CREATE);
+      if (!s2sResult.allowed) {
+        log.info(`[acl] Denied POST /sites - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+        return forbidden('Only admins can create new sites');
+      }
     }
     if (!hasText(context.data?.baseURL)) {
       return badRequest('Base URL required');
@@ -417,10 +424,10 @@ function SitesController(ctx, log, env) {
   };
 
   /**
-   * Gets all sites. Accessible to admin callers (legacy admin path) and to S2S
-   * consumers that hold the `site:readAll` capability - see
+   * Gets all sites with cursor-based pagination. Accessible to admin callers (legacy admin path)
+   * and to S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
-   * @returns {Promise<Response>} Array of sites response.
+   * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
     const requestId = context?.invocation?.id || 'unknown';
@@ -435,24 +442,73 @@ function SitesController(ctx, log, env) {
       return forbidden('Forbidden: admin access or site:readAll capability required');
     }
 
-    // TODO: implement proper pagination or filtering to stay under AWS Lambda
-    // response size limits (6MB). Currently excluding the two non customer facing orgs as
-    // a temporary workaround to avoid 413 responses.
-    const EXCLUDED_ORG_IDS = [
-      env.DEFAULT_ORGANIZATION_ID,
-      env.ORGANIZATION_ID_FRIENDS_FAMILY,
-    ];
+    const limitParam = context?.data?.limit;
+    const cursor = context?.data?.cursor || null;
+    const paginated = hasText(limitParam) || hasText(cursor);
 
-    const all = await Site.all({}, { fetchAllPages: true });
-    const sites = all
-      .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
-      .map((site) => SiteDto.toListJSON(site));
+    if (cursor !== null) {
+      if (typeof cursor !== 'string') {
+        return badRequest('cursor must be a string');
+      }
+      if (cursor.length > 256) {
+        return badRequest('cursor exceeds maximum length');
+      }
+    }
+
+    let sites;
+    let responseBody;
+
+    if (paginated) {
+      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return badRequest('limit must be a positive integer');
+      }
+      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
+
+      const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
+      if (!Array.isArray(results?.data)) {
+        log.error(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
+        sites = [];
+        responseBody = {
+          sites,
+          pagination: { limit: effectiveLimit, cursor: null, hasMore: false },
+        };
+      } else {
+        sites = results.data.map((site) => SiteDto.toListJSON(site));
+        responseBody = {
+          sites,
+          pagination: {
+            limit: effectiveLimit,
+            // `|| null` (not `??`) so an empty-string cursor normalizes to null,
+            // staying consistent with `hasMore: !!results.cursor` below.
+            cursor: results.cursor || null,
+            hasMore: !!results.cursor,
+          },
+        };
+      }
+    } else {
+      // TODO: remove this legacy branch once Coralogix shows zero hits on
+      // [sites][legacy-shape] for 30 consecutive days.
+      // legacy: no limit/cursor params -> flat array for backwards comp.
+      // keep the default + friends-and-family exclusion on this path to stay
+      // under the 6MB Lambda response limit until consumers migrate to pagination.
+      log.info(`[sites][legacy-shape] GET /sites called without limit/cursor requestId=${requestId} clientId=${s2sResult.clientId || (isAdmin ? 'admin-bypass' : 'unknown-s2s')}`);
+      const excludedOrgIds = [
+        env.DEFAULT_ORGANIZATION_ID,
+        env.ORGANIZATION_ID_FRIENDS_FAMILY,
+      ];
+      const all = await Site.all({}, { fetchAllPages: true });
+      sites = all
+        .filter((site) => !excludedOrgIds.includes(site.getOrganizationId()))
+        .map((site) => SiteDto.toListJSON(site));
+      responseBody = sites;
+    }
 
     if (s2sResult.allowed) {
       log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
     }
 
-    return ok(sites);
+    return ok(responseBody);
   };
 
   /**
