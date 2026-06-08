@@ -4466,7 +4466,7 @@ describe('Sites Controller', () => {
     });
   });
 
-  describe('isPrimaryLocale, language, and region updates', () => {
+  describe('projectId, isPrimaryLocale, language, and region updates', () => {
     it('returns forbidden when trying to update projectId', async () => {
       const site = sites[0];
       const currentProjectId = '550e8400-e29b-41d4-a716-446655440000';
@@ -4503,6 +4503,27 @@ describe('Sites Controller', () => {
         ...defaultAuthAttributes,
       });
 
+      expect(site.setProjectId).to.have.not.been.called;
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
+    it('ignores an empty-string projectId (guarded by hasText)', async () => {
+      const site = sites[0];
+      site.getProjectId = sandbox.stub().returns('550e8400-e29b-41d4-a716-446655440000');
+      site.setProjectId = sandbox.stub();
+      site.getIsPrimaryLocale = sandbox.stub().returns(false);
+      site.setIsPrimaryLocale = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { projectId: '', isPrimaryLocale: true },
+        ...defaultAuthAttributes,
+      });
+
+      // Empty string is not "text", so the guard is skipped — no 403 — and the
+      // other field still saves.
       expect(site.setProjectId).to.have.not.been.called;
       expect(site.save).to.have.been.calledOnce;
       expect(response.status).to.equal(200);
