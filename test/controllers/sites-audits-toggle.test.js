@@ -12,6 +12,7 @@
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
@@ -19,6 +20,7 @@ import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import SitesAuditsToggleController from '../../src/controllers/sites-audits-toggle.js';
 
 use(chaiAsPromised);
+use(sinonChai);
 
 describe('Sites Audits Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -81,6 +83,11 @@ describe('Sites Audits Controller', () => {
 
     contextMock = {
       dataAccess: dataAccessMock,
+      log: {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+      },
       pathInfo: {
         headers: { 'x-product': 'abcd' },
       },
@@ -595,6 +602,11 @@ describe('Sites Audits Controller', () => {
       // Create a new non-admin context
       const nonAdminContext = {
         dataAccess: dataAccessMock,
+        log: {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+        },
         env: {},
         pathInfo: {
           headers: { 'x-product': 'abcd' },
@@ -882,6 +894,130 @@ describe('Sites Audits Controller', () => {
       });
       expect(configurationMock.setUpdatedBy).to.have.been.calledOnceWith('system');
       expect(configurationMock.save.called).to.be.true;
+    });
+  });
+
+  describe('S2S configuration:write capability', () => {
+    const makeS2SConsumer = ({
+      clientId = 'svc-toggle-write', imsOrgId = 'CCC333333333333333333333@AdobeOrg',
+    } = {}) => ({ getClientId: () => clientId, getImsOrgId: () => imsOrgId });
+
+    const makeFreshConsumer = ({
+      id = 'consumer-toggle-write-1',
+      capabilities = ['configuration:write'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) => ({
+      getId: () => id,
+      getCapabilities: () => capabilities,
+      getStatus: () => status,
+      isRevoked: () => revoked,
+    });
+
+    beforeEach(() => {
+      contextMock.attributes.authInfo.withProfile({ is_admin: false });
+      contextMock.s2sConsumer = makeS2SConsumer();
+      contextMock.invocation = { id: 'req-toggle-1' };
+      dataAccessMock.Consumer = { findByClientIdAndImsOrgId: sandbox.stub() };
+      sitesAuditsToggleController = SitesAuditsToggleController(contextMock);
+    });
+
+    it('grants execute to an S2S consumer holding configuration:write', async () => {
+      dataAccessMock.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:write'] }));
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+        invocation: { id: 'req-toggle-1' },
+        attributes: contextMock.attributes,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(contextMock.log.info).to.have.been.calledWithMatch(
+        /\[s2s\] PATCH \/configurations\/sites\/audits granted clientId=svc-toggle-write consumerId=consumer-toggle-write-1 capability=configuration:write requestId=req-toggle-1/,
+      );
+    });
+
+    it('sets updatedBy to s2s:<clientId> for S2S write callers', async () => {
+      dataAccessMock.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:write'] }));
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+      ];
+      await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+        invocation: { id: 'req-toggle-1' },
+        attributes: contextMock.attributes,
+      });
+
+      expect(configurationMock.setUpdatedBy).to.have.been.calledWith('s2s:svc-toggle-write');
+    });
+
+    it('denies an S2S consumer lacking configuration:write', async () => {
+      dataAccessMock.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:read'] }));
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+        invocation: { id: 'req-toggle-1' },
+        attributes: contextMock.attributes,
+      });
+      const error = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only admins can change configuration settings.');
+      expect(dataAccessMock.Configuration.findLatest).to.not.have.been.called;
+      expect(contextMock.log.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied PATCH \/configurations\/sites\/audits - reason=missing-capability clientId=svc-toggle-write consumerId=consumer-toggle-write-1/,
+      );
+    });
+
+    it('denies a revoked S2S consumer', async () => {
+      dataAccessMock.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ revoked: true }));
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+        invocation: { id: 'req-toggle-1' },
+        attributes: contextMock.attributes,
+      });
+
+      expect(response.status).to.equal(403);
+      expect(dataAccessMock.Configuration.findLatest).to.not.have.been.called;
+      expect(contextMock.log.info).to.have.been.calledWithMatch(/reason=revoked/);
+    });
+
+    it('logs requestId=unknown when invocation id is missing', async () => {
+      dataAccessMock.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['configuration:read'] }));
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+        attributes: contextMock.attributes,
+      });
+
+      expect(response.status).to.equal(403);
+      expect(contextMock.log.info).to.have.been.calledWithMatch(/requestId=unknown/);
     });
   });
 
