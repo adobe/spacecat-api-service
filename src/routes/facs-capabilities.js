@@ -177,6 +177,9 @@ const routeFacsCapabilities = {
     'POST /slack/channels/invite-by-user-id', // Slack-internal
     'GET /trigger', // internal scheduler
 
+    // Internal proxy tool
+    'GET /tools/proxy', // internal preview proxy (no external auth required)
+
     // Monitoring / admin telemetry
     'GET /monitoring/drs-bp-pg-audit', // internal monitoring
 
@@ -383,6 +386,18 @@ const routeFacsCapabilities = {
       // Export — kicks off a data export job; read-only access semantics.
       'POST /sites/:siteId/agentic-traffic/urls/export': 'llmo/can_view',
       'GET /sites/:siteId/agentic-traffic/urls/export/:exportId': 'llmo/can_view',
+
+      // Agentic categories / page types — meta-data used to classify site
+      // content for agentic AI analysis.  :name is the category/page-type
+      // identifier (non-resource param — see FACS_NON_RESOURCE_PARAMS).
+      'GET /sites/:siteId/agentic-categories': 'llmo/can_view',
+      'POST /sites/:siteId/agentic-categories': 'llmo/can_configure',
+      'PATCH /sites/:siteId/agentic-categories/:name': 'llmo/can_configure',
+      'DELETE /sites/:siteId/agentic-categories/:name': 'llmo/can_configure',
+      'GET /sites/:siteId/agentic-page-types': 'llmo/can_view',
+      'POST /sites/:siteId/agentic-page-types': 'llmo/can_configure',
+      'PATCH /sites/:siteId/agentic-page-types/:name': 'llmo/can_configure',
+      'DELETE /sites/:siteId/agentic-page-types/:name': 'llmo/can_configure',
 
       // Referral traffic (site-scoped)
       'GET /sites/:siteId/referral-traffic/kpis': 'llmo/can_view',
@@ -1087,6 +1102,10 @@ const routeFacsCapabilities = {
     // Domain identifiers / sub-resource ids — never independently
     // ReBAC-controlled at the wrapper layer:
     'auditType', 'auditedAt', 'categoryId', 'configName', 'executionId',
+    // Category / page-type name — the identifier used in PATCH/DELETE on
+    // agentic-categories and agentic-page-types routes. It is a label, not
+    // a standalone FACS resource.
+    'name',
     'fixId', 'geoExperimentId', 'guidelineId', 'intentKey',
     'jobId', 'jobType', 'onboardingId', 'opportunityId', 'plgOnboardingId',
     'promptId', 'questionKey', 'reportId', 'suggestionId', 'tokenId',
