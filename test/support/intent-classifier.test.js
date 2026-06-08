@@ -171,6 +171,21 @@ describe('intent-classifier', () => {
       expect(result.size).to.equal(0);
     });
 
+    it('returns empty map without calling classify when all texts are filtered out', async () => {
+      const classify = sinon.stub().resolves('informational');
+      // Empty/nullish all fail hasText -> unique is empty -> early return.
+      const result = await classifyIntents(classify, ['', null, undefined]);
+      expect(result.size).to.equal(0);
+      expect(classify.called).to.be.false;
+    });
+
+    it('returns empty map when texts is omitted', async () => {
+      const classify = sinon.stub().resolves('informational');
+      const result = await classifyIntents(classify, undefined);
+      expect(result.size).to.equal(0);
+      expect(classify.called).to.be.false;
+    });
+
     it('deduplicates inputs so repeated text costs one call', async () => {
       const classify = sinon.stub().callsFake((t) => Promise.resolve(t === 'x' ? 'planning' : null));
       const result = await classifyIntents(classify, ['x', 'x', 'y', '']);
