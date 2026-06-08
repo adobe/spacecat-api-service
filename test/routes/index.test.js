@@ -530,16 +530,22 @@ describe('getRouteHandlers', () => {
     listWorkspaceProjects: sinon.stub(),
   };
 
-  const mockSemrushController = {
-    listPrompts: sinon.stub(),
-    createPrompts: sinon.stub(),
-    updatePrompt: sinon.stub(),
-    bulkDeletePrompts: sinon.stub(),
-    listProjects: sinon.stub(),
-    createProject: sinon.stub(),
-    listProjectTags: sinon.stub(),
-    listProjectModels: sinon.stub(),
-    listWorkspaceProjects: sinon.stub(),
+  const mockAgenticCategoriesController = {
+    list: sinon.stub(),
+    create: sinon.stub(),
+    update: sinon.stub(),
+    remove: sinon.stub(),
+  };
+
+  const mockAgenticPageTypesController = {
+    list: sinon.stub(),
+    create: sinon.stub(),
+    update: sinon.stub(),
+    remove: sinon.stub(),
+  };
+
+  const mockProxyController = {
+    getPreview: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -599,8 +605,10 @@ describe('getRouteHandlers', () => {
       mockAiVisibilityController,
       mockFanoutReportController,
       mockStateAccessMappingsController,
-      mockSemrushController,
+      mockAgenticCategoriesController,
+      mockAgenticPageTypesController,
       mockSerenityController,
+      mockProxyController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -630,6 +638,7 @@ describe('getRouteHandlers', () => {
       'POST /slack/channels/invite-by-user-id',
       'POST /tools/api-keys',
       'GET /tools/api-keys',
+      'GET /tools/proxy',
       'GET /monitoring/drs-bp-pg-audit',
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
@@ -701,6 +710,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /trigger']).to.equal(mockTrigger);
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
+    expect(staticRoutes['GET /tools/proxy']).to.equal(mockProxyController.getPreview);
     expect(staticRoutes['GET /monitoring/drs-bp-pg-audit']).to.equal(mockDrsBpPgAuditController.getProjectionAudit);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
@@ -1142,6 +1152,14 @@ describe('getRouteHandlers', () => {
       'PATCH /state/access-mappings/:id',
       'DELETE /state/access-mappings/:id',
       'GET /user/capabilities/:resourceId',
+      'GET /sites/:siteId/agentic-categories',
+      'POST /sites/:siteId/agentic-categories',
+      'PATCH /sites/:siteId/agentic-categories/:name',
+      'DELETE /sites/:siteId/agentic-categories/:name',
+      'GET /sites/:siteId/agentic-page-types',
+      'POST /sites/:siteId/agentic-page-types',
+      'PATCH /sites/:siteId/agentic-page-types/:name',
+      'DELETE /sites/:siteId/agentic-page-types/:name',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 

@@ -102,7 +102,10 @@ function isStaticRoute(routePattern) {
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
  * @param {Object} stateAccessMappingsController - State-layer access mappings + caps.
  * @param {Object} serenityController - Semrush AIO proxy controller (prompts + projects).
+ * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
+ * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
+ * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -161,7 +164,10 @@ export default function getRouteHandlers(
   aiVisibilityController,
   fanoutReportController,
   stateAccessMappingsController,
+  agenticCategoriesController,
+  agenticPageTypesController,
   serenityController,
+  proxyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -267,6 +273,16 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/url-store': urlStoreController.addUrls,
     'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
     'POST /sites/:siteId/url-store/delete': urlStoreController.deleteUrls,
+
+    // Agentic URL classification rules (precede :auditType for static-segment match)
+    'GET /sites/:siteId/agentic-categories': agenticCategoriesController.list,
+    'POST /sites/:siteId/agentic-categories': agenticCategoriesController.create,
+    'PATCH /sites/:siteId/agentic-categories/:name': agenticCategoriesController.update,
+    'DELETE /sites/:siteId/agentic-categories/:name': agenticCategoriesController.remove,
+    'GET /sites/:siteId/agentic-page-types': agenticPageTypesController.list,
+    'POST /sites/:siteId/agentic-page-types': agenticPageTypesController.create,
+    'PATCH /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.update,
+    'DELETE /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.remove,
 
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
@@ -387,6 +403,7 @@ export default function getRouteHandlers(
     'POST /tools/api-keys': apiKeyController.createApiKey,
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,
+    'GET /tools/proxy': proxyController.getPreview,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
     'POST /tools/import/jobs': importController.createImportJob,
     'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
