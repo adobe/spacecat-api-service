@@ -50,7 +50,15 @@ import {
   handleTopicsResearchSourceDomains,
 } from '../support/ai-visibility/handlers/topics.js';
 import { handleBrandTopics as handleBrandTopicsV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics.js';
+import { handleBrandTopicsExport as handleBrandTopicsExportV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics-export.js';
+import { handleBrandTopicsTotals as handleBrandTopicsTotalsV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics-totals.js';
+import { handleGapTopics as handleGapTopicsV1 } from '../support/ai-visibility/handlers/v1/topic/gap-topics.js';
+import { handleGapTopicsExport as handleGapTopicsExportV1 } from '../support/ai-visibility/handlers/v1/topic/gap-topics-export.js';
+import { handleGapTopicsTotals as handleGapTopicsTotalsV1 } from '../support/ai-visibility/handlers/v1/topic/gap-topics-totals.js';
 import { handleBrandPrompts as handleBrandPromptsV1 } from '../support/ai-visibility/handlers/v1/prompt/brand-prompts.js';
+import { handleBrandPromptsExport as handleBrandPromptsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/brand-prompts-export.js';
+import { handleGapPrompts as handleGapPromptsV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts.js';
+import { handleGapPromptsExport as handleGapPromptsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts-export.js';
 import { handlePromptResponse as handlePromptResponseV1 } from '../support/ai-visibility/handlers/v1/prompt/prompt-response.js';
 import { handleMeta } from '../support/ai-visibility/handlers/meta.js';
 
@@ -78,7 +86,15 @@ const ROUTE_MAP = [
   ['/topics/research', handleTopicsResearch],
   ['/topics/stats', handleTopicsStats],
   ['/v1/topic/brand-topics', handleBrandTopicsV1],
+  ['/v1/topic/brand-topics-export', handleBrandTopicsExportV1],
+  ['/v1/topic/brand-topics-totals', handleBrandTopicsTotalsV1],
+  ['/v1/topic/gap-topics', handleGapTopicsV1],
+  ['/v1/topic/gap-topics-export', handleGapTopicsExportV1],
+  ['/v1/topic/gap-topics-totals', handleGapTopicsTotalsV1],
   ['/v1/prompt/brand-prompts', handleBrandPromptsV1],
+  ['/v1/prompt/brand-prompts-export', handleBrandPromptsExportV1],
+  ['/v1/prompt/gap-prompts', handleGapPromptsV1],
+  ['/v1/prompt/gap-prompts-export', handleGapPromptsExportV1],
   ['/v1/prompt/prompt-response', handlePromptResponseV1],
 ];
 

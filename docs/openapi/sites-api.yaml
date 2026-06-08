@@ -122,17 +122,76 @@ sites:
       - site
     summary: Retrieve all sites
     description: |
-      This endpoint is useful for retrieving all sites.
+      Retrieves sites. Supports two response shapes for backwards compatibility:
+
+      - **Legacy (no query params):** returns a flat array of sites — a filtered subset for
+        backward compatibility. This shape is deprecated and will be removed once all
+        consumers have migrated to pagination.
+      - **Paginated (with `limit` and/or `cursor`):** returns `{ sites, pagination }` with
+        the full unfiltered result set. Iterate using `pagination.cursor` until
+        `pagination.hasMore` is `false` to fetch all sites.
+
+      Required capabilities: admin access (legacy admin path) or S2S `site:readAll`.
     operationId: getSites
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        description: |
+          Maximum number of items per page. When `limit` (or `cursor`) is provided the
+          response uses the paginated envelope shape; when both are omitted the response
+          uses the legacy flat-array shape (see endpoint description). Defaults to 100
+          when the paginated shape is selected. Non-integer or non-positive values
+          (e.g. `0`, `-1`, `abc`) return 400. Values above 500 are clamped to 500.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          example: 100
+      - name: cursor
+        in: query
+        required: false
+        description: |
+          Opaque cursor returned from a previous page's `pagination.cursor`. Pass it back
+          to fetch the next page. When present (or `limit` is present), the response uses
+          the paginated envelope shape. Treat as opaque — do not parse or construct
+          cursors client-side; the encoding is internal and may change without notice.
+        schema:
+          type: string
+          maxLength: 256
+          example: "eyJvZmZzZXQiOjEwMH0="
     responses:
       '200':
-        description: A list of sites
+        description: |
+          A list of sites. The shape depends on whether `limit`/`cursor` query parameters were provided.
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/SiteList'
+              description: |
+                Two response shapes are possible, selected by the request and
+                unambiguous by JSON type, so no `discriminator` is used (nor can one
+                be expressed — the legacy branch is a top-level array, which has no
+                property to discriminate on):
+                - When `limit` and/or `cursor` is provided → **`SitePagedResponse`**,
+                  a JSON object with `sites` and `pagination`.
+                - When neither is provided → **`SiteList`**, the legacy top-level
+                  JSON array.
+
+                This resolves to a single shape once the legacy path is sunset.
+              oneOf:
+                # Per-usage deprecation: marks only the legacy branch of this
+                # endpoint as deprecated for codegen. The SiteList schema itself is
+                # not deprecated — it is still the active shape for
+                # getSitesByDeliveryType and getSitesForOrganization.
+                - $ref: './schemas.yaml#/SiteList'
+                  deprecated: true
+                - $ref: './schemas.yaml#/SitePagedResponse'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
       '500':
         $ref: './responses.yaml#/500'
     security:

@@ -21,6 +21,20 @@ import { ConnectError, Code } from '@connectrpc/connect';
 
 export { COUNTRY_ENUM, LLM_ENUM, TOPIC_INTENT_ENUM };
 
+/**
+ * Shared JSON read options for v1 protobuf-es handlers. Ignores unknown fields so
+ * incoming JSON forwarded into `fromJson` does not fail on extra keys.
+ * @type {import('@bufbuild/protobuf').JsonReadOptions}
+ */
+export const PROTO_FROM_JSON = { ignoreUnknownFields: true };
+
+/**
+ * Shared JSON write options for v1 protobuf-es handlers. Emits camelCase field names
+ * and includes implicit (default-valued) fields so the response shape is stable.
+ * @type {import('@bufbuild/protobuf').JsonWriteOptions}
+ */
+export const PROTO_TO_JSON = { useProtoFieldName: false, alwaysEmitImplicit: true };
+
 export const LLM_UI = {
   [LLM_ENUM.CHAT_GPT]: 'chatgpt',
   [LLM_ENUM.GEMINI]: 'gemini',
@@ -146,6 +160,71 @@ export function parseLimitOffset(sp) {
   offset = Math.max(0, offset);
   return { limit, offset };
 }
+
+/* c8 ignore start -- thin QL/validation helpers for V1 brand-topics filters */
+/**
+ * Escape a user-supplied string for embedding inside a Semrush QL double-quoted
+ * literal. Backslashes are doubled and double-quotes are backslash-escaped so the
+ * literal cannot break out of the surrounding `"..."` quotes.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+export function escapeQlString(s) {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
+ * Build a Semrush QL range expression like `volume >= 10 AND volume <= 100`.
+ * - both bounds present → `metric >= from AND metric <= to`
+ * - only `from` present → `metric >= from`
+ * - only `to` present   → `metric <= to`
+ * - neither present     → ''
+ *
+ * @param {string} metric
+ * @param {string|number|null|undefined} from
+ * @param {string|number|null|undefined} to
+ * @returns {string}
+ */
+export function buildRangeExpr(metric, from, to) {
+  const hasFrom = from != null && from !== '';
+  const hasTo = to != null && to !== '';
+  if (hasFrom && hasTo) {
+    return `${metric} >= ${from} AND ${metric} <= ${to}`;
+  }
+  if (hasFrom) {
+    return `${metric} >= ${from}`;
+  }
+  if (hasTo) {
+    return `${metric} <= ${to}`;
+  }
+  return '';
+}
+
+/**
+ * @param {string|number|null|undefined} v
+ * @returns {boolean} true if `v` is null/undefined/empty (no bound) or an integer in [0, 100].
+ */
+export function isValidVisibility(v) {
+  if (v == null || v === '') {
+    return true;
+  }
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 && n <= 100;
+}
+
+/**
+ * @param {string|number|null|undefined} v
+ * @returns {boolean} true if `v` is null/undefined/empty (no bound) or a non-negative integer.
+ */
+export function isValidVolume(v) {
+  if (v == null || v === '') {
+    return true;
+  }
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0;
+}
+/* c8 ignore stop */
 
 export function normalizeCountryForGrpc(raw) {
   const u = String(raw).trim().toUpperCase();

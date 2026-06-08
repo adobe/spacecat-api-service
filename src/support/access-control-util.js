@@ -28,7 +28,7 @@ const ANONYMOUS_ENDPOINTS = [
   /^POST \/hooks\/site-detection.+/,
 ];
 const SERVICE_CODE = 'dx_aem_perf';
-const X_PRODUCT_HEADER = 'x-product';
+export const X_PRODUCT_HEADER = 'x-product';
 
 function isAnonymous(endpoint) {
   return ANONYMOUS_ENDPOINTS.some((rgx) => rgx.test(endpoint));
@@ -103,9 +103,50 @@ export default class AccessControlUtil {
   }
 
   /**
+   * Fetches and validates the S2S consumer identity from the DB, covering the shared
+   * denial paths (not-s2s, not-found, revoked, not-active) used by both
+   * `hasS2SCapability`. Returns either a denial result or the
+   * validated consumer ready for domain-specific checks.
+   *
+   * @returns {Promise<{ denied: true, result: object }
+   *   | { denied: false, fresh: object, clientId: string }>}
+   */
+  async _fetchAndValidateConsumer() {
+    const { s2sConsumer } = this.context;
+    if (!s2sConsumer) {
+      return { denied: true, result: { allowed: false, reason: 'not-s2s' } };
+    }
+    const clientId = s2sConsumer.getClientId();
+    const fresh = await this.context.dataAccess.Consumer.findByClientIdAndImsOrgId(
+      clientId,
+      s2sConsumer.getImsOrgId(),
+    );
+    if (!fresh) {
+      return { denied: true, result: { allowed: false, reason: 'not-found', clientId } };
+    }
+    if (fresh.isRevoked()) {
+      return {
+        denied: true,
+        result: {
+          allowed: false, reason: 'revoked', clientId, consumerId: fresh.getId(),
+        },
+      };
+    }
+    if (fresh.getStatus() !== ConsumerModel.STATUS.ACTIVE) {
+      return {
+        denied: true,
+        result: {
+          allowed: false, reason: 'not-active', clientId, consumerId: fresh.getId(),
+        },
+      };
+    }
+    return { denied: false, fresh, clientId };
+  }
+
+  /**
    * Verifies the requesting S2S consumer holds the given capability by issuing
    * a fresh DB fetch. Uses `context.s2sConsumer` (set by s2sAuthWrapper) only as
-   * an identity source - extracts `clientId` and `imsOrgId` and re-queries the
+   * an identity source — extracts `clientId` and `imsOrgId` and re-queries the
    * Consumer table. Capabilities are NOT read from the in-context object: a stale
    * or tampered context cannot grant access.
    *
@@ -121,29 +162,11 @@ export default class AccessControlUtil {
    *   consumerId: (string|undefined), clientId: (string|undefined) }>}
    */
   async hasS2SCapability(capability) {
-    const { s2sConsumer } = this.context;
-    if (!s2sConsumer) {
-      return { allowed: false, reason: 'not-s2s' };
+    const validated = await this._fetchAndValidateConsumer();
+    if (validated.denied) {
+      return validated.result;
     }
-
-    const clientId = s2sConsumer.getClientId();
-    const fresh = await this.context.dataAccess.Consumer.findByClientIdAndImsOrgId(
-      clientId,
-      s2sConsumer.getImsOrgId(),
-    );
-    if (!fresh) {
-      return { allowed: false, reason: 'not-found', clientId };
-    }
-    if (fresh.isRevoked()) {
-      return {
-        allowed: false, reason: 'revoked', clientId, consumerId: fresh.getId(),
-      };
-    }
-    if (fresh.getStatus() !== ConsumerModel.STATUS.ACTIVE) {
-      return {
-        allowed: false, reason: 'not-active', clientId, consumerId: fresh.getId(),
-      };
-    }
+    const { fresh, clientId } = validated;
     if (!fresh.getCapabilities()?.includes(capability)) {
       return {
         allowed: false, reason: 'missing-capability', clientId, consumerId: fresh.getId(),
@@ -219,6 +242,34 @@ export default class AccessControlUtil {
           externalUserId: profile.email,
           lastSeenAt: new Date().toISOString(),
         });
+      }
+    // Lazy one-time backfill of externalUserId for PAID-tier (Brandalf) users onboarded via
+    // invitation. These users are created without externalUserId; we record it here on the
+    // first authenticated request so the userDetails lookup can resolve their display name.
+    // NOTE: profile.email is an IMS user GUID (e.g. GUID@hexOrgId.e), not an RFC-5322 address.
+    // profile.trial_email is the human-readable email used as the DB row selector.
+    // Both claims refer to the same identity and are attested by IMS on the same token.
+    // findByEmailId runs on every non-FREE_TRIAL request (same as the FREE_TRIAL branch above),
+    // so this adds no new per-request overhead relative to existing behaviour.
+    } else if (!this.authInfo?.isS2SConsumer?.()) {
+      const profile = this.authInfo.getProfile?.();
+      if (profile?.email && profile?.trial_email) {
+        try {
+          const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
+          if (trialUser && !trialUser.getExternalUserId()) {
+            trialUser.setExternalUserId(profile.email);
+            await trialUser.save();
+            this.log?.info('[AccessControl] Backfilled externalUserId for PAID-tier user', {
+              trialEmail: profile.trial_email,
+              organizationId: org.getId(),
+            });
+          }
+        } catch (err) {
+          this.log?.warn('[AccessControl] externalUserId backfill failed; continuing', {
+            trialEmail: profile.trial_email,
+            error: err.message,
+          });
+        }
       }
     }
   }
