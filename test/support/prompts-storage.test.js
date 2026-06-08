@@ -2744,14 +2744,25 @@ describe('prompts-storage', () => {
         expect(isMissingIntentColumnError({ message: 'DB exploded' })).to.be.false;
       });
 
-      it('does not match an error that mentions intent but not column/schema cache', () => {
-        // Exercises the negative side of the `column || schema cache` branch:
-        // "intent" present, but neither qualifier — must NOT be swallowed.
+      it('does not match an intent-mentioning error without a missing-column code', () => {
+        // "intent" present but no 42703/PGRST204 code — must NOT be swallowed.
         expect(isMissingIntentColumnError({ message: 'invalid intent value supplied' })).to.be.false;
       });
 
-      it('does not match an error that mentions column but not intent', () => {
-        expect(isMissingIntentColumnError({ message: 'column foo does not exist' })).to.be.false;
+      it('does not match a missing-column code for a different column', () => {
+        // Correct code, but the column is not `intent` — must NOT latch the fallback.
+        expect(isMissingIntentColumnError({ code: '42703', message: 'column prompts.status does not exist' })).to.be.false;
+      });
+
+      it('does not match a check-constraint violation that mentions intent and column', () => {
+        // Regression (PR #2562 review): a future constraint error like
+        // "column intent violates check constraint" carries a non-missing-column
+        // code (e.g. 23514). Gating on the code prevents a false positive that
+        // would latch the fallback off and silently drop intent.
+        expect(isMissingIntentColumnError({
+          code: '23514',
+          message: 'new row violates check constraint; column intent ...',
+        })).to.be.false;
       });
     });
 

@@ -66,6 +66,11 @@ export function normalizeIntent(intent) {
  * migration, and bumping it pulls in unrelated migrations + a constraint that
  * rejects the IT seed brand. So the code self-defends: when `intent` is absent,
  * prompts are still written/read WITHOUT intent rather than 500-ing.
+ *
+ * TODO: remove this fallback (the WeakMap, `isMissingIntentColumnError`, and the
+ * try/detect/retry in withMissingIntentFallback) once the IT PostgREST image in
+ * `test/it/postgres/docker-compose.yml` is bumped to a mysticat-data-service
+ * version >= v5.27.0 that includes the `intent` column. Tracked in SITES-39521.
  */
 const intentColumnSupported = new WeakMap();
 
@@ -75,6 +80,13 @@ const intentColumnSupported = new WeakMap();
  * 'intent' column of 'prompts' in the schema cache") and the select error
  * (`42703`, "column prompts.intent does not exist").
  *
+ * Gated on the two specific error codes first, THEN on the column being
+ * `intent`. This deliberately avoids broad message matching: an error that
+ * merely mentions "intent" and "column" (e.g. a future check-constraint
+ * violation "column intent violates check constraint") must NOT be treated as
+ * a missing column, or the fallback would latch off and silently drop the
+ * intent the caller sent — the exact data-loss bug this code exists to fix.
+ *
  * @param {*} error - Error object from a PostgREST response (`{ message, details, hint, code }`)
  * @returns {boolean} true when the error is specifically about a missing `intent` column
  */
@@ -82,12 +94,45 @@ export function isMissingIntentColumnError(error) {
   if (!error) {
     return false;
   }
-  const haystack = [error.message, error.details, error.hint, error.code]
+  const code = String(error.code || '').toUpperCase();
+  if (code !== '42703' && code !== 'PGRST204') {
+    return false;
+  }
+  const haystack = [error.message, error.details, error.hint]
     .filter((v) => v != null)
     .join(' ')
     .toLowerCase();
-  return haystack.includes('intent')
-    && (haystack.includes('column') || haystack.includes('schema cache'));
+  return haystack.includes('intent');
+}
+
+/**
+ * Removes the `intent` key from a row/patch (used when the column is known-absent).
+ */
+function stripIntent(row) {
+  const { intent: _, ...rest } = row;
+  return rest;
+}
+
+/**
+ * Runs a PostgREST op that may reference `prompts.intent`, transparently degrading
+ * when the column is absent (see intentColumnSupported). `run(includeIntent)` builds
+ * AND executes the op with or without intent and resolves to a PostgREST result
+ * (`{ error, ... }`). On the first missing-`intent`-column error for a client it
+ * caches the fact and retries once without intent; subsequent calls skip intent up
+ * front. Centralizes the try/detect/cache/retry the read and write paths share.
+ *
+ * @param {object} postgrestClient - PostgREST client (WeakMap key)
+ * @param {(includeIntent: boolean) => Promise<object>} run - builds+executes the op
+ * @returns {Promise<object>} the PostgREST result
+ */
+async function withMissingIntentFallback(postgrestClient, run) {
+  const includeIntent = intentColumnSupported.get(postgrestClient) !== false;
+  const result = await run(includeIntent);
+  if (includeIntent && result?.error && isMissingIntentColumnError(result.error)) {
+    intentColumnSupported.set(postgrestClient, false);
+    return run(false);
+  }
+  return result;
 }
 
 /**
@@ -493,13 +538,7 @@ export async function listPrompts({
     return baseQuery.range(offset, offset + limitNum - 1);
   };
 
-  const tryIntent = intentColumnSupported.get(postgrestClient) !== false;
-  let { data: rows, error, count } = await run(tryIntent);
-
-  if (error && isMissingIntentColumnError(error)) {
-    intentColumnSupported.set(postgrestClient, false);
-    ({ data: rows, error, count } = await run(false));
-  }
+  const { data: rows, error, count } = await withMissingIntentFallback(postgrestClient, run);
 
   if (error) {
     throw new Error(`Failed to list prompts: ${error.message}`);
@@ -568,12 +607,7 @@ export async function getPromptById({
     .eq('prompt_id', promptId)
     .maybeSingle();
 
-  let { data, error } = await run(intentColumnSupported.get(postgrestClient) !== false);
-
-  if (error && isMissingIntentColumnError(error)) {
-    intentColumnSupported.set(postgrestClient, false);
-    ({ data, error } = await run(false));
-  }
+  const { data, error } = await withMissingIntentFallback(postgrestClient, run);
 
   if (error) {
     throw new Error(`Failed to get prompt: ${error.message}`);
@@ -698,25 +732,16 @@ export async function upsertPrompts({
   let updated = 0;
   const skipped = prompts.length - toInsert.length - toUpdate.length;
 
-  // Best-effort against environments where `prompts.intent` is absent (see
-  // intentColumnSupported): strip `intent` from rows known-unsupported up
-  // front, and on a missing-column error remember it and retry without intent.
-  const stripIntent = (row) => {
-    const { intent: _, ...rest } = row;
-    return rest;
-  };
-
+  // Best-effort against environments where `prompts.intent` is absent: the
+  // shared helper drops intent and retries when the column is missing.
   if (toInsert.length > 0) {
-    const knownUnsupported = intentColumnSupported.get(postgrestClient) === false;
-    const insertRows = knownUnsupported ? toInsert.map(stripIntent) : toInsert;
-    let { data: inserted, error } = await postgrestClient.from('prompts').insert(insertRows).select();
-    if (error && isMissingIntentColumnError(error)) {
-      intentColumnSupported.set(postgrestClient, false);
-      ({ data: inserted, error } = await postgrestClient
+    const { data: inserted, error } = await withMissingIntentFallback(
+      postgrestClient,
+      (includeIntent) => postgrestClient
         .from('prompts')
-        .insert(toInsert.map(stripIntent))
-        .select());
-    }
+        .insert(includeIntent ? toInsert : toInsert.map(stripIntent))
+        .select(),
+    );
     if (error) {
       throw new Error(`Failed to insert prompts: ${error.message}`);
     }
@@ -725,14 +750,14 @@ export async function upsertPrompts({
 
   for (const row of toUpdate) {
     const { id, ...patch } = row;
-    const knownUnsupported = intentColumnSupported.get(postgrestClient) === false;
-    // eslint-disable-next-line no-await-in-loop, max-len
-    let { error } = await postgrestClient.from('prompts').update(knownUnsupported ? stripIntent(patch) : patch).eq('id', id);
-    if (error && isMissingIntentColumnError(error)) {
-      intentColumnSupported.set(postgrestClient, false);
-      // eslint-disable-next-line no-await-in-loop, max-len
-      ({ error } = await postgrestClient.from('prompts').update(stripIntent(patch)).eq('id', id));
-    }
+    // eslint-disable-next-line no-await-in-loop
+    const { error } = await withMissingIntentFallback(
+      postgrestClient,
+      (includeIntent) => postgrestClient
+        .from('prompts')
+        .update(includeIntent ? patch : stripIntent(patch))
+        .eq('id', id),
+    );
     if (error) {
       throw new Error(`Failed to update prompt: ${error.message}`);
     }
@@ -798,10 +823,8 @@ export async function updatePromptById({
   if (updates.origin !== undefined) {
     patch.origin = updates.origin;
   }
-  // Only set patch.intent when the column is not known-unsupported for this
-  // client (see intentColumnSupported); a missing-column error below triggers
-  // a retry with intent dropped.
-  if (updates.intent !== undefined && intentColumnSupported.get(postgrestClient) !== false) {
+  if (updates.intent !== undefined) {
+    // The shared fallback strips intent when the column is known-absent.
     patch.intent = normalizeIntent(updates.intent);
   }
   if (updates.categoryId !== undefined) {
@@ -824,13 +847,10 @@ export async function updatePromptById({
     .select()
     .maybeSingle();
 
-  let { data, error } = await runUpdate(patch);
-
-  if (error && isMissingIntentColumnError(error)) {
-    intentColumnSupported.set(postgrestClient, false);
-    const { intent: _, ...patchWithoutIntent } = patch;
-    ({ data, error } = await runUpdate(patchWithoutIntent));
-  }
+  const { data, error } = await withMissingIntentFallback(
+    postgrestClient,
+    (includeIntent) => runUpdate(includeIntent ? patch : stripIntent(patch)),
+  );
 
   if (error) {
     throw new Error(`Failed to update prompt: ${error.message}`);
