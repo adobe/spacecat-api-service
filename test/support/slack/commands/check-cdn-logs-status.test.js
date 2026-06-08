@@ -24,6 +24,7 @@ describe('CheckCdnLogsStatusCommand', () => {
   let CheckCdnLogsStatusCommand;
   let readConfigStub;
   let s3SendStub;
+  let s3ClientRegions;
   const TARGET_SITE_ID = '11111111-2222-3333-4444-555555555555';
   const OTHER_SITE_ID = '22222222-3333-4444-5555-555555555555';
   const MISSING_SITE_ID = '33333333-4444-5555-6666-555555555555';
@@ -62,6 +63,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     this.timeout(30000);
     readConfigStub = sinon.stub();
     s3SendStub = sinon.stub();
+    s3ClientRegions = [];
 
     CheckCdnLogsStatusCommand = (await esmock(
       '../../../../src/support/slack/commands/check-cdn-logs-status.js',
@@ -72,6 +74,11 @@ describe('CheckCdnLogsStatusCommand', () => {
         '@aws-sdk/client-s3': {
           ListObjectsV2Command: class ListObjectsV2Command {
             constructor(params) { this.params = params; }
+          },
+          // Per-region clients delegate to the same send stub.
+          S3Client: function S3Client(config) {
+            s3ClientRegions.push(config?.region);
+            return { config, send: (...args) => s3SendStub(...args) };
           },
         },
       },
@@ -614,6 +621,31 @@ describe('CheckCdnLogsStatusCommand', () => {
 
     expect(s3SendStub.firstCall.args[0].params.Bucket)
       .to.equal('spacecat-ci-cdn-logs-aggregates-eu-west-1');
+    // Dedicated client created for the site's non-runtime region.
+    expect(s3ClientRegions).to.deep.equal(['eu-west-1']);
+  });
+
+  it('reuses the default S3 client (no new client) when the site region matches the runtime region', async () => {
+    const site = makeSite('site-runtime-region', 'https://runtime-region.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+    readConfigStub.resolves({
+      config: { cdnBucketConfig: { cdnProvider: 'fastly', region: 'us-east-1' } },
+    });
+    s3SendStub.resolves({
+      CommonPrefixes: Array.from({ length: 24 }, (_, i) => ({
+        Prefix: `aggregated/site-runtime-region/2026/04/21/${String(i).padStart(2, '0')}/`,
+      })),
+    });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    expect(s3SendStub.firstCall.args[0].params.Bucket)
+      .to.equal('spacecat-ci-cdn-logs-aggregates-us-east-1');
+    expect(s3ClientRegions).to.deep.equal([]);
   });
 
   it('treats unknown provider as hourly (all 24 hours expected)', async () => {
