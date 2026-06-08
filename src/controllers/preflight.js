@@ -18,7 +18,6 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { AsyncJob } from '@adobe/spacecat-shared-data-access';
 import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
-import { TierClient } from '@adobe/spacecat-shared-tier-client';
 import AccessControlUtil from '../support/access-control-util.js';
 import { PreflightDto } from '../dto/preflight.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
@@ -97,41 +96,6 @@ function PreflightController(ctx, log, env) {
         `Invalid request: step must be either ${AUDIT_STEP_IDENTIFY} or ${AUDIT_STEP_SUGGEST}`,
       );
     }
-  }
-
-  /**
-   * Checks if a handler type is enabled for a site, including product code
-   * entitlement verification. Mirrors the audit worker's isAuditEnabledForSite.
-   */
-  async function isAuditEnabledForSite(type, site, configuration) {
-    const handler = configuration.getHandlers()?.[type];
-    if (!handler) {
-      log.info(`Handler ${type} not found in Configuration`);
-      return false;
-    }
-    if (isNonEmptyArray(handler.productCodes)) {
-      const tierContext = { dataAccess, log };
-      const enrollmentChecks = await Promise.all(
-        handler.productCodes.map(async (productCode) => {
-          try {
-            const tierClient = await TierClient.createForSite(tierContext, site, productCode);
-            const tierResult = await tierClient.checkValidEntitlement();
-            return tierResult.siteEnrollment || false;
-          } catch (e) {
-            log.error(`Failed to check entitlement for ${productCode}: ${e.message}`);
-            return false;
-          }
-        }),
-      );
-      if (!enrollmentChecks.some((has) => has)) {
-        log.info(`No valid site enrollment for handler ${type} with product codes ${handler.productCodes} for site ${site.getId()}`);
-        return false;
-      }
-    } else {
-      log.info(`Handler ${type} has no product codes`);
-      return false;
-    }
-    return configuration.isHandlerEnabledForSite(type, site);
   }
 
   /**
@@ -437,21 +401,7 @@ function PreflightController(ctx, log, env) {
       return preflightError('PREFLIGHT_INVALID_REQUEST', 'URL does not belong to this site', 400);
     }
 
-    let configuration;
-    try {
-      configuration = await dataAccess.Configuration.findLatest();
-      if (!configuration) {
-        return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Configuration not available', 500);
-      }
-    } catch (e) {
-      log.error(`Failed to load Configuration: ${e.message}`);
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to load configuration', 500);
-    }
-
-    const preflightEnabled = await isAuditEnabledForSite('preflight', site, configuration);
-    if (!preflightEnabled) {
-      return preflightError('PREFLIGHT_NOT_ENABLED', 'Preflight is not enabled for this site', 403);
-    }
+    // Eligibility is Mysticat's decision — see SITES-46202 + ADR-002.
 
     // Resolve page authentication if required.
     // checkEnableAuthentication does a bare HEAD fetch against the customer
