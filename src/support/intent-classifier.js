@@ -185,19 +185,6 @@ export function contentToString(content) {
 }
 
 /**
- * Returns true when intent classification on write is enabled. Default-safe:
- * disabled unless `ENABLE_PROMPT_INTENT_CLASSIFICATION` is explicitly truthy,
- * so it can be turned on/off via config without a code change or redeploy.
- *
- * @param {object} env - Environment variables
- * @returns {boolean}
- */
-export function isIntentClassificationEnabled(env = {}) {
-  const flag = env.ENABLE_PROMPT_INTENT_CLASSIFICATION;
-  return flag === true || flag === 'true' || flag === '1';
-}
-
-/**
  * Extracts a JSON object from a model response that may include code fences or
  * surrounding prose, then returns its normalized `intent` (or null).
  *
@@ -237,21 +224,17 @@ function parseIntent(content) {
  * best-effort: it resolves to a canonical bucket on success, or `null` on any
  * failure or when text/credentials are missing. It NEVER rejects.
  *
- * When classification is disabled by config or Azure credentials are absent,
- * returns `null` (no classifier) so callers can skip the work entirely and
- * persist NULL.
+ * Classification runs whenever Azure OpenAI is configured. When the Azure
+ * credentials are absent it returns `null` (no classifier) so callers skip the
+ * work entirely and persist NULL — a hard dependency, not an opt-in toggle.
  *
  * @param {object} context - Helix universal context
- * @param {object} context.env - Environment variables (Azure creds + toggle)
+ * @param {object} context.env - Environment variables (Azure OpenAI creds)
  * @param {object} [context.log] - Logger
  * @returns {((text: string) => Promise<string|null>)|null}
  */
 export function createIntentClassifier(context = {}) {
   const { env = {}, log = console } = context;
-
-  if (!isIntentClassificationEnabled(env)) {
-    return null;
-  }
 
   const {
     AZURE_OPEN_AI_API_KEY: azureOpenAIApiKey,
@@ -263,7 +246,7 @@ export function createIntentClassifier(context = {}) {
   if (!hasText(azureOpenAIApiKey)
     || !hasText(azureOpenAIApiInstanceName)
     || !hasText(azureOpenAIApiDeploymentName)) {
-    log.info('Prompt intent classification enabled but Azure OpenAI is not configured; skipping (intent stays null)');
+    log.info('Prompt intent classification skipped: Azure OpenAI is not configured (intent stays null)');
     return null;
   }
 

@@ -19,7 +19,6 @@ import esmock from 'esmock';
 import yaml from 'js-yaml';
 
 import {
-  isIntentClassificationEnabled,
   classifyIntents,
   contentToString,
 } from '../../src/support/intent-classifier.js';
@@ -28,7 +27,6 @@ import { INTENT_VALUES } from '../../src/support/intent.js';
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 
 const ENABLED_ENV = {
-  ENABLE_PROMPT_INTENT_CLASSIFICATION: 'true',
   AZURE_OPEN_AI_API_KEY: 'key',
   AZURE_OPEN_AI_API_INSTANCE_NAME: 'instance',
   AZURE_OPEN_AI_API_DEPLOYMENT_NAME: 'deployment',
@@ -67,43 +65,19 @@ async function loadWithModel(invokeImpl, { constructorError } = {}) {
 describe('intent-classifier', () => {
   afterEach(() => sinon.restore());
 
-  describe('isIntentClassificationEnabled', () => {
-    const enabled = (v) => isIntentClassificationEnabled(
-      { ENABLE_PROMPT_INTENT_CLASSIFICATION: v },
-    );
-
-    it('is disabled by default (default-safe toggle)', () => {
-      expect(isIntentClassificationEnabled()).to.be.false;
-      expect(isIntentClassificationEnabled({})).to.be.false;
-      expect(enabled('false')).to.be.false;
-      expect(enabled('no')).to.be.false;
-    });
-
-    it('is enabled when the flag is truthy', () => {
-      expect(enabled('true')).to.be.true;
-      expect(enabled(true)).to.be.true;
-      expect(enabled('1')).to.be.true;
-    });
-  });
-
   describe('createIntentClassifier', () => {
-    it('returns null when classification is disabled (toggle off)', async () => {
+    it('returns null when Azure OpenAI is not configured', async () => {
       const { mod, ctorSpy } = await loadWithModel(() => ({ content: '{}' }));
-      const classify = mod.createIntentClassifier({
-        env: { ...ENABLED_ENV, ENABLE_PROMPT_INTENT_CLASSIFICATION: 'false' },
-        log,
-      });
+      const classify = mod.createIntentClassifier({ env: {}, log });
       expect(classify).to.be.null;
       expect(ctorSpy.called).to.be.false;
     });
 
-    it('returns null when Azure OpenAI is not configured', async () => {
-      const { mod } = await loadWithModel(() => ({ content: '{}' }));
-      const classify = mod.createIntentClassifier({
-        env: { ENABLE_PROMPT_INTENT_CLASSIFICATION: 'true' },
-        log,
-      });
-      expect(classify).to.be.null;
+    it('builds a classifier whenever Azure OpenAI is configured (no opt-in flag)', async () => {
+      const { mod, ctorSpy } = await loadWithModel(() => ({ content: '{"intent":"informational"}' }));
+      const classify = mod.createIntentClassifier({ env: ENABLED_ENV, log });
+      expect(classify).to.be.a('function');
+      expect(ctorSpy.called).to.be.true;
     });
 
     it('constructs the model with temperature 0 and json_object response format', async () => {
