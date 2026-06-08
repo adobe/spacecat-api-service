@@ -29,7 +29,7 @@ import {
   listFacsAccessMappingHistory,
   requirePostgrestForFacsMappings,
   revokeFacsAccessMappingById,
-} from '../support/facs-access-mappings.js';
+} from '../support/state-access-mapping-utils.js';
 
 // TODO(deps): replace with `normalizeImsOrgId` imported from
 // `@adobe/spacecat-shared-http-utils` once the published package includes

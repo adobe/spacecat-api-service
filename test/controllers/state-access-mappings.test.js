@@ -88,7 +88,7 @@ async function loadController(supportStubs = {}) {
     ...supportStubs,
   };
   const mod = await esmock('../../src/controllers/state-access-mappings.js', {
-    '../../src/support/facs-access-mappings.js': stubs,
+    '../../src/support/state-access-mapping-utils.js': stubs,
   });
   return { Controller: mod.default, stubs };
 }

@@ -18,7 +18,7 @@ import {
   listFacsAccessMappingHistory,
   createFacsAccessMappings,
   revokeFacsAccessMappingById,
-} from '../../src/support/facs-access-mappings.js';
+} from '../../src/support/state-access-mapping-utils.js';
 
 /**
  * Builds a chained PostgREST-style stub for read/write queries. Each
@@ -73,7 +73,7 @@ function fakePostgrestClient({ readResult, upsertResult, rpcResult } = {}) {
   return client;
 }
 
-describe('facs-access-mappings helpers', () => {
+describe('state-access-mapping-utils helpers', () => {
   describe('listFacsAccessMappings', () => {
     it('throws when imsOrgId is missing', async () => {
       const client = fakePostgrestClient();

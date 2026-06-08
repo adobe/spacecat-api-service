@@ -35,7 +35,7 @@ import { createResponse } from '@adobe/spacecat-shared-http-utils';
  * PostgREST-backed surfaces). The 503 status and Content-Type are fixed.
  *
  * Extracted from `controllers/brands.js` (where it lived as a private
- * nested function with 20 call sites) and `support/facs-access-mappings.js`
+ * nested function with 20 call sites) and `support/state-access-mapping-utils.js`
  * (where a near-duplicate `requirePostgrestForFacsMappings` mirrored the
  * shape) so a single check lives in one place. The convenience aliases
  * below preserve the original call-site shapes used across both consumers.
