@@ -1,3 +1,10 @@
+# [1.559.0](https://github.com/adobe/spacecat-api-service/compare/v1.558.0...v1.559.0) (2026-06-08)
+
+
+### Features
+
+* **s2s:** allow S2S consumers with configuration:write to toggle site audits ([#2571](https://github.com/adobe/spacecat-api-service/issues/2571)) ([b9714d3](https://github.com/adobe/spacecat-api-service/commit/b9714d373f2eb3a14904ec357aee3c199c91ab56))
+
 # [1.558.0](https://github.com/adobe/spacecat-api-service/compare/v1.557.0...v1.558.0) (2026-06-08)
 
 
