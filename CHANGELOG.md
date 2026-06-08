@@ -1,3 +1,10 @@
+## [1.556.2](https://github.com/adobe/spacecat-api-service/compare/v1.556.1...v1.556.2) (2026-06-08)
+
+
+### Bug Fixes
+
+* **slack:** correct agentic-traffic db-status (backfills + raw evidence) and cdn-logs-status region ([#2487](https://github.com/adobe/spacecat-api-service/issues/2487)) ([e15db4b](https://github.com/adobe/spacecat-api-service/commit/e15db4b0c9db9e3b731dfa1bfac7d6647365bc65))
+
 ## [1.556.1](https://github.com/adobe/spacecat-api-service/compare/v1.556.0...v1.556.1) (2026-06-05)
 
 
