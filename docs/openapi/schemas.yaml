@@ -6413,6 +6413,131 @@ V2PromptBulkDeleteResponse:
           reason:
             type: string
 
+V2GscPrompt:
+  type: object
+  description: |
+    A per-brand state record for a GSC-sourced prompt suggestion. The
+    canonical tracked-prompt row (when `status='added'`) lives in `prompts`
+    with `source='gsc'`; this table records the user's action history.
+  required:
+    - id
+    - text
+    - region
+    - source
+    - status
+  properties:
+    id:
+      type: string
+      format: uuid
+    text:
+      type: string
+    region:
+      type: string
+      description: 2-char lowercase region code (e.g. "us", "gb")
+    source:
+      type: string
+      description: Suggestion source (e.g. `gsc`)
+    status:
+      type: string
+      enum: [ignored, added]
+    createdAt:
+      type: string
+      format: date-time
+    createdBy:
+      type:
+        - string
+        - 'null'
+    updatedAt:
+      type: string
+      format: date-time
+    updatedBy:
+      type:
+        - string
+        - 'null'
+
+V2GscPromptInput:
+  type: object
+  description: Request item for upserting a gsc_prompts row
+  required:
+    - text
+    - region
+    - source
+    - status
+  properties:
+    text:
+      type: string
+      maxLength: 2000
+    region:
+      type: string
+      description: |
+        Region code. Normalized to lowercase 2-char before insert (e.g. "US" → "us").
+    source:
+      type: string
+      description: Suggestion source (e.g. `gsc`)
+    status:
+      type: string
+      enum: [ignored, added]
+
+V2GscPromptListResponse:
+  type: object
+  description: Paginated list of gsc_prompts rows
+  required:
+    - items
+    - total
+    - limit
+    - page
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/V2GscPrompt'
+    total:
+      type: integer
+    limit:
+      type: integer
+    page:
+      type: integer
+
+V2GscPromptUpsertRequest:
+  type: object
+  description: |
+    Bulk upsert request. Idempotent on `(brand_id, lower(text), region,
+    source)`: existing rows have their status updated; new tuples are
+    inserted; same-status calls are no-ops (counted as `skipped`).
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      minItems: 1
+      maxItems: 500
+      items:
+        $ref: '#/V2GscPromptInput'
+
+V2GscPromptUpsertResponse:
+  type: object
+  description: Result of an upsert call
+  required:
+    - created
+    - updated
+    - skipped
+    - items
+  properties:
+    created:
+      type: integer
+      description: Number of new rows inserted
+    updated:
+      type: integer
+      description: Number of existing rows whose status was changed
+    skipped:
+      type: integer
+      description: Number of input items that matched an existing row's status (no-op)
+    items:
+      type: array
+      description: Inserted + updated rows. Skipped rows are not returned.
+      items:
+        $ref: '#/V2GscPrompt'
+
 CustomerConfigPrompt:
   type: object
   description: A search prompt with category and topic ID references

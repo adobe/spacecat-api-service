@@ -41,6 +41,10 @@ import {
   resolveBrandUuid,
 } from '../support/prompts-storage.js';
 import {
+  upsertGscPrompts,
+  listGscPrompts,
+} from '../support/gsc-prompts-storage.js';
+import {
   listBrands,
   upsertBrand,
   updateBrand,
@@ -598,6 +602,127 @@ function BrandsController(ctx, log, env) {
       return ok(result);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  // ── Brand-scoped GSC prompts state (v2) ──
+
+  const listGscPromptsByBrand = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const {
+      status, source, limit, page,
+    } = getQueryParams(context);
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      const result = await listGscPrompts({
+        organizationId: spaceCatId,
+        brandUuid,
+        status,
+        source,
+        limit,
+        page,
+        postgrestClient,
+      });
+      return ok(result);
+    } catch (error) {
+      log.error(`Error listing gsc_prompts for brand ${brandId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const upsertGscPromptsByBrand = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const body = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+
+      const { items } = body;
+      if (!Array.isArray(items) || items.length === 0) {
+        return badRequest('"items" array required (min 1, max 500)');
+      }
+      if (items.length > 500) {
+        return badRequest('Maximum 500 items per request');
+      }
+      if (items.some((i) => !i || typeof i !== 'object'
+          || !i.text?.trim() || i.text.length > 2000
+          || !i.region?.trim()
+          || !i.source?.trim()
+          || !i.status?.trim())) {
+        return badRequest('Each item must have non-empty "text" (max 2000), "region", "source", and "status"');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+      const createdBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      const result = await upsertGscPrompts({
+        organizationId: spaceCatId,
+        brandUuid,
+        items,
+        postgrestClient,
+        createdBy,
+      });
+
+      return createResponse(result, 201);
+    } catch (error) {
+      log.error(`Error upserting gsc_prompts for brand ${brandId}:`, error);
       return createErrorResponse(error);
     }
   };
@@ -1438,6 +1563,8 @@ function BrandsController(ctx, log, env) {
     deletePromptByBrandAndId,
     bulkDeletePromptsByBrand,
     checkPromptsByBrand,
+    listGscPromptsByBrand,
+    upsertGscPromptsByBrand,
   };
 }
 

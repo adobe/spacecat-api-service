@@ -228,6 +228,8 @@ export default function getRouteHandlers(
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.deletePromptByBrandAndId,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': brandsController.bulkDeletePromptsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check': brandsController.checkPromptsByBrand,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/gsc-prompts': brandsController.listGscPromptsByBrand,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/gsc-prompts': brandsController.upsertGscPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': brandsController.getBrandForOrgSite,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,

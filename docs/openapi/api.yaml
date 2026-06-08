@@ -143,6 +143,8 @@ paths:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-and-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/gsc-prompts:
+    $ref: './gsc-prompts-v2-api.yaml#/v2-gsc-prompts-by-brand'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts:
     $ref: './serenity-api.yaml#/v2-serenity-prompts'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/{semrushPromptId}:

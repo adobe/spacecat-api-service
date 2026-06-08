@@ -4791,4 +4791,411 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(500);
     });
   });
+
+  describe('GSC prompts (brand-scoped, v2)', () => {
+    const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
+    const GSC_ROW_ID = 'aa111111-1111-4111-b111-111111111111';
+    const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+
+    describe('listGscPromptsByBrand validation', () => {
+      it('returns 400 when params is undefined', async () => {
+        const response = await brandsController.listGscPromptsByBrand({ ...context });
+        expect(response.status).to.equal(400);
+      });
+
+      it('returns 400 when spaceCatId is not a valid UUID', async () => {
+        const response = await brandsController.listGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: 'not-a-uuid', brandId: 'b' },
+        });
+        expect(response.status).to.equal(400);
+      });
+
+      it('returns 400 when brandId is missing', async () => {
+        const response = await brandsController.listGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+        });
+        expect(response.status).to.equal(400);
+      });
+    });
+
+    describe('upsertGscPromptsByBrand validation', () => {
+      it('returns 400 when params is undefined', async () => {
+        const response = await brandsController.upsertGscPromptsByBrand({ ...context });
+        expect(response.status).to.equal(400);
+      });
+
+      it('returns 400 when spaceCatId is not a valid UUID', async () => {
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: 'not-a-uuid', brandId: 'b' },
+          data: {
+            items: [{
+              text: 'a', region: 'us', source: 'gsc', status: 'ignored',
+            }],
+          },
+        });
+        expect(response.status).to.equal(400);
+      });
+
+      it('returns 400 when brandId is missing', async () => {
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            items: [{
+              text: 'a', region: 'us', source: 'gsc', status: 'ignored',
+            }],
+          },
+        });
+        expect(response.status).to.equal(400);
+      });
+
+      it('returns 400 when items is not an array', async () => {
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: 'b' },
+          data: { items: 'nope' },
+        });
+        expect(response.status).to.equal(400);
+      });
+
+      it('returns 400 when items is empty', async () => {
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: 'b' },
+          data: { items: [] },
+        });
+        expect(response.status).to.equal(400);
+      });
+
+      it('returns 400 when items exceeds 500', async () => {
+        const items = Array.from({ length: 501 }, (_, i) => ({
+          text: `t${i}`, region: 'us', source: 'gsc', status: 'ignored',
+        }));
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: 'b' },
+          data: { items },
+        });
+        expect(response.status).to.equal(400);
+      });
+
+      it('returns 400 when item is missing required fields', async () => {
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: 'b' },
+          data: { items: [{ text: 'a', region: 'us', source: 'gsc' }] }, // missing status
+        });
+        expect(response.status).to.equal(400);
+      });
+
+      it('returns 400 when text exceeds 2000 chars', async () => {
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: 'b' },
+          data: {
+            items: [{
+              text: 'x'.repeat(2001), region: 'us', source: 'gsc', status: 'ignored',
+            }],
+          },
+        });
+        expect(response.status).to.equal(400);
+      });
+    });
+
+    describe('happy paths (storage mocked)', () => {
+      beforeEach(() => {
+        const row = {
+          id: GSC_ROW_ID,
+          prompt_text: 'How to use Adobe Photoshop',
+          region_code: 'us',
+          source: 'gsc',
+          status: 'ignored',
+          created_at: '2026-06-08T00:00:00Z',
+          created_by: 'user@test.com',
+          updated_at: '2026-06-08T00:00:00Z',
+          updated_by: 'user@test.com',
+        };
+        mockDataAccess.services.postgrestClient = {
+          from: sandbox.stub().callsFake((table) => {
+            if (table === 'gsc_prompts') {
+              const chain = {
+                select: sandbox.stub().returnsThis(),
+                eq: sandbox.stub().returnsThis(),
+                order: sandbox.stub().returnsThis(),
+                range: sandbox.stub().resolves({ data: [row], error: null, count: 1 }),
+                insert: sandbox.stub().returns({
+                  select: sandbox.stub().resolves({ data: [row], error: null }),
+                }),
+              };
+              // For createIgnoredPrompts-style "fetch existing" await chain.
+              chain.then = (resolve) => resolve({ data: [], error: null });
+              return chain;
+            }
+            const chain = {
+              select: sandbox.stub().returnsThis(),
+              eq: sandbox.stub().returnsThis(),
+              maybeSingle: sandbox.stub().callsFake(() => {
+                if (table === 'brands') {
+                  return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+                }
+                return Promise.resolve({ data: null, error: null });
+              }),
+            };
+            return chain;
+          }),
+        };
+        brandsController = BrandsController(context, loggerStub, mockEnv);
+      });
+
+      it('listGscPromptsByBrand returns 200 with paginated items', async () => {
+        const response = await brandsController.listGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          dataAccess: mockDataAccess,
+        });
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body).to.have.property('items').that.is.an('array');
+        expect(body).to.have.property('total');
+        expect(body).to.have.property('limit');
+        expect(body).to.have.property('page');
+      });
+
+      it('listGscPromptsByBrand returns 503 when postgrestClient is unavailable', async () => {
+        mockDataAccess.services.postgrestClient = null;
+        const response = await brandsController.listGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          dataAccess: mockDataAccess,
+        });
+        expect(response.status).to.equal(503);
+      });
+
+      it('listGscPromptsByBrand returns 404 when brand is not found', async () => {
+        mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        }));
+        const response = await brandsController.listGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: '00000000-0000-4000-8000-000000000000' },
+          dataAccess: mockDataAccess,
+        });
+        expect(response.status).to.equal(404);
+      });
+
+      it('listGscPromptsByBrand returns 404 when organization is not found', async () => {
+        mockDataAccess.Organization.findById.resolves(null);
+        const response = await brandsController.listGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          dataAccess: mockDataAccess,
+        });
+        expect(response.status).to.equal(404);
+      });
+
+      it('listGscPromptsByBrand returns 403 when user lacks access', async () => {
+        const authContextUser = {
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withScopes([{ name: 'user' }])
+              .withProfile({ is_admin: false })
+              .withAuthenticated(true),
+          },
+        };
+        const unauthorizedController = BrandsController({
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          ...authContextUser,
+        }, loggerStub, mockEnv);
+        const response = await unauthorizedController.listGscPromptsByBrand({
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          dataAccess: mockDataAccess,
+        });
+        expect(response.status).to.equal(403);
+      });
+
+      it('listGscPromptsByBrand returns 500 when storage throws', async () => {
+        mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+          if (table === 'gsc_prompts') {
+            return {
+              select: sandbox.stub().returnsThis(),
+              eq: sandbox.stub().returnsThis(),
+              order: sandbox.stub().returnsThis(),
+              range: sandbox.stub().rejects(new Error('DB connection lost')),
+            };
+          }
+          return {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+          };
+        });
+        const response = await brandsController.listGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          dataAccess: mockDataAccess,
+        });
+        expect(response.status).to.equal(500);
+      });
+
+      it('upsertGscPromptsByBrand returns 201 with created/updated/skipped counts', async () => {
+        // Need a more elaborate mock: select returns [] (no existing), insert returns the new row.
+        const newRow = {
+          id: GSC_ROW_ID,
+          prompt_text: 'New prompt',
+          region_code: 'us',
+          source: 'gsc',
+          status: 'ignored',
+          created_at: '2026-06-08T00:00:00Z',
+          created_by: 'user@test.com',
+          updated_at: '2026-06-08T00:00:00Z',
+          updated_by: 'user@test.com',
+        };
+        mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+          if (table === 'gsc_prompts') {
+            return {
+              select: () => ({ eq: () => thenable({ data: [], error: null }) }),
+              insert: () => ({ select: () => thenable({ data: [newRow], error: null }) }),
+            };
+          }
+          return {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+          };
+        });
+
+        const contextWithEmail = {
+          ...context,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        };
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...contextWithEmail,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            items: [{
+              text: 'New prompt', region: 'us', source: 'gsc', status: 'ignored',
+            }],
+          },
+          dataAccess: mockDataAccess,
+        });
+
+        expect(response.status).to.equal(201);
+        const body = await response.json();
+        expect(body).to.have.property('created');
+        expect(body).to.have.property('updated');
+        expect(body).to.have.property('skipped');
+        expect(body).to.have.property('items').that.is.an('array');
+      });
+
+      it('upsertGscPromptsByBrand returns 503 when postgrestClient is unavailable', async () => {
+        mockDataAccess.services.postgrestClient = null;
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            items: [{
+              text: 'a', region: 'us', source: 'gsc', status: 'ignored',
+            }],
+          },
+          dataAccess: mockDataAccess,
+        });
+        expect(response.status).to.equal(503);
+      });
+
+      it('upsertGscPromptsByBrand returns 404 when brand is not found', async () => {
+        mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        }));
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: '00000000-0000-4000-8000-000000000000' },
+          data: {
+            items: [{
+              text: 'a', region: 'us', source: 'gsc', status: 'ignored',
+            }],
+          },
+          dataAccess: mockDataAccess,
+        });
+        expect(response.status).to.equal(404);
+      });
+
+      it('upsertGscPromptsByBrand returns 404 when organization is not found', async () => {
+        mockDataAccess.Organization.findById.resolves(null);
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            items: [{
+              text: 'a', region: 'us', source: 'gsc', status: 'ignored',
+            }],
+          },
+          dataAccess: mockDataAccess,
+        });
+        expect(response.status).to.equal(404);
+      });
+
+      it('upsertGscPromptsByBrand returns 403 when user lacks access', async () => {
+        const authContextUser = {
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withScopes([{ name: 'user' }])
+              .withProfile({ is_admin: false })
+              .withAuthenticated(true),
+          },
+        };
+        const unauthorizedController = BrandsController({
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          ...authContextUser,
+        }, loggerStub, mockEnv);
+        const response = await unauthorizedController.upsertGscPromptsByBrand({
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            items: [{
+              text: 'a', region: 'us', source: 'gsc', status: 'ignored',
+            }],
+          },
+          dataAccess: mockDataAccess,
+        });
+        expect(response.status).to.equal(403);
+      });
+
+      it('upsertGscPromptsByBrand returns 500 when storage throws', async () => {
+        mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+          if (table === 'gsc_prompts') {
+            return {
+              select: () => ({ eq: sandbox.stub().rejects(new Error('DB connection lost')) }),
+            };
+          }
+          return {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+          };
+        });
+        const response = await brandsController.upsertGscPromptsByBrand({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            items: [{
+              text: 'a', region: 'us', source: 'gsc', status: 'ignored',
+            }],
+          },
+          dataAccess: mockDataAccess,
+        });
+        expect(response.status).to.equal(500);
+      });
+    });
+  });
 });
