@@ -104,7 +104,7 @@ function ConfigurationController(ctx) {
       return forbidden(message);
     }
     if (s2sResult.allowed) {
-      log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_CONFIGURATION_WRITE} requestId=${requestId}`);
+      log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_CONFIGURATION_WRITE} requestId=${requestId}`);
     }
     return null;
   };
