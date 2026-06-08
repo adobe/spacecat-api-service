@@ -22,6 +22,10 @@ use(sinonChai);
 
 const s2sAuthWrapperStub = (fn) => fn;
 const authWrapperStub = (fn) => fn;
+// Index tests cover routing/param-validation, not FACS enforcement.
+// facsWrapper is tested in its own suite; stub it out here so test
+// requests are not 403'd by the FACS layer.
+const facsWrapperStub = (fn) => fn;
 
 const tokowakaTestShim = {
   default: class TokowakaClientStub {
@@ -53,6 +57,7 @@ const { main } = await esmock(
     '@adobe/spacecat-shared-http-utils': {
       s2sAuthWrapper: s2sAuthWrapperStub,
       authWrapper: authWrapperStub,
+      facsWrapper: facsWrapperStub,
     },
   },
   {
