@@ -178,6 +178,8 @@ export const INTERNAL_ROUTES = [
   'POST /tools/api-keys',
   'DELETE /tools/api-keys/:id',
   'GET /tools/api-keys',
+  // URL preview proxy - UI-only utility for iframe rendering; not for S2S consumers
+  'GET /tools/proxy',
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
@@ -361,6 +363,16 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/url-store': 'site:write',
   'PATCH /sites/:siteId/url-store': 'site:write',
   'POST /sites/:siteId/url-store/delete': 'site:write',
+
+  // Agentic URL classification rules
+  'GET /sites/:siteId/agentic-categories': 'site:read',
+  'POST /sites/:siteId/agentic-categories': 'site:write',
+  'PATCH /sites/:siteId/agentic-categories/:name': 'site:write',
+  'DELETE /sites/:siteId/agentic-categories/:name': 'site:write',
+  'GET /sites/:siteId/agentic-page-types': 'site:read',
+  'POST /sites/:siteId/agentic-page-types': 'site:write',
+  'PATCH /sites/:siteId/agentic-page-types/:name': 'site:write',
+  'DELETE /sites/:siteId/agentic-page-types/:name': 'site:write',
 
   'PATCH /sites/:siteId/:auditType': 'audit:write',
   'GET /sites/:siteId/latest-audit/:auditType': 'audit:read',
