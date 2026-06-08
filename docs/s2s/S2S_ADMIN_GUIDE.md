@@ -26,7 +26,7 @@ As an S2S Admin, you are responsible for:
 2. **Access Management**: Reviewing and approving capability upgrade requests with security scrutiny
 3. **Security Enforcement**:
    - Scrutinizing write permission requests on all entities
-   - Denying restricted capabilities (e.g., `fixEntity:write`, `organization:write`, `site:write`, `configuration:write`)
+   - Scrutinizing restricted capabilities (e.g., `fixEntity:write`, `fixEntity:create`, `organization:write`, `site:write`, `site:create`, `configuration:write`) — all require executive approval
    - Ensuring least-privilege access principles
 4. **Lifecycle Management**: Suspending or revoking consumer access when necessary
 5. **Secret Rotation**: Coordinating secret rotation in response to security incidents or compromised credentials
@@ -161,9 +161,9 @@ When a consumer team requests capability changes:
    - Consider security implications
 
 2. **Check Restricted Capabilities**:
-   > 🚨 **CRITICAL**: The following capabilities are RESTRICTED and must be explicitly denied:
-   - `fixEntity:write` - Restricted capability for internal use only
-   - `fixEntity:create` - Restricted capability for internal use only
+   > 🚨 **CRITICAL**: The following capabilities are RESTRICTED and require executive approval:
+   - `fixEntity:write` - Fix entity write access, rarely granted, requires executive approval
+   - `fixEntity:create` - Fix entity creation access, rarely granted, requires executive approval
    - `site:write` - Critical write access, rarely granted
    - `site:create` - Admin-gated site creation, requires executive approval
    - `organization:write` - Critical write access, rarely granted
@@ -441,8 +441,8 @@ All capabilities must follow the format: `entity:operation`
 | `*:read` | Low | Generally safe, verify legitimate need |
 | `*:write` (general) | **High** | Requires strong business justification |
 | `*:delete` | **Critical** | Rarely granted, executive approval recommended |
-| `fixEntity:write` | **RESTRICTED** | Never grant under any circumstances |
-| `fixEntity:create` | **RESTRICTED** | Never grant under any circumstances |
+| `fixEntity:write` | **RESTRICTED** | Rarely granted; requires executive approval |
+| `fixEntity:create` | **RESTRICTED** | Rarely granted; requires executive approval |
 | `site:write` | **RESTRICTED** | Critical write access, rarely granted |
 | `site:create` | **RESTRICTED** | Admin-gated site creation; requires executive approval |
 | `organization:write` | **RESTRICTED** | Critical write access, rarely granted |
@@ -451,10 +451,10 @@ All capabilities must follow the format: `entity:operation`
 
 ### Restricted Capabilities
 
-The following capabilities are **RESTRICTED** and should **NEVER** be granted:
+The following capabilities are **RESTRICTED** and require **executive approval** before granting:
 
-1. **`fixEntity:write`**: Restricted capability for internal use only
-2. **`fixEntity:create`**: Restricted capability for internal use only
+1. **`fixEntity:write`**: Fix entity write access - rarely granted, requires executive approval
+2. **`fixEntity:create`**: Fix entity creation access - rarely granted, requires executive approval
 3. **`site:write`**: Critical write access to site configurations - rarely granted, requires executive approval
 4. **`site:create`**: Admin-gated site creation - rarely granted, requires executive approval
 5. **`organization:write`**: Critical write access to organization configurations - rarely granted, requires executive approval
