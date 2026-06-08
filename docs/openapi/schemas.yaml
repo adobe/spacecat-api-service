@@ -740,6 +740,66 @@ SiteList:
   type: array
   items:
     $ref: './schemas.yaml#/Site'
+SiteListItem:
+  type: object
+  description: |
+    Slim site shape returned by list endpoints (e.g. the paginated `GET /sites`).
+    Mirrors `SiteDto.toListJSON` — drops the heaviest and least-used fields from the
+    full `Site` shape to keep list payloads small.
+  properties:
+    id:
+      $ref: './schemas.yaml#/Id'
+    baseURL:
+      $ref: './schemas.yaml#/URL'
+    name:
+      type: [string, 'null']
+    organizationId:
+      $ref: './schemas.yaml#/Id'
+    deliveryType:
+      type: string
+      enum: [aem_edge, aem_cs, aem_ams, other]
+    gitHubURL:
+      type: [string, 'null']
+    isLive:
+      type: boolean
+    isSandbox:
+      type: boolean
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    region:
+      type: [string, 'null']
+    config:
+      type: [object, 'null']
+      description: |
+        Slim configuration subset returned by `ConfigDto.toListJSON` (selected llmo,
+        edgeOptimizeConfig, slack, brandConfig, fetchConfig, handlers fields).
+      additionalProperties: true
+  required:
+    - id
+    - baseURL
+    - organizationId
+    - deliveryType
+    - isLive
+    - isSandbox
+    - createdAt
+    - updatedAt
+SitePagedResponse:
+  type: object
+  description: Paginated response for sites (returned when `limit` or `cursor` query parameter is provided)
+  properties:
+    sites:
+      type: array
+      items:
+        $ref: './schemas.yaml#/SiteListItem'
+    pagination:
+      $ref: './schemas.yaml#/PaginationMetadata'
+  required:
+    - sites
+    - pagination
 SiteWithLatestAuditList:
   type: array
   items:
@@ -3300,7 +3360,11 @@ SuggestionSummary:
     - rank
 PaginationMetadata:
   type: object
-  description: Metadata for paginated responses
+  description: |
+    Canonical pagination envelope metadata for cursor-based list endpoints. Reuse this
+    schema (rather than inlining `limit`/`cursor`/`hasMore`) in every paginated list
+    response so the envelope shape stays consistent across the API. Already used by
+    `SitePagedResponse` and `SuggestionPagedResponse`.
   properties:
     limit:
       description: The maximum number of items returned in this page
@@ -3308,7 +3372,7 @@ PaginationMetadata:
       example: 100
     cursor:
       description: The cursor to use for fetching the next page, or null if there are no more pages
-      type: string
+      type: [string, 'null']
       example: "eyJzayI6IjIwMjQtMDEtMTVUMTI6MzA6MDBaIiwiaWQiOiIxMjNlNDU2Ny1lODliLTEyZDMtYTQ1Ni00MjY2MTQxNzQwMDAifQ=="
     hasMore:
       description: Indicates whether there are more pages available
@@ -6199,6 +6263,21 @@ V2Prompt:
       description: The source system or process that created the prompt
       example: "config"
       default: "config"
+    intent:
+      type: [string, 'null']
+      description: >-
+        Canonical search-intent bucket persisted for the prompt, or null when
+        unknown/unclassified. One of the canonical buckets (mirrors DRS prompt
+        generation).
+      enum:
+        - informational
+        - instructional
+        - comparative
+        - transactional
+        - planning
+        - delegation
+        - null
+      example: informational
     updatedAt:
       $ref: '#/DateTime'
     updatedBy:
@@ -6278,6 +6357,21 @@ V2PromptInput:
       type: string
       description: The source system or process that created the prompt
       default: "config"
+    intent:
+      type: string
+      description: >-
+        Optional search-intent bucket for the prompt. Normalized on write:
+        the value is lowercased, legacy aliases are remapped
+        (`statistical`/`navigational` -> `informational`,
+        `commercial` -> `transactional`), and the result is validated against
+        the canonical buckets. An absent, empty, or (post-remap) invalid
+        value is stored as null (NULL) — it is NOT coerced to a default
+        bucket. Canonical buckets (mirror DRS prompt generation):
+        `informational`, `instructional`, `comparative`, `transactional`,
+        `planning`, `delegation`. No `enum` constraint is applied to the
+        input: legacy aliases (`statistical`, `navigational`, `commercial`)
+        are accepted and normalized on write.
+      example: informational
 
 V2PromptBulkDeleteRequest:
   type: object

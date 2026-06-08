@@ -11,10 +11,13 @@
  */
 
 import {
+  CAP_CONFIGURATION_READ,
+  CAP_CONFIGURATION_WRITE,
   CAP_FIX_ENTITY_CREATE,
   CAP_ORG_READ_ALL,
   CAP_SITE_CREATE,
   CAP_SITE_READ_ALL,
+  CAP_SUGGESTION_WRITE,
 } from './capability-constants.js';
 
 /**
@@ -176,6 +179,8 @@ export const INTERNAL_ROUTES = [
   'POST /tools/api-keys',
   'DELETE /tools/api-keys/:id',
   'GET /tools/api-keys',
+  // URL preview proxy - UI-only utility for iframe rendering; not for S2S consumers
+  'GET /tools/proxy',
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
@@ -222,16 +227,16 @@ const routeRequiredCapabilities = {
   'GET /consent-banner/:jobId': 'organization:read',
 
   // Configuration
-  'GET /configurations/latest': 'configuration:read',
-  'PATCH /configurations/latest': 'configuration:write',
-  'POST /configurations/:version/restore': 'configuration:write',
-  'GET /configurations/:version': 'configuration:read',
-  'POST /configurations/audits': 'configuration:write',
-  'DELETE /configurations/audits/:auditType': 'configuration:write',
-  'PUT /configurations/latest/queues': 'configuration:write',
-  'PATCH /configurations/latest/jobs/:jobType': 'configuration:write',
-  'PATCH /configurations/latest/handlers/:handlerType': 'configuration:write',
-  'PATCH /configurations/sites/audits': 'configuration:write',
+  'GET /configurations/latest': CAP_CONFIGURATION_READ,
+  'PATCH /configurations/latest': CAP_CONFIGURATION_WRITE,
+  'POST /configurations/:version/restore': CAP_CONFIGURATION_WRITE,
+  'GET /configurations/:version': CAP_CONFIGURATION_READ,
+  'POST /configurations/audits': CAP_CONFIGURATION_WRITE,
+  'DELETE /configurations/audits/:auditType': CAP_CONFIGURATION_WRITE,
+  'PUT /configurations/latest/queues': CAP_CONFIGURATION_WRITE,
+  'PATCH /configurations/latest/jobs/:jobType': CAP_CONFIGURATION_WRITE,
+  'PATCH /configurations/latest/handlers/:handlerType': CAP_CONFIGURATION_WRITE,
+  'PATCH /configurations/sites/audits': CAP_CONFIGURATION_WRITE,
 
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,
@@ -360,6 +365,16 @@ const routeRequiredCapabilities = {
   'PATCH /sites/:siteId/url-store': 'site:write',
   'POST /sites/:siteId/url-store/delete': 'site:write',
 
+  // Agentic URL classification rules
+  'GET /sites/:siteId/agentic-categories': 'site:read',
+  'POST /sites/:siteId/agentic-categories': 'site:write',
+  'PATCH /sites/:siteId/agentic-categories/:name': 'site:write',
+  'DELETE /sites/:siteId/agentic-categories/:name': 'site:write',
+  'GET /sites/:siteId/agentic-page-types': 'site:read',
+  'POST /sites/:siteId/agentic-page-types': 'site:write',
+  'PATCH /sites/:siteId/agentic-page-types/:name': 'site:write',
+  'DELETE /sites/:siteId/agentic-page-types/:name': 'site:write',
+
   'PATCH /sites/:siteId/:auditType': 'audit:write',
   'GET /sites/:siteId/latest-audit/:auditType': 'audit:read',
   'GET /sites/:siteId/experiments': 'experiment:read',
@@ -390,11 +405,11 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fixEntity:read',
-  'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:write',
-  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': 'suggestion:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/suggestions': CAP_SUGGESTION_WRITE,
+  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': CAP_SUGGESTION_WRITE,
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': CAP_FIX_ENTITY_CREATE,
-  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
-  'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
+  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': CAP_SUGGESTION_WRITE,
+  'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': CAP_SUGGESTION_WRITE,
 
   // Traffic
   'GET /sites/:siteId/traffic/paid': 'site:read',
@@ -642,7 +657,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/tokens/:tokenId/grants': 'token:read',
 
   // Suggestion grants
-  'DELETE /sites/:siteId/suggestions/grants/:grantId': 'suggestion:write',
+  'DELETE /sites/:siteId/suggestions/grants/:grantId': CAP_SUGGESTION_WRITE,
 };
 
 export default routeRequiredCapabilities;

@@ -1,3 +1,73 @@
+# [1.558.0](https://github.com/adobe/spacecat-api-service/compare/v1.557.0...v1.558.0) (2026-06-08)
+
+
+### Features
+
+* **s2s:** allow S2S consumers with configuration:write to modify configuration ([#2569](https://github.com/adobe/spacecat-api-service/issues/2569)) ([45798e3](https://github.com/adobe/spacecat-api-service/commit/45798e30bfab2b791f5ebf9b3005a19ab03b62d9))
+
+# [1.557.0](https://github.com/adobe/spacecat-api-service/compare/v1.556.2...v1.557.0) (2026-06-08)
+
+
+### Features
+
+* **prompts:** persist intent on prompt upsert/update ([#2562](https://github.com/adobe/spacecat-api-service/issues/2562)) ([05f8d16](https://github.com/adobe/spacecat-api-service/commit/05f8d16a2139ab2b8536efcee11c0908aff4528a))
+
+## [1.556.2](https://github.com/adobe/spacecat-api-service/compare/v1.556.1...v1.556.2) (2026-06-08)
+
+
+### Bug Fixes
+
+* **slack:** correct agentic-traffic db-status (backfills + raw evidence) and cdn-logs-status region ([#2487](https://github.com/adobe/spacecat-api-service/issues/2487)) ([e15db4b](https://github.com/adobe/spacecat-api-service/commit/e15db4b0c9db9e3b731dfa1bfac7d6647365bc65))
+
+## [1.556.1](https://github.com/adobe/spacecat-api-service/compare/v1.556.0...v1.556.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* add structured-data, sitemap, toc audits to paid profile ([#2566](https://github.com/adobe/spacecat-api-service/issues/2566)) ([33dec79](https://github.com/adobe/spacecat-api-service/commit/33dec794099ebbfd6baef55a26874087203b4ab4))
+
+# [1.556.0](https://github.com/adobe/spacecat-api-service/compare/v1.555.0...v1.556.0) (2026-06-05)
+
+
+### Features
+
+* proxy endpoint for url inspector preview | LLMO-434 ([#2557](https://github.com/adobe/spacecat-api-service/issues/2557)) ([771c208](https://github.com/adobe/spacecat-api-service/commit/771c208da9409cf431492b41f98a1c003cfef490))
+
+# [1.555.0](https://github.com/adobe/spacecat-api-service/compare/v1.554.2...v1.555.0) (2026-06-05)
+
+
+### Features
+
+* **agentic-rules:** customer-edit endpoints for URL classification rules (LLMO-5037) ([#2536](https://github.com/adobe/spacecat-api-service/issues/2536)) ([9af94e2](https://github.com/adobe/spacecat-api-service/commit/9af94e2a1e3ecbdb4055c5bda324278681355914)), closes [#2539](https://github.com/adobe/spacecat-api-service/issues/2539)
+
+## [1.554.2](https://github.com/adobe/spacecat-api-service/compare/v1.554.1...v1.554.2) (2026-06-05)
+
+
+### Bug Fixes
+
+* guardrails on agentic/referral traffic read endpoints (SITES-46098) ([#2564](https://github.com/adobe/spacecat-api-service/issues/2564)) ([b4e1ed7](https://github.com/adobe/spacecat-api-service/commit/b4e1ed79f1372b16589b93af4d18d726c9706f58))
+
+## [1.554.1](https://github.com/adobe/spacecat-api-service/compare/v1.554.0...v1.554.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* **configuration:** allow S2S consumers with configuration:read to read configurations ([#2559](https://github.com/adobe/spacecat-api-service/issues/2559)) ([5f85cb4](https://github.com/adobe/spacecat-api-service/commit/5f85cb4b295ae8ec047f6a1e04955717b5d3349a))
+
+# [1.554.0](https://github.com/adobe/spacecat-api-service/compare/v1.553.0...v1.554.0) (2026-06-05)
+
+
+### Features
+
+* cursor-based pagination for GET /sites ([#2497](https://github.com/adobe/spacecat-api-service/issues/2497)) ([ac0dab4](https://github.com/adobe/spacecat-api-service/commit/ac0dab47a744135c6dee8f844ebb13d4ab073473))
+
+# [1.553.0](https://github.com/adobe/spacecat-api-service/compare/v1.552.0...v1.553.0) (2026-06-05)
+
+
+### Features
+
+* **suggestions:** allow S2S consumers with suggestion:write to reject suggestions ([#2558](https://github.com/adobe/spacecat-api-service/issues/2558)) ([8d1150e](https://github.com/adobe/spacecat-api-service/commit/8d1150e09c577796d2a9aff6ffb0f94c1b6abd84))
+
 # [1.552.0](https://github.com/adobe/spacecat-api-service/compare/v1.551.0...v1.552.0) (2026-06-04)
 
 

@@ -812,6 +812,43 @@ describe('Brands Controller', () => {
       expect(body).to.have.property('prompts');
     });
 
+    it('createPromptsByBrand persists normalized intent from the request body', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        // legacy 'commercial' -> 'transactional'; uppercase lowercased; bogus -> null
+        data: [{ prompt: 'P', regions: ['us'], intent: 'COMMERCIAL' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].intent).to.equal('transactional');
+    });
+
     it('createPromptsByBrand returns 400 when prompts not an array', async () => {
       const response = await brandsController.createPromptsByBrand({
         ...context,
@@ -889,6 +926,51 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.id).to.equal(PROMPT_ID);
+    });
+
+    it('updatePromptByBrandAndId persists normalized intent from the request body', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const updatedRow = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Prompt text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: 'informational',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+        brands: { id: BRAND_UUID, name: 'Test Brand' },
+        categories: null,
+        topics: null,
+      };
+      const single = (data) => ({ maybeSingle: () => thenable({ data, error: null }) });
+      const updateStub = sandbox.stub().returns({
+        eq: () => ({ eq: () => ({ eq: () => ({ select: () => single(updatedRow) }) }) }),
+      });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'brands') {
+          return { select: () => ({ eq: () => ({ eq: () => single({ id: BRAND_UUID }) }) }) };
+        }
+        // prompts: update path + the getPromptById re-read
+        return {
+          update: updateStub,
+          select: () => ({ eq: () => ({ eq: () => ({ eq: () => single(updatedRow) }) }) }),
+        };
+      });
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        // legacy 'statistical' -> 'informational'
+        data: { intent: 'Statistical' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(updateStub.firstCall.args[0].intent).to.equal('informational');
+      const body = await response.json();
+      expect(body.intent).to.equal('informational');
     });
 
     it('updatePromptByBrandAndId uses empty object when data is undefined', async () => {
