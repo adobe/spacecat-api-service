@@ -32,7 +32,7 @@ const AUDIT_TYPES = {
   LLMO_REFERRAL_TRAFFIC: 'llmo-referral-traffic',
   LLM_ERROR_PAGES: 'llm-error-pages',
 };
-const CDN_LOGS_ANALYSIS_DELAY_SECONDS = 5;
+const CDN_LOGS_ANALYSIS_DELAY_SECONDS = 30;
 const SQS_MAX_DELAY_SECONDS = 900;
 
 // cdn-logs-report daily backfill knobs

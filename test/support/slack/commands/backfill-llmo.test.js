@@ -167,7 +167,7 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage.callCount).to.equal(2);
     });
 
-    it('adds a 5-second gap between multi-day cdn-logs-analysis messages for the same site', async () => {
+    it('adds a 30-second gap between multi-day cdn-logs-analysis messages for the same site', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
@@ -175,8 +175,8 @@ describe('BackfillLlmoCommand', () => {
 
       expect(sqsStub.sendMessage.callCount).to.equal(3);
       expect(sqsStub.sendMessage.firstCall.args[3]).to.deep.equal({ delaySeconds: 0 });
-      expect(sqsStub.sendMessage.secondCall.args[3]).to.deep.equal({ delaySeconds: 5 });
-      expect(sqsStub.sendMessage.thirdCall.args[3]).to.deep.equal({ delaySeconds: 10 });
+      expect(sqsStub.sendMessage.secondCall.args[3]).to.deep.equal({ delaySeconds: 30 });
+      expect(sqsStub.sendMessage.thirdCall.args[3]).to.deep.equal({ delaySeconds: 60 });
     });
 
     it('sends date-based per-day SQS messages for cdn-logs-report (traffic day + 1), staggered', async () => {
