@@ -215,6 +215,10 @@ async function triggerCdnLogsReportBackfill(sqs, configuration, siteId, trafficD
       message,
       undefined,
       {
+        // Stagger the per-day imports so they don't all fire at once. At current
+        // limits the largest delay is small (CDN_LOGS_REPORT_MAX_DAYS * the
+        // per-day step), but the SQS hard cap (900s) is enforced here so the
+        // value stays valid if those knobs are ever increased.
         delaySeconds: Math.min(index * CDN_LOGS_REPORT_DELAY_SECONDS, SQS_MAX_DELAY_SECONDS),
       },
     );
@@ -284,7 +288,9 @@ async function triggerBackfill(
 
     case AUDIT_TYPES.CDN_LOGS_REPORT: {
       // Daily backfill: one date-based import per traffic day (oldest first).
-      // (mode=weekly-db is handled synchronously before triggerBackfill is called.)
+      // mode=weekly-db is handled synchronously and returns before triggerBackfill
+      // is reached, so specificDate.trafficDays is always populated here; the `|| []`
+      // is a defensive no-op guard, never the queued path.
       await triggerCdnLogsReportBackfill(
         sqs,
         configuration,

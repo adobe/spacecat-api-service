@@ -761,6 +761,21 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage.callCount).to.equal(2);
     });
 
+    it('queues per-day cdn-logs-report imports for every site with baseurl=all', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime()); // Wednesday
+      const site1 = { getId: () => 'site-1' };
+      const site2 = { getId: () => 'site-2' };
+      dataAccessStub.Site.all.resolves([site1, site2]);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=all', `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`, 'weeks=1'], slackContext);
+      clock.restore();
+
+      // 2 sites * 7 days (1 ISO week) = 14 messages; confirms sites.length * msgsPerSite.
+      expect(sqsStub.sendMessage.callCount).to.equal(14);
+      expect(slackContext.say.calledWith(':white_check_mark: Done! 14 messages queued.')).to.be.true;
+    });
+
     it('reports no sites enabled when baseurl=all and none enabled', async () => {
       dataAccessStub.Site.all.resolves([siteStub]);
       configStub.isHandlerEnabledForSite.returns(false);
