@@ -12,6 +12,7 @@
 
 import {
   CAP_CONFIGURATION_READ,
+  CAP_CONFIGURATION_WRITE,
   CAP_FIX_ENTITY_CREATE,
   CAP_ORG_READ_ALL,
   CAP_SITE_CREATE,
@@ -227,15 +228,15 @@ const routeRequiredCapabilities = {
 
   // Configuration
   'GET /configurations/latest': CAP_CONFIGURATION_READ,
-  'PATCH /configurations/latest': 'configuration:write',
-  'POST /configurations/:version/restore': 'configuration:write',
+  'PATCH /configurations/latest': CAP_CONFIGURATION_WRITE,
+  'POST /configurations/:version/restore': CAP_CONFIGURATION_WRITE,
   'GET /configurations/:version': CAP_CONFIGURATION_READ,
-  'POST /configurations/audits': 'configuration:write',
-  'DELETE /configurations/audits/:auditType': 'configuration:write',
-  'PUT /configurations/latest/queues': 'configuration:write',
-  'PATCH /configurations/latest/jobs/:jobType': 'configuration:write',
-  'PATCH /configurations/latest/handlers/:handlerType': 'configuration:write',
-  'PATCH /configurations/sites/audits': 'configuration:write',
+  'POST /configurations/audits': CAP_CONFIGURATION_WRITE,
+  'DELETE /configurations/audits/:auditType': CAP_CONFIGURATION_WRITE,
+  'PUT /configurations/latest/queues': CAP_CONFIGURATION_WRITE,
+  'PATCH /configurations/latest/jobs/:jobType': CAP_CONFIGURATION_WRITE,
+  'PATCH /configurations/latest/handlers/:handlerType': CAP_CONFIGURATION_WRITE,
+  'PATCH /configurations/sites/audits': CAP_CONFIGURATION_WRITE,
 
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,

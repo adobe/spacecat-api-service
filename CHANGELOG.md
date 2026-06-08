@@ -1,3 +1,17 @@
+# [1.558.0](https://github.com/adobe/spacecat-api-service/compare/v1.557.0...v1.558.0) (2026-06-08)
+
+
+### Features
+
+* **s2s:** allow S2S consumers with configuration:write to modify configuration ([#2569](https://github.com/adobe/spacecat-api-service/issues/2569)) ([45798e3](https://github.com/adobe/spacecat-api-service/commit/45798e30bfab2b791f5ebf9b3005a19ab03b62d9))
+
+# [1.557.0](https://github.com/adobe/spacecat-api-service/compare/v1.556.2...v1.557.0) (2026-06-08)
+
+
+### Features
+
+* **prompts:** persist intent on prompt upsert/update ([#2562](https://github.com/adobe/spacecat-api-service/issues/2562)) ([05f8d16](https://github.com/adobe/spacecat-api-service/commit/05f8d16a2139ab2b8536efcee11c0908aff4528a))
+
 ## [1.556.2](https://github.com/adobe/spacecat-api-service/compare/v1.556.1...v1.556.2) (2026-06-08)
 
 
