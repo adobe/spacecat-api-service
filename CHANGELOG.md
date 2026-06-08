@@ -1,3 +1,10 @@
+# [1.558.0](https://github.com/adobe/spacecat-api-service/compare/v1.557.0...v1.558.0) (2026-06-08)
+
+
+### Features
+
+* **s2s:** allow S2S consumers with configuration:write to modify configuration ([#2569](https://github.com/adobe/spacecat-api-service/issues/2569)) ([45798e3](https://github.com/adobe/spacecat-api-service/commit/45798e30bfab2b791f5ebf9b3005a19ab03b62d9))
+
 # [1.557.0](https://github.com/adobe/spacecat-api-service/compare/v1.556.2...v1.557.0) (2026-06-08)
 
 
