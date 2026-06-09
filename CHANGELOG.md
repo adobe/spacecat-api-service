@@ -1,3 +1,10 @@
+# [1.564.0](https://github.com/adobe/spacecat-api-service/compare/v1.563.1...v1.564.0) (2026-06-09)
+
+
+### Features
+
+* adding new `ensure preflight` slack command ([#2561](https://github.com/adobe/spacecat-api-service/issues/2561)) ([77a0b5e](https://github.com/adobe/spacecat-api-service/commit/77a0b5e1ef52fa195b9ba5ab072f6c54ecba3f03)), closes [#1674](https://github.com/adobe/spacecat-api-service/issues/1674)
+
 ## [1.563.1](https://github.com/adobe/spacecat-api-service/compare/v1.563.0...v1.563.1) (2026-06-09)
 
 
