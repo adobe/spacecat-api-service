@@ -117,14 +117,16 @@ async function seed() {
     insertRows('projects', projects),
     insertRows('entitlements', entitlements),
     insertRows('trial_users', trialUsers),
-    insertRows('brands', brands),
   ]);
 
   // Level 1b: depend on projects
   await insertRows('sites', sites);
 
   // Level 2: depend on sites
+  // brands.site_id → sites.id, and chk_active_brand_has_site_id requires an
+  // active brand to carry a site_id, so brands must seed after sites.
   await Promise.all([
+    insertRows('brands', brands),
     insertRows('audits', audits),
     insertRows('opportunities', opportunities),
     insertRows('site_enrollments', siteEnrollments),
