@@ -6260,10 +6260,10 @@ describe('LlmoController', () => {
         expect((await result.json()).message).to.include('not available in stage');
       });
 
-      it('returns 400 when site baseURL has a non-root path (subpath site)', async () => {
+      it('returns 200 with skip message when site baseURL has a non-root path (subpath site)', async () => {
         mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
-        expect(result.status).to.equal(400);
+        expect(result.status).to.equal(200);
         expect((await result.json()).message).to.include('subpath sites');
         expect(mockLog.error).to.have.been.calledWith(
           sinon.match(/Subpath site cannot use host-level auto-routing/),
