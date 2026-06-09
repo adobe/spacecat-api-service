@@ -104,13 +104,24 @@ function isCompletedIsoWeek(weekRange, now = new Date()) {
 }
 
 /**
+ * Strictly parses a non-negative integer argument. Returns NaN for anything that
+ * isn't all digits (e.g. `foo`, `2x`, `2.5`), so operator typos fail loudly
+ * instead of being silently truncated by parseInt.
+ */
+function parseIntArg(raw) {
+  return /^\s*\d+\s*$/.test(String(raw)) ? parseInt(raw, 10) : NaN;
+}
+
+/**
  * Enumerates the UTC traffic days to backfill for cdn-logs-report, oldest first.
  *
  * Backfilling oldest→newest means each completed week's Sunday is imported after
  * its earlier days, so the projector's automatic weekly rollup (which fires when a
  * week's closing Sunday lands) rebuilds the week from a complete set of raw rows.
  *
- * Precedence: date= (single day) > days=M (trailing days) > weeks=N (ISO weeks).
+ * Exactly one range selector may be set: date= (single day), days=M (trailing days),
+ * or weeks=N (ISO weeks). Combining them is rejected so a queued backfill can't be
+ * misread. When none is given, defaults to the last N completed ISO weeks.
  *
  * @returns {{ days: Date[], desc: string }}
  */
@@ -118,8 +129,19 @@ function buildCdnReportTrafficDays(parsed, now = new Date()) {
   const today = startOfUtcDay(now);
   const yesterday = addUtcDays(today, -1);
 
-  // Single explicit traffic day.
   const trafficDate = parseTrafficDate(parsed);
+
+  // Reject ambiguous combinations — only one of date=/days=/weeks= may be set.
+  const selectors = [
+    trafficDate ? 'date' : null,
+    parsed.days !== undefined ? 'days' : null,
+    parsed.weeks !== undefined ? 'weeks' : null,
+  ].filter(Boolean);
+  if (selectors.length > 1) {
+    throw new Error(`Specify only one of date=, days=, or weeks= (got: ${selectors.join(', ')}).`);
+  }
+
+  // Single explicit traffic day.
   if (trafficDate) {
     if (trafficDate.date > yesterday) {
       throw new Error('date must be yesterday (UTC) or earlier.');
@@ -129,7 +151,7 @@ function buildCdnReportTrafficDays(parsed, now = new Date()) {
 
   // Trailing N days ending yesterday.
   if (parsed.days !== undefined) {
-    const n = parseInt(parsed.days, 10);
+    const n = parseIntArg(parsed.days);
     if (Number.isNaN(n) || n < 1) {
       throw new Error('days must be a positive integer.');
     }
@@ -142,9 +164,12 @@ function buildCdnReportTrafficDays(parsed, now = new Date()) {
 
   // Last N completed ISO weeks (default). weeks=0 = current week to date.
   const thisMonday = startOfUtcIsoWeek(now);
-  let weeks = parseInt(parsed.weeks, 10);
-  if (Number.isNaN(weeks)) {
-    weeks = CDN_LOGS_REPORT_DEFAULT_WEEKS;
+  let weeks = CDN_LOGS_REPORT_DEFAULT_WEEKS;
+  if (parsed.weeks !== undefined) {
+    weeks = parseIntArg(parsed.weeks);
+    if (Number.isNaN(weeks)) {
+      throw new Error(`weeks must be an integer between 0 and ${CDN_LOGS_REPORT_MAX_WEEKS} for ${AUDIT_TYPES.CDN_LOGS_REPORT}.`);
+    }
   }
   if (weeks < 0 || weeks > CDN_LOGS_REPORT_MAX_WEEKS) {
     throw new Error(`weeks must be between 0 and ${CDN_LOGS_REPORT_MAX_WEEKS} for ${AUDIT_TYPES.CDN_LOGS_REPORT}.`);

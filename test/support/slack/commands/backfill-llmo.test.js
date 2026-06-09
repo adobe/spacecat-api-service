@@ -344,6 +344,81 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
 
+    it('rejects days with trailing garbage (e.g. 7x)', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'days=7x',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: days must be a positive integer.')).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects conflicting range selectors (days + weeks)', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'days=7',
+        'weeks=0',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        ':warning: Specify only one of date=, days=, or weeks= (got: days, weeks).',
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects conflicting range selectors (date + weeks)', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'date=2026-05-01',
+        'weeks=2',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        ':warning: Specify only one of date=, days=, or weeks= (got: date, weeks).',
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects non-numeric weeks instead of defaulting', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'weeks=foo',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        `:warning: weeks must be an integer between 0 and 4 for ${AUDIT_TYPES.CDN_LOGS_REPORT}.`,
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects weeks with trailing garbage (e.g. 2x) instead of truncating', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'weeks=2x',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        `:warning: weeks must be an integer between 0 and 4 for ${AUDIT_TYPES.CDN_LOGS_REPORT}.`,
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
     it('runs a cdn-logs-report weekly DB refresh through the weekly WRPC', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       postgrestStub.rpc.resolves({
