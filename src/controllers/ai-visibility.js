@@ -60,6 +60,7 @@ import { handleBrandPromptsExport as handleBrandPromptsExportV1 } from '../suppo
 import { handleGapPrompts as handleGapPromptsV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts.js';
 import { handleGapPromptsExport as handleGapPromptsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts-export.js';
 import { handlePromptResponse as handlePromptResponseV1 } from '../support/ai-visibility/handlers/v1/prompt/prompt-response.js';
+import { handleStatsByCountry as handleBrandStatsByCountryV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-country.js';
 import { handleStatsByLLM as handleBrandStatsByLLMV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-llm.js';
 import { handleMeta as handleMetaV1 } from '../support/ai-visibility/handlers/v1/meta/meta.js';
 import { handleMeta } from '../support/ai-visibility/handlers/meta.js';
@@ -98,6 +99,7 @@ const ROUTE_MAP = [
   ['/v1/prompt/gap-prompts', handleGapPromptsV1],
   ['/v1/prompt/gap-prompts-export', handleGapPromptsExportV1],
   ['/v1/prompt/prompt-response', handlePromptResponseV1],
+  ['/v1/brand/stats-by-country', handleBrandStatsByCountryV1],
   ['/v1/brand/stats-by-llm', handleBrandStatsByLLMV1],
   ['/v1/meta/meta', handleMetaV1],
 ];

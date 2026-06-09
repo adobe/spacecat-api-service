@@ -664,6 +664,8 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
   /llmo/ai-visibility/v1/brand/stats-by-llm:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-llm'
+  /llmo/ai-visibility/v1/brand/stats-by-country:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-country'
   /llmo/ai-visibility/v1/topic/brand-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
   /llmo/ai-visibility/v1/topic/brand-topics-export:

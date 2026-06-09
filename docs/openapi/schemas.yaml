@@ -9558,6 +9558,48 @@ AiVisibilityV1BrandStatsByLLMResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1BrandStatsByCountryEntry:
+  type: object
+  description: |
+    One row from Semrush `StatsByCountryResponse.ByCountry` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    country:
+      description: Market for the grouped statistics
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+    mentions:
+      description: Prompt responses mentioning the target brand
+      oneOf:
+        - type: string
+        - type: integer
+    audience:
+      description: Estimated audience for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    ownedSources:
+      description: Citations from the brand domain
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByCountryResponse:
+  type: object
+  description: |
+    Brand statistics by country from `GET /llmo/ai-visibility/v1/brand/stats-by-country`.
+    Native Semrush v2 `StatsByCountryResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    byCountry:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandStatsByCountryEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityV1TopicBrandTopicRow:
   type: object
   description: |

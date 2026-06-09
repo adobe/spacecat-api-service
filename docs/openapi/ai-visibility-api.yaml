@@ -1185,6 +1185,33 @@ ai-visibility-v1-brand-stats-by-llm:
     security:
       - api_key: []
 
+ai-visibility-v1-brand-stats-by-country:
+  get:
+    tags: [ai-visibility]
+    summary: Get brand statistics by country (Brand v2 JSON)
+    description: |
+      Returns brand statistics grouped by country using Semrush `BrandService` v2
+      `StatsByCountry`. The response is native protobuf JSON (camelCase), with the
+      Semrush `byCountry` array containing one row per market.
+
+      Optional `engine` is forwarded as Semrush `llm`; omit it or use `all` to request
+      all models. Optional `date` is forwarded as Semrush `target_date`.
+    operationId: getAiVisibilityV1BrandStatsByCountry
+    parameters:
+      - *domainParam
+      - *engineParam
+      - *dateParam
+    responses:
+      '200':
+        description: Brand statistics by country retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1BrandStatsByCountryResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-v1-topic-brand-topics:
   get:
     tags: [ai-visibility]
