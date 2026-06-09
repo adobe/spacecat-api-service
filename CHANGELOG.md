@@ -1,3 +1,10 @@
+# [1.561.0](https://github.com/adobe/spacecat-api-service/compare/v1.560.0...v1.561.0) (2026-06-09)
+
+
+### Features
+
+* **backfill-llmo:** simplify cdn-logs-report backfill to per-day DB imports ([#2560](https://github.com/adobe/spacecat-api-service/issues/2560)) ([25872a0](https://github.com/adobe/spacecat-api-service/commit/25872a0e91351c218b11f35ba2ab23ddab2db510))
+
 # [1.560.0](https://github.com/adobe/spacecat-api-service/compare/v1.559.0...v1.560.0) (2026-06-08)
 
 
