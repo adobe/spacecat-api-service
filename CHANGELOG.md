@@ -1,3 +1,10 @@
+# [1.563.0](https://github.com/adobe/spacecat-api-service/compare/v1.562.0...v1.563.0) (2026-06-09)
+
+
+### Features
+
+* **llmo:** auto-create missing value columns on sheet-row patch ([#2576](https://github.com/adobe/spacecat-api-service/issues/2576)) ([e530b56](https://github.com/adobe/spacecat-api-service/commit/e530b56f65353ae508ed114927bb840293798501))
+
 # [1.562.0](https://github.com/adobe/spacecat-api-service/compare/v1.561.0...v1.562.0) (2026-06-09)
 
 
