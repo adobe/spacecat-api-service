@@ -47,6 +47,47 @@ function createSequentialClient(responses) {
   return { from };
 }
 
+// Capture-insert client: records the row passed to `.insert()` and echoes it
+// back as the inserted row (id/timestamps stubbed). Lets a test assert the
+// exact row the storage layer builds — e.g. a derived or synthetic slug. The
+// lookup (`.maybeSingle()`) resolves to no existing row, so createCategory
+// takes the insert path.
+function createCaptureInsertClient({ id = 'uuid-captured' } = {}) {
+  const captured = { row: null };
+  const client = {
+    from: sinon.stub().callsFake(() => ({
+      select: sinon.stub().returnsThis(),
+      eq: sinon.stub().returnsThis(),
+      ilike: sinon.stub().returnsThis(),
+      maybeSingle: sinon.stub().resolves({ data: null, error: null }),
+      insert: sinon.stub().callsFake((row) => {
+        captured.row = row;
+        return {
+          select: () => ({
+            single: () => Promise.resolve({
+              data: {
+                id,
+                category_id: row.category_id,
+                name: row.name,
+                status: row.status,
+                origin: row.origin,
+                created_at: '2026-04-20',
+                created_by: row.updated_by,
+                updated_at: '2026-04-20',
+                updated_by: row.updated_by,
+              },
+              error: null,
+            }),
+          }),
+        };
+      }),
+    })),
+  };
+  return { client, captured };
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 describe('categories-storage', () => {
   const ORG_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -192,19 +233,42 @@ describe('categories-storage', () => {
       })).to.be.rejectedWith('Category name is required');
     });
 
-    it('rejects names that canonicalize to a degenerate slug when no id is supplied', async () => {
-      // Non-ASCII-only names collapse to a bare "-" via the slug derivation
-      // `replace(/[^a-z0-9]+/g, '-')`. Rejecting at the API boundary keeps
-      // such rows from landing with meaningless FKs. Caller can opt out
-      // by supplying an explicit `id`.
-      const postgrestClient = createSequentialClient([
-        { data: null, error: null },
-      ]);
-      await expect(createCategory({
+    it('generates a synthetic slug for non-ASCII-only names when no id is supplied', async () => {
+      // CJK / non-ASCII-only names (e.g. "日本語") collapse to empty via the
+      // slug derivation `replace(/[^a-z0-9]+/g, '-')`. Rather than failing
+      // (which surfaced as a 500 — LLMO-5473), fall back to a synthetic UUID
+      // slug, mirroring the DB column default. FKs target categories.id (the
+      // UUID PK) and idempotency keys on name, so the synthetic slug is safe.
+      const { client, captured } = createCaptureInsertClient({ id: 'uuid-jp' });
+
+      const result = await createCategory({
         organizationId: ORG_ID,
         category: { name: '日本語' },
-        postgrestClient,
-      })).to.be.rejectedWith(/empty slug/);
+        postgrestClient: client,
+        updatedBy: 'user@test.com',
+      });
+
+      expect(result.created).to.be.true;
+      expect(result.outcome).to.equal('insert');
+      // Display name is preserved verbatim; slug is a generated UUID — never
+      // empty and never a bare '-'.
+      expect(captured.row.name).to.equal('日本語');
+      expect(captured.row.category_id).to.match(UUID_RE);
+      expect(result.category.name).to.equal('日本語');
+    });
+
+    it('generates a synthetic slug for punctuation-only names when no id is supplied', async () => {
+      const { client, captured } = createCaptureInsertClient({ id: 'uuid-punct' });
+
+      const result = await createCategory({
+        organizationId: ORG_ID,
+        category: { name: '!!!' },
+        postgrestClient: client,
+      });
+
+      expect(result.created).to.be.true;
+      expect(captured.row.name).to.equal('!!!');
+      expect(captured.row.category_id).to.match(UUID_RE);
     });
 
     it('accepts non-ASCII names when the client supplies an explicit slug', async () => {
