@@ -1,0 +1,11 @@
+# Jekyll configuration for the published GitHub Pages docs site (source: ./docs).
+#
+# Internal implementation plans and specs live under docs/ per the workspace
+# information hierarchy, but they are working documents - not part of the public
+# API reference - and they embed code samples whose JSDoc object-type syntax is
+# misread by Jekyll's Liquid parser as an unterminated variable, which fails the
+# build. Exclude them so the site builds cleanly and internal docs stay off the
+# public site.
+exclude:
+  - plans
+  - specs

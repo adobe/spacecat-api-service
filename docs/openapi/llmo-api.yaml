@@ -19,6 +19,9 @@ llmo-sheet-data:
     responses:
       '200':
         description: LLMO sheet data retrieved successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -31,6 +34,10 @@ llmo-sheet-data:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
   post:
@@ -52,6 +59,9 @@ llmo-sheet-data:
     responses:
       '200':
         description: LLMO sheet data queried and processed successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -64,6 +74,10 @@ llmo-sheet-data:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -96,6 +110,9 @@ llmo-sheet-data-with-type:
     responses:
       '200':
         description: LLMO sheet data retrieved successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -108,6 +125,10 @@ llmo-sheet-data-with-type:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
   post:
@@ -130,6 +151,9 @@ llmo-sheet-data-with-type:
     responses:
       '200':
         description: LLMO sheet data queried and processed successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -142,6 +166,10 @@ llmo-sheet-data-with-type:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -183,6 +211,9 @@ llmo-sheet-data-with-type-and-week:
     responses:
       '200':
         description: LLMO sheet data retrieved successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -195,6 +226,10 @@ llmo-sheet-data-with-type-and-week:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
   post:
@@ -218,6 +253,9 @@ llmo-sheet-data-with-type-and-week:
     responses:
       '200':
         description: LLMO sheet data queried and processed successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -230,6 +268,10 @@ llmo-sheet-data-with-type-and-week:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -309,6 +351,9 @@ llmo-data:
     responses:
       '200':
         description: LLMO data queried and processed successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -332,8 +377,8 @@ llmo-data:
                         description: The file path that was fetched
                       status:
                         type: string
-                        enum: [success, error]
-                        description: The status of the fetch operation
+                        enum: [success, error, no_data]
+                        description: The status of the fetch operation. `no_data` indicates the file's upstream data is not provisioned.
                       data:
                         type: object
                         description: The processed data (only present if status is success)
@@ -346,6 +391,10 @@ llmo-data:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -412,6 +461,9 @@ llmo-data-with-datasource:
     responses:
       '200':
         description: LLMO data queried successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -429,6 +481,10 @@ llmo-data-with-datasource:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -502,6 +558,9 @@ llmo-data-with-type:
     responses:
       '200':
         description: LLMO data queried successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -515,6 +574,136 @@ llmo-data-with-type:
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
+    security:
+      - api_key: [ ]
+
+llmo-data-row-with-datasource:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: dataSource
+      in: path
+      required: true
+      description: The data source identifier (without extension); the underlying SharePoint workbook is {dataSource}.xlsx
+      schema:
+        type: string
+        example: 'strategic-recommendations-template'
+  patch:
+    tags:
+      - llmo
+    summary: Update one or more rows in an LLMO XLSX data sheet
+    description: |
+      Updates row(s) of the SharePoint XLSX file backing the LLMO data file at
+      {dataFolder}/{dataSource}.xlsx, then republishes the JSON projection so the
+      Helix CDN serves the new contents.
+
+      Two body shapes are accepted:
+      - Single update: `{ sheet, match, values }` — response inlines `sheet`, `rowNumber`, `updated`.
+      - Batch update:  `{ updates: [{ sheet, match, values }, ...] }` (1..100 entries) — response returns an `updates` array of per-row results in input order.
+
+      Batch is **all-or-nothing**: if any entry fails to match exactly one row, no rows
+      are written. Batching N updates into one call collapses N×(SharePoint download +
+      upload + HLX republish) into one cycle, so it's the recommended shape for bulk
+      operations.
+
+      The endpoint is intended for low-frequency UI-driven edits such as soft-deleting
+      prompts in Strategic Recommendations. Each call performs a read–modify–write on
+      the full workbook, so concurrent calls targeting the same workbook can clobber
+      each other.
+
+      Within each entry, the `match` object must uniquely identify exactly one row
+      (no match → 404, multiple matches → 409). Column names in `match` and `values`
+      must exist in the worksheet header row.
+    operationId: patchLlmoDataRow
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetRowPatch'
+    responses:
+      '200':
+        description: Row updated and republished successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoSheetRowPatchResult'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '409':
+        description: Match criteria identify more than one row
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-data-row-with-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: sheetType
+      in: path
+      required: true
+      description: The sheet type identifier (folder under dataFolder)
+      schema:
+        type: string
+        example: 'strategic-recommendations'
+    - name: dataSource
+      in: path
+      required: true
+      description: The data source identifier (without extension)
+      schema:
+        type: string
+        example: 'strategic-recommendations-template'
+  patch:
+    tags:
+      - llmo
+    summary: Update one or more rows in an LLMO XLSX data sheet (with sheet type)
+    description: |
+      Same as PATCH /sites/{siteId}/llmo/data/{dataSource}/row, but the underlying
+      SharePoint workbook lives at {dataFolder}/{sheetType}/{dataSource}.xlsx.
+
+      Accepts the same single-update and batch (`{ updates: [...] }`) shapes. The
+      batch form is recommended for bulk operations such as marking multiple
+      Strategic Recommendations prompts as deleted in one round-trip.
+
+      Used by the elmo UI to mark prompt(s) in the Strategic Recommendations
+      workbook as deleted by writing `"deleted": "true"` on the matching row(s) of
+      the `Semrush`, `Synthetic Personas`, or `Citation Attempt` worksheet.
+    operationId: patchLlmoDataRowWithType
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetRowPatch'
+    responses:
+      '200':
+        description: Row updated and republished successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoSheetRowPatchResult'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '409':
+        description: Match criteria identify more than one row
       '500':
         $ref: './responses.yaml#/500'
     security:
@@ -598,6 +787,9 @@ llmo-data-with-type-and-week:
     responses:
       '200':
         description: LLMO data queried successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -613,6 +805,10 @@ llmo-data-with-type-and-week:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -638,6 +834,9 @@ llmo-global-sheet-data:
     responses:
       '200':
         description: LLMO global sheet data retrieved successfully
+        headers:
+          X-Llmo-Data-Status:
+            $ref: './headers.yaml#/xLlmoDataStatus'
         content:
           application/json:
             schema:
@@ -650,6 +849,10 @@ llmo-global-sheet-data:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+      '504':
+        $ref: './responses.yaml#/504'
     security:
       - api_key: [ ]
 
@@ -2581,13 +2784,25 @@ llmo-agentic-traffic-by-url:
     summary: Per-URL agentic traffic performance analysis (paginated)
     description: |
       Queries `rpc_agentic_traffic_by_url`. Powers the URL Performance table with
-      infinite-scroll pagination. Returns a page of `pageSize` rows (default 50, max 500)
+      infinite-scroll pagination. Returns a page of `pageSize` rows (default 50, max 200)
       plus `totalCount` for pagination context.
       Supports server-side substring search via `urlPathSearch`.
+
+      Date range guardrail (SITES-46098): `startDate` and `endDate` must be
+      supplied together — providing only one returns `400`. The requested span
+      may not exceed 62 days; a wider span returns `400`. Omitting both applies
+      the default 28-day window. This cap is enforced on every agentic-traffic
+      and referral-traffic read endpoint.
     operationId: getAgenticTrafficByUrl
     parameters:
-      - { name: startDate, in: query, schema: { type: string, format: date } }
-      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - name: startDate
+        in: query
+        description: Range start (`YYYY-MM-DD`). Required if `endDate` is set; span with `endDate` must be <= 62 days.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
+        schema: { type: string, format: date }
       - { name: platform, in: query, schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
@@ -2596,11 +2811,11 @@ llmo-agentic-traffic-by-url:
       - $ref: './parameters.yaml#/agentTypes'
       - name: pageSize
         in: query
-        description: Number of rows per page (default 50, max 500)
+        description: Number of rows per page (default 50, max 200)
         schema:
           type: integer
           minimum: 1
-          maximum: 500
+          maximum: 200
           default: 50
       - name: pageOffset
         in: query

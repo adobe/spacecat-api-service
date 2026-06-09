@@ -150,6 +150,97 @@ site-cdn-logs-config:
       '500':
         $ref: './responses.yaml#/500'
 
+site-scraper-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+    summary: Get scraper configuration for a site
+    description: |
+      Returns the per-site scraper configuration in the same narrow shape as
+      the PATCH endpoint. The full site configuration (which may include
+      unrelated secrets such as `tokowakaConfig.apiKey`) is not echoed.
+
+      When no scraper configuration is persisted for the site, `scraperConfig`
+      is returned as an empty object so callers do not need to handle a
+      separate "missing" case.
+    operationId: getSiteScraperConfig
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+    responses:
+      '200':
+        description: |
+          Scraper configuration retrieved successfully. The response contains
+          only `siteId` and the persisted `scraperConfig`.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ScraperConfigResponse'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+  patch:
+    tags:
+      - site
+    summary: Update scraper configuration for a site
+    description: |
+      Replaces the site's scraper configuration. The content scraper applies the
+      configured custom request headers (for example, `Accept-Language`) on
+      outbound fetches for this site.
+
+      **Replace semantics:** the request body fully replaces the existing
+      `scraperConfig`. To preserve fields the caller does not want to change,
+      the caller must merge client-side. Sending `scraperConfig: {}` clears any
+      previously stored configuration.
+
+      **Header restrictions:** header names must conform to RFC 7230 token
+      characters (`A-Za-z0-9!#$%&'*+-.^_`|~`), values must be printable ASCII
+      with no CR/LF/NUL, and the following names are rejected because they are
+      reserved by the scraper or its environment (case-insensitive):
+      `Authorization`, `Cookie`, `Proxy-Authorization`, `Host`, `User-Agent`,
+      `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`,
+      `Upgrade`, `TE`, `Trailer`. Maximum 32 headers, 64-char names,
+      1024-char values.
+    operationId: updateSiteScraperConfig
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/ScraperConfigUpdate'
+    responses:
+      '200':
+        description: |
+          Scraper configuration updated successfully. The response contains only
+          `siteId` and the persisted `scraperConfig` to avoid echoing unrelated
+          site configuration back to the caller.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ScraperConfigResponse'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+
 site-page-relationships-search:
   parameters:
     - $ref: './parameters.yaml#/siteId'

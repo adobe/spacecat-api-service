@@ -20,4 +20,5 @@ jobs:
       docs-lint: true
       it-postgres: true
       vpc-enabled: true
+      bundle-build: true
     secrets: inherit

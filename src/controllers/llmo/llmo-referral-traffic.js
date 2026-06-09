@@ -15,6 +15,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { cachedOk } from '../../support/cached-response.js';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
+import { checkDateRange } from './traffic-date-range.js';
 
 /**
  * Site-scoped referral traffic handler factories.
@@ -40,7 +41,11 @@ const SOURCE_TO_TABLE = {
 };
 
 const DEFAULT_BY_URL_PAGE_SIZE = 50;
-const MAX_BY_URL_PAGE_SIZE = 1000;
+// 500 (not the agentic 200) so the elmo-ui referral "All URLs" export — which
+// still paginates by-url client-side at pageSize=500 — is not silently
+// truncated. Drop to 200 once that export migrates to the async urls/export
+// endpoint like the agentic one (SITES-46098 review).
+const MAX_BY_URL_PAGE_SIZE = 500;
 
 // Mirrors the CASE whitelist in rpc_referral_traffic_by_url for defence-in-depth.
 const VALID_BY_URL_SORT_COLUMNS = new Set([
@@ -132,6 +137,12 @@ async function withReferralTrafficAuth(
   if (!Site?.postgrestService) {
     log.error('Referral traffic APIs require PostgREST (DATA_SERVICE_PROVIDER=postgres)');
     return badRequest('Referral traffic data is not available. PostgreSQL data service is required.');
+  }
+
+  const rangeError = checkDateRange(context.data);
+  if (rangeError) {
+    log.info(`Referral traffic ${handlerName} rejected (date range guardrail): ${rangeError}`);
+    return badRequest(rangeError);
   }
 
   const { siteId } = context.params;
