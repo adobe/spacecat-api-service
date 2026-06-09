@@ -312,6 +312,14 @@ paths:
     $ref: './url-store-api.yaml#/url-store-get'
   /sites/{siteId}/url-store/delete:
     $ref: './url-store-api.yaml#/url-store-delete'
+  /sites/{siteId}/agentic-categories:
+    $ref: './agentic-rules-api.yaml#/agentic-categories-list'
+  /sites/{siteId}/agentic-categories/{name}:
+    $ref: './agentic-rules-api.yaml#/agentic-categories-one'
+  /sites/{siteId}/agentic-page-types:
+    $ref: './agentic-rules-api.yaml#/agentic-page-types-list'
+  /sites/{siteId}/agentic-page-types/{name}:
+    $ref: './agentic-rules-api.yaml#/agentic-page-types-one'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:

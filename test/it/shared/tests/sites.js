@@ -90,7 +90,8 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
-        // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
+        // Legacy path (no limit/cursor params) excludes DEFAULT_ORGANIZATION_ID (ORG_1)
+        // and ORGANIZATION_ID_FRIENDS_FAMILY sites to stay under 6MB Lambda limit.
         // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3) + SITE_LEGACY_LLMO + SITE_NEW_LLMO
         // (LLMO-4176 mode-resolution test fixtures, neither under ORG_1).
         expect(res.body).to.be.an('array').with.lengthOf(4);
@@ -141,6 +142,31 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.s2sConsumerUnknown.get('/sites');
         expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns the paginated envelope and advances via cursor', async () => {
+        // Pins both the controller↔DAL contract for the `returnCursor: true` shape AND
+        // the cursor round-trip that pagination exists to provide. Seed has 6 sites
+        // total (paginated branch bypasses the org exclusion), so limit=2 MUST yield
+        // exactly 2 sites with hasMore=true on page 1.
+        const http = getHttpClient();
+        const page1 = await http.admin.get('/sites?limit=2');
+        expect(page1.status).to.equal(200);
+        expect(page1.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(page1.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page1.body.pagination).to.include({ limit: 2, hasMore: true });
+        expect(page1.body.pagination.cursor).to.be.a('string').and.not.empty;
+        page1.body.sites
+          .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
+          .forEach((s) => expectSiteListDto(s));
+
+        // Page 2 must advance — no overlap with page 1, same envelope shape.
+        const page2 = await http.admin.get(`/sites?limit=2&cursor=${encodeURIComponent(page1.body.pagination.cursor)}`);
+        expect(page2.status).to.equal(200);
+        expect(page2.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page2.body.pagination.limit).to.equal(2);
+        const page1Ids = new Set(page1.body.sites.map((s) => s.id));
+        page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
       });
     });
 
