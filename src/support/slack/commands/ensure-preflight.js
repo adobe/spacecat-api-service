@@ -70,9 +70,9 @@ export default (context) => {
         return;
       }
 
-      const { ready, missingLabels } = await isPreflightSiteConfigReady(site, context);
+      const { ready, needsContentSourcePath } = await isPreflightSiteConfigReady(site, context);
       if (!ready) {
-        if (missingLabels.length === 1 && missingLabels[0] === 'Content Source Path') {
+        if (needsContentSourcePath) {
           await say({
             text: `:warning: Preflight audit requires additional configuration for \`${site.getBaseURL()}\``,
             blocks: [
