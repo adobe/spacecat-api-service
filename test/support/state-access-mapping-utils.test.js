@@ -18,6 +18,7 @@ import {
   listFacsAccessMappingHistory,
   createFacsAccessMappings,
   revokeFacsAccessMappingById,
+  updateFacsAccessMappingCapabilities,
 } from '../../src/support/state-access-mapping-utils.js';
 
 /**
@@ -492,6 +493,30 @@ describe('state-access-mapping-utils helpers', () => {
       expect(out).to.equal(null);
     });
 
+    it('returns null when the RPC returns an all-NULL composite row (no match)', async () => {
+      // `RETURNS facs_access_mappings` yields a row of all-null columns (not
+      // SQL NULL) when no active row matches the id+org. Must be treated as
+      // "not found" so the controller returns 404, not 204.
+      const allNullRow = {
+        id: null,
+        subject_type: null,
+        subject_id: null,
+        resource_type: null,
+        resource_id: null,
+        ims_org_id: null,
+        product: null,
+        granted_capabilities: null,
+        created_at: null,
+        created_by: null,
+        revoked_at: null,
+        revoked_by: null,
+        revoke_reason: null,
+      };
+      const client = fakePostgrestClient({ rpcResult: { data: allNullRow, error: null } });
+      const out = await revokeFacsAccessMappingById(client, { id: 'r1', imsOrgId: 'org-1' });
+      expect(out).to.equal(null);
+    });
+
     it('throws with a meaningful message when the RPC returns an error', async () => {
       const client = fakePostgrestClient({
         rpcResult: { data: null, error: { message: 'permission denied' } },
@@ -501,6 +526,96 @@ describe('state-access-mapping-utils helpers', () => {
         throw new Error('expected to throw');
       } catch (e) {
         expect(e.message).to.equal('revokeFacsAccessMappingById failed: permission denied');
+      }
+    });
+  });
+
+  describe('updateFacsAccessMappingCapabilities', () => {
+    it('throws when id is missing', async () => {
+      const client = fakePostgrestClient();
+      try {
+        await updateFacsAccessMappingCapabilities(client, { imsOrgId: 'org-1', product: 'LLMO' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('updateFacsAccessMappingCapabilities: id is required');
+      }
+    });
+
+    it('throws when imsOrgId is missing', async () => {
+      const client = fakePostgrestClient();
+      try {
+        await updateFacsAccessMappingCapabilities(client, { id: 'r1', product: 'LLMO' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('updateFacsAccessMappingCapabilities: imsOrgId is required');
+      }
+    });
+
+    it('throws when product is missing', async () => {
+      const client = fakePostgrestClient();
+      try {
+        await updateFacsAccessMappingCapabilities(client, { id: 'r1', imsOrgId: 'org-1' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('updateFacsAccessMappingCapabilities: product is required');
+      }
+    });
+
+    it('invokes wrpc_set_facs_access_mapping_capabilities with org + product scope', async () => {
+      const updated = { id: 'r1', granted_capabilities: ['llmo/can_view', 'llmo/can_deploy'] };
+      const client = fakePostgrestClient({ rpcResult: { data: updated, error: null } });
+      const out = await updateFacsAccessMappingCapabilities(client, {
+        id: 'r1',
+        imsOrgId: 'org-1',
+        product: 'LLMO',
+        grantedCapabilities: ['llmo/can_view', 'llmo/can_deploy'],
+      });
+      expect(out).to.deep.equal(updated);
+      const [fnName, args] = client.rpc.firstCall.args;
+      expect(fnName).to.equal('wrpc_set_facs_access_mapping_capabilities');
+      expect(args).to.deep.equal({
+        p_id: 'r1',
+        p_ims_org_id: 'org-1',
+        p_product: 'LLMO',
+        p_granted_capabilities: ['llmo/can_view', 'llmo/can_deploy'],
+      });
+    });
+
+    it('defaults grantedCapabilities to an empty array when omitted', async () => {
+      const client = fakePostgrestClient({ rpcResult: { data: { id: 'r1' }, error: null } });
+      await updateFacsAccessMappingCapabilities(client, { id: 'r1', imsOrgId: 'org-1', product: 'LLMO' });
+      expect(client.rpc.firstCall.args[1].p_granted_capabilities).to.deep.equal([]);
+    });
+
+    it('unwraps a single-element array (client variant)', async () => {
+      const client = fakePostgrestClient({ rpcResult: { data: [{ id: 'r1' }], error: null } });
+      const out = await updateFacsAccessMappingCapabilities(client, {
+        id: 'r1', imsOrgId: 'org-1', product: 'LLMO', grantedCapabilities: ['llmo/can_view'],
+      });
+      expect(out).to.deep.equal({ id: 'r1' });
+    });
+
+    it('returns null on an all-NULL composite row (no active row matched)', async () => {
+      const client = fakePostgrestClient({
+        rpcResult: { data: { id: null, granted_capabilities: null }, error: null },
+      });
+      const out = await updateFacsAccessMappingCapabilities(client, {
+        id: 'r1', imsOrgId: 'org-1', product: 'LLMO', grantedCapabilities: ['llmo/can_view'],
+      });
+      expect(out).to.equal(null);
+    });
+
+    it('throws with a meaningful message when the RPC returns an error', async () => {
+      const client = fakePostgrestClient({
+        rpcResult: { data: null, error: { message: 'permission denied' } },
+      });
+      try {
+        await updateFacsAccessMappingCapabilities(client, {
+          id: 'r1', imsOrgId: 'org-1', product: 'LLMO', grantedCapabilities: ['llmo/can_view'],
+        });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('updateFacsAccessMappingCapabilities failed: permission denied');
       }
     });
   });

@@ -98,6 +98,7 @@ async function loadController(supportStubs = {}) {
     listFacsAccessMappingHistory: sinon.stub().resolves([]),
     createFacsAccessMappings: sinon.stub().resolves({ created: [], skipped: [] }),
     revokeFacsAccessMappingById: sinon.stub().resolves(null),
+    updateFacsAccessMappingCapabilities: sinon.stub().resolves(null),
     requirePostgrestForFacsMappings: () => null,
     ...supportStubs,
   };
@@ -472,17 +473,6 @@ describe('StateAccessMappingsController', () => {
   });
 
   describe('PATCH /state/access-mappings/:id (patchMapping)', () => {
-    function postgrestFor(rows, error = null) {
-      const chain = {
-        from: sinon.stub().returnsThis(),
-        update: sinon.stub().returnsThis(),
-        eq: sinon.stub().returnsThis(),
-        is: sinon.stub().returnsThis(),
-        select: sinon.stub().resolves({ data: rows, error }),
-      };
-      return chain;
-    }
-
     it('returns 400 when id is not a UUID', async () => {
       const { Controller } = await loadController();
       const ctx = makeContext({ pathParams: { id: 'not-uuid' }, body: { grantedCapabilities: ['llmo/can_view'] } });
@@ -507,37 +497,46 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(400);
     });
 
-    it('returns 200 with the updated row', async () => {
+    it('returns 200 with the updated row (via the capability-edit RPC helper)', async () => {
       const updated = makeRow({ granted_capabilities: ['llmo/can_view', 'llmo/can_configure'] });
-      const { Controller } = await loadController();
+      const updateStub = sinon.stub().resolves(updated);
+      const { Controller, stubs } = await loadController({
+        updateFacsAccessMappingCapabilities: updateStub,
+      });
       const ctx = makeContext({
         pathParams: { id: VALID_UUID_MAPPING },
         body: { grantedCapabilities: ['llmo/can_view', 'llmo/can_configure'] },
-        postgrestClient: postgrestFor([updated]),
       });
       const res = await Controller(ctx).patchMapping(ctx);
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.grantedCapabilities).to.deep.equal(['llmo/can_view', 'llmo/can_configure']);
+      // Helper invoked with org + product scope and the new capability set.
+      expect(stubs.updateFacsAccessMappingCapabilities.calledOnce).to.be.true;
+      const args = stubs.updateFacsAccessMappingCapabilities.firstCall.args[1];
+      expect(args).to.include({ id: VALID_UUID_MAPPING, product: 'LLMO' });
+      expect(args.grantedCapabilities).to.deep.equal(['llmo/can_view', 'llmo/can_configure']);
     });
 
-    it('returns 404 when no row matched', async () => {
-      const { Controller } = await loadController();
+    it('returns 404 when no active row matched', async () => {
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(null),
+      });
       const ctx = makeContext({
         pathParams: { id: VALID_UUID_MAPPING },
         body: { grantedCapabilities: ['llmo/can_view'] },
-        postgrestClient: postgrestFor([]),
       });
       const res = await Controller(ctx).patchMapping(ctx);
       expect(res.status).to.equal(404);
     });
 
-    it('returns 500 when postgrest returns an error', async () => {
-      const { Controller } = await loadController();
+    it('returns 500 when the RPC helper throws', async () => {
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().rejects(new Error('db down')),
+      });
       const ctx = makeContext({
         pathParams: { id: VALID_UUID_MAPPING },
         body: { grantedCapabilities: ['llmo/can_view'] },
-        postgrestClient: postgrestFor(null, { message: 'db down' }),
       });
       const res = await Controller(ctx).patchMapping(ctx);
       expect(res.status).to.equal(500);

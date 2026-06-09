@@ -29,6 +29,7 @@ import {
   listFacsAccessMappingHistory,
   requirePostgrestForFacsMappings,
   revokeFacsAccessMappingById,
+  updateFacsAccessMappingCapabilities,
 } from '../support/state-access-mapping-utils.js';
 
 // TODO(deps): replace with `normalizeImsOrgId` imported from
@@ -477,21 +478,19 @@ function StateAccessMappingsController(context) {
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
-      const { data: rows, error } = await postgrestClient
-        .from('facs_access_mappings')
-        .update({ granted_capabilities: grantedCapabilities })
-        .eq('id', id)
-        .eq('ims_org_id', imsOrgId)
-        .eq('product', product)
-        .is('revoked_at', null)
-        .select('*');
-      if (error) {
-        throw new Error(error.message);
-      }
-      if (!Array.isArray(rows) || rows.length === 0) {
+      // The table grants no UPDATE to any REST role (mutation is RPC-only by
+      // design); capability edits go through the SECURITY DEFINER RPC, which
+      // also enforces the active-row + org + product scope.
+      const updated = await updateFacsAccessMappingCapabilities(postgrestClient, {
+        id,
+        imsOrgId,
+        product,
+        grantedCapabilities,
+      });
+      if (!updated) {
         return notFound('Mapping not found');
       }
-      return ok(toMappingDto(rows[0]));
+      return ok(toMappingDto(updated));
     } catch (error) {
       log.error(
         { tag: 'state-access-mappings', err: error.message, id },

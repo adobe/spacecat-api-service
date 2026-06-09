@@ -313,18 +313,74 @@ export async function revokeFacsAccessMappingById(postgrestClient, {
     throw new Error(`revokeFacsAccessMappingById failed: ${error.message}`);
   }
   // PostgREST returns the function's return value as the data payload.
-  // `wrpc_revoke_facs_access_mapping` returns a `facs_access_mappings` row
-  // (or NULL when no active row matched). Some PostgREST clients deliver
-  // this as `{...row}`, others as `[{...row}]`; normalize both, and treat
-  // null / empty as "no row revoked".
-  if (data === null || data === undefined) {
-    return null;
-  }
+  // `wrpc_revoke_facs_access_mapping` is declared `RETURNS facs_access_mappings`,
+  // so when no active row matches it yields an ALL-NULL composite row (every
+  // column null) rather than SQL NULL — surfaced as an object whose keys are
+  // all null. Some clients deliver a single row as `{...row}`, others as
+  // `[{...row}]`; normalize both, then treat a missing row OR a row without an
+  // `id` (the all-null no-match case) as "no row revoked".
+  let row = data;
   if (Array.isArray(data)) {
-    return data[0] ?? null;
+    row = data[0] ?? null;
   }
-  if (typeof data === 'object' && Object.keys(data).length === 0) {
+  if (!row || typeof row !== 'object' || row.id == null) {
     return null;
   }
-  return data;
+  return row;
+}
+
+/**
+ * Replaces `granted_capabilities` on a single ACTIVE binding, scoped to the
+ * caller's org + product. Invokes the `wrpc_set_facs_access_mapping_capabilities`
+ * RPC defined in mysticat-data-service — the ONLY legal capability-edit path
+ * (no UPDATE grant exists on the table for any REST role; the RPC runs with
+ * SECURITY DEFINER and filters on `revoked_at IS NULL`, so it cannot mutate a
+ * tombstoned row or change the binding's identity).
+ *
+ * @param {object} postgrestClient
+ * @param {object} args
+ * @param {string} args.id                  - Binding row id.
+ * @param {string} args.imsOrgId            - REQUIRED — org scope guard.
+ * @param {string} args.product             - REQUIRED — product scope guard.
+ * @param {string[]} args.grantedCapabilities - New capability set (replaces).
+ * @returns {Promise<object|null>} The updated row, or `null` when no active
+ *                                  row matched (unknown id, revoked, or a
+ *                                  different org/product).
+ */
+export async function updateFacsAccessMappingCapabilities(postgrestClient, {
+  id,
+  imsOrgId,
+  product,
+  grantedCapabilities,
+}) {
+  if (!id) {
+    throw new Error('updateFacsAccessMappingCapabilities: id is required');
+  }
+  if (!imsOrgId) {
+    throw new Error('updateFacsAccessMappingCapabilities: imsOrgId is required');
+  }
+  if (!product) {
+    throw new Error('updateFacsAccessMappingCapabilities: product is required');
+  }
+  const { data, error } = await postgrestClient
+    .rpc('wrpc_set_facs_access_mapping_capabilities', {
+      p_id: id,
+      p_ims_org_id: imsOrgId,
+      p_product: product,
+      p_granted_capabilities: grantedCapabilities ?? [],
+    });
+  if (error) {
+    throw new Error(`updateFacsAccessMappingCapabilities failed: ${error.message}`);
+  }
+  // Same return contract as the revoke RPC: `RETURNS facs_access_mappings`
+  // yields an all-NULL composite row on no-match. Normalize single/array and
+  // treat a row without an `id` as "not found".
+  let row = data;
+  if (Array.isArray(data)) {
+    row = data[0] ?? null;
+  }
+  if (!row || typeof row !== 'object' || row.id == null) {
+    return null;
+  }
+  return row;
 }
