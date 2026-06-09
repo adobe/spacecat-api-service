@@ -383,10 +383,14 @@ function PreflightController(ctx, log, env) {
       if (!isValidUrl(data.mystiqueUrl)) {
         return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must be a valid URL', 400);
       }
-      const overrideHost = new URL(data.mystiqueUrl).hostname;
-      if (!/\.adobe\.io$/.test(overrideHost)) {
+      const parsedOverride = new URL(data.mystiqueUrl);
+      if (parsedOverride.protocol !== 'https:') {
+        return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must use https://', 400);
+      }
+      if (!/\.adobe\.io$/.test(parsedOverride.hostname)) {
         return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must point at an *.adobe.io host', 400);
       }
+      log.info(`Using caller-supplied mystiqueUrl override: ${data.mystiqueUrl}`);
     }
 
     const mysticatBaseUrl = useMystiqueUrlOverride

@@ -1279,6 +1279,21 @@ describe('Preflight Controller', () => {
       expect(result.message).to.include('*.adobe.io');
     });
 
+    it('returns 400 PREFLIGHT_INVALID_REQUEST when mystiqueUrl scheme is not https', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'http://m-dev.adobe.io', // http, not https
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.message).to.include('https');
+    });
+
     it('ignores mystiqueUrl in prod (override is dead code there)', async () => {
       const controller = CreatePreflightController(
         {
@@ -1335,6 +1350,9 @@ describe('Preflight Controller', () => {
         attributes: { authInfo: mockAuthInfo },
       });
       expect(response.status).to.equal(202);
+      // Confirm the override was actually used — not just that the request
+      // avoided the "Analyze service not configured" 500.
+      expect(fetchStub.secondCall.args[0]).to.equal('https://m-dev.adobe.io/v1/preflight/analyze');
     });
 
     it('returns 404 when site is not found', async () => {
