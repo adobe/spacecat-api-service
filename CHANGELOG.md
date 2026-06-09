@@ -1,3 +1,11 @@
+## [1.563.1](https://github.com/adobe/spacecat-api-service/compare/v1.563.0...v1.563.1) (2026-06-09)
+
+
+### Bug Fixes
+
+* **SITES-46200:** re-parent project in set imsorg, not just the site ([#2574](https://github.com/adobe/spacecat-api-service/issues/2574)) ([cb86d91](https://github.com/adobe/spacecat-api-service/commit/cb86d910d328f0efb44c120f2039088e00202c4e))
+* **SITES-46200:** reject projectId updates on PATCH /sites/:siteId ([#2573](https://github.com/adobe/spacecat-api-service/issues/2573)) ([39eb86c](https://github.com/adobe/spacecat-api-service/commit/39eb86c3a9b63ea309424eac78ecf116cc6404d3))
+
 # [1.563.0](https://github.com/adobe/spacecat-api-service/compare/v1.562.0...v1.563.0) (2026-06-09)
 
 
