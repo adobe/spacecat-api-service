@@ -1486,8 +1486,8 @@ function LlmoController(ctx) {
           const siteUrlForGuard = baseURL.startsWith('http') ? baseURL : `https://${baseURL}`;
           const siteUrlObj = new URL(siteUrlForGuard);
           if (siteUrlObj.pathname && siteUrlObj.pathname !== '/') {
-            log.error(`[edge-optimize-routing-failed] ${baseURL} Subpath site cannot use host-level auto-routing`);
-            return badRequest('Automated CDN routing is not yet supported for subpath sites. Path-scoped routing requires a Fastly API update (LLMO-4579).');
+            log.error(`[edge-optimize-routing-failed] ${baseURL} site cannot use host-level auto-routing`);
+            return badRequest('Automated CDN routing supported at domain level sites only. Please enable via domain level site or contact support for assistance.');
           }
         } catch {
           // Malformed URL — let the subsequent probe step surface the error
