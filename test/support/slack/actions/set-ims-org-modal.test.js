@@ -874,6 +874,9 @@ describe('SetImsOrgModal', () => {
         expect(mockCreateEntitlementsForProducts.calledOnce).to.be.true;
         expect(mockCreateEntitlementsForProducts.firstCall.args[1]).to.equal(mockSite);
         expect(mockCreateEntitlementsForProducts.firstCall.args[2]).to.deep.equal(['ASO']);
+        // Mechanically enforce the ordering invariant: the re-parented site is
+        // persisted before entitlements are created against it.
+        sinon.assert.callOrder(mockSite.save, mockCreateEntitlementsForProducts);
       });
     });
   });
