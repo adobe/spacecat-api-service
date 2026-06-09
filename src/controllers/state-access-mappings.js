@@ -95,6 +95,33 @@ function decodeCursor(cursor) {
   }
 }
 
+/**
+ * Parses the request's query string into a plain object.
+ *
+ * The Lambda runtime exposes the raw query string on
+ * `context.invocation.event.rawQueryString` (not `pathInfo.queryParams`,
+ * which is not populated in this deployment). Mirrors the established
+ * pattern in `controllers/feature-flags.js` and `controllers/brands.js`.
+ *
+ * @param {object} ctx - request context
+ * @returns {Object<string, string>} decoded query parameters
+ */
+function getQueryParams(ctx) {
+  const rawQueryString = ctx.invocation?.event?.rawQueryString;
+  if (!rawQueryString) {
+    return {};
+  }
+  const params = {};
+  rawQueryString.split('&').forEach((param) => {
+    const [key, value] = param.split('=');
+    if (key && value) {
+      const decode = (s) => decodeURIComponent(s.replace(/\+/g, ' '));
+      params[decode(key)] = decode(value);
+    }
+  });
+  return params;
+}
+
 function clampLimit(limit) {
   const n = Number(limit);
   if (!Number.isFinite(n) || n <= 0) {
@@ -201,7 +228,7 @@ function StateAccessMappingsController(context) {
   }
 
   function buildListFilters(ctx, imsOrgId, product) {
-    const queryParams = ctx.pathInfo?.queryParams || {};
+    const queryParams = getQueryParams(ctx);
     return {
       imsOrgId,
       product,
@@ -260,7 +287,7 @@ function StateAccessMappingsController(context) {
       );
     }
 
-    const queryParams = ctx.pathInfo?.queryParams || {};
+    const queryParams = getQueryParams(ctx);
     const decoded = decodeCursor(queryParams.cursor);
     const limit = clampLimit(filters.limit);
     // Helper applies a single page-size limit; for cursor pagination we
@@ -305,7 +332,7 @@ function StateAccessMappingsController(context) {
       );
     }
 
-    const queryParams = ctx.pathInfo?.queryParams || {};
+    const queryParams = getQueryParams(ctx);
     const decoded = decodeCursor(queryParams.cursor);
     const limit = clampLimit(filters.limit);
     filters.limit = limit + 1 + (decoded?.offset ?? 0);
@@ -568,7 +595,7 @@ function StateAccessMappingsController(context) {
     if (productResourceTypes.length === 0) {
       return badRequest(`product ${product} has no FACS resource types configured`);
     }
-    const queryParams = ctx.pathInfo?.queryParams || {};
+    const queryParams = getQueryParams(ctx);
     let resourceType;
     if (productResourceTypes.length === 1) {
       [resourceType] = productResourceTypes;

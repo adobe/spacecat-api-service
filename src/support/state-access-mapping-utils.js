@@ -231,30 +231,39 @@ export async function createFacsAccessMappings(postgrestClient, {
     created_by: createdBy ?? null,
   }));
 
-  // PostgREST upsert with onConflict: rows matching the active partial
-  // unique index are silently skipped when ignoreDuplicates: true. We then
-  // diff against the requested rows to compute the `skipped` array.
+  // The active-row uniqueness index is PARTIAL (WHERE revoked_at IS NULL).
+  // Postgres `ON CONFLICT (cols)` cannot target a partial index unless the
+  // matching predicate is also supplied, and PostgREST's `onConflict` option
+  // only emits the column list — so an upsert raises "there is no unique or
+  // exclusion constraint matching the ON CONFLICT specification". Instead we
+  // insert each row directly and treat a unique-violation (SQLSTATE 23505)
+  // against the partial index as a duplicate to skip.
   //
-  // Note: the index is partial (WHERE revoked_at IS NULL), so a previously-
-  // revoked binding for the same (subject, resource, org, product) does NOT
-  // conflict — it gets a fresh row with a new id. This is the design's
-  // "re-grant after revoke = new row, not reactivation" property.
-  const { data, error } = await postgrestClient
+  // Because the index is partial, a previously-revoked binding for the same
+  // (subject, resource, org, product) does NOT conflict — it gets a fresh row
+  // with a new id. This is the design's "re-grant after revoke = new row, not
+  // reactivation" property.
+  const results = await Promise.all(rows.map((row) => postgrestClient
     .from('facs_access_mappings')
-    .upsert(rows, {
-      onConflict: 'subject_type,subject_id,resource_type,resource_id,ims_org_id,product',
-      ignoreDuplicates: true,
-    })
-    .select('*');
-  if (error) {
-    throw new Error(`createFacsAccessMappings failed: ${error.message}`);
-  }
-  const created = data ?? [];
-  const createdKey = (row) => `${row.subject_type}|${row.subject_id}`;
-  const createdKeys = new Set(created.map(createdKey));
-  const skipped = subjects
-    .filter(({ type, id }) => !createdKeys.has(`${type}|${id}`))
-    .map((subject) => ({ subject, reason: 'duplicate' }));
+    .insert(row)
+    .select('*')));
+
+  const created = [];
+  const skipped = [];
+  results.forEach(({ data, error }, i) => {
+    if (error && error.code !== '23505') {
+      throw new Error(`createFacsAccessMappings failed: ${error.message}`);
+    }
+    if (error) {
+      // 23505: unique violation against the active-row partial index.
+      skipped.push({
+        subject: { type: rows[i].subject_type, id: rows[i].subject_id },
+        reason: 'duplicate',
+      });
+    } else if (Array.isArray(data) && data.length > 0) {
+      created.push(data[0]);
+    }
+  });
   return { created, skipped };
 }
 

@@ -67,6 +67,17 @@ function makeContext({
       },
     },
     data: body,
+    // The controller reads query params from invocation.event.rawQueryString
+    // (the Lambda runtime source), so serialize the queryParams arg into a
+    // raw query string here. pathInfo.queryParams is retained for any other
+    // readers but is no longer the controller's source of truth.
+    invocation: {
+      event: {
+        rawQueryString: Object.entries(queryParams || {})
+          .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+          .join('&'),
+      },
+    },
     pathInfo: {
       params: pathParams || {},
       queryParams: queryParams || {},

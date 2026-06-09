@@ -42,16 +42,19 @@ function fakeQueryBuilder(result) {
   return builder;
 }
 
-function fakePostgrestClient({ readResult, upsertResult, rpcResult } = {}) {
+function fakePostgrestClient({ readResult, insertResults, rpcResult } = {}) {
   const readBuilder = fakeQueryBuilder(readResult ?? { data: [], error: null });
-  const upsertBuilder = fakeQueryBuilder(upsertResult ?? { data: [], error: null });
+  // createFacsAccessMappings inserts one row per subject; each `.insert(row)`
+  // returns its own builder resolving to the next queued result (in order).
+  const insertQueue = [...(insertResults ?? [])];
+  const insertArgs = [];
   const client = {
     fromCalls: [],
+    insertArgs,
     from(table) {
       this.fromCalls.push(table);
       return {
         // Treat all of select/eq/is/in/gte/order/limit as the readBuilder.
-        // upsert(...) returns the upsertBuilder (which exposes .select()).
         select: readBuilder.select,
         eq: readBuilder.eq,
         is: readBuilder.is,
@@ -59,16 +62,16 @@ function fakePostgrestClient({ readResult, upsertResult, rpcResult } = {}) {
         gte: readBuilder.gte,
         order: readBuilder.order,
         limit: readBuilder.limit,
-        upsert: (rows, opts) => {
-          upsertBuilder.upsertArgs = [rows, opts];
-          return upsertBuilder;
+        insert: (row) => {
+          insertArgs.push(row);
+          const result = insertQueue.shift() ?? { data: [], error: null };
+          return fakeQueryBuilder(result);
         },
         then: readBuilder.then.bind(readBuilder),
       };
     },
     rpc: sinon.stub().resolves(rpcResult ?? { data: null, error: null }),
     readBuilder,
-    upsertBuilder,
   };
   return client;
 }
@@ -303,11 +306,13 @@ describe('state-access-mapping-utils helpers', () => {
       }
     });
 
-    it('upserts rows carrying product + granted_capabilities (no facs_permission column)', async () => {
+    it('inserts a row carrying product + granted_capabilities (no facs_permission column)', async () => {
       const client = fakePostgrestClient({
-        upsertResult: { data: [{ id: 'r1', subject_type: 'user', subject_id: 'A@AdobeID' }], error: null },
+        insertResults: [
+          { data: [{ id: 'r1', subject_type: 'user', subject_id: 'A@AdobeID' }], error: null },
+        ],
       });
-      await createFacsAccessMappings(client, {
+      const out = await createFacsAccessMappings(client, {
         imsOrgId: 'org-1',
         product: 'LLMO',
         resourceType: 'brand',
@@ -316,9 +321,8 @@ describe('state-access-mapping-utils helpers', () => {
         subjects: [{ type: 'user', id: 'A@AdobeID' }],
         createdBy: 'admin@AdobeID',
       });
-      const [rows, opts] = client.upsertBuilder.upsertArgs;
-      expect(rows).to.have.length(1);
-      const row = rows[0];
+      expect(client.insertArgs).to.have.length(1);
+      const row = client.insertArgs[0];
       expect(row).to.not.have.property('facs_permission');
       expect(row).to.include({
         subject_type: 'user',
@@ -330,18 +334,18 @@ describe('state-access-mapping-utils helpers', () => {
         created_by: 'admin@AdobeID',
       });
       expect(row.granted_capabilities).to.deep.equal(['llmo/can_view', 'llmo/can_configure']);
-      expect(opts.onConflict).to.equal(
-        'subject_type,subject_id,resource_type,resource_id,ims_org_id,product',
-      );
-      expect(opts.ignoreDuplicates).to.be.true;
+      expect(out.created).to.have.length(1);
+      expect(out.skipped).to.deep.equal([]);
     });
 
-    it('classifies unreturned subjects as `skipped: duplicate`', async () => {
+    it('classifies a unique-violation (23505) row as `skipped: duplicate`', async () => {
+      // The active-row uniqueness index is partial, so a duplicate active
+      // binding surfaces as a per-row 23505 error (not a missing return row).
       const client = fakePostgrestClient({
-        upsertResult: {
-          data: [{ subject_type: 'user', subject_id: 'A@AdobeID' }], // only A was inserted
-          error: null,
-        },
+        insertResults: [
+          { data: [{ subject_type: 'user', subject_id: 'A@AdobeID' }], error: null },
+          { data: null, error: { code: '23505', message: 'duplicate key value' } },
+        ],
       });
       const out = await createFacsAccessMappings(client, {
         imsOrgId: 'org-1',
@@ -351,7 +355,7 @@ describe('state-access-mapping-utils helpers', () => {
         grantedCapabilities: ['llmo/can_view'],
         subjects: [
           { type: 'user', id: 'A@AdobeID' },
-          { type: 'user', id: 'B@AdobeID' }, // already bound; not returned
+          { type: 'user', id: 'B@AdobeID' }, // already actively bound → 23505
         ],
       });
       expect(out.created).to.have.length(1);
@@ -360,9 +364,9 @@ describe('state-access-mapping-utils helpers', () => {
       ]);
     });
 
-    it('throws with a meaningful message when PostgREST returns an error', async () => {
+    it('throws with a meaningful message on a non-conflict PostgREST error', async () => {
       const client = fakePostgrestClient({
-        upsertResult: { data: null, error: { message: 'boom' } },
+        insertResults: [{ data: null, error: { message: 'boom' } }],
       });
       try {
         await createFacsAccessMappings(client, {
@@ -379,9 +383,9 @@ describe('state-access-mapping-utils helpers', () => {
       }
     });
 
-    it('treats `data: null` from PostgREST as an empty created list', async () => {
+    it('treats an empty insert return (no error) as neither created nor skipped', async () => {
       const client = fakePostgrestClient({
-        upsertResult: { data: null, error: null },
+        insertResults: [{ data: [], error: null }],
       });
       const out = await createFacsAccessMappings(client, {
         imsOrgId: 'org-1',
@@ -392,14 +396,12 @@ describe('state-access-mapping-utils helpers', () => {
         subjects: [{ type: 'user', id: 'A@AdobeID' }],
       });
       expect(out.created).to.deep.equal([]);
-      expect(out.skipped).to.deep.equal([
-        { subject: { type: 'user', id: 'A@AdobeID' }, reason: 'duplicate' },
-      ]);
+      expect(out.skipped).to.deep.equal([]);
     });
 
     it('treats undefined createdBy as null in the row', async () => {
       const client = fakePostgrestClient({
-        upsertResult: { data: [], error: null },
+        insertResults: [{ data: [{ id: 'r1' }], error: null }],
       });
       await createFacsAccessMappings(client, {
         imsOrgId: 'org-1',
@@ -409,8 +411,7 @@ describe('state-access-mapping-utils helpers', () => {
         grantedCapabilities: ['llmo/can_view'],
         subjects: [{ type: 'user', id: 'A@AdobeID' }],
       });
-      const [rows] = client.upsertBuilder.upsertArgs;
-      expect(rows[0].created_by).to.equal(null);
+      expect(client.insertArgs[0].created_by).to.equal(null);
     });
   });
 
