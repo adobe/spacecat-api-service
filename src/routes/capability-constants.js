@@ -23,6 +23,7 @@ export const CAP_SITE_READ_ALL = 'site:readAll';
 export const CAP_ORG_READ_ALL = 'organization:readAll';
 
 export const CAP_CONFIGURATION_READ = 'configuration:read';
+export const CAP_CONFIGURATION_WRITE = 'configuration:write';
 
 export const CAP_SITE_CREATE = 'site:create';
 
