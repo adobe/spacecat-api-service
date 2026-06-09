@@ -28,7 +28,6 @@ describe('EnsurePreflightCommand', () => {
   let isPreflightSiteConfigReadyStub;
   let promptPreflightConfigStub;
   let enablePreflightAuditForSiteStub;
-  let postErrorMessageStub;
 
   const site = {
     getId: () => 'site1',
@@ -40,7 +39,6 @@ describe('EnsurePreflightCommand', () => {
     isPreflightSiteConfigReadyStub = sandbox.stub();
     promptPreflightConfigStub = sandbox.stub().resolves();
     enablePreflightAuditForSiteStub = sandbox.stub().resolves();
-    postErrorMessageStub = sandbox.stub().resolves();
 
     configurationMock = {
       enableHandlerForSite: sandbox.stub(),
@@ -78,7 +76,6 @@ describe('EnsurePreflightCommand', () => {
       },
       '../../../../src/utils/slack/base.js': {
         extractURLFromSlackInput: (value) => value,
-        postErrorMessage: postErrorMessageStub,
       },
     });
   });
@@ -171,6 +168,5 @@ describe('EnsurePreflightCommand', () => {
     expect(slackContextMock.say).to.have.been.calledWith(
       `${ERROR_MESSAGE_PREFIX}An error occurred while trying to ensure preflight for site "https://example.com": enable failed`,
     );
-    expect(postErrorMessageStub).to.have.been.calledWith(slackContextMock.say, error);
   });
 });

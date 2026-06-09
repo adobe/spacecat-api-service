@@ -12,9 +12,9 @@
 
 import { AUTHORING_TYPES, hasText } from '@adobe/spacecat-shared-utils';
 
-const ERROR_MESSAGE_PREFIX = ':x: ';
-const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
-const PREFLIGHT_AUDIT_TYPE = 'preflight';
+export const ERROR_MESSAGE_PREFIX = ':x: ';
+export const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
+export const PREFLIGHT_AUDIT_TYPE = 'preflight';
 
 export const CS_AUTHORING_TYPES = [AUTHORING_TYPES.CS, AUTHORING_TYPES.CS_CW];
 
@@ -272,9 +272,3 @@ export async function enablePreflightAuditForSite(site, dataAccess) {
   configuration.enableHandlerForSite(PREFLIGHT_AUDIT_TYPE, site);
   await configuration.save();
 }
-
-export {
-  ERROR_MESSAGE_PREFIX,
-  SUCCESS_MESSAGE_PREFIX,
-  PREFLIGHT_AUDIT_TYPE,
-};

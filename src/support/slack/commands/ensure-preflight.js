@@ -12,7 +12,7 @@
 
 import { isValidUrl } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
-import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
+import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import {
   enablePreflightAuditForSite,
   ERROR_MESSAGE_PREFIX,
@@ -47,9 +47,9 @@ export default (context) => {
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
     let baseURL;
+    const [baseURLInput] = args;
 
     try {
-      const [baseURLInput] = args;
       baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!isValidUrl(baseURL)) {
@@ -115,9 +115,8 @@ export default (context) => {
     } catch (error) {
       log.error(error);
       await say(
-        `${ERROR_MESSAGE_PREFIX}An error occurred while trying to ensure preflight for site "${baseURL}": ${error.message}`,
+        `${ERROR_MESSAGE_PREFIX}An error occurred while trying to ensure preflight for site "${baseURL ?? baseURLInput ?? 'unknown'}": ${error.message}`,
       );
-      await postErrorMessage(say, error);
     }
   };
 
