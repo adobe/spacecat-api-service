@@ -1,3 +1,31 @@
+# [1.560.0](https://github.com/adobe/spacecat-api-service/compare/v1.559.0...v1.560.0) (2026-06-08)
+
+
+### Features
+
+* **preflight:** defer eligibility to Mysticat on site-scoped endpoints (SITES-46202) ([#2572](https://github.com/adobe/spacecat-api-service/issues/2572)) ([547223b](https://github.com/adobe/spacecat-api-service/commit/547223b5f450b4ce769f53edca65a7c94bfa26c0)), closes [#2478](https://github.com/adobe/spacecat-api-service/issues/2478)
+
+# [1.559.0](https://github.com/adobe/spacecat-api-service/compare/v1.558.0...v1.559.0) (2026-06-08)
+
+
+### Features
+
+* **s2s:** allow S2S consumers with configuration:write to toggle site audits ([#2571](https://github.com/adobe/spacecat-api-service/issues/2571)) ([b9714d3](https://github.com/adobe/spacecat-api-service/commit/b9714d373f2eb3a14904ec357aee3c199c91ab56))
+
+# [1.558.0](https://github.com/adobe/spacecat-api-service/compare/v1.557.0...v1.558.0) (2026-06-08)
+
+
+### Features
+
+* **s2s:** allow S2S consumers with configuration:write to modify configuration ([#2569](https://github.com/adobe/spacecat-api-service/issues/2569)) ([45798e3](https://github.com/adobe/spacecat-api-service/commit/45798e30bfab2b791f5ebf9b3005a19ab03b62d9))
+
+# [1.557.0](https://github.com/adobe/spacecat-api-service/compare/v1.556.2...v1.557.0) (2026-06-08)
+
+
+### Features
+
+* **prompts:** persist intent on prompt upsert/update ([#2562](https://github.com/adobe/spacecat-api-service/issues/2562)) ([05f8d16](https://github.com/adobe/spacecat-api-service/commit/05f8d16a2139ab2b8536efcee11c0908aff4528a))
+
 ## [1.556.2](https://github.com/adobe/spacecat-api-service/compare/v1.556.1...v1.556.2) (2026-06-08)
 
 
