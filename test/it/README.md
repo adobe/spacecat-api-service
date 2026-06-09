@@ -18,7 +18,7 @@ test/it/
 │   ├── postgrest-jwt.js          # PostgREST writer JWT for mutations
 │   ├── helpers/
 │   │   └── assertions.js         # Reusable assertion helpers
-│   └── tests/                    # Shared test suites (18 files)
+│   └── tests/                    # Shared test suites (19 files)
 │       ├── sites.js
 │       ├── organizations.js
 │       ├── audits.js
@@ -34,7 +34,8 @@ test/it/
 │       ├── experiments.js
 │       ├── site-top-pages.js
 │       ├── user-activities.js
-│       └── preflight.js
+│       ├── preflight.js
+│       └── state-access-mappings.js
 │
 └── postgres/                     # PostgreSQL backend
     ├── harness.js                # Mocha root hooks (beforeAll/afterAll)
@@ -85,8 +86,9 @@ test/it/
 | Site Top Pages | `site-top-pages.js` | GET /top-pages, /by-source, /by-source/:geo | ~7 |
 | User Activities | `user-activities.js` | GET/POST /user-activities | ~6 |
 | Preflight | `preflight.js` | POST/GET /preflight/jobs | ~10 |
+| State Access Mappings | `state-access-mappings.js` | GET/POST/PATCH/DELETE /state/access-mappings (+ /history) | ~25 |
 
-**Total**: ~150+ test cases across 16 test suites.
+**Total**: ~175+ test cases across 17 test suites.
 
 ### What Each Test Validates
 

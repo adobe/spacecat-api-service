@@ -1,0 +1,376 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { expect } from 'chai';
+import { expectISOTimestamp } from '../helpers/assertions.js';
+
+// State-layer access mappings are created fresh by these tests (the controller
+// does not validate resource existence), so no pre-seeded rows are required.
+// Literal UUIDs below identify the ReBAC resources being granted.
+const BRAND_RESOURCE_ID = 'b1111111-1111-4111-8111-111111111111';
+const BRAND_RESOURCE_ID_2 = 'b2222222-2222-4222-8222-222222222222';
+const SITE_RESOURCE_ID = '5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a';
+
+// Canonical IMS user idents (subject_id for subject_type='user').
+const USER_SUBJECT = 'grantee123@AdobeID';
+
+const LLMO_CAPS = ['llmo/can_view', 'llmo/can_configure'];
+const LLMO_CAPS_UPDATED = ['llmo/can_view', 'llmo/can_deploy', 'llmo/can_configure'];
+
+const BASE = '/state/access-mappings';
+const HISTORY = '/state/access-mappings/history';
+
+/**
+ * Asserts that an object has the state-access-mapping DTO shape (camelCase).
+ *
+ * @param {object} m - the mapping DTO
+ */
+function expectMappingDto(m) {
+  expect(m).to.be.an('object');
+  expect(m.id).to.be.a('string');
+  expect(m.subjectType).to.be.oneOf(['user', 'org']);
+  expect(m.subjectId).to.be.a('string');
+  expect(m.resourceType).to.be.a('string');
+  expect(m.resourceId).to.be.a('string');
+  expect(m.imsOrgId).to.be.a('string');
+  expect(m.product).to.be.a('string');
+  expect(m.grantedCapabilities).to.be.an('array');
+  expectISOTimestamp(m.createdAt, 'createdAt');
+}
+
+/**
+ * Shared StateAccessMappings endpoint tests.
+ *
+ * Exercises the full PostgREST round-trip for the hybrid-model state layer:
+ * create / list / patch / soft-revoke / history, plus validation and the
+ * partial-unique-index semantics (active duplicate → 409; re-create after
+ * revoke → 201). The `admin` persona is used throughout because it is an
+ * internal identity that bypasses `facsWrapper` — the controller logic and
+ * the real `facs_access_mappings` table are what's under test here, not the
+ * capability gate (covered by the facsWrapper unit suite).
+ *
+ * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
+ * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
+ */
+export default function stateAccessMappingsTests(getHttpClient, resetData) {
+  describe('StateAccessMappings', () => {
+    describe('lifecycle: create → list → patch → revoke → history', () => {
+      before(() => resetData());
+
+      let created;
+
+      it('POST creates a user-scoped binding (201)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, {
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID,
+          grantedCapabilities: LLMO_CAPS,
+        });
+        expect(res.status).to.equal(201);
+        expectMappingDto(res.body);
+        expect(res.body.subjectType).to.equal('user');
+        expect(res.body.subjectId).to.equal(USER_SUBJECT);
+        expect(res.body.resourceType).to.equal('brand');
+        expect(res.body.resourceId).to.equal(BRAND_RESOURCE_ID);
+        expect(res.body.product).to.equal('LLMO');
+        expect(res.body.grantedCapabilities).to.have.members(LLMO_CAPS);
+        expect(res.body.revokedAt).to.equal(null);
+        created = res.body;
+      });
+
+      it('GET lists the binding filtered by resource', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(
+          `${BASE}?resourceType=brand&resourceId=${BRAND_RESOURCE_ID}`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object');
+        expect(res.body.items).to.be.an('array').with.lengthOf(1);
+        expect(res.body.items[0].id).to.equal(created.id);
+        expect(res.body).to.have.property('cursor');
+      });
+
+      it('GET lists the binding filtered by subject', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(
+          `${BASE}?subjectType=user&subjectId=${encodeURIComponent(USER_SUBJECT)}`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.items).to.be.an('array').with.lengthOf(1);
+        expect(res.body.items[0].id).to.equal(created.id);
+      });
+
+      it('POST a duplicate active binding returns 409 with the existing id', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, {
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(409);
+        expect(res.body.id).to.equal(created.id);
+      });
+
+      it('PATCH replaces the granted capabilities (200)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(`${BASE}/${created.id}`, {
+          grantedCapabilities: LLMO_CAPS_UPDATED,
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.id).to.equal(created.id);
+        expect(res.body.grantedCapabilities).to.have.members(LLMO_CAPS_UPDATED);
+      });
+
+      it('GET reflects the patched capabilities', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(
+          `${BASE}?resourceType=brand&resourceId=${BRAND_RESOURCE_ID}`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.items[0].grantedCapabilities).to.have.members(LLMO_CAPS_UPDATED);
+      });
+
+      it('DELETE soft-revokes the binding (204)', async () => {
+        const http = getHttpClient();
+        // The IT http-client's delete() carries no request body (its second
+        // arg is extra headers), so no revoke reason is supplied here — the
+        // reason path is covered by the controller unit tests.
+        const res = await http.admin.delete(`${BASE}/${created.id}`);
+        expect(res.status).to.equal(204);
+      });
+
+      it('GET (active) no longer returns the revoked binding', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(
+          `${BASE}?resourceType=brand&resourceId=${BRAND_RESOURCE_ID}`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.items).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('GET history returns the revoked binding with tombstone fields', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(
+          `${HISTORY}?resourceType=brand&resourceId=${BRAND_RESOURCE_ID}`,
+        );
+        expect(res.status).to.equal(200);
+        const row = res.body.items.find((m) => m.id === created.id);
+        expect(row, 'revoked row present in history').to.be.an('object');
+        expectISOTimestamp(row.revokedAt, 'revokedAt');
+        expect(row.revokedBy).to.be.a('string');
+      });
+
+      it('POST the same natural key again after revoke succeeds (partial unique index)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, {
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(201);
+        expect(res.body.id).to.not.equal(created.id);
+        expect(res.body.revokedAt).to.equal(null);
+      });
+    });
+
+    describe('org-scoped binding', () => {
+      before(() => resetData());
+
+      it('POST org-scoped binding requires subjectId === caller org (403 otherwise)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, {
+          subjectType: 'org',
+          subjectId: 'SOMEOTHERORG@AdobeOrg',
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_2,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('POST org-scoped binding succeeds when subjectId equals the caller org id', async () => {
+        const http = getHttpClient();
+        // Derive the caller's canonical org id by reading it back off a
+        // user-scoped create (robust to the normalizeImsOrgId rule).
+        const userRes = await http.admin.post(BASE, {
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_2,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(userRes.status).to.equal(201);
+        const callerOrgId = userRes.body.imsOrgId;
+
+        const res = await http.admin.post(BASE, {
+          subjectType: 'org',
+          subjectId: callerOrgId,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_2,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(201);
+        expect(res.body.subjectType).to.equal('org');
+        expect(res.body.subjectId).to.equal(callerOrgId);
+      });
+    });
+
+    describe('validation', () => {
+      before(() => resetData());
+
+      it('POST returns 400 when the body is missing', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, undefined);
+        expect(res.status).to.equal(400);
+      });
+
+      it('POST returns 400 for an invalid subjectType', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, {
+          subjectType: 'group',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it("POST returns 400 when a 'user' subjectId is not canonical (<ident>@<authSrc>)", async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, {
+          subjectType: 'user',
+          subjectId: 'no-at-sign',
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('POST returns 400 for a resourceType not valid for the product', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, {
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'site', // not an LLMO resource type
+          resourceId: BRAND_RESOURCE_ID,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('POST returns 400 for a capability outside the product catalog', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, {
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID,
+          grantedCapabilities: ['llmo/can_teleport'],
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('POST returns 400 for a capability with the wrong product prefix', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, {
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID,
+          grantedCapabilities: ['aso/can_view'],
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('POST returns 400 when x-product is absent / unknown', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(
+          BASE,
+          {
+            subjectType: 'user',
+            subjectId: USER_SUBJECT,
+            resourceType: 'brand',
+            resourceId: BRAND_RESOURCE_ID,
+            grantedCapabilities: ['llmo/can_view'],
+          },
+          { 'x-product': 'not-a-product' },
+        );
+        expect(res.status).to.equal(400);
+      });
+
+      it('GET returns 400 when neither subject nor resource filter is supplied', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(BASE);
+        expect(res.status).to.equal(400);
+      });
+
+      it('PATCH returns 400 for an invalid UUID', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(`${BASE}/not-a-uuid`, {
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('PATCH returns 404 for an unknown id', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(`${BASE}/${BRAND_RESOURCE_ID}`, {
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(404);
+      });
+
+      it('DELETE returns 400 for an invalid UUID', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.delete(`${BASE}/not-a-uuid`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('DELETE returns 404 for an unknown id', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.delete(`${BASE}/${BRAND_RESOURCE_ID}`);
+        expect(res.status).to.equal(404);
+      });
+    });
+
+    describe('ASO product (site-scoped)', () => {
+      before(() => resetData());
+
+      it('POST creates a site-scoped ASO binding when x-product=aso', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(
+          BASE,
+          {
+            subjectType: 'user',
+            subjectId: USER_SUBJECT,
+            resourceType: 'site',
+            resourceId: SITE_RESOURCE_ID,
+            grantedCapabilities: ['aso/can_view', 'aso/can_edit'],
+          },
+          { 'x-product': 'aso' },
+        );
+        expect(res.status).to.equal(201);
+        expect(res.body.product).to.equal('ASO');
+        expect(res.body.resourceType).to.equal('site');
+        expect(res.body.grantedCapabilities).to.have.members(['aso/can_view', 'aso/can_edit']);
+      });
+    });
+  });
+}

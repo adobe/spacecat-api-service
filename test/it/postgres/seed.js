@@ -75,13 +75,14 @@ async function insertRows(table, rows) {
  *
  * site_ims_org_accesses.organization_id and target_organization_id reference
  * organizations with ON DELETE RESTRICT, so grants must be cleared before
- * deleting organizations. access_grant_logs uses TEXT columns (no FK) but
- * is cleared for test isolation.
+ * deleting organizations. access_grant_logs and facs_access_mappings use TEXT
+ * columns (no FK to organizations) but are cleared for test isolation.
  */
 function clearData() {
   execSync(
     `docker exec ${POSTGRES_CONTAINER} psql -U postgres -d ${POSTGRES_DB} -c "`
     + 'DELETE FROM access_grant_logs;'
+    + 'DELETE FROM facs_access_mappings;'
     + 'DELETE FROM site_ims_org_accesses;'
     + 'DELETE FROM plg_onboardings;'
     + 'DELETE FROM consumers;'
