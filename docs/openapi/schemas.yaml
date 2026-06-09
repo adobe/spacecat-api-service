@@ -9504,6 +9504,60 @@ AiVisibilitySemrushTopicIntentEntry:
       description: Intent weight within the distribution (0–100 scale per Semrush)
   additionalProperties: true
 
+AiVisibilityV1BrandStatsByLLMEntry:
+  type: object
+  description: |
+    One row from Semrush `StatsByLLMResponse.LLMEntry` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    mentions:
+      description: Prompt responses mentioning the target brand
+      oneOf:
+        - type: string
+        - type: integer
+    audience:
+      description: Estimated audience for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    citations:
+      description: Citations for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    ownedSources:
+      description: Citations from the brand domain
+      oneOf:
+        - type: string
+        - type: integer
+    aiVisibility:
+      type: integer
+      description: AI Visibility score for the brand
+    isoDate:
+      type: string
+      description: Normalized ISO date (`YYYY-MM` or `YYYY-MM-DD`)
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByLLMResponse:
+  type: object
+  description: |
+    Brand statistics by LLM from `GET /llmo/ai-visibility/v1/brand/stats-by-llm`.
+    Native Semrush v2 `StatsByLLMResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    target:
+      $ref: '#/AiVisibilitySemrushBrand'
+    llm:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandStatsByLLMEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityV1TopicBrandTopicRow:
   type: object
   description: |

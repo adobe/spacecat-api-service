@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 28 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 
@@ -78,6 +78,26 @@ x-ai-vis-date: &dateParam
   schema:
     type: string
     example: '2026-01-15'
+
+x-ai-vis-date-from: &dateFromParam
+  name: dateFrom
+  in: query
+  required: false
+  description: Start of the requested period, forwarded to Semrush as `date_from` (`YYYY-MM` or `YYYY-MM-DD`)
+  schema:
+    type: string
+    pattern: '^\d{4}-\d{2}(-\d{2})?$'
+    example: '2026-01'
+
+x-ai-vis-date-to: &dateToParam
+  name: dateTo
+  in: query
+  required: false
+  description: End of the requested period, forwarded to Semrush as `date_to` (`YYYY-MM` or `YYYY-MM-DD`)
+  schema:
+    type: string
+    pattern: '^\d{4}-\d{2}(-\d{2})?$'
+    example: '2026-04'
 
 x-ai-vis-window-months: &windowMonthsParam
   name: windowMonths
@@ -1130,6 +1150,37 @@ ai-visibility-topics-research-source-domains:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilitySourceDomainsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-brand-stats-by-llm:
+  get:
+    tags: [ai-visibility]
+    summary: Get brand statistics by LLM (Brand v2 JSON)
+    description: |
+      Returns brand statistics by model and date using Semrush `BrandService` v2
+      `StatsByLLM`. The response is native protobuf JSON (camelCase), with the
+      Semrush `llm` array containing rows for each LLM/date combination and
+      aggregate rows where `llm` is `UNSPECIFIED`.
+
+      Optional `dateFrom` and `dateTo` are forwarded as Semrush `date_from` and
+      `date_to`. Semrush requires both dates to be omitted or both dates to be
+      present, using the same `YYYY-MM` or `YYYY-MM-DD` format.
+    operationId: getAiVisibilityV1BrandStatsByLlm
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *dateFromParam
+      - *dateToParam
+    responses:
+      '200':
+        description: Brand statistics by LLM retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1BrandStatsByLLMResponse'
       <<: *errorResponses
     security:
       - api_key: []
