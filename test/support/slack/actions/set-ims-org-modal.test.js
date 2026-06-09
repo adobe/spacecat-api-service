@@ -639,7 +639,7 @@ describe('SetImsOrgModal', () => {
     describe('project re-parenting (SITES-46200)', () => {
       const baseURL = 'https://example.com';
 
-      const makeBody = () => ({
+      const makeBody = (selectedProducts = []) => ({
         view: {
           private_metadata: JSON.stringify({
             baseURL,
@@ -651,7 +651,9 @@ describe('SetImsOrgModal', () => {
           state: {
             values: {
               products_block: {
-                aso_checkbox: { selected_options: [] },
+                aso_checkbox: {
+                  selected_options: selectedProducts.map((value) => ({ value })),
+                },
                 llmo_checkbox: { selected_options: [] },
               },
             },
@@ -835,6 +837,43 @@ describe('SetImsOrgModal', () => {
         expect(mockProject.save.calledOnce).to.be.true;
         expect(mockSite.save.calledOnce).to.be.true;
         expect(mockLog.warn.called).to.be.true;
+      });
+
+      it('creates entitlements for the re-parented site when products are selected', async () => {
+        // Entitlements are org-scoped and resolved from the site at call time
+        // (TierClient.createForSite reads site.getOrganizationId()). They run
+        // after the project re-parent + site.save(), so they must operate on the
+        // re-parented site and land in the new org. This guards that ordering.
+        const ack = sinon.stub().resolves();
+        const mockProject = {
+          getId: () => 'project123',
+          getProjectName: () => 'example.com',
+          getOrganizationId: () => 'oldOrg',
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        const mockSite = {
+          getId: () => 'site123',
+          getProjectId: () => 'project123',
+          setProjectId: sinon.stub(),
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+        mockDataAccess.Organization.findByImsOrgId.resolves({ getId: () => 'newOrg' });
+        mockDataAccess.Project.findById.resolves(mockProject);
+        mockDataAccess.Site.allByProjectId.resolves([mockSite]);
+
+        const client = makeClient();
+        await setImsOrgModal(lambdaContext)({ ack, body: makeBody(['ASO']), client });
+
+        // Project moved to the new org, site persisted, THEN entitlements created
+        // against that same (now re-parented) site.
+        expect(mockProject.setOrganizationId.calledWith('newOrg')).to.be.true;
+        expect(mockSite.save.calledOnce).to.be.true;
+        expect(mockCreateEntitlementsForProducts.calledOnce).to.be.true;
+        expect(mockCreateEntitlementsForProducts.firstCall.args[1]).to.equal(mockSite);
+        expect(mockCreateEntitlementsForProducts.firstCall.args[2]).to.deep.equal(['ASO']);
       });
     });
   });
