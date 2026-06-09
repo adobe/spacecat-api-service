@@ -461,7 +461,7 @@ function StateAccessMappingsController(context) {
     }
     const { product, imsOrgId } = pre;
 
-    const { id } = ctx.pathInfo?.params || {};
+    const { id } = ctx.params || {};
     if (!hasText(id) || !isValidUUID(id)) {
       return badRequest('id must be a valid UUID');
     }
@@ -512,7 +512,7 @@ function StateAccessMappingsController(context) {
     }
     const { imsOrgId } = pre;
 
-    const { id } = ctx.pathInfo?.params || {};
+    const { id } = ctx.params || {};
     if (!hasText(id) || !isValidUUID(id)) {
       return badRequest('id must be a valid UUID');
     }
@@ -586,7 +586,7 @@ function StateAccessMappingsController(context) {
       return forbidden('Caller has no IMS org');
     }
 
-    const { resourceId } = ctx.pathInfo?.params || {};
+    const { resourceId } = ctx.params || {};
     if (!hasText(resourceId)) {
       return badRequest('resourceId is required');
     }

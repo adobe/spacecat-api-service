@@ -67,6 +67,9 @@ function makeContext({
       },
     },
     data: body,
+    // The controller reads path params (:id, :resourceId) from ctx.params
+    // (the runtime source), not pathInfo.params.
+    params: pathParams || {},
     // The controller reads query params from invocation.event.rawQueryString
     // (the Lambda runtime source), so serialize the queryParams arg into a
     // raw query string here. pathInfo.queryParams is retained for any other

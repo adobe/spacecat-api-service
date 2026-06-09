@@ -11,7 +11,21 @@
  */
 
 import { expect } from 'chai';
-import { expectISOTimestamp } from '../helpers/assertions.js';
+
+/**
+ * Asserts a value is a parseable ISO 8601 timestamp. Unlike the shared
+ * `expectISOTimestamp` helper (which requires a `Z` suffix), this accepts the
+ * `+00:00` offset form that PostgREST returns for `timestamptz` columns — the
+ * state-access-mapping DTO passes those values through unmodified.
+ *
+ * @param {*} value - the value to check
+ * @param {string} label - field label for assertion messages
+ */
+function expectIsoTimestamp(value, label = 'timestamp') {
+  expect(value, label).to.be.a('string');
+  expect(Number.isNaN(Date.parse(value)), `${label} should be a valid ISO 8601 timestamp`)
+    .to.equal(false);
+}
 
 // State-layer access mappings are created fresh by these tests (the controller
 // does not validate resource existence), so no pre-seeded rows are required.
@@ -44,7 +58,7 @@ function expectMappingDto(m) {
   expect(m.imsOrgId).to.be.a('string');
   expect(m.product).to.be.a('string');
   expect(m.grantedCapabilities).to.be.an('array');
-  expectISOTimestamp(m.createdAt, 'createdAt');
+  expectIsoTimestamp(m.createdAt, 'createdAt');
 }
 
 /**
@@ -169,7 +183,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.status).to.equal(200);
         const row = res.body.items.find((m) => m.id === created.id);
         expect(row, 'revoked row present in history').to.be.an('object');
-        expectISOTimestamp(row.revokedAt, 'revokedAt');
+        expectIsoTimestamp(row.revokedAt, 'revokedAt');
         expect(row.revokedBy).to.be.a('string');
       });
 
