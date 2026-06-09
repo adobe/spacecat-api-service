@@ -25,8 +25,10 @@ import {
   sharepointPathFor,
   publishPathFor,
   isSafePathSegment,
+  isCreatableColumnName,
   cellValueAsString,
   MAX_UPDATES_PER_REQUEST,
+  MAX_NEW_COLUMN_NAME_LENGTH,
 } from '../../../src/controllers/llmo/llmo-sheet-write.js';
 
 use(sinonChai);
@@ -237,6 +239,25 @@ describe('llmo-sheet-write', () => {
       expect(isSafePathSegment(null)).to.equal(false);
       expect(isSafePathSegment(undefined)).to.equal(false);
       expect(isSafePathSegment(123)).to.equal(false);
+    });
+  });
+
+  describe('isCreatableColumnName', () => {
+    it('accepts real-world header names including spaces and +', () => {
+      expect(isCreatableColumnName('status')).to.equal(true);
+      expect(isCreatableColumnName('prompt_en')).to.equal(true);
+      expect(isCreatableColumnName('Source GSC+Keywords')).to.equal(true);
+      expect(isCreatableColumnName('Reasoning')).to.equal(true);
+    });
+
+    it('rejects empty, over-long, control-char, and non-string names', () => {
+      expect(isCreatableColumnName('')).to.equal(false);
+      expect(isCreatableColumnName('a'.repeat(MAX_NEW_COLUMN_NAME_LENGTH + 1))).to.equal(false);
+      expect(isCreatableColumnName('bad\nname')).to.equal(false);
+      expect(isCreatableColumnName('with/slash')).to.equal(false);
+      expect(isCreatableColumnName('tab\tname')).to.equal(false);
+      expect(isCreatableColumnName(null)).to.equal(false);
+      expect(isCreatableColumnName(123)).to.equal(false);
     });
   });
 
@@ -454,6 +475,54 @@ describe('llmo-sheet-write', () => {
       expect(semrush.getRow(2).getCell(4).value).to.equal('dismissed');
       // ...and non-matched rows leave the new cell empty.
       expect(semrush.getRow(3).getCell(4).value).to.satisfy((v) => v === null || v === '' || v === undefined);
+    });
+
+    it('creates multiple new value columns in one update, in input order', async () => {
+      const initialBuffer = await buildWorkbookBuffer(sheets());
+      const { sharepointClient, uploaded } = buildStubClient({ initialBuffer });
+
+      await patchSheetRow(
+        {
+          ...baseArgs,
+          sheet: 'Semrush',
+          match: { topic_id: '111' },
+          values: { status: 'dismissed', priority: 'low' },
+        },
+        baseEnv,
+        { sharepointClient, fetch: sinon.stub().resolves({ ok: true, status: 200 }), adminKey: 'k' },
+      );
+
+      const verifyWorkbook = new ExcelJS.Workbook();
+      await verifyWorkbook.xlsx.load(uploaded.buffer);
+      const semrush = verifyWorkbook.getWorksheet('Semrush');
+      // Existing headers occupy cols 1-3; the two new columns are appended at 4 and 5.
+      expect(semrush.getRow(1).getCell(4).value).to.equal('status');
+      expect(semrush.getRow(1).getCell(5).value).to.equal('priority');
+      expect(semrush.getRow(2).getCell(4).value).to.equal('dismissed');
+      expect(semrush.getRow(2).getCell(5).value).to.equal('low');
+    });
+
+    it('returns 400 when a new value column name is invalid', async () => {
+      const initialBuffer = await buildWorkbookBuffer(sheets());
+      const { sharepointClient, document } = buildStubClient({ initialBuffer });
+      try {
+        await patchSheetRow(
+          {
+            ...baseArgs,
+            sheet: 'Semrush',
+            match: { topic_id: '111' },
+            values: { 'bad/col': 'x' },
+          },
+          baseEnv,
+          { sharepointClient, fetch: sinon.stub() },
+        );
+        expect.fail('Expected throw');
+      } catch (e) {
+        expect(e.statusCode).to.equal(400);
+        expect(e.message).to.match(/Cannot create column/);
+      }
+      // No write happens when column creation is rejected.
+      expect(document.uploadRawDocument).to.not.have.been.called;
     });
 
     it('returns 404 when no row matches', async () => {
@@ -685,6 +754,35 @@ describe('llmo-sheet-write', () => {
       expect(semrush.getRow(1).getCell(5).value).to.satisfy((v) => v === null || v === '' || v === undefined);
       expect(semrush.getRow(2).getCell(4).value).to.equal('dismissed'); // topic_id 111
       expect(semrush.getRow(4).getCell(4).value).to.equal('dismissed'); // topic_id 333
+    });
+
+    it('discards an earlier entry\'s new column when a later entry fails (all-or-nothing)', async () => {
+      const initialBuffer = await buildWorkbookBuffer(sheets());
+      const { sharepointClient, document } = buildStubClient({ initialBuffer });
+
+      try {
+        await patchSheetRows(
+          {
+            ...baseArgs,
+            updates: [
+              // First entry creates the `status` column in the in-memory workbook...
+              { sheet: 'Semrush', match: { topic_id: '111' }, values: { status: 'dismissed' } },
+              // ...then a later entry fails to match, aborting before any upload.
+              { sheet: 'Semrush', match: { topic_id: 'does-not-exist' }, values: { status: 'dismissed' } },
+            ],
+          },
+          baseEnv,
+          { sharepointClient, fetch: sinon.stub(), adminKey: 'k' },
+        );
+        expect.fail('Expected throw');
+      } catch (e) {
+        expect(e.statusCode).to.equal(404);
+        expect(e.message).to.match(/updates\[1\]/);
+      }
+      // The workbook was downloaded and mutated in memory, but never uploaded —
+      // so the newly created `status` column is discarded with the rest of the batch.
+      expect(document.getDocumentContent).to.have.been.calledOnce;
+      expect(document.uploadRawDocument).to.not.have.been.called;
     });
 
     it('worksheet-not-found reports the entry index', async () => {

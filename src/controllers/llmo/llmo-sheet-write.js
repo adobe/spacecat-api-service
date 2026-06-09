@@ -33,6 +33,18 @@ const SAFE_PATH_SEGMENT_RE = /^[A-Za-z0-9_-]+$/;
 export const isSafePathSegment = (value) => typeof value === 'string'
   && value.length > 0 && SAFE_PATH_SEGMENT_RE.test(value);
 
+// A `values` write may create a header column that doesn't exist yet (see
+// updateWorksheet). Existing columns are never re-validated, but a *new* column
+// name is gated so an authenticated caller can't pollute the worksheet header with
+// arbitrary or oversized keys. The set is deliberately wider than isSafePathSegment
+// (sheet headers legitimately contain spaces and '+', e.g. "Source GSC+Keywords")
+// but still excludes control characters and caps length.
+export const MAX_NEW_COLUMN_NAME_LENGTH = 100;
+const NEW_COLUMN_NAME_RE = /^[\w .+-]+$/;
+export const isCreatableColumnName = (value) => typeof value === 'string'
+  && value.length > 0 && value.length <= MAX_NEW_COLUMN_NAME_LENGTH
+  && NEW_COLUMN_NAME_RE.test(value);
+
 const buildSharePointPath = (dataFolder, sheetType, dataSource) => {
   const segments = [SHAREPOINT_FILE_PREFIX, dataFolder];
   if (sheetType) {
@@ -239,6 +251,12 @@ const updateWorksheet = (worksheet, entryRef, headerMap, match, values) => {
   // empty — only the matched row below gets a value.
   const missingValueCols = Object.keys(values).filter((c) => !headerMap.has(c));
   if (missingValueCols.length > 0) {
+    const invalidNewCols = missingValueCols.filter((c) => !isCreatableColumnName(c));
+    if (invalidNewCols.length > 0) {
+      const err = new Error(`${prefix}Cannot create column(s) ${invalidNewCols.join(', ')}: new column names must be 1-${MAX_NEW_COLUMN_NAME_LENGTH} characters of letters, digits, spaces, and . _ + - only`);
+      err.statusCode = 400;
+      throw err;
+    }
     const headerRow = worksheet.getRow(1);
     let nextCol = headerMap.size > 0 ? Math.max(...headerMap.values()) : 0;
     missingValueCols.forEach((column) => {
