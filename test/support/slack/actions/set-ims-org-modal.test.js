@@ -801,6 +801,41 @@ describe('SetImsOrgModal', () => {
         expect(mockSite.setOrganizationId.calledWith('newOrg')).to.be.true;
         expect(mockSite.save.calledOnce).to.be.true;
       });
+
+      it('still saves the site when the project-move Slack message fails', async () => {
+        const ack = sinon.stub().resolves();
+        const mockProject = {
+          getId: () => 'project123',
+          getProjectName: () => 'example.com',
+          getOrganizationId: () => 'oldOrg',
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        const mockSite = {
+          getId: () => 'site123',
+          getProjectId: () => 'project123',
+          setProjectId: sinon.stub(),
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+        mockDataAccess.Organization.findByImsOrgId.resolves({ getId: () => 'newOrg' });
+        mockDataAccess.Project.findById.resolves(mockProject);
+        mockDataAccess.Site.allByProjectId.resolves([mockSite]);
+
+        // say() posts via client.chat.postMessage; make it fail so the
+        // best-effort guard is exercised.
+        const client = makeClient();
+        client.chat.postMessage.rejects(new Error('Slack down'));
+
+        await setImsOrgModal(lambdaContext)({ ack, body: makeBody(), client });
+
+        // The project move and the site save must both still happen — a Slack
+        // failure must not leave the project moved with the site unpersisted.
+        expect(mockProject.save.calledOnce).to.be.true;
+        expect(mockSite.save.calledOnce).to.be.true;
+        expect(mockLog.warn.called).to.be.true;
+      });
     });
   });
 });

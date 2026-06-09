@@ -72,9 +72,16 @@ export async function reparentSiteProject({
     // Solo site on the project — move the whole project to the target org.
     project.setOrganizationId(targetOrgId);
     await project.save();
-    await say(
-      `:information_source: Moved project *${project.getProjectName()}* to the new org so the site stays visible in the site picker.`,
-    );
+    // Slack feedback is best-effort: a posting failure here must not throw,
+    // otherwise the caller's site.save() would be skipped, leaving the project
+    // moved but the site's orgId change unpersisted.
+    try {
+      await say(
+        `:information_source: Moved project *${project.getProjectName()}* to the new org so the site stays visible in the site picker.`,
+      );
+    } catch (sayError) {
+      log.warn(`set imsorg: failed to post project move message: ${sayError.message}`);
+    }
   } else {
     // Project is shared with sites that are staying behind — split it so the
     // moved site gets a project in the target org and the siblings keep theirs.
