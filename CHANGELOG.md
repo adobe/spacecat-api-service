@@ -1,3 +1,32 @@
+## [1.563.1](https://github.com/adobe/spacecat-api-service/compare/v1.563.0...v1.563.1) (2026-06-09)
+
+
+### Bug Fixes
+
+* **SITES-46200:** re-parent project in set imsorg, not just the site ([#2574](https://github.com/adobe/spacecat-api-service/issues/2574)) ([cb86d91](https://github.com/adobe/spacecat-api-service/commit/cb86d910d328f0efb44c120f2039088e00202c4e))
+* **SITES-46200:** reject projectId updates on PATCH /sites/:siteId ([#2573](https://github.com/adobe/spacecat-api-service/issues/2573)) ([39eb86c](https://github.com/adobe/spacecat-api-service/commit/39eb86c3a9b63ea309424eac78ecf116cc6404d3))
+
+# [1.563.0](https://github.com/adobe/spacecat-api-service/compare/v1.562.0...v1.563.0) (2026-06-09)
+
+
+### Features
+
+* **llmo:** auto-create missing value columns on sheet-row patch ([#2576](https://github.com/adobe/spacecat-api-service/issues/2576)) ([e530b56](https://github.com/adobe/spacecat-api-service/commit/e530b56f65353ae508ed114927bb840293798501))
+
+# [1.562.0](https://github.com/adobe/spacecat-api-service/compare/v1.561.0...v1.562.0) (2026-06-09)
+
+
+### Features
+
+* **preflight:** restore mystiqueUrl dev override on site-scoped endpoint (SITES-46216) ([#2575](https://github.com/adobe/spacecat-api-service/issues/2575)) ([31915b6](https://github.com/adobe/spacecat-api-service/commit/31915b6240a51ab8c8e8e19a1e4d94452a196727)), closes [#2140](https://github.com/adobe/spacecat-api-service/issues/2140) [#2478](https://github.com/adobe/spacecat-api-service/issues/2478) [#2140](https://github.com/adobe/spacecat-api-service/issues/2140) [#2572](https://github.com/adobe/spacecat-api-service/issues/2572)
+
+# [1.561.0](https://github.com/adobe/spacecat-api-service/compare/v1.560.0...v1.561.0) (2026-06-09)
+
+
+### Features
+
+* **backfill-llmo:** simplify cdn-logs-report backfill to per-day DB imports ([#2560](https://github.com/adobe/spacecat-api-service/issues/2560)) ([25872a0](https://github.com/adobe/spacecat-api-service/commit/25872a0e91351c218b11f35ba2ab23ddab2db510))
+
 # [1.560.0](https://github.com/adobe/spacecat-api-service/compare/v1.559.0...v1.560.0) (2026-06-08)
 
 

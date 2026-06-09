@@ -786,6 +786,16 @@ function SitesController(ctx, log, env) {
       return forbidden('Updating organization ID is not allowed');
     }
 
+    // A projectId references a project record that is itself scoped to an
+    // organizationId. Allowing ad-hoc projectId patches here lets a site point
+    // at a project in a different org, which hides the site from the org's site
+    // picker (SITES-46200). Re-parenting must go through controlled flows
+    // (e.g. PATCH /projects/:projectId), so reject it here like organizationId.
+    if (hasText(requestBody.projectId)
+      && requestBody.projectId !== site.getProjectId()) {
+      return forbidden('Updating project ID is not allowed');
+    }
+
     if (requestBody.name !== site.getName()) {
       site.setName(requestBody.name);
       updates = true;
@@ -886,11 +896,6 @@ function SitesController(ctx, log, env) {
     }
 
     // Handle localization fields
-    if (requestBody.projectId !== site.getProjectId() && isValidUUID(requestBody.projectId)) {
-      site.setProjectId(requestBody.projectId);
-      updates = true;
-    }
-
     if (isBoolean(requestBody.isPrimaryLocale)
         && requestBody.isPrimaryLocale !== site.getIsPrimaryLocale()) {
       site.setIsPrimaryLocale(requestBody.isPrimaryLocale);
