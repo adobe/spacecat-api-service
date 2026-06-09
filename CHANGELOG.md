@@ -1,3 +1,10 @@
+# [1.562.0](https://github.com/adobe/spacecat-api-service/compare/v1.561.0...v1.562.0) (2026-06-09)
+
+
+### Features
+
+* **preflight:** restore mystiqueUrl dev override on site-scoped endpoint (SITES-46216) ([#2575](https://github.com/adobe/spacecat-api-service/issues/2575)) ([31915b6](https://github.com/adobe/spacecat-api-service/commit/31915b6240a51ab8c8e8e19a1e4d94452a196727)), closes [#2140](https://github.com/adobe/spacecat-api-service/issues/2140) [#2478](https://github.com/adobe/spacecat-api-service/issues/2478) [#2140](https://github.com/adobe/spacecat-api-service/issues/2140) [#2572](https://github.com/adobe/spacecat-api-service/issues/2572)
+
 # [1.561.0](https://github.com/adobe/spacecat-api-service/compare/v1.560.0...v1.561.0) (2026-06-09)
 
 
