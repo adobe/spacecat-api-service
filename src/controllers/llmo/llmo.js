@@ -1486,9 +1486,9 @@ function LlmoController(ctx) {
           const siteUrlForGuard = baseURL.startsWith('http') ? baseURL : `https://${baseURL}`;
           const siteUrlObj = new URL(siteUrlForGuard);
           if (siteUrlObj.pathname && siteUrlObj.pathname !== '/') {
-            log.error(`Subpath site cannot use host-level auto-routing: ${baseURL}`);
+            log.warn(`Subpath site cannot use host-level auto-routing: ${baseURL}`);
             return ok({
-              message: 'Automated CDN routing is not supported for subpath sites. Please use a domain-level site or contact support for assistance.',
+              message: 'Automated CDN routing is not supported for subpath sites. Please contact domain-level site owner or contact support for assistance.',
               ...metaconfig,
             });
           }
