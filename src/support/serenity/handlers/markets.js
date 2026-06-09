@@ -163,6 +163,12 @@ async function resolveLanguageId(transport, languageTag, log) {
  * and publish_status would require an O(workspace-size) `listWorkspaceProjects`
  * call per request, and the consumer (project-elmo-ui) reads neither.
  *
+ * Each row also carries the derived ISO alpha-2 `market` (translated from
+ * `geoTargetId` via the local locations table, no upstream call) so consumers
+ * — notably the onboarding provisioning read-back — can match on the
+ * {market, languageCode} tuples they requested without shipping the
+ * geo-target table to the client.
+ *
  * `transport` and `semrushWorkspaceId` are kept on the signature for the
  * controller's parity with the other handlers; they are unused here.
  */
@@ -176,44 +182,10 @@ export async function handleListMarkets(transport, dataAccess, brandId, semrushW
     items: rows.map((row) => ({
       brandId,
       geoTargetId: row.getGeoTargetId(),
+      market: marketFromGeoTargetId(row.getGeoTargetId()),
       languageCode: row.getLanguageCode(),
       createdAt: row.getCreatedAt(),
       updatedAt: row.getUpdatedAt(),
-    })),
-  };
-}
-
-/**
- * GET /serenity/projects — list a brand's provisioned market projects in the
- * shape the onboarding UI consumes (project-elmo-ui `SerenityProject`): each
- * row mapped to `{ market, language, status }`.
- *
- * Differs from `handleListMarkets` (which returns the raw geoTargetId slice
- * keys) by translating geoTargetId back to an ISO alpha-2 `market` so the UI's
- * provisioning poll can match on the {market, language} tuples it requested.
- *
- * `status` is a derived constant: a row exists only after the upstream project
- * has been created AND published (`handleCreateMarket` publishes before the row
- * write), so presence === live. There is no status column yet; a real
- * pending→live lifecycle would need a BrandSemrushProject schema migration.
- *
- * Stays provider-free (no `semrushProjectId`), per LLMO-5190 — the upstream id
- * surfaces only on the single-slice detail endpoint.
- *
- * `transport` and `semrushWorkspaceId` are kept on the signature for the
- * controller's parity with the other handlers; they are unused here.
- */
-// eslint-disable-next-line no-unused-vars
-export async function handleListProjects(transport, dataAccess, brandId, semrushWorkspaceId) {
-  const rows = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
-  if (!rows || rows.length === 0) {
-    return { items: [] };
-  }
-  return {
-    items: rows.map((row) => ({
-      market: marketFromGeoTargetId(row.getGeoTargetId()),
-      language: row.getLanguageCode(),
-      status: 'live',
     })),
   };
 }

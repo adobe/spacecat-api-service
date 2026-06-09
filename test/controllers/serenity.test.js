@@ -79,7 +79,6 @@ describe('SerenityController', () => {
     handleUpdatePrompt: sinon.stub(),
     handleBulkDeletePrompts: sinon.stub(),
     handleListMarkets: sinon.stub(),
-    handleListProjects: sinon.stub(),
     handleGetMarket: sinon.stub(),
     handleCreateMarket: sinon.stub(),
     handleDeleteMarket: sinon.stub(),
@@ -131,7 +130,6 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/handlers/markets.js': {
         handleListMarkets: handlers.handleListMarkets,
-        handleListProjects: handlers.handleListProjects,
         handleGetMarket: handlers.handleGetMarket,
         handleCreateMarket: handlers.handleCreateMarket,
         handleDeleteMarket: handlers.handleDeleteMarket,
@@ -586,7 +584,7 @@ describe('SerenityController', () => {
   });
 
   describe('controller surface', () => {
-    it('exposes the markets-named methods (plus the UI-shaped listProjects) and not the removed project-CRUD names', () => {
+    it('exposes the markets-named methods and not the removed project names', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       expect(controller.listPrompts).to.be.a('function');
       expect(controller.createPrompts).to.be.a('function');
@@ -599,10 +597,11 @@ describe('SerenityController', () => {
       expect(controller.listTags).to.be.a('function');
       expect(controller.listModels).to.be.a('function');
       expect(controller.updateModels).to.be.a('function');
-      // listProjects is the read-only, UI-shaped market list (GET /serenity/projects,
-      // LLMO-5211) — distinct from the removed project-CRUD surface below.
-      expect(controller.listProjects).to.be.a('function');
 
+      // listProjects was removed — /serenity/markets is the single list endpoint
+      // (its response now carries the derived ISO `market`), per the prompts-api
+      // abstraction spec. The project-CRUD surface below was never exposed.
+      expect(controller.listProjects).to.be.undefined;
       expect(controller.createProject).to.be.undefined;
       expect(controller.listProjectTags).to.be.undefined;
       expect(controller.listProjectModels).to.be.undefined;
@@ -621,7 +620,6 @@ describe('SerenityController', () => {
       { name: 'updatePrompt', stub: 'handleUpdatePrompt', params: { semrushPromptId: 'p-1' } },
       { name: 'bulkDeletePrompts', stub: 'handleBulkDeletePrompts' },
       { name: 'listMarkets', stub: 'handleListMarkets' },
-      { name: 'listProjects', stub: 'handleListProjects' },
       { name: 'getMarket', stub: 'handleGetMarket', params: { geoTargetId: '2840', languageCode: 'en' } },
       { name: 'createMarket', stub: 'handleCreateMarket' },
       { name: 'deleteMarket', stub: 'handleDeleteMarket', params: { geoTargetId: '2840', languageCode: 'en' } },

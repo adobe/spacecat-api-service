@@ -153,8 +153,6 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-markets'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/{geoTargetId}/{languageCode}:
     $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
-  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/projects:
-    $ref: './serenity-api.yaml#/v2-serenity-projects'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
     $ref: './serenity-api.yaml#/v2-serenity-tags'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:

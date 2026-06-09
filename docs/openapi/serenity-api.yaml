@@ -261,7 +261,10 @@ v2-serenity-markets:
     summary: List markets configured for a brand
     description: |
       Returns the brand's (geoTargetId, languageCode) slices. The presence
-      of a row is the contract that the market is active.
+      of a row is the contract that the market is active. Each item also
+      carries the derived ISO 3166-1 alpha-2 `market` (translated from
+      `geoTargetId` server-side) so consumers can match on {market,
+      languageCode} tuples without a local geo-target table.
     operationId: listSerenityMarkets
     security:
       - ims_key: []
@@ -310,52 +313,6 @@ v2-serenity-markets:
         description: Organization has no workspace.
       '409':
         description: A market already exists for this (brandId, geoTargetId, languageCode) slice.
-      '502':
-        description: Upstream returned a non-2xx response.
-        content:
-          application/json:
-            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
-      '500': { $ref: './responses.yaml#/500' }
-
-v2-serenity-projects:
-  parameters:
-    - name: spaceCatId
-      in: path
-      required: true
-      description: SpaceCat Organization ID (UUID)
-      schema:
-        type: string
-        format: uuid
-    - name: brandId
-      in: path
-      required: true
-      description: Brand ID (UUID-only on the /serenity/* surface)
-      schema:
-        type: string
-        format: uuid
-  get:
-    tags: [serenity]
-    summary: List a brand's provisioned market projects (onboarding UI shape)
-    description: |
-      Returns the brand's provisioned market projects shaped for the onboarding
-      UI: each row as `{ market, language, status }`. Differs from
-      `listSerenityMarkets` (raw geoTargetId slice keys) by translating
-      geoTargetId back to an ISO 3166-1 alpha-2 `market`. `status` is a derived
-      constant (`live`): a row exists only after the upstream project was created
-      and published, so presence means live. Stays provider-free — no
-      `semrushProjectId` (LLMO-5190).
-    operationId: listSerenityProjects
-    security:
-      - ims_key: []
-    responses:
-      '200':
-        description: Projects retrieved successfully.
-        content:
-          application/json:
-            schema: { $ref: './schemas.yaml#/SerenityProjectListResponse' }
-      '400': { $ref: './responses.yaml#/400' }
-      '404':
-        description: Organization, brand, or workspace not found.
       '502':
         description: Upstream returned a non-2xx response.
         content:
