@@ -79,6 +79,7 @@ describe('SerenityController', () => {
     handleUpdatePrompt: sinon.stub(),
     handleBulkDeletePrompts: sinon.stub(),
     handleListMarkets: sinon.stub(),
+    handleListProjects: sinon.stub(),
     handleGetMarket: sinon.stub(),
     handleCreateMarket: sinon.stub(),
     handleDeleteMarket: sinon.stub(),
@@ -130,6 +131,7 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/handlers/markets.js': {
         handleListMarkets: handlers.handleListMarkets,
+        handleListProjects: handlers.handleListProjects,
         handleGetMarket: handlers.handleGetMarket,
         handleCreateMarket: handlers.handleCreateMarket,
         handleDeleteMarket: handlers.handleDeleteMarket,
@@ -605,6 +607,73 @@ describe('SerenityController', () => {
       expect(controller.listProjectTags).to.be.undefined;
       expect(controller.listProjectModels).to.be.undefined;
       expect(controller.listWorkspaceProjects).to.be.undefined;
+    });
+  });
+
+  // Each handler shares the same shape: `if (auth.error) return auth.error`
+  // (authorize() denial short-circuit) and a `catch` that funnels through
+  // mapError. Exercise both branches across every method so the per-handler
+  // auth-denial and error paths are all covered.
+  describe('per-handler auth-denial and error branches', () => {
+    const methods = [
+      { name: 'listPrompts', stub: 'handleListPrompts' },
+      { name: 'createPrompts', stub: 'handleCreatePrompts' },
+      { name: 'updatePrompt', stub: 'handleUpdatePrompt', params: { semrushPromptId: 'p-1' } },
+      { name: 'bulkDeletePrompts', stub: 'handleBulkDeletePrompts' },
+      { name: 'listMarkets', stub: 'handleListMarkets' },
+      { name: 'listProjects', stub: 'handleListProjects' },
+      { name: 'getMarket', stub: 'handleGetMarket', params: { geoTargetId: '2840', languageCode: 'en' } },
+      { name: 'createMarket', stub: 'handleCreateMarket' },
+      { name: 'deleteMarket', stub: 'handleDeleteMarket', params: { geoTargetId: '2840', languageCode: 'en' } },
+      { name: 'listTags', stub: 'handleListTags' },
+      { name: 'listModels', stub: 'handleListModels' },
+      { name: 'updateModels', stub: 'handleUpdateModels' },
+    ];
+
+    methods.forEach(({ name, stub, params = {} }) => {
+      it(`${name} returns the authorize() error (403) when the caller lacks org access`, async () => {
+        accessControlHasAccessStub.resolves(false);
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller[name](fakeContext({ params, data: {} }));
+        expect(response.status).to.equal(403);
+        expect(handlers[stub]).not.to.have.been.called;
+      });
+
+      it(`${name} funnels a thrown handler error through mapError (500)`, async () => {
+        handlers[stub].rejects(new Error('boom from handler'));
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller[name](fakeContext({ params, data: {} }));
+        expect(response.status).to.equal(500);
+      });
+    });
+  });
+
+  // authorize() denial branches that the happy-path + per-handler tests don't reach.
+  describe('authorize() guard branches', () => {
+    it('500s when Organization data-access is unavailable', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess = { services: { postgrestClient: { from: () => ({}) } } };
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(500);
+    });
+
+    it('404s when the organization is not found', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization = { findById: sinon.stub().resolves(null) };
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(404);
+    });
+
+    it('503s when the PostgREST client is not available', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.services = {};
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(503);
+      const body = await readBody(response);
+      expect(body.error).to.equal('configurationError');
     });
   });
 });
