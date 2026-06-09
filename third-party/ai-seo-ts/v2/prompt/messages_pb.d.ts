@@ -184,6 +184,13 @@ export declare type PromptsByTopicFTSResponse_Prompt = Message<"semrush.services
    * @generated from field: uint64 topic_volume = 10;
    */
   topicVolume: bigint;
+
+  /**
+   * relevance_score is the prompt's topic relevance score in the 0-100 range.
+   *
+   * @generated from field: uint32 relevance_score = 11;
+   */
+  relevanceScore: number;
 };
 
 /**
@@ -505,6 +512,13 @@ export declare type PromptsByTopicIDsResponse_Prompt = Message<"semrush.services
    * @generated from field: uint64 topic_id = 8;
    */
   topicId: bigint;
+
+  /**
+   * country is the country where the prompt is represented.
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.COUNTRY.ENUM country = 9;
+   */
+  country: COUNTRY_ENUM;
 };
 
 /**
@@ -1144,6 +1158,13 @@ export declare type PromptsResponse_Prompt = Message<"semrush.services.ai_seo.v2
    * @generated from field: repeated semrush.services.ai_seo.v2.prompt.PROMPT_CATEGORY.ENUM categories = 14;
    */
   categories: PROMPT_CATEGORY_ENUM[];
+
+  /**
+   * topic_visibility is the brand topic visibility (0-100) for the prompt's topic.
+   *
+   * @generated from field: uint32 topic_visibility = 15;
+   */
+  topicVisibility: number;
 };
 
 /**

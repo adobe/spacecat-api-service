@@ -13,6 +13,7 @@
 import {
   createResponse,
   badRequest,
+  internalServerError,
   notFound,
   ok, forbidden,
 } from '@adobe/spacecat-shared-http-utils';
@@ -22,13 +23,18 @@ import {
   isString,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
 import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
+import {
+  ensureOrgEntitlement,
+  resolveProductCode,
+} from '../support/tier-provisioning.js';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -59,25 +65,52 @@ function OrganizationsController(ctx, env) {
 
   /**
    * Creates an organization. The organization ID is generated automatically.
+   *
+   * Write-time tier provisioning: when an organization is newly created, it ensures org
+   * entitlement via TierClient using the existing tier when present, otherwise FREE_TRIAL.
+   * Idempotent re-POSTs do not run provisioning.
+   *
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Organization response.
    */
   const createOrganization = async (context) => {
+    const { log } = ctx;
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new Organizations');
     }
+    const { productCode, error: productCodeError } = resolveProductCode(context);
+    if (productCodeError) {
+      return badRequest(productCodeError);
+    }
+    let organization;
+    let status;
     // check if the organization already exists
-    const organization = await Organization.findByImsOrgId(context.data.imsOrgId);
-    if (organization) {
-      return createResponse(OrganizationDto.toJSON(organization), 200);
+    const existingOrganization = await Organization.findByImsOrgId(context.data.imsOrgId);
+    if (existingOrganization) {
+      organization = existingOrganization;
+      status = 200;
+    } else {
+      try {
+        organization = await Organization.create(context.data);
+        status = 201;
+      } catch (e) {
+        return badRequest(e.message);
+      }
     }
 
-    try {
-      const organizationCreated = await Organization.create(context.data);
-      return createResponse(OrganizationDto.toJSON(organizationCreated), 201);
-    } catch (e) {
-      return badRequest(e.message);
+    if (productCode && status === 201) {
+      try {
+        await ensureOrgEntitlement(context, organization, productCode, log);
+      } catch (error) {
+        log.error(
+          `Error ensuring entitlement for organization ${organization.getId()}: ${error.message}`,
+          error,
+        );
+        return internalServerError('Failed to ensure entitlement for organization');
+      }
     }
+
+    return createResponse(OrganizationDto.toJSON(organization), status);
   };
 
   /**
@@ -356,6 +389,37 @@ function OrganizationsController(ctx, env) {
     }
 
     if (isObject(requestBody.config)) {
+      if (isObject(requestBody.config.defaults)) {
+        if (!accessControlUtil.hasAdminAccess()) {
+          return forbidden('Only admins can update config.defaults');
+        }
+        const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
+        for (const [productCode, entry] of Object.entries(requestBody.config.defaults)) {
+          if (!VALID_PRODUCT_CODES.has(productCode)) {
+            return badRequest(`Unknown product code in config.defaults: ${productCode}`);
+          }
+          if (isObject(entry) && entry.siteId != null) {
+            if (!isValidUUID(entry.siteId)) {
+              return badRequest(`Invalid siteId for product ${productCode} in config.defaults`);
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const site = await Site.findById(entry.siteId);
+            if (!site || site.getOrganizationId() !== organization.getId()) {
+              return badRequest(`config.defaults.${productCode}: site not found or does not belong to this organization`);
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const siteTierClient = await TierClient.createForSite(context, site, productCode);
+            // eslint-disable-next-line no-await-in-loop
+            const { entitlement, siteEnrollment } = await siteTierClient.checkValidEntitlement();
+            if (!entitlement) {
+              return badRequest(`config.defaults.${productCode}: organization does not have an entitlement for this product`);
+            }
+            if (!siteEnrollment) {
+              return badRequest(`config.defaults.${productCode}: site is not enrolled for this product`);
+            }
+          }
+        }
+      }
       organization.setConfig(requestBody.config);
       updates = true;
     }

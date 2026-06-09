@@ -16,10 +16,7 @@ admin-idp-p*.json
 .vscode/settings.json
 
 # Cursor
-.cursor/*
-!.cursor/rules/
-!.cursor/commands/
-.cursor/commands/speckit.*
+.cursor/
 
 # Claude
 .claude/*

@@ -57,6 +57,7 @@ import listDelegates from './commands/list-delegates.js';
 import removeDelegate from './commands/remove-delegate.js';
 import checkAgenticTrafficDbStatus from './commands/check-agentic-traffic-db-status.js';
 import checkCdnLogsStatus from './commands/check-cdn-logs-status.js';
+import addOaeStageDomain from './commands/add-oae-stage-domain.js';
 
 /**
  * Returns all commands.
@@ -112,4 +113,5 @@ export default (context) => [
   removeDelegate(context),
   checkAgenticTrafficDbStatus(context),
   checkCdnLogsStatus(context),
+  addOaeStageDomain(context),
 ];
