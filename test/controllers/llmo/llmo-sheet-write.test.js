@@ -406,7 +406,7 @@ describe('llmo-sheet-write', () => {
       }
     });
 
-    it('returns 400 when match/values reference unknown columns', async () => {
+    it('returns 400 when match references an unknown column', async () => {
       const initialBuffer = await buildWorkbookBuffer(sheets());
       const { sharepointClient } = buildStubClient({ initialBuffer });
       try {
@@ -414,8 +414,8 @@ describe('llmo-sheet-write', () => {
           {
             ...baseArgs,
             sheet: 'Semrush',
-            match: { topic_id: '111' },
-            values: { nonexistent_column: 'true' },
+            match: { nonexistent_column: '111' },
+            values: { deleted: 'true' },
           },
           baseEnv,
           { sharepointClient, fetch: sinon.stub() },
@@ -423,8 +423,37 @@ describe('llmo-sheet-write', () => {
         expect.fail('Expected throw');
       } catch (e) {
         expect(e.statusCode).to.equal(400);
-        expect(e.message).to.match(/Unknown column/);
+        expect(e.message).to.match(/Unknown match column/);
       }
+    });
+
+    it('creates a value column that does not exist yet, then writes it', async () => {
+      const initialBuffer = await buildWorkbookBuffer(sheets());
+      const { sharepointClient, document, uploaded } = buildStubClient({ initialBuffer });
+
+      const result = await patchSheetRow(
+        {
+          ...baseArgs,
+          sheet: 'Semrush',
+          match: { topic_id: '111', prompt: 'first prompt' },
+          values: { status: 'dismissed' },
+        },
+        baseEnv,
+        { sharepointClient, fetch: sinon.stub().resolves({ ok: true, status: 200 }), adminKey: 'k' },
+      );
+
+      expect(result).to.deep.include({ rowNumber: 2, updated: { status: 'dismissed' } });
+      expect(document.uploadRawDocument).to.have.been.calledOnce;
+
+      const verifyWorkbook = new ExcelJS.Workbook();
+      await verifyWorkbook.xlsx.load(uploaded.buffer);
+      const semrush = verifyWorkbook.getWorksheet('Semrush');
+      // The new column is appended after the 3 existing headers (topic_id, prompt, deleted).
+      expect(semrush.getRow(1).getCell(4).value).to.equal('status');
+      // The matched row gets the value...
+      expect(semrush.getRow(2).getCell(4).value).to.equal('dismissed');
+      // ...and non-matched rows leave the new cell empty.
+      expect(semrush.getRow(3).getCell(4).value).to.satisfy((v) => v === null || v === '' || v === undefined);
     });
 
     it('returns 404 when no row matches', async () => {
@@ -606,7 +635,7 @@ describe('llmo-sheet-write', () => {
       expect(document.uploadRawDocument).to.not.have.been.called;
     });
 
-    it('surfaces the offending index for unknown columns and ambiguous matches', async () => {
+    it('surfaces the offending index for unknown match columns', async () => {
       const initialBuffer = await buildWorkbookBuffer(sheets());
       const { sharepointClient } = buildStubClient({ initialBuffer });
 
@@ -615,7 +644,7 @@ describe('llmo-sheet-write', () => {
           {
             ...baseArgs,
             updates: [
-              { sheet: 'Semrush', match: { topic_id: '111' }, values: { unknown: 'col' } },
+              { sheet: 'Semrush', match: { unknown: 'col' }, values: { deleted: 'true' } },
             ],
           },
           baseEnv,
@@ -625,9 +654,37 @@ describe('llmo-sheet-write', () => {
       } catch (e) {
         // Single-update batches drop the prefix for back-compat with the original wording.
         expect(e.statusCode).to.equal(400);
-        expect(e.message).to.match(/Unknown column/);
+        expect(e.message).to.match(/Unknown match column/);
         expect(e.message).to.not.match(/updates\[0\]/);
       }
+    });
+
+    it('creates a missing value column once and reuses it across batch entries', async () => {
+      const initialBuffer = await buildWorkbookBuffer(sheets());
+      const { sharepointClient, uploaded } = buildStubClient({ initialBuffer });
+
+      const { results } = await patchSheetRows(
+        {
+          ...baseArgs,
+          updates: [
+            { sheet: 'Semrush', match: { topic_id: '111' }, values: { status: 'dismissed' } },
+            { sheet: 'Semrush', match: { topic_id: '333' }, values: { status: 'dismissed' } },
+          ],
+        },
+        baseEnv,
+        { sharepointClient, fetch: sinon.stub().resolves({ ok: true, status: 200 }), adminKey: 'k' },
+      );
+
+      expect(results).to.have.lengthOf(2);
+
+      const verifyWorkbook = new ExcelJS.Workbook();
+      await verifyWorkbook.xlsx.load(uploaded.buffer);
+      const semrush = verifyWorkbook.getWorksheet('Semrush');
+      // Column created exactly once at index 4 (after topic_id, prompt, deleted) — not duplicated.
+      expect(semrush.getRow(1).getCell(4).value).to.equal('status');
+      expect(semrush.getRow(1).getCell(5).value).to.satisfy((v) => v === null || v === '' || v === undefined);
+      expect(semrush.getRow(2).getCell(4).value).to.equal('dismissed'); // topic_id 111
+      expect(semrush.getRow(4).getCell(4).value).to.equal('dismissed'); // topic_id 333
     });
 
     it('worksheet-not-found reports the entry index', async () => {
