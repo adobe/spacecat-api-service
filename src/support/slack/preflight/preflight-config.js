@@ -98,23 +98,6 @@ export function getPreflightMissingConfigLabels(site) {
 }
 
 /**
- * @param {Object} site
- * @returns {Object}
- */
-function toSiblingSiteLogEntry(site) {
-  const deliveryConfig = site.getDeliveryConfig?.() || {};
-  return {
-    siteId: site.getId?.(),
-    baseURL: site.getBaseURL?.(),
-    organizationId: site.getOrganizationId?.(),
-    authoringType: site.getAuthoringType?.(),
-    programId: deliveryConfig.programId,
-    environmentId: deliveryConfig.environmentId,
-    contentSourcePath: deliveryConfig.contentSourcePath,
-  };
-}
-
-/**
  * Determines whether contentSourcePath is required for a CS or CS/Crosswalk site when
  * multiple sites in the same organization share the same program, environment, and
  * authoring type.
@@ -123,7 +106,6 @@ function toSiblingSiteLogEntry(site) {
  * @param {string} programId
  * @param {string} environmentId
  * @param {string} authoringType
- * @param {Object} [log] - Optional logger for sibling resolution diagnostics
  * @returns {Promise<boolean>}
  */
 export async function isContentSourcePathRequired(
@@ -132,7 +114,6 @@ export async function isContentSourcePathRequired(
   programId,
   environmentId,
   authoringType,
-  log,
 ) {
   if (!hasText(programId) || !hasText(environmentId) || !isCSAuthoringType(authoringType)) {
     return false;
@@ -152,27 +133,6 @@ export async function isContentSourcePathRequired(
       && candidate.getOrganizationId() === organizationId
       && candidate.getAuthoringType() === authoringType,
   );
-
-  if (log?.info) {
-    const siblingsInOrg = siblings.filter(
-      (candidate) => candidate.getOrganizationId() === organizationId,
-    );
-    log.info('preflight.contentSourcePath.siblingCheck', {
-      siteId: site.getId(),
-      baseURL: site.getBaseURL(),
-      organizationId,
-      authoringType,
-      programId,
-      environmentId,
-      externalOwnerId,
-      externalSiteId,
-      siblingsByExternalIds: siblings.map(toSiblingSiteLogEntry),
-      siblingsInOrg: siblingsInOrg.map(toSiblingSiteLogEntry),
-      siblingsInOrgWithSameAuthoringType: othersInOrgWithSameAuthoringType
-        .map(toSiblingSiteLogEntry),
-      contentSourcePathRequired: othersInOrgWithSameAuthoringType.length >= 1,
-    });
-  }
 
   return othersInOrgWithSameAuthoringType.length >= 1;
 }
@@ -202,7 +162,6 @@ export async function isPreflightSiteConfigReady(site, context) {
       programId,
       environmentId,
       authoringType,
-      context.log,
     );
 
     if (contentSourcePathRequired && !hasText(contentSourcePath)) {

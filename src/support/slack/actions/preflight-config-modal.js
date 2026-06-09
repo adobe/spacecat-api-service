@@ -133,7 +133,6 @@ export function preflightConfigModal(lambdaContext) {
           deliveryConfigFromPreview.programId,
           deliveryConfigFromPreview.environmentId,
           authoringType,
-          log,
         );
 
         if (contentSourcePathRequired && !hasText(contentSourcePath)) {
