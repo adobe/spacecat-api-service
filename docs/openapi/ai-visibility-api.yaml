@@ -855,6 +855,29 @@ ai-visibility-meta:
     security:
       - api_key: []
 
+ai-visibility-v1-meta-meta:
+  get:
+    tags: [ai-visibility]
+    summary: Get AI Visibility metadata (Meta v1 JSON)
+    description: |
+      Returns Semrush `cr.v1 Meta/Meta` protobuf JSON using proto field names.
+      Еhe response appends a computed `WORLDWIDE` country entry: 
+      daily dates are the intersection across countries with daily snapshots, 
+      and monthly dates are the union up to the minimum latest
+      monthly snapshot available across countries.
+    operationId: getAiVisibilityV1MetaMeta
+    parameters: []
+    responses:
+      '200':
+        description: Metadata retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1Meta'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-prompts-responses-latest:
   get:
     tags: [ai-visibility]

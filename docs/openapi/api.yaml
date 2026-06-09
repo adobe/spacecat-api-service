@@ -684,6 +684,8 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
+  /llmo/ai-visibility/v1/meta/meta:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-meta-meta'
 
 components:
   securitySchemes:

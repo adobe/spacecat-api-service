@@ -700,6 +700,7 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': aiVisibilityController.getV1PromptGapPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
+    'GET /llmo/ai-visibility/v1/meta/meta': aiVisibilityController.getV1MetaMeta,
   };
 
   // Initialization of static and dynamic routes
