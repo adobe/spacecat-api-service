@@ -61,6 +61,12 @@ site:
       This endpoint is useful for updating a site.
       Only the fields as per the request body schema will be updated.
       At least one field to update must be provided in the request body.
+
+      Re-parenting a site is not allowed through this endpoint: changing
+      `organizationId` or `projectId` returns 403. Both reference org-scoped
+      records, so re-parenting must go through controlled flows (e.g.
+      `PATCH /projects/{projectId}`) to keep a site and its project in the same
+      organization.
     operationId: patchSite
     security:
       - admin_key: [ ]
@@ -77,6 +83,18 @@ site:
           application/json:
             schema:
               $ref: './schemas.yaml#/Site'
+      '403':
+        description: >-
+          Attempted to change a field that is not allowed via this endpoint
+          (organizationId or projectId).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Updating project ID is not allowed"
       '400':
         $ref: './responses.yaml#/400-no-site-id-request-body-no-updates'
       '401':
