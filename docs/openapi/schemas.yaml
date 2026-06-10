@@ -704,6 +704,38 @@ Site:
         outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
+SiteIdentity:
+  type: object
+  description: |
+    The minimal routing identity for a single site, returned by
+    `GET /sites/{siteId}/identity`. Exposes only what a platform `site:readAll` consumer
+    needs to resolve a site's owning organization and mint a customer-scoped token.
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    organizationId:
+      description: The ID of the organization this site belongs to, or null if unresolved
+      oneOf:
+        - $ref: '#/Id'
+        - type: 'null'
+    imsOrgId:
+      description: The Adobe IMS organization ID of the owning organization, or null if unresolved
+      oneOf:
+        - $ref: '#/ImsOrganizationId'
+        - type: 'null'
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+    deliveryType:
+      description: The type of the delivery this site is using
+      $ref: '#/DeliveryType'
+  example:
+    siteId: '7511d4b9-1234-4abc-8def-0123456789ab'
+    organizationId: '160da889-5678-4cde-9f01-23456789abcd'
+    imsOrgId: '8C6043F15F43B6390A49401A@AdobeOrg'
+    baseURL: 'https://example.com'
+    deliveryType: 'aem_edge'
 SiteWithLatestAudit:
   allOf:
     - $ref: '#/Site'
