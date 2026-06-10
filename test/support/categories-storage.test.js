@@ -47,6 +47,47 @@ function createSequentialClient(responses) {
   return { from };
 }
 
+// Capture-insert client: records the row passed to `.insert()` and echoes it
+// back as the inserted row (id/timestamps stubbed). Lets a test assert the
+// exact row the storage layer builds — e.g. a derived or synthetic slug. The
+// lookup (`.maybeSingle()`) resolves to no existing row, so createCategory
+// takes the insert path.
+function createCaptureInsertClient({ rowId = 'uuid-captured' } = {}) {
+  const captured = { row: null };
+  const client = {
+    from: sinon.stub().callsFake(() => ({
+      select: sinon.stub().returnsThis(),
+      eq: sinon.stub().returnsThis(),
+      ilike: sinon.stub().returnsThis(),
+      maybeSingle: sinon.stub().resolves({ data: null, error: null }),
+      insert: sinon.stub().callsFake((row) => {
+        captured.row = row;
+        return {
+          select: () => ({
+            single: () => Promise.resolve({
+              data: {
+                id: rowId,
+                category_id: row.category_id,
+                name: row.name,
+                status: row.status,
+                origin: row.origin,
+                created_at: '2026-04-20',
+                created_by: row.updated_by,
+                updated_at: '2026-04-20',
+                updated_by: row.updated_by,
+              },
+              error: null,
+            }),
+          }),
+        };
+      }),
+    })),
+  };
+  return { client, captured };
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 describe('categories-storage', () => {
   const ORG_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -192,19 +233,116 @@ describe('categories-storage', () => {
       })).to.be.rejectedWith('Category name is required');
     });
 
-    it('rejects names that canonicalize to a degenerate slug when no id is supplied', async () => {
-      // Non-ASCII-only names collapse to a bare "-" via the slug derivation
-      // `replace(/[^a-z0-9]+/g, '-')`. Rejecting at the API boundary keeps
-      // such rows from landing with meaningless FKs. Caller can opt out
-      // by supplying an explicit `id`.
-      const postgrestClient = createSequentialClient([
-        { data: null, error: null },
-      ]);
-      await expect(createCategory({
+    it('generates a synthetic slug for non-ASCII-only names when no id is supplied', async () => {
+      // CJK / non-ASCII-only names (e.g. "日本語") collapse to empty via the
+      // slug derivation `replace(/[^a-z0-9]+/g, '-')`. Rather than failing
+      // (which surfaced as a 500 — LLMO-5473), fall back to a synthetic UUID
+      // slug, mirroring the DB column default. FKs target categories.id (the
+      // UUID PK) and idempotency keys on name, so the synthetic slug is safe.
+      const { client, captured } = createCaptureInsertClient({ rowId: 'uuid-jp' });
+      const log = { warn: sinon.stub() };
+
+      const result = await createCategory({
         organizationId: ORG_ID,
         category: { name: '日本語' },
+        postgrestClient: client,
+        updatedBy: 'user@test.com',
+        log,
+      });
+
+      expect(result.created).to.be.true;
+      expect(result.outcome).to.equal('insert');
+      // Display name is preserved verbatim; slug is a generated UUID — never
+      // empty and never a bare '-'.
+      expect(captured.row.name).to.equal('日本語');
+      expect(captured.row.category_id).to.match(UUID_RE);
+      expect(result.category.name).to.equal('日本語');
+      // Round-trip identity: the slug returned in the DTO is the same one
+      // written to the row (guards against a future row->DTO mapping drift).
+      expect(result.category.id).to.equal(captured.row.category_id);
+      // Fallback emits a structured WARN so operators can quantify the rate
+      // and find affected rows (the synthetic slug is otherwise opaque).
+      expect(log.warn).to.have.been.calledOnce;
+      const [, fields] = log.warn.firstCall.args;
+      expect(fields).to.include({ organization_id: ORG_ID, name: '日本語' });
+      expect(fields.category_id).to.match(UUID_RE);
+    });
+
+    it('generates a synthetic slug for punctuation-only names when no id is supplied', async () => {
+      const { client, captured } = createCaptureInsertClient({ rowId: 'uuid-punct' });
+
+      const result = await createCategory({
+        organizationId: ORG_ID,
+        category: { name: '!!!' },
+        postgrestClient: client,
+        updatedBy: 'user@test.com',
+      });
+
+      expect(result.created).to.be.true;
+      expect(captured.row.name).to.equal('!!!');
+      expect(captured.row.category_id).to.match(UUID_RE);
+      expect(result.category.id).to.equal(captured.row.category_id);
+    });
+
+    it('does NOT fall back to a UUID when a name has some ASCII alphanumerics (mixed script)', async () => {
+      // "AI カテゴリ" slugifies to "ai" (the CJK run collapses to a trailing
+      // dash that is then stripped). The synthetic-UUID fallback must fire
+      // ONLY when the slug is empty — a mixed-script name keeps its readable
+      // ASCII slug, and no WARN is emitted.
+      const { client, captured } = createCaptureInsertClient({ rowId: 'uuid-mixed' });
+      const log = { warn: sinon.stub() };
+
+      const result = await createCategory({
+        organizationId: ORG_ID,
+        category: { name: 'AI カテゴリ' },
+        postgrestClient: client,
+        updatedBy: 'user@test.com',
+        log,
+      });
+
+      expect(result.created).to.be.true;
+      expect(captured.row.category_id).to.equal('ai');
+      expect(captured.row.category_id).to.not.match(UUID_RE);
+      expect(log.warn).to.not.have.been.called;
+    });
+
+    it('does NOT regenerate a synthetic slug when a non-ASCII name already exists (idempotent by name)', async () => {
+      // The safety argument for the synthetic-UUID fallback is that a re-post
+      // of the same name resolves the existing row and never mints a new slug.
+      // The name-lookup runs BEFORE slug derivation, so an all-CJK name is
+      // matched exactly like an ASCII one — the synthetic UUID is generated
+      // exactly once, at first insert. LLMO-5473.
+      const existingRow = {
+        id: 'uuid-cjk-existing',
+        category_id: '7f3d2c1a-0b9e-4a6f-8c2d-1e5b9a4d7c3f', // synthetic slug minted on the original insert
+        name: 'カテゴリ',
+        status: 'active',
+        origin: 'human',
+        created_at: '2026-02-01',
+        created_by: 'first@test.com',
+        updated_at: '2026-02-01',
+        updated_by: 'first@test.com',
+      };
+      const postgrestClient = createSequentialClient([
+        { data: existingRow, error: null },
+      ]);
+      const log = { warn: sinon.stub() };
+
+      const result = await createCategory({
+        organizationId: ORG_ID,
+        category: { name: 'カテゴリ' },
         postgrestClient,
-      })).to.be.rejectedWith(/empty slug/);
+        updatedBy: 'second@test.com',
+        log,
+      });
+
+      // Existing row returned unchanged; no insert, so no new UUID and no
+      // fallback WARN.
+      expect(result.created).to.be.false;
+      expect(result.outcome).to.equal('noop');
+      expect(result.category.id).to.equal('7f3d2c1a-0b9e-4a6f-8c2d-1e5b9a4d7c3f');
+      expect(postgrestClient.from).to.have.been.calledOnce;
+      expect(log.warn).to.not.have.been.called;
     });
 
     it('accepts non-ASCII names when the client supplies an explicit slug', async () => {
@@ -605,14 +743,14 @@ describe('categories-storage', () => {
 
     it('surfaces a typed 409 when a 23505 fires against a non-name constraint (slug collision)', async () => {
       // Scenario: client POSTs {id: 'foo', name: 'NewName'}. Lookup by
-      // 'NewName' finds nothing. INSERT trips `uq_category_id_per_org`
+      // 'NewName' finds nothing. INSERT trips `uq_category_per_org`
       // because slug `foo` is already occupied by a different row with a
       // different name. Mirror the topics pattern — surface as a typed
       // 409 with constraint echo so callers don't see a generic 500 on
       // what is really a constraint conflict. LLMO-4370 #5/#6.
       const insertError = {
         code: '23505',
-        message: 'duplicate key value violates unique constraint "uq_category_id_per_org"',
+        message: 'duplicate key value violates unique constraint "uq_category_per_org"',
       };
       const postgrestClient = createSequentialClient([
         { data: null, error: null },
@@ -626,7 +764,7 @@ describe('categories-storage', () => {
       }).catch((e) => e);
 
       expect(err.status).to.equal(409);
-      expect(err.message).to.include('uq_category_id_per_org');
+      expect(err.message).to.include('uq_category_per_org');
       expect(err.cause).to.equal(insertError);
     });
 
