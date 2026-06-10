@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "full",
+  "commit_sha": "16d78086d638536144be7172b10b1469b1c9bc2b",
+  "author": "cboldis@yahoo.com",
+  "timestamp": "2026-06-10T14:52:15+03:00",
+  "detection": {
+    "ai_assisted": true,
+    "method": "heuristic",
+    "tool": "claude-code",
+    "model": "",
+    "confidence": 0.9
+  },
+  "stats": {
+    "total_additions": 618,
+    "total_deletions": 5,
+    "ai_additions": 618,
+    "ai_deletions": 5,
+    "human_additions": 0,
+    "human_deletions": 0
+  },
+  "files": {
+    "src/controllers/llmo/llmo-url-inspector.js": {
+      "ai_additions": 112,
+      "human_additions": 0,
+      "ai_deletions": 5,
+      "human_deletions": 0
+    },
+    "src/support/serenity/handlers/brand-presence.js": {
+      "ai_additions": 212,
+      "human_additions": 0,
+      "ai_deletions": 0,
+      "human_deletions": 0
+    },
+    "src/support/serenity/rest-transport.js": {
+      "ai_additions": 19,
+      "human_additions": 0,
+      "ai_deletions": 0,
+      "human_deletions": 0
+    },
+    "test/controllers/llmo/llmo-url-inspector.test.js": {
+      "ai_additions": 275,
+      "human_additions": 0,
+      "ai_deletions": 0,
+      "human_deletions": 0
+    }
+  }
+}
