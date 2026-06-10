@@ -180,5 +180,40 @@ describe('rum-config-service', () => {
       expect(context.log.warn).to.have.been.calledWithMatch(/Malformed overrideBaseURL/);
       expect(retrieveDomainkeyStub.firstCall.args[0]).to.equal('example.com');
     });
+
+    it('does not add bare variant when baseURL already starts with www', async () => {
+      site = { ...site, getBaseURL: () => 'https://www.example.com' };
+      retrieveDomainkeyStub.resolves('dom-key-www');
+
+      const result = await updateRumConfig(site, context);
+
+      expect(result).to.be.true;
+      const calledDomains = retrieveDomainkeyStub.args.map((a) => a[0]);
+      expect(calledDomains).to.deep.equal(['www.example.com']);
+    });
+
+    it('stops iterating candidates once cancelled by timeout', async () => {
+      let rejectFirst;
+      retrieveDomainkeyStub.withArgs('example.com').returns(
+        new Promise((_, reject) => { rejectFirst = reject; }),
+      );
+      retrieveDomainkeyStub.withArgs('www.example.com').resolves('dom-key-www');
+
+      const clock = sinon.useFakeTimers();
+      const resultPromise = updateRumConfig(site, context);
+
+      await clock.tickAsync(4000); // fires timeout, sets cancelled=true
+      clock.restore();
+
+      rejectFirst(new Error('slow network'));
+      // drain microtasks so inner IIFE processes the rejection and checks cancelled
+      await new Promise(setImmediate);
+
+      const result = await resultPromise;
+
+      expect(result).to.be.false;
+      expect(retrieveDomainkeyStub).to.have.been.calledOnce;
+      expect(retrieveDomainkeyStub).not.to.have.been.calledWith('www.example.com');
+    });
   });
 });
