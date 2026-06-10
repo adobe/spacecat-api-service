@@ -1,3 +1,10 @@
+# [1.566.0](https://github.com/adobe/spacecat-api-service/compare/v1.565.0...v1.566.0) (2026-06-10)
+
+
+### Features
+
+* **s2s:** single-site identity endpoint to bootstrap customer-scoped tokens (GET /sites/:siteId/identity) ([#2586](https://github.com/adobe/spacecat-api-service/issues/2586)) ([c94a698](https://github.com/adobe/spacecat-api-service/commit/c94a698cc631566c665a8ec0048f8e9b5ed575fc)), closes [adobe/spacecat-api-service#2585](https://github.com/adobe/spacecat-api-service/issues/2585)
+
 # [1.565.0](https://github.com/adobe/spacecat-api-service/compare/v1.564.1...v1.565.0) (2026-06-10)
 
 
