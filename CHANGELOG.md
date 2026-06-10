@@ -1,3 +1,10 @@
+## [1.566.1](https://github.com/adobe/spacecat-api-service/compare/v1.566.0...v1.566.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **llmo:** retire categories.category_id business key; resolve prompt category filter by UUID (LLMO-5515) ([#2587](https://github.com/adobe/spacecat-api-service/issues/2587)) ([72ed9ae](https://github.com/adobe/spacecat-api-service/commit/72ed9aeaf3436227adb58750db08d912c9248e78))
+
 # [1.566.0](https://github.com/adobe/spacecat-api-service/compare/v1.565.0...v1.566.0) (2026-06-10)
 
 
