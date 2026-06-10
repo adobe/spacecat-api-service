@@ -13,138 +13,173 @@
 import { expect } from 'chai';
 import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
- * Integration tests for the category slug-as-name bug (LLMO-4060).
+ * Integration tests for category identity and the category prompt-count filter.
+ *
+ * The legacy `categories.category_id` TEXT business key has been retired
+ * (LLMO-5515). Categories are now addressed exclusively by their `categories.id`
+ * UUID primary key, and the prompt-list `categoryId` filter resolves against
+ * that UUID and FAILS CLOSED — a categoryId that does not resolve returns an
+ * empty page rather than the brand's full prompt set. The original bug: a
+ * UUID-shaped business key resolved to no row, the filter was silently dropped,
+ * and a brand-new (e.g. Japanese-named) category showed a phantom prompt count
+ * equal to every prompt for the brand.
  *
  * Validates:
- * 1. Fallback path: category exists with unprefixed slug, prompt references prefixed slug
- *    — the fallback strips the DRS prefix and resolves to the existing category
- * 2. Fix verification: POST categories with explicit id preserves name, no duplicates
- * 3. Idempotency: duplicate category creation returns 200 (idempotent update),
- *    not 201 (insert). See LLMO-4370 — the status-code contract flipped from
- *    `201|409` (old upsert) to `200|201` (idempotent-by-name), so callers can
- *    discriminate a fresh row from a re-post without parsing the body.
+ * 1. Category create returns a UUID `id` (== `uuid`), idempotent by name.
+ * 2. A non-ASCII (multibyte) category name is stored and listed without error.
+ * 3. The prompt-list `categoryId` filter resolves by UUID and fails closed for
+ *    unknown UUIDs and for non-UUID values (no phantom counts).
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
  */
 export default function categoriesPromptsTests(getHttpClient, resetData) {
-  describe('Categories & Prompts (LLMO-4060)', () => {
-    // ── Fallback path (slugToName defense-in-depth) ──
+  describe('Categories & Prompts (UUID identity, LLMO-5515)', () => {
+    // ── Category identity is a UUID, idempotent by name ──
 
-    describe('Fallback: category exists with unprefixed slug, prompt references prefixed slug', () => {
+    describe('Category create returns a UUID id and is idempotent by name', () => {
       before(() => resetData());
 
-      it('resolves to the existing category via unprefixed slug lookup', async () => {
+      it('returns a UUID id on create and the same id on idempotent re-post', async () => {
         const http = getHttpClient();
 
-        // 1. Create a category WITHOUT an explicit id — API auto-derives slug from name
-        //    Stored category_id = "comparison-decision" (no prefix)
-        const catRes = await http.admin.post(
-          `/v2/orgs/${ORG_1_ID}/categories`,
-          { name: 'Comparison & Decision', origin: 'ai' },
-        );
-        expect(catRes.status).to.equal(201);
-        expect(catRes.body.id).to.equal('comparison-decision');
+        const payload = { name: 'Comparison & Decision', origin: 'ai' };
 
-        // 2. Post prompts referencing "baseurl-comparison-decision" (prefixed slug).
-        //    Upsert fails (name collision), fallback strips prefix and finds
-        //    the existing "comparison-decision" category.
-        const promptRes = await http.admin.post(
-          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
-          [
-            {
-              prompt: 'What is the best tool for comparison?',
-              regions: ['us'],
-              categoryId: 'baseurl-comparison-decision',
-            },
-          ],
-        );
-        expect(promptRes.status).to.equal(201);
-        expect(promptRes.body.created).to.equal(1);
+        // First POST — inserts a new row, server assigns the UUID primary key.
+        const res1 = await http.admin.post(`/v2/orgs/${ORG_1_ID}/categories`, payload);
+        expect(res1.status).to.equal(201);
+        expect(res1.body.id).to.match(UUID_RE);
+        expect(res1.body.uuid).to.equal(res1.body.id);
+        expect(res1.body.name).to.equal('Comparison & Decision');
+        const { id: categoryUuid } = res1.body;
 
-        // 3. Only ONE category should exist — no duplicate created
+        // Second POST with the same name — idempotent by name, returns 200 and
+        // the SAME stable UUID. No client-supplied identifier is honored.
+        const res2 = await http.admin.post(`/v2/orgs/${ORG_1_ID}/categories`, payload);
+        expect(res2.status).to.equal(200);
+        expect(res2.body.id).to.equal(categoryUuid);
+
+        // Only ONE category exists — no duplicate.
         const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/categories`);
         expect(listRes.status).to.equal(200);
-
-        const cats = listRes.body.categories;
-        const matches = cats.filter((c) => c.name === 'Comparison & Decision');
+        const matches = listRes.body.categories.filter((c) => c.name === 'Comparison & Decision');
         expect(matches).to.have.lengthOf(1);
-        expect(matches[0].id).to.equal('comparison-decision');
+        expect(matches[0].id).to.equal(categoryUuid);
         expect(matches[0].origin).to.equal('ai');
       });
-    });
 
-    // ── Fix verification ──
-
-    describe('Fix: POST categories with explicit id', () => {
-      before(() => resetData());
-
-      it('stores category with the provided id and preserves the readable name', async () => {
+      it('ignores a client-supplied id — the UUID primary key is authoritative', async () => {
         const http = getHttpClient();
 
-        // 1. Create category WITH explicit id (the DRS fix)
-        const catRes = await http.admin.post(
+        const res = await http.admin.post(
           `/v2/orgs/${ORG_1_ID}/categories`,
           { id: 'baseurl-discovery-research', name: 'Discovery & Research', origin: 'ai' },
         );
-        expect(catRes.status).to.equal(201);
-        expect(catRes.body.id).to.equal('baseurl-discovery-research');
-        expect(catRes.body.name).to.equal('Discovery & Research');
-
-        // 2. Post prompts referencing the same prefixed categoryId
-        const promptRes = await http.admin.post(
-          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
-          [
-            {
-              prompt: 'How do users discover products?',
-              regions: ['us'],
-              categoryId: 'baseurl-discovery-research',
-            },
-          ],
-        );
-        expect(promptRes.status).to.equal(201);
-        expect(promptRes.body.created).to.equal(1);
-
-        // 3. Verify: only ONE category with that id, name is the readable one
-        const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/categories`);
-        expect(listRes.status).to.equal(200);
-
-        const cats = listRes.body.categories;
-        const matches = cats.filter((c) => c.id === 'baseurl-discovery-research');
-        expect(matches).to.have.lengthOf(1);
-        expect(matches[0].name).to.equal('Discovery & Research');
-        expect(matches[0].origin).to.equal('ai');
+        expect(res.status).to.equal(201);
+        // The stray slug-shaped id is NOT used; the returned id is a UUID.
+        expect(res.body.id).to.match(UUID_RE);
+        expect(res.body.id).to.not.equal('baseurl-discovery-research');
+        expect(res.body.name).to.equal('Discovery & Research');
       });
     });
 
-    // ── Idempotency ──
+    // ── Multibyte names (the cohort that surfaced the bug) ──
 
-    describe('Category creation is idempotent by name (200 on re-post)', () => {
+    describe('Multibyte category names are stored and listed without error', () => {
       before(() => resetData());
 
-      it('second POST with the same name returns 200 (idempotent update)', async () => {
+      it('creates a Japanese-named category with a UUID id', async () => {
         const http = getHttpClient();
 
-        const payload = { id: 'baseurl-test', name: 'Test', origin: 'ai' };
+        const res = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/categories`,
+          { name: '日本語カテゴリ', origin: 'human' },
+        );
+        expect(res.status).to.equal(201);
+        expect(res.body.id).to.match(UUID_RE);
+        expect(res.body.name).to.equal('日本語カテゴリ');
 
-        const res1 = await http.admin.post(`/v2/orgs/${ORG_1_ID}/categories`, payload);
-        expect(res1.status).to.equal(201);
-
-        // Second call — idempotent by name: the existing row is matched,
-        // no-op short-circuits (identical fields), response is 200. This
-        // lets DRS-class clients discriminate "created new" from "ensured
-        // existing" without parsing the body. LLMO-4370.
-        const res2 = await http.admin.post(`/v2/orgs/${ORG_1_ID}/categories`, payload);
-        expect(res2.status).to.equal(200);
-
-        // Only one category exists — no duplicate.
         const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/categories`);
         expect(listRes.status).to.equal(200);
-
-        const matches = listRes.body.categories.filter((c) => c.id === 'baseurl-test');
+        const matches = listRes.body.categories.filter((c) => c.name === '日本語カテゴリ');
         expect(matches).to.have.lengthOf(1);
-        expect(matches[0].name).to.equal('Test');
+        expect(matches[0].id).to.equal(res.body.id);
+      });
+    });
+
+    // ── The category prompt-count filter (the LLMO-5515 regression guard) ──
+
+    describe('Prompt-list categoryId filter resolves by UUID and fails closed', () => {
+      before(() => resetData());
+
+      it('returns only the prompts linked to the category, and an empty page for unresolved filters', async () => {
+        const http = getHttpClient();
+
+        // 1. Create a category; capture its UUID.
+        const catRes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/categories`,
+          { name: 'Editing', origin: 'human' },
+        );
+        expect(catRes.status).to.equal(201);
+        const categoryUuid = catRes.body.id;
+        expect(categoryUuid).to.match(UUID_RE);
+
+        // 2. Post two prompts under that category (linked by category name) and
+        //    one prompt with NO category.
+        const promptRes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+          [
+            { prompt: 'How do I crop an image?', regions: ['us'], category: 'Editing' },
+            { prompt: 'How do I remove a background?', regions: ['us'], category: 'Editing' },
+            { prompt: 'Unrelated prompt with no category', regions: ['us'] },
+          ],
+        );
+        expect(promptRes.status).to.equal(201);
+        expect(promptRes.body.created).to.equal(3);
+
+        // 3. Filtering by the real category UUID returns exactly the two linked
+        //    prompts — and their embedded category.id / .uuid is that UUID.
+        const filtered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?categoryId=${categoryUuid}`,
+        );
+        expect(filtered.status).to.equal(200);
+        expect(filtered.body.total).to.equal(2);
+        expect(filtered.body.items).to.have.lengthOf(2);
+        filtered.body.items.forEach((p) => {
+          expect(p.category.id).to.equal(categoryUuid);
+          expect(p.category.uuid).to.equal(categoryUuid);
+        });
+
+        // 4. No filter returns all three prompts — proving the filter above
+        //    actually narrowed the set rather than the brand being empty.
+        const unfiltered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+        );
+        expect(unfiltered.status).to.equal(200);
+        expect(unfiltered.body.total).to.equal(3);
+
+        // 5. FAIL CLOSED: a valid-but-unknown category UUID returns an EMPTY
+        //    page — never the brand's full prompt set (the LLMO-5515 phantom
+        //    count). This is the core regression guard.
+        const unknownUuid = 'f0000000-0000-4000-b000-000000000000';
+        const unknown = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?categoryId=${unknownUuid}`,
+        );
+        expect(unknown.status).to.equal(200);
+        expect(unknown.body.total).to.equal(0);
+        expect(unknown.body.items).to.have.lengthOf(0);
+
+        // 6. FAIL CLOSED: a non-UUID categoryId (e.g. a legacy business key)
+        //    also returns an empty page — business keys are retired.
+        const legacyKey = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?categoryId=baseurl-editing`,
+        );
+        expect(legacyKey.status).to.equal(200);
+        expect(legacyKey.body.total).to.equal(0);
+        expect(legacyKey.body.items).to.have.lengthOf(0);
       });
     });
   });

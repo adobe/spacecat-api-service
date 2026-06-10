@@ -6246,7 +6246,8 @@ V2Prompt:
       description: Regions where this prompt is applicable
     categoryId:
       type: string
-      description: Category business key
+      format: uuid
+      description: Category UUID (categories.id)
     topicId:
       type: string
       description: Topic business key
@@ -6293,14 +6294,17 @@ V2Prompt:
       properties:
         id:
           type: string
+          format: uuid
           description: |
-            Currently the UUID PK (categories.id) for backward compat —
-            aligning this to the category_id business key is a deferred
-            breaking change. Use `uuid` for FK linkage today.
+            UUID primary key (categories.id). The sole category identifier
+            (the legacy category_id business key was retired — LLMO-5515).
+            `id` and `uuid` carry the same value; either works for FK linkage.
         uuid:
           type: string
           format: uuid
-          description: UUID primary key (categories.id)
+          description: |
+            UUID primary key (categories.id). Alias of `id`, kept for
+            backward compatibility.
         name:
           type: string
         origin:
@@ -7493,12 +7497,16 @@ V2Category:
   properties:
     id:
       type: string
-      description: Category business key (category_id slug). Stable once assigned.
-      example: 'baseurl-discovery-research'
+      format: uuid
+      description: |
+        UUID primary key (categories.id) — the sole category identifier.
+        Use this value on the CRUD path params and the `?categoryId=` prompt
+        filter. The legacy category_id business key was retired (LLMO-5515).
+      example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
     uuid:
       type: string
       format: uuid
-      description: UUID primary key (categories.id)
+      description: UUID primary key (categories.id). Alias of `id`.
     name:
       type: string
       description: |
@@ -7541,12 +7549,6 @@ V2CategoryInput:
   required:
     - name
   properties:
-    id:
-      type: string
-      description: |
-        Client-supplied slug. Used only when inserting a brand-new row; for
-        existing rows the stored `id` is preserved (FK stability).
-      example: 'discovery-research'
     name:
       type: string
       description: Human-readable category name. Canonicalized on write.

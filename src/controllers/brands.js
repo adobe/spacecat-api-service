@@ -943,7 +943,7 @@ function BrandsController(ctx, log, env) {
       // without grepping messages. LLMO-4370 #15.
       log.info(`Category POST resolved for organization ${spaceCatId}`, {
         organization_id: spaceCatId,
-        category_id: category.id,
+        category_uuid: category.id,
         outcome,
       });
 
@@ -978,6 +978,9 @@ function BrandsController(ctx, log, env) {
       }
       if (!hasText(categoryId)) {
         return badRequest('Category ID required');
+      }
+      if (!isValidUUID(categoryId)) {
+        return badRequest('Category ID must be a valid UUID');
       }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
@@ -1033,6 +1036,9 @@ function BrandsController(ctx, log, env) {
       }
       if (!hasText(categoryId)) {
         return badRequest('Category ID required');
+      }
+      if (!isValidUUID(categoryId)) {
+        return badRequest('Category ID must be a valid UUID');
       }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
