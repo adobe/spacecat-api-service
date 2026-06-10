@@ -40,6 +40,7 @@ import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
 import { handleCreateMarket, resolveLocation } from '../../support/serenity/handlers/markets.js';
 import { createSerenityTransport, SerenityTransportError } from '../../support/serenity/rest-transport.js';
+import { extractImsBearer } from '../../support/serenity/ims-bearer.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1228,32 +1229,6 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
   });
 
   log.info(`Queued ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}`);
-}
-
-/**
- * Extracts the IMS user bearer token from the request context, mirroring the
- * Serenity controller's `requireImsBearer` but non-throwing — the fan-out is
- * best-effort, so a missing/incompatible token is recorded as a per-tuple
- * failure rather than aborting onboarding.
- *
- * @param {object} context - The request context.
- * @returns {string|null} The bearer token, or null when absent / non-IMS auth.
- */
-function extractImsBearer(context) {
-  // The Semrush gateway only understands IMS user tokens; anything else
-  // (scoped API key, S2S JWT, or an auth object we can't classify) must not be
-  // forwarded. Stricter than the proxy's `requireImsBearer` on purpose: require
-  // a recognisable IMS auth type rather than letting an unknown shape through.
-  const authInfo = context?.attributes?.authInfo;
-  if (!authInfo?.getType || authInfo.getType() !== 'ims') {
-    return null;
-  }
-  const header = context?.pathInfo?.headers?.authorization;
-  if (!hasText(header) || !header.startsWith('Bearer ')) {
-    return null;
-  }
-  const token = header.substring('Bearer '.length);
-  return hasText(token) ? token : null;
 }
 
 /**

@@ -29,6 +29,7 @@ import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { cleanupBrandSemrushProjects } from '../support/serenity/brand-cleanup.js';
 import {
   listPrompts,
   getPromptById,
@@ -1399,6 +1400,13 @@ function BrandsController(ctx, log, env) {
       if (!brandUuid) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
+      // Tear down any Serenity (Semrush) projects this brand owns before the
+      // brand row goes away, so we never orphan a remote project. Fail-closed:
+      // this throws on any cleanup failure and the catch below maps it to an
+      // error response, aborting the delete. The teardown is idempotent, so a
+      // retried delete converges.
+      await cleanupBrandSemrushProjects(context, spaceCatId, brandUuid, log);
 
       // eslint-disable-next-line max-len
       const deleted = await deleteBrand(spaceCatId, brandUuid, postgrestClient, updatedBy);
