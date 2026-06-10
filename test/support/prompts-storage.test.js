@@ -883,6 +883,145 @@ describe('prompts-storage', () => {
       ]);
     });
 
+    it('classifies prompts with no intent and persists the result', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'a', prompt: 'Figma vs Sketch', regions: [] }],
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(classifyIntent.calledOnceWith('Figma vs Sketch')).to.be.true;
+      expect(insertStub.firstCall.args[0][0].intent).to.equal('comparative');
+    });
+
+    it('does NOT re-classify prompts that already carry an intent', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'a', prompt: 'pipeline prompt', regions: [], intent: 'transactional',
+        }],
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(classifyIntent.called).to.be.false;
+      expect(insertStub.firstCall.args[0][0].intent).to.equal('transactional');
+    });
+
+    it('persists null and does not fail when classification rejects', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const classifyIntent = sinon.stub().rejects(new Error('LLM down'));
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'a', prompt: 'some prompt', regions: [] }],
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(result.created).to.equal(1);
+      expect(insertStub.firstCall.args[0][0].intent).to.be.null;
+    });
+
+    it('does not classify when no classifier is provided', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'a', prompt: 'no classifier', regions: [] }],
+        postgrestClient: client,
+      });
+      expect(insertStub.firstCall.args[0][0].intent).to.be.null;
+    });
+
     it('updates existing prompts by id', async () => {
       const existingData = {
         data: [{
@@ -1840,6 +1979,171 @@ describe('prompts-storage', () => {
       expect(Object.prototype.hasOwnProperty.call(updateStub.firstCall.args[0], 'intent')).to.be.true;
       expect(updateStub.firstCall.args[0].intent).to.be.null;
       expect(result.intent).to.be.null;
+    });
+
+    it('classifies new text on update when no intent is supplied', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'T',
+        text: 'Figma vs Sketch',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: 'comparative',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { prompt: 'Figma vs Sketch' },
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(classifyIntent.calledOnceWith('Figma vs Sketch')).to.be.true;
+      expect(updateStub.firstCall.args[0].intent).to.equal('comparative');
+    });
+
+    it('does NOT classify on update when an intent is explicitly supplied', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'T',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: 'transactional',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { prompt: 'new text', intent: 'transactional' },
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(classifyIntent.called).to.be.false;
+      expect(updateStub.firstCall.args[0].intent).to.equal('transactional');
+    });
+
+    it('leaves intent unset on update when classification rejects', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'T',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: null,
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const classifyIntent = sinon.stub().rejects(new Error('LLM down'));
+      const result = await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { prompt: 'new text' },
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(result).to.not.be.null;
+      expect(Object.prototype.hasOwnProperty.call(updateStub.firstCall.args[0], 'intent')).to.be.false;
+    });
+
+    it('does NOT classify on update when only non-text fields change', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'New name',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: null,
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { name: 'New name' },
+        postgrestClient: client,
+        classifyIntent,
+      });
+      // No text change and no explicit intent -> classifier must not be invoked.
+      expect(classifyIntent.called).to.be.false;
+      expect(Object.prototype.hasOwnProperty.call(updateStub.firstCall.args[0], 'intent')).to.be.false;
     });
 
     it('sets categoryId and topicId to null when empty string', async () => {

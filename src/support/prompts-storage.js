@@ -14,46 +14,13 @@
 import crypto from 'node:crypto';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
-/**
- * The 6 canonical intent buckets persisted in `prompts.intent`. Mirrors the
- * buckets DRS emits (see DRS `prompt_generation_agentic_traffic` generation
- * prompts) and that the stats intent breakdown aggregates over.
- */
-const INTENT_VALUES = ['informational', 'instructional', 'comparative', 'transactional', 'planning', 'delegation'];
-const CANONICAL_INTENTS = new Set(INTENT_VALUES);
+import { classifyIntents } from './intent-classifier.js';
+import { INTENT_VALUES, normalizeIntent } from './intent.js';
 
-/**
- * Legacy intent labels remapped onto the canonical buckets. Mirrors DRS
- * `INTENT_REMAP` (src/providers/prompt_generation_agentic_traffic/utils/
- * hard_validate.py) so values produced by older generations or external
- * callers collapse onto the supported set instead of dropping to NULL.
- */
-const INTENT_REMAP = {
-  statistical: 'informational',
-  navigational: 'informational',
-  commercial: 'transactional',
-};
-
-/**
- * Normalizes a caller-supplied intent for persistence into `prompts.intent`.
- *
- * Lowercases the value, applies the legacy remap, then validates against the
- * 6 canonical buckets. Absent, empty, or values that are still invalid after
- * remapping yield `null` — gap-filling (e.g. LLM classification of
- * human-added prompts) is handled elsewhere, so we never coerce to a default
- * bucket here.
- *
- * @param {*} intent - Raw intent value from the request body
- * @returns {string|null} Canonical lowercase intent, or null
- */
-export function normalizeIntent(intent) {
-  if (!hasText(intent)) {
-    return null;
-  }
-  const lowered = intent.trim().toLowerCase();
-  const remapped = INTENT_REMAP[lowered] || lowered;
-  return CANONICAL_INTENTS.has(remapped) ? remapped : null;
-}
+// Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
+// live in `./intent.js` so the LLM intent classifier can reuse them without an
+// import cycle. Existing importers of these from `prompts-storage.js` keep working.
+export { INTENT_VALUES, normalizeIntent };
 
 /**
  * Per-client cache of whether `prompts.intent` is selectable/writable. Keyed by
@@ -659,6 +626,8 @@ export async function upsertPrompts({
   prompts,
   postgrestClient,
   updatedBy = 'system',
+  classifyIntent,
+  classifyIntentBatchTimeoutMs,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
@@ -749,6 +718,35 @@ export async function upsertPrompts({
     }
   }
 
+  // Best-effort intent classification for prompts that arrived WITHOUT an
+  // intent (typically human-added). Pipeline prompts already carry a
+  // normalized intent and are skipped. Failures leave intent null; they MUST
+  // NOT block the write — the backfill/reconciliation path covers them later.
+  if (typeof classifyIntent === 'function') {
+    const rowsNeedingIntent = [...toInsert, ...toUpdate]
+      .filter((r) => r.intent === null && hasText(r.text));
+    if (rowsNeedingIntent.length > 0) {
+      const intentByText = await classifyIntents(
+        classifyIntent,
+        rowsNeedingIntent.map((r) => r.text),
+        { timeoutMs: classifyIntentBatchTimeoutMs },
+      );
+      const apply = (r) => {
+        const classified = intentByText.get(r.text);
+        // Only overwrite when we actually got a bucket back — a null/absent
+        // result (failed or timed-out classification) leaves intent as null.
+        if (r.intent === null && hasText(r.text) && classified != null) {
+          // eslint-disable-next-line no-param-reassign
+          r.intent = classified;
+        }
+      };
+      toInsert.forEach(apply);
+      toUpdate.forEach(apply);
+      // Keep the returned payload consistent with what was persisted.
+      processed.forEach(apply);
+    }
+  }
+
   let created = 0;
   let updated = 0;
   const skipped = prompts.length - toInsert.length - toUpdate.length;
@@ -814,6 +812,9 @@ export async function upsertPrompts({
  * @param {object} params.updates - Partial prompt fields to update
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} params.updatedBy - User performing the update
+ * @param {((text: string) => Promise<string|null>)} [params.classifyIntent] -
+ *   Optional best-effort classifier; used only when the text changes WITHOUT an
+ *   explicit intent. Non-fatal: a null result simply leaves intent unset.
  * @returns {Promise<object|null>} Updated prompt or null if not found
  */
 export async function updatePromptById({
@@ -823,6 +824,7 @@ export async function updatePromptById({
   updates,
   postgrestClient,
   updatedBy = 'system',
+  classifyIntent,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -847,6 +849,13 @@ export async function updatePromptById({
   if (updates.intent !== undefined) {
     // The shared fallback strips intent when the column is known-absent.
     patch.intent = normalizeIntent(updates.intent);
+  } else if (typeof classifyIntent === 'function' && hasText(patch.text)) {
+    // No intent supplied but the text changed: best-effort classify the new
+    // text. Non-fatal — a null result simply leaves intent unset on the patch.
+    const intent = await classifyIntent(patch.text).catch(() => null);
+    if (intent !== null) {
+      patch.intent = intent;
+    }
   }
   if (updates.categoryId !== undefined) {
     patch.category_id = hasText(updates.categoryId)

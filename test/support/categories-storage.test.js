@@ -630,12 +630,12 @@ describe('categories-storage', () => {
       // Defensive path: any 23505 whose constraint is NOT
       // `uq_category_name_per_org` is surfaced as a typed 409 with the
       // constraint echoed, rather than a generic 500. The legacy
-      // `uq_category_id_per_org` constraint still exists on the deprecated
+      // `uq_category_per_org` constraint still exists on the deprecated
       // category_id column (DB drop deferred — LLMO-5515); a DB-default
       // UUID collision there would land here. Mirror the topics pattern.
       const insertError = {
         code: '23505',
-        message: 'duplicate key value violates unique constraint "uq_category_id_per_org"',
+        message: 'duplicate key value violates unique constraint "uq_category_per_org"',
       };
       const postgrestClient = createSequentialClient([
         { data: null, error: null },
@@ -649,7 +649,7 @@ describe('categories-storage', () => {
       }).catch((e) => e);
 
       expect(err.status).to.equal(409);
-      expect(err.message).to.include('uq_category_id_per_org');
+      expect(err.message).to.include('uq_category_per_org');
       expect(err.cause).to.equal(insertError);
     });
 
