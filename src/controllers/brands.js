@@ -52,6 +52,7 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
+import { createIntentClassifier, resolveBatchTimeoutMs } from '../support/intent-classifier.js';
 import {
   listCategories,
   createCategory,
@@ -89,6 +90,16 @@ function BrandsController(ctx, log, env) {
   const { Organization, Site } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  // Best-effort intent classifier for prompts that arrive without an intent
+  // (human-added). Returns null when disabled by config or Azure OpenAI is not
+  // configured, in which case intent is simply left null. Built once per
+  // controller instance and passed into the prompt storage layer.
+  const classifyIntent = createIntentClassifier({ env, log });
+  // Total wall-clock ceiling for the bulk-create classification batch, so a slow
+  // Azure can't stall the write past the Lambda timeout (per-call timeout only
+  // bounds a single call). On expiry, completed classifications are kept.
+  const classifyIntentBatchTimeoutMs = resolveBatchTimeoutMs(env);
 
   /**
    * Fetches an organization by ID and returns a 404 error if not found.
@@ -420,6 +431,8 @@ function BrandsController(ctx, log, env) {
         prompts,
         postgrestClient,
         updatedBy,
+        classifyIntent,
+        classifyIntentBatchTimeoutMs,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);
@@ -475,6 +488,7 @@ function BrandsController(ctx, log, env) {
         updates,
         postgrestClient,
         updatedBy,
+        classifyIntent,
       });
 
       if (!prompt) {
@@ -943,7 +957,7 @@ function BrandsController(ctx, log, env) {
       // without grepping messages. LLMO-4370 #15.
       log.info(`Category POST resolved for organization ${spaceCatId}`, {
         organization_id: spaceCatId,
-        category_id: category.id,
+        category_uuid: category.id,
         outcome,
       });
 
@@ -978,6 +992,9 @@ function BrandsController(ctx, log, env) {
       }
       if (!hasText(categoryId)) {
         return badRequest('Category ID required');
+      }
+      if (!isValidUUID(categoryId)) {
+        return badRequest('Category ID must be a valid UUID');
       }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
@@ -1033,6 +1050,9 @@ function BrandsController(ctx, log, env) {
       }
       if (!hasText(categoryId)) {
         return badRequest('Category ID required');
+      }
+      if (!isValidUUID(categoryId)) {
+        return badRequest('Category ID must be a valid UUID');
       }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);

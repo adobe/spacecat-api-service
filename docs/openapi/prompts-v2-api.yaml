@@ -37,7 +37,11 @@ v2-prompts-by-brand:
       required: false
       schema:
         type: string
-      description: Filter by category business key
+        format: uuid
+      description: |
+        Filter by category UUID (categories.id). A categoryId that does not
+        resolve to a category in this organization returns an empty page
+        (the filter fails closed; it is never silently dropped).
     - name: topicId
       in: query
       required: false

@@ -130,6 +130,7 @@ describe('Sites Controller', () => {
     'getAuditForSite',
     'getByBaseURL',
     'getByID',
+    'getIdentity',
     'getBrandProfile',
     'removeSite',
     'updateSite',
@@ -818,6 +819,19 @@ describe('Sites Controller', () => {
     expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
   });
 
+  it('emits [sites][legacy-shape] log on every legacy-path hit', async () => {
+    // The [sites][legacy-shape] marker is the sunset gate for removing the legacy
+    // branch — Coralogix must show zero hits before removal. Pin the format here so
+    // a rename or accidental drop is caught by tests, not 30 days of silent lying.
+    mockDataAccess.Site.all.resolves(sites);
+
+    await sitesController.getAll({ ...context, invocation: { id: 'req-legacy-1' } });
+
+    expect(loggerStub.info).to.have.been.calledWithMatch(
+      /\[sites\]\[legacy-shape\] GET \/sites called without limit\/cursor requestId=req-legacy-1/,
+    );
+  });
+
   it('gets all sites for a read-only admin user', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
     mockDataAccess.Site.all.resolves(sites);
@@ -856,6 +870,193 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(200);
     expect(body).to.be.an('array').with.lengthOf(2);
+  });
+
+  describe('GET /sites - cursor-based pagination', () => {
+    it('returns paginated envelope when limit is provided', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '100' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.have.all.keys('sites', 'pagination');
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(body.pagination).to.deep.equal({
+        limit: 100,
+        cursor: null,
+        hasMore: false,
+      });
+    });
+
+    it('returns paginated envelope when only cursor is provided', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: 'some-cursor' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.have.all.keys('sites', 'pagination');
+      expect(body.pagination.limit).to.equal(100); // DEFAULT_LIMIT
+    });
+
+    it('returns flat array when no limit or cursor is provided (legacy)', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll(context);
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('routes an empty-string cursor to the legacy path (no envelope)', async () => {
+      // `?cursor=` coerces to null via `|| null`, so hasText() is false and the
+      // request falls through to the legacy flat-array shape. Pinned so a future
+      // switch from `||` to `??` (which would keep "") is caught.
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: '' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+        {},
+        sinon.match({ fetchAllPages: true }),
+      );
+    });
+
+    it('uses provided limit and returns cursor when more pages exist', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: 'next-page-cursor' });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '1' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.deep.equal({
+        limit: 1,
+        cursor: 'next-page-cursor',
+        hasMore: true,
+      });
+    });
+
+    it('clamps limit to MAX_LIMIT (500)', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '9999' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination.limit).to.equal(500);
+    });
+
+    ['abc', '0', '-1', '-100'].forEach((badLimit) => {
+      it(`returns 400 when limit is "${badLimit}"`, async () => {
+        mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+        const result = await sitesController.getAll({ ...context, data: { limit: badLimit } });
+        const error = await result.json();
+
+        expect(result.status).to.equal(400);
+        expect(error).to.have.property('message', 'limit must be a positive integer');
+        expect(mockDataAccess.Site.all).to.not.have.been.called;
+      });
+    });
+
+    it('passes limit, cursor, and returnCursor to data access', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      await sitesController.getAll({ ...context, data: { limit: '10', cursor: 'some-cursor' } });
+
+      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+        {},
+        sinon.match({ limit: 10, cursor: 'some-cursor', returnCursor: true }),
+      );
+    });
+
+    it('rejects cursor longer than 256 characters with 400', async () => {
+      const longCursor = 'a'.repeat(257);
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: longCursor } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'cursor exceeds maximum length');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+
+    it('accepts cursor of exactly 256 characters (boundary)', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+      const exactCursor = 'a'.repeat(256);
+
+      const result = await sitesController.getAll({ ...context, data: { cursor: exactCursor } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.sites).to.be.an('array');
+      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+        {},
+        sinon.match({ cursor: exactCursor }),
+      );
+    });
+
+    [
+      { label: 'number', value: 42 },
+      { label: 'array', value: [1, 2, 3] },
+      { label: 'object', value: { foo: 'bar' } },
+    ].forEach(({ label, value }) => {
+      it(`rejects non-string cursor (${label}) with 400`, async () => {
+        const result = await sitesController.getAll({ ...context, data: { cursor: value } });
+        const error = await result.json();
+
+        expect(result.status).to.equal(400);
+        expect(error).to.have.property('message', 'cursor must be a string');
+        expect(mockDataAccess.Site.all).to.not.have.been.called;
+      });
+    });
+
+    it('returns sites with slim DTO shape in paginated response', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '100' } });
+      const body = await result.json();
+
+      expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
+      expect(body.sites[0]).to.have.property('baseURL', 'https://site1.com');
+      expect(body.sites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
+    });
+
+    it('denies non-admin caller in paginated path', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '10' } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+
+    [
+      { label: 'null', value: null },
+      { label: 'undefined', value: undefined },
+      { label: 'empty object', value: {} },
+    ].forEach(({ label, value }) => {
+      it(`logs an error and returns an empty paginated envelope when Site.all resolves ${label}`, async () => {
+        mockDataAccess.Site.all.resolves(value);
+
+        const result = await sitesController.getAll({ ...context, data: { limit: '10' } });
+        const body = await result.json();
+
+        expect(result.status).to.equal(200);
+        expect(body.sites).to.be.an('array').with.lengthOf(0);
+        expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
+        expect(loggerStub.error).to.have.been.calledWithMatch(
+          /\[sites\] Site\.all returned unexpected shape with returnCursor=true/,
+        );
+      });
+    });
   });
 
   describe('GET /sites - S2S readAll capability', () => {
@@ -898,6 +1099,24 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
       expect(loggerStub.info).to.have.been.calledWithMatch(
         /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-abc-123/,
+      );
+    });
+
+    it('grants access to S2S consumer with site:readAll on the paginated path', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-paginated-1' };
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+      const result = await sitesController.getAll({ ...context, data: { limit: '10' } });
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-paginated-1/,
       );
     });
 
@@ -1131,6 +1350,160 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.findById).to.have.been.calledOnce;
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+  });
+
+  describe('getIdentity (GET /sites/:siteId/identity)', () => {
+    const ORG_ID = '11111111-1111-4111-b111-111111111111';
+
+    function makeS2SConsumer({ clientId = 'svc-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
+      return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
+    }
+
+    function makeFreshConsumer({
+      id = 'consumer-id-1',
+      capabilities = ['site:readAll'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) {
+      return {
+        getId: () => id,
+        getCapabilities: () => capabilities,
+        getStatus: () => status,
+        isRevoked: () => revoked,
+      };
+    }
+
+    it('admin: returns the site identity and resolves imsOrgId via the org join', async () => {
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => 'ABC123DEF456@AdobeOrg' });
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Site.findById).to.have.been.calledOnceWith(SITE_IDS[0]);
+      expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith(ORG_ID);
+      expect(body).to.deep.equal({
+        siteId: SITE_IDS[0],
+        organizationId: ORG_ID,
+        imsOrgId: 'ABC123DEF456@AdobeOrg',
+        baseURL: 'https://site1.com',
+        deliveryType: 'aem_edge',
+      });
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] GET \/sites\/:siteId\/identity granted via admin bypass siteId=.* requestId=unknown/,
+      );
+    });
+
+    it('returns 404 for an unknown site without touching the org lookup', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Site not found');
+      expect(mockDataAccess.Organization.findById).to.not.have.been.called;
+    });
+
+    it('returns 400 for an invalid site id', async () => {
+      const result = await sitesController.getIdentity({ params: { siteId: 'not-a-uuid' } });
+
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+    });
+
+    it('returns 200 with imsOrgId null when the owning org has no imsOrgId', async () => {
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => null });
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.organizationId).to.equal(ORG_ID);
+      expect(body.imsOrgId).to.equal(null);
+    });
+
+    it('returns 200 with imsOrgId null when the organizationId is orphaned (org not found)', async () => {
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith(ORG_ID);
+      expect(body.organizationId).to.equal(ORG_ID);
+      expect(body.imsOrgId).to.equal(null);
+    });
+
+    it('returns 200 with null ids when the site has no organization', async () => {
+      sites[0].getOrganizationId = () => undefined;
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.organizationId).to.equal(null);
+      expect(body.imsOrgId).to.equal(null);
+      expect(mockDataAccess.Organization.findById).to.not.have.been.called;
+    });
+
+    it('propagates a data-access failure to the error wrapper (no silent swallow)', async () => {
+      // Documents the contract: like getByID, getIdentity does not try/catch the data
+      // layer - a thrown Organization.findById propagates and is mapped to a 500 by the
+      // middleware error wrapper rather than being swallowed into a misleading 200.
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.rejects(new Error('boom'));
+
+      await expect(
+        sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } }),
+      ).to.be.rejectedWith('boom');
+    });
+
+    it('grants access to an S2S consumer holding site:readAll', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-identity-1' };
+      mockDataAccess.Consumer = {
+        findByClientIdAndImsOrgId: sandbox.stub().resolves(makeFreshConsumer()),
+      };
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => 'ABC123DEF456@AdobeOrg' });
+
+      const result = await sitesController.getIdentity({
+        ...context, params: { siteId: SITE_IDS[0] },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.imsOrgId).to.equal('ABC123DEF456@AdobeOrg');
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[s2s-readall\] GET \/sites\/:siteId\/identity granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll siteId=.* requestId=req-identity-1/,
+      );
+    });
+
+    it('denies an S2S consumer that only holds site:read', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer = {
+        findByClientIdAndImsOrgId: sandbox.stub().resolves(makeFreshConsumer({ capabilities: ['site:read'] })),
+      };
+
+      const result = await sitesController.getIdentity({
+        ...context, params: { siteId: SITE_IDS[0] },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied GET \/sites\/:siteId\/identity - reason=missing-capability clientId=svc-1 consumerId=consumer-id-1/,
+      );
+    });
   });
 
   it('gets a site by base URL', async () => {
@@ -4248,22 +4621,65 @@ describe('Sites Controller', () => {
     });
   });
 
-  describe('isPrimaryLocale, language, and region updates', () => {
-    it('updates site with projectId', async () => {
+  describe('projectId, isPrimaryLocale, language, and region updates', () => {
+    it('returns forbidden when trying to update projectId', async () => {
       const site = sites[0];
       const currentProjectId = '550e8400-e29b-41d4-a716-446655440000';
       const newProjectId = '650e8400-e29b-41d4-a716-446655440000';
       site.getProjectId = sandbox.stub().returns(currentProjectId);
       site.setProjectId = sandbox.stub();
-      site.save = sandbox.stub().resolves(site);
+      site.save = sandbox.spy(site.save);
 
       const response = await sitesController.updateSite({
         params: { siteId: SITE_IDS[0] },
         data: { projectId: newProjectId },
         ...defaultAuthAttributes,
       });
+      const error = await response.json();
 
-      expect(site.setProjectId).to.have.been.calledWith(newProjectId);
+      expect(site.setProjectId).to.have.not.been.called;
+      expect(site.save).to.have.not.been.called;
+      expect(response.status).to.equal(403);
+      expect(error).to.have.property('message', 'Updating project ID is not allowed');
+    });
+
+    it('ignores projectId when it matches the current projectId', async () => {
+      const site = sites[0];
+      const currentProjectId = '550e8400-e29b-41d4-a716-446655440000';
+      site.getProjectId = sandbox.stub().returns(currentProjectId);
+      site.setProjectId = sandbox.stub();
+      site.getIsPrimaryLocale = sandbox.stub().returns(false);
+      site.setIsPrimaryLocale = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { projectId: currentProjectId, isPrimaryLocale: true },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setProjectId).to.have.not.been.called;
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
+    it('ignores an empty-string projectId (guarded by hasText)', async () => {
+      const site = sites[0];
+      site.getProjectId = sandbox.stub().returns('550e8400-e29b-41d4-a716-446655440000');
+      site.setProjectId = sandbox.stub();
+      site.getIsPrimaryLocale = sandbox.stub().returns(false);
+      site.setIsPrimaryLocale = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { projectId: '', isPrimaryLocale: true },
+        ...defaultAuthAttributes,
+      });
+
+      // Empty string is not "text", so the guard is skipped — no 403 — and the
+      // other field still saves.
+      expect(site.setProjectId).to.have.not.been.called;
       expect(site.save).to.have.been.calledOnce;
       expect(response.status).to.equal(200);
     });

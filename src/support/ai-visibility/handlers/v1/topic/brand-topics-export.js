@@ -63,33 +63,42 @@ export async function handleBrandTopicsExport(sp, clients) {
     PROMPT_CATEGORY_ENUM.CITES_TARGET,
   ];
 
-  const topicsRequest = fromJson(
-    BrandTopicsRequestSchema,
-    {
-      country,
-      llm: engine,
-      target: { domain, name: domain },
-      order: {
-        by: sortBy,
-        direction: sortDirection,
+  let exportRequest;
+  try {
+    const topicsRequest = fromJson(
+      BrandTopicsRequestSchema,
+      {
+        country,
+        llm: engine,
+        target: { domain, name: domain },
+        order: {
+          by: sortBy,
+          direction: sortDirection,
+        },
+        range: { limit, offset },
+        categories,
+        dimension_filter_ql: dimensionFilterQl,
+        metric_filter_ql: metricFilterQl,
+        target_date: date,
       },
-      range: { limit, offset },
-      categories,
-      dimension_filter_ql: dimensionFilterQl,
-      metric_filter_ql: metricFilterQl,
-      target_date: date,
-    },
-    PROTO_FROM_JSON,
-  );
+      PROTO_FROM_JSON,
+    );
 
-  const exportRequest = fromJson(
-    BrandTopicsExportRequestSchema,
-    {
-      request: topicsRequest,
-      format: EXPORT_FILE_FORMAT_ENUM.CSV,
-    },
-    PROTO_FROM_JSON,
-  );
+    exportRequest = fromJson(
+      BrandTopicsExportRequestSchema,
+      {
+        request: topicsRequest,
+        format: EXPORT_FILE_FORMAT_ENUM.CSV,
+      },
+      PROTO_FROM_JSON,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid brand topics export request';
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message },
+    };
+  }
 
   try {
     const exportMessage = await clients.topicClient.brandTopicsExport(exportRequest);

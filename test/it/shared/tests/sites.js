@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import { expectISOTimestamp } from '../helpers/assertions.js';
 import {
   ORG_1_ID,
+  ORG_1_IMS_ORG_ID,
   ORG_2_ID,
   SITE_1_ID,
   SITE_1_BASE_URL,
@@ -25,6 +26,7 @@ import {
   SITE_NEW_LLMO_ID,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
+  PROJECT_2_ID,
 } from '../seed-ids.js';
 
 // LLMO-4176 mode-resolution test sites are seeded with intentionally
@@ -90,7 +92,8 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
-        // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
+        // Legacy path (no limit/cursor params) excludes DEFAULT_ORGANIZATION_ID (ORG_1)
+        // and ORGANIZATION_ID_FRIENDS_FAMILY sites to stay under 6MB Lambda limit.
         // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3) + SITE_LEGACY_LLMO + SITE_NEW_LLMO
         // (LLMO-4176 mode-resolution test fixtures, neither under ORG_1).
         expect(res.body).to.be.an('array').with.lengthOf(4);
@@ -141,6 +144,31 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.s2sConsumerUnknown.get('/sites');
         expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns the paginated envelope and advances via cursor', async () => {
+        // Pins both the controller↔DAL contract for the `returnCursor: true` shape AND
+        // the cursor round-trip that pagination exists to provide. Seed has 6 sites
+        // total (paginated branch bypasses the org exclusion), so limit=2 MUST yield
+        // exactly 2 sites with hasMore=true on page 1.
+        const http = getHttpClient();
+        const page1 = await http.admin.get('/sites?limit=2');
+        expect(page1.status).to.equal(200);
+        expect(page1.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(page1.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page1.body.pagination).to.include({ limit: 2, hasMore: true });
+        expect(page1.body.pagination.cursor).to.be.a('string').and.not.empty;
+        page1.body.sites
+          .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
+          .forEach((s) => expectSiteListDto(s));
+
+        // Page 2 must advance — no overlap with page 1, same envelope shape.
+        const page2 = await http.admin.get(`/sites?limit=2&cursor=${encodeURIComponent(page1.body.pagination.cursor)}`);
+        expect(page2.status).to.equal(200);
+        expect(page2.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page2.body.pagination.limit).to.equal(2);
+        const page1Ids = new Set(page1.body.sites.map((s) => s.id));
+        page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
       });
     });
 
@@ -238,6 +266,67 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.readOnlyAdmin.post('/sites', { baseURL: 'https://ro-admin-test.example.com' });
         expect(res.status).to.equal(403);
+      });
+    });
+
+    describe('GET /sites/:siteId/identity', () => {
+      // readAll-class single-site route: returns only the routing identity and resolves
+      // imsOrgId via the site->organization join. Gated on site:readAll, NOT site:read,
+      // so it is cross-tenant and there is no hasAccess(site) per-entity check.
+      // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
+
+      it('admin: returns the routing identity with the resolved imsOrgId', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.deep.equal({
+          siteId: SITE_1_ID,
+          organizationId: ORG_1_ID,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+          baseURL: SITE_1_BASE_URL,
+          deliveryType: 'aem_edge',
+        });
+      });
+
+      it('s2sConsumerReadAll: returns the identity for any site (site:readAll, cross-tenant)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(200);
+        // Full-shape assertion (like the admin case) so an accidental extra field
+        // leaking through the readAll path is caught, not just siteId/imsOrgId.
+        expect(res.body).to.deep.equal({
+          siteId: SITE_1_ID,
+          organizationId: ORG_1_ID,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+          baseURL: SITE_1_BASE_URL,
+          deliveryType: 'aem_edge',
+        });
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no site:readAll)', async () => {
+        // Layer 1 (s2sAuthWrapper) denies — the route maps to site:readAll which
+        // CONSUMER_1 does NOT hold.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerUnknown: returns 403 (no Consumer row for the (clientId, imsOrgId) pair)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerUnknown.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${NON_EXISTENT_SITE_ID}/identity`);
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 for an invalid UUID', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/not-a-uuid/identity');
+        expect(res.status).to.equal(400);
       });
     });
 
@@ -471,6 +560,17 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.patch(`/sites/${SITE_1_ID}`, {
           organizationId: ORG_2_ID,
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 403 when trying to change projectId', async () => {
+        // Re-parenting a site to a project in another org via this endpoint is
+        // disallowed (projects are org-scoped) — SITES-46200. SITE_1 belongs to
+        // PROJECT_1_ID, so patching it to PROJECT_2_ID must be rejected.
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_1_ID}`, {
+          projectId: PROJECT_2_ID,
         });
         expect(res.status).to.equal(403);
       });

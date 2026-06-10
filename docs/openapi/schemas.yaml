@@ -704,6 +704,38 @@ Site:
         outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
+SiteIdentity:
+  type: object
+  description: |
+    The minimal routing identity for a single site, returned by
+    `GET /sites/{siteId}/identity`. Exposes only what a platform `site:readAll` consumer
+    needs to resolve a site's owning organization and mint a customer-scoped token.
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    organizationId:
+      description: The ID of the organization this site belongs to, or null if unresolved
+      oneOf:
+        - $ref: '#/Id'
+        - type: 'null'
+    imsOrgId:
+      description: The Adobe IMS organization ID of the owning organization, or null if unresolved
+      oneOf:
+        - $ref: '#/ImsOrganizationId'
+        - type: 'null'
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+    deliveryType:
+      description: The type of the delivery this site is using
+      $ref: '#/DeliveryType'
+  example:
+    siteId: '7511d4b9-1234-4abc-8def-0123456789ab'
+    organizationId: '160da889-5678-4cde-9f01-23456789abcd'
+    imsOrgId: '8C6043F15F43B6390A49401A@AdobeOrg'
+    baseURL: 'https://example.com'
+    deliveryType: 'aem_edge'
 SiteWithLatestAudit:
   allOf:
     - $ref: '#/Site'
@@ -740,6 +772,66 @@ SiteList:
   type: array
   items:
     $ref: './schemas.yaml#/Site'
+SiteListItem:
+  type: object
+  description: |
+    Slim site shape returned by list endpoints (e.g. the paginated `GET /sites`).
+    Mirrors `SiteDto.toListJSON` — drops the heaviest and least-used fields from the
+    full `Site` shape to keep list payloads small.
+  properties:
+    id:
+      $ref: './schemas.yaml#/Id'
+    baseURL:
+      $ref: './schemas.yaml#/URL'
+    name:
+      type: [string, 'null']
+    organizationId:
+      $ref: './schemas.yaml#/Id'
+    deliveryType:
+      type: string
+      enum: [aem_edge, aem_cs, aem_ams, other]
+    gitHubURL:
+      type: [string, 'null']
+    isLive:
+      type: boolean
+    isSandbox:
+      type: boolean
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    region:
+      type: [string, 'null']
+    config:
+      type: [object, 'null']
+      description: |
+        Slim configuration subset returned by `ConfigDto.toListJSON` (selected llmo,
+        edgeOptimizeConfig, slack, brandConfig, fetchConfig, handlers fields).
+      additionalProperties: true
+  required:
+    - id
+    - baseURL
+    - organizationId
+    - deliveryType
+    - isLive
+    - isSandbox
+    - createdAt
+    - updatedAt
+SitePagedResponse:
+  type: object
+  description: Paginated response for sites (returned when `limit` or `cursor` query parameter is provided)
+  properties:
+    sites:
+      type: array
+      items:
+        $ref: './schemas.yaml#/SiteListItem'
+    pagination:
+      $ref: './schemas.yaml#/PaginationMetadata'
+  required:
+    - sites
+    - pagination
 SiteWithLatestAuditList:
   type: array
   items:
@@ -3300,7 +3392,11 @@ SuggestionSummary:
     - rank
 PaginationMetadata:
   type: object
-  description: Metadata for paginated responses
+  description: |
+    Canonical pagination envelope metadata for cursor-based list endpoints. Reuse this
+    schema (rather than inlining `limit`/`cursor`/`hasMore`) in every paginated list
+    response so the envelope shape stays consistent across the API. Already used by
+    `SitePagedResponse` and `SuggestionPagedResponse`.
   properties:
     limit:
       description: The maximum number of items returned in this page
@@ -3308,7 +3404,7 @@ PaginationMetadata:
       example: 100
     cursor:
       description: The cursor to use for fetching the next page, or null if there are no more pages
-      type: string
+      type: [string, 'null']
       example: "eyJzayI6IjIwMjQtMDEtMTVUMTI6MzA6MDBaIiwiaWQiOiIxMjNlNDU2Ny1lODliLTEyZDMtYTQ1Ni00MjY2MTQxNzQwMDAifQ=="
     hasMore:
       description: Indicates whether there are more pages available
@@ -6182,7 +6278,8 @@ V2Prompt:
       description: Regions where this prompt is applicable
     categoryId:
       type: string
-      description: Category business key
+      format: uuid
+      description: Category UUID (categories.id)
     topicId:
       type: string
       description: Topic business key
@@ -6199,6 +6296,21 @@ V2Prompt:
       description: The source system or process that created the prompt
       example: "config"
       default: "config"
+    intent:
+      type: [string, 'null']
+      description: >-
+        Canonical search-intent bucket persisted for the prompt, or null when
+        unknown/unclassified. One of the canonical buckets (mirrors DRS prompt
+        generation).
+      enum:
+        - informational
+        - instructional
+        - comparative
+        - transactional
+        - planning
+        - delegation
+        - null
+      example: informational
     updatedAt:
       $ref: '#/DateTime'
     updatedBy:
@@ -6214,14 +6326,17 @@ V2Prompt:
       properties:
         id:
           type: string
+          format: uuid
           description: |
-            Currently the UUID PK (categories.id) for backward compat —
-            aligning this to the category_id business key is a deferred
-            breaking change. Use `uuid` for FK linkage today.
+            UUID primary key (categories.id). The sole category identifier
+            (the legacy category_id business key was retired — LLMO-5515).
+            `id` and `uuid` carry the same value; either works for FK linkage.
         uuid:
           type: string
           format: uuid
-          description: UUID primary key (categories.id)
+          description: |
+            UUID primary key (categories.id). Alias of `id`, kept for
+            backward compatibility.
         name:
           type: string
         origin:
@@ -6278,6 +6393,21 @@ V2PromptInput:
       type: string
       description: The source system or process that created the prompt
       default: "config"
+    intent:
+      type: string
+      description: >-
+        Optional search-intent bucket for the prompt. Normalized on write:
+        the value is lowercased, legacy aliases are remapped
+        (`statistical`/`navigational` -> `informational`,
+        `commercial` -> `transactional`), and the result is validated against
+        the canonical buckets. An absent, empty, or (post-remap) invalid
+        value is stored as null (NULL) — it is NOT coerced to a default
+        bucket. Canonical buckets (mirror DRS prompt generation):
+        `informational`, `instructional`, `comparative`, `transactional`,
+        `planning`, `delegation`. No `enum` constraint is applied to the
+        input: legacy aliases (`statistical`, `navigational`, `commercial`)
+        are accepted and normalized on write.
+      example: informational
 
 V2PromptBulkDeleteRequest:
   type: object
@@ -7399,12 +7529,16 @@ V2Category:
   properties:
     id:
       type: string
-      description: Category business key (category_id slug). Stable once assigned.
-      example: 'baseurl-discovery-research'
+      format: uuid
+      description: |
+        UUID primary key (categories.id) — the sole category identifier.
+        Use this value on the CRUD path params and the `?categoryId=` prompt
+        filter. The legacy category_id business key was retired (LLMO-5515).
+      example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
     uuid:
       type: string
       format: uuid
-      description: UUID primary key (categories.id)
+      description: UUID primary key (categories.id). Alias of `id`.
     name:
       type: string
       description: |
@@ -7447,12 +7581,6 @@ V2CategoryInput:
   required:
     - name
   properties:
-    id:
-      type: string
-      description: |
-        Client-supplied slug. Used only when inserting a brand-new row; for
-        existing rows the stored `id` is preserved (FK stability).
-      example: 'discovery-research'
     name:
       type: string
       description: Human-readable category name. Canonicalized on write.
@@ -9323,6 +9451,16 @@ AiVisibilitySemrushCountry:
     - UY
     - ZA
     - SA
+    - HK
+    - ID
+    - KR
+    - MY
+    - PH
+    - SG
+    - TH
+    - TR
+    - TW
+    - VN
     - WORLDWIDE
 
 AiVisibilitySemrushTopicIntent:

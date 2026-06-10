@@ -40,6 +40,7 @@ import getLlmoConfigSummary from './commands/get-llmo-config-summary.js';
 import getLlmoOpportunityUsage from './commands/get-llmo-opportunity-usage.js';
 import runBrandProfile from './commands/run-brand-profile.js';
 import ensureEntitlementSite from './commands/ensure-entitlement-site.js';
+import ensurePreflight from './commands/ensure-preflight.js';
 import ensureEntitlementImsOrg from './commands/ensure-entitlement-imsorg.js';
 import getEntitlementSite from './commands/get-entitlement-site.js';
 import getEntitlementImsOrg from './commands/get-entitlement-imsorg.js';
@@ -96,6 +97,7 @@ export default (context) => [
   getLlmoOpportunityUsage(context),
   runBrandProfile(context),
   ensureEntitlementSite(context),
+  ensurePreflight(context),
   ensureEntitlementImsOrg(context),
   getEntitlementSite(context),
   getEntitlementImsOrg(context),
