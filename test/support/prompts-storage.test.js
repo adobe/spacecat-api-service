@@ -574,6 +574,47 @@ describe('prompts-storage', () => {
       expect(result.total).to.equal(0);
     });
 
+    it('fails closed (empty page) when a topicId filter does not resolve', async () => {
+      // Regression guard for LLMO-5515: symmetric with the categoryId guard
+      // above. A topicId that does not resolve to a topic in this org must
+      // return an EMPTY page, never the full unfiltered set. We use a
+      // valid-but-unknown UUID so the topics lookup actually fires and
+      // returns no row.
+      const unknownUuid = 'd4444444-4444-4444-b444-444444444444';
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Prompt',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: null, error: null });
+          }
+          return makeChain({ data: [row], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        topicId: unknownUuid,
+        postgrestClient: client,
+      });
+      expect(result.items).to.have.lengthOf(0);
+      expect(result.total).to.equal(0);
+    });
+
     it('applies categoryId and topicId filters when provided', async () => {
       const categoryUuid = 'a1111111-1111-4111-b111-111111111111';
       const row = {
