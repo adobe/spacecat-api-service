@@ -292,8 +292,15 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.s2sConsumerReadAll.get(`/sites/${SITE_1_ID}/identity`);
         expect(res.status).to.equal(200);
-        expect(res.body.siteId).to.equal(SITE_1_ID);
-        expect(res.body.imsOrgId).to.equal(ORG_1_IMS_ORG_ID);
+        // Full-shape assertion (like the admin case) so an accidental extra field
+        // leaking through the readAll path is caught, not just siteId/imsOrgId.
+        expect(res.body).to.deep.equal({
+          siteId: SITE_1_ID,
+          organizationId: ORG_1_ID,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+          baseURL: SITE_1_BASE_URL,
+          deliveryType: 'aem_edge',
+        });
       });
 
       it('s2sConsumerReadOnly: returns 403 (only has site:read, no site:readAll)', async () => {

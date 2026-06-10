@@ -1450,6 +1450,18 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Organization.findById).to.not.have.been.called;
     });
 
+    it('propagates a data-access failure to the error wrapper (no silent swallow)', async () => {
+      // Documents the contract: like getByID, getIdentity does not try/catch the data
+      // layer - a thrown Organization.findById propagates and is mapped to a 500 by the
+      // middleware error wrapper rather than being swallowed into a misleading 200.
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.rejects(new Error('boom'));
+
+      await expect(
+        sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } }),
+      ).to.be.rejectedWith('boom');
+    });
+
     it('grants access to an S2S consumer holding site:readAll', async () => {
       context.attributes.authInfo.withProfile({ is_admin: false });
       context.s2sConsumer = makeS2SConsumer();
