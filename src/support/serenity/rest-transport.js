@@ -579,5 +579,24 @@ export function createSerenityTransport({ env, imsToken }) {
       const url = `${root}${aioBrandUrlsPath(workspaceId, projectId, benchmarkId)}`;
       return request('DELETE', url, imsToken, { ids });
     },
+
+    /**
+     * POST /apis/v4-raw/external-api/v1/workspaces/{ws}/products/ai/elements/{elementId}
+     *
+     * Queries the Brand Presence reporting API for citation data. The
+     * `elementId` is a Semrush-side concept that identifies the BP report
+     * element; it is stored in `env.SEMRUSH_BP_ELEMENT_ID` (sourced from
+     * Vault, same as SEMRUSH_PROJECTS_BASE_URL). The `renderData` object
+     * carries all filter parameters (project_id, URL fragment, domain,
+     * date range, etc.) and is forwarded verbatim as `render_data` in the
+     * request body.
+     *
+     * Returns the raw upstream JSON. The caller (brand-presence handler) is
+     * responsible for interpreting the response shape.
+     */
+    async queryBrandPresenceResults(semrushWorkspaceId, elementId, renderData) {
+      const url = `${root}/apis/v4-raw/external-api/v1/workspaces/${enc(semrushWorkspaceId)}/products/ai/elements/${enc(elementId)}`;
+      return request('POST', url, imsToken, { render_data: renderData });
+    },
   };
 }
