@@ -714,12 +714,16 @@ export async function upsertPrompts({
       updated_by: updatedBy,
     };
 
-    if (match && match.status !== 'active') {
-      // eslint-disable-next-line no-continue
-      continue;
-    }
-
     if (match) {
+      // Restore-on-match: when an incoming prompt matches an existing row we
+      // update that row. This includes rows that were previously soft-deleted
+      // (status !== 'active') — the update sets status back to 'active' (via
+      // `row.status`, default 'active'), restoring the prompt. Previously a
+      // soft-deleted match was dropped entirely (no insert, no update, no
+      // restore), so re-importing an identical prompt silently no-oped while
+      // the API still returned 201 with created:0/skipped:N. Excluding the
+      // restore left brands with only soft-deleted rows unable to re-create
+      // identical prompts.
       toUpdate.push({ ...row, id: match.id });
       processed.push({ ...row, prompt_id: promptId });
     } else {
