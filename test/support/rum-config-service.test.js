@@ -21,11 +21,9 @@ describe('rum-config-service', () => {
   const sandbox = sinon.createSandbox();
 
   let updateRumConfig;
-  let autoDetectOverrideBaseURL;
   let retrieveDomainkeyStub;
   let rumApiClientStub;
   let toDynamoItemStub;
-  let fetchStub;
   let site;
   let siteConfig;
   let context;
@@ -34,18 +32,13 @@ describe('rum-config-service', () => {
     retrieveDomainkeyStub = sandbox.stub();
     rumApiClientStub = { retrieveDomainkey: retrieveDomainkeyStub };
     toDynamoItemStub = sandbox.stub().returns({});
-    fetchStub = sandbox.stub();
 
-    ({ updateRumConfig, autoDetectOverrideBaseURL } = await esmock('../../src/support/rum-config-service.js', {
+    ({ updateRumConfig } = await esmock('../../src/support/rum-config-service.js', {
       '@adobe/spacecat-shared-rum-api-client': {
         default: { createFrom: () => rumApiClientStub },
       },
       '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
         Config: { toDynamoItem: toDynamoItemStub },
-      },
-      '@adobe/spacecat-shared-utils': {
-        hasText: (v) => typeof v === 'string' && v.trim().length > 0,
-        tracingFetch: fetchStub,
       },
     }));
   });
@@ -55,8 +48,6 @@ describe('rum-config-service', () => {
 
     siteConfig = {
       updateRumConfig: sandbox.stub(),
-      getFetchConfig: sandbox.stub().returns({}),
-      updateFetchConfig: sandbox.stub(),
     };
 
     site = {
@@ -128,94 +119,6 @@ describe('rum-config-service', () => {
       await updateRumConfig(site, context);
 
       expect(retrieveDomainkeyStub).to.have.been.calledOnceWith('example.com');
-    });
-  });
-
-  describe('autoDetectOverrideBaseURL', () => {
-    it('no-ops when overrideBaseURL is already set', async () => {
-      siteConfig.getFetchConfig.returns({ overrideBaseURL: 'https://www.example.com' });
-
-      await autoDetectOverrideBaseURL(site, context);
-
-      expect(fetchStub).not.to.have.been.called;
-      expect(site.save).not.to.have.been.called;
-    });
-
-    it('no-ops when site has a non-www subdomain', async () => {
-      const subSite = {
-        ...site,
-        getBaseURL: () => 'https://blog.example.com',
-        getConfig: () => ({ getFetchConfig: sandbox.stub().returns({}) }),
-      };
-
-      await autoDetectOverrideBaseURL(subSite, context);
-
-      expect(fetchStub).not.to.have.been.called;
-      expect(subSite.save).not.to.have.been.called;
-    });
-
-    it('no-ops when baseURL is reachable', async () => {
-      fetchStub.resolves({});
-
-      await autoDetectOverrideBaseURL(site, context);
-
-      expect(fetchStub).to.have.been.calledOnce;
-      expect(site.save).not.to.have.been.called;
-    });
-
-    it('sets overrideBaseURL when baseURL is unreachable but www-toggled variant is reachable', async () => {
-      fetchStub.withArgs('https://example.com', sinon.match.any).rejects(new Error('ECONNREFUSED'));
-      fetchStub.withArgs('https://www.example.com', sinon.match.any).resolves({});
-
-      await autoDetectOverrideBaseURL(site, context);
-
-      expect(siteConfig.updateFetchConfig).to.have.been.calledOnceWith({ overrideBaseURL: 'https://www.example.com' });
-      expect(toDynamoItemStub).to.have.been.calledOnceWith(siteConfig);
-      expect(site.setConfig).to.have.been.calledOnce;
-      expect(site.save).to.have.been.calledOnce;
-    });
-
-    it('sets overrideBaseURL merging existing fetchConfig fields', async () => {
-      siteConfig.getFetchConfig.returns({ someExistingField: 'value' });
-      fetchStub.withArgs('https://example.com', sinon.match.any).rejects(new Error('ECONNREFUSED'));
-      fetchStub.withArgs('https://www.example.com', sinon.match.any).resolves({});
-
-      await autoDetectOverrideBaseURL(site, context);
-
-      expect(siteConfig.updateFetchConfig).to.have.been.calledOnceWith({
-        someExistingField: 'value',
-        overrideBaseURL: 'https://www.example.com',
-      });
-    });
-
-    it('no-ops when both baseURL and www-toggled are unreachable', async () => {
-      fetchStub.rejects(new Error('ECONNREFUSED'));
-
-      await autoDetectOverrideBaseURL(site, context);
-
-      expect(siteConfig.updateFetchConfig).not.to.have.been.called;
-      expect(site.save).not.to.have.been.called;
-    });
-
-    it('works with www-prefixed baseURL, toggling to apex', async () => {
-      const wwwSiteConfig = {
-        getFetchConfig: sandbox.stub().returns({}),
-        updateFetchConfig: sandbox.stub(),
-      };
-      const wwwSite = {
-        ...site,
-        getBaseURL: () => 'https://www.example.com',
-        getConfig: () => wwwSiteConfig,
-        setConfig: sandbox.stub(),
-        save: sandbox.stub().resolves(),
-      };
-      fetchStub.withArgs('https://www.example.com', sinon.match.any).rejects(new Error('ECONNREFUSED'));
-      fetchStub.withArgs('https://example.com', sinon.match.any).resolves({});
-
-      await autoDetectOverrideBaseURL(wwwSite, context);
-
-      expect(wwwSiteConfig.updateFetchConfig).to.have.been.calledOnceWith({ overrideBaseURL: 'https://example.com' });
-      expect(wwwSite.save).to.have.been.calledOnce;
     });
   });
 });
