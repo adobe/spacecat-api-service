@@ -340,6 +340,10 @@ const routeRequiredCapabilities = {
   // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
   // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
   'GET /sites': CAP_SITE_READ_ALL,
+  // GET /sites/:siteId/identity is a readAll-class single-site route: it returns only the
+  // routing identity (org ids, baseURL, deliveryType) a site:readAll holder can already
+  // derive from the bulk list + org join, so it is gated on site:readAll, not site:read.
+  'GET /sites/:siteId/identity': CAP_SITE_READ_ALL,
   'POST /sites': CAP_SITE_CREATE,
   'POST /sites/detect/jobs': 'site:write',
   'GET /sites/detect/jobs/:jobId': 'site:read',

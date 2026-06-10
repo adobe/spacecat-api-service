@@ -1,3 +1,38 @@
+## [1.566.1](https://github.com/adobe/spacecat-api-service/compare/v1.566.0...v1.566.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **llmo:** retire categories.category_id business key; resolve prompt category filter by UUID (LLMO-5515) ([#2587](https://github.com/adobe/spacecat-api-service/issues/2587)) ([72ed9ae](https://github.com/adobe/spacecat-api-service/commit/72ed9aeaf3436227adb58750db08d912c9248e78))
+
+# [1.566.0](https://github.com/adobe/spacecat-api-service/compare/v1.565.0...v1.566.0) (2026-06-10)
+
+
+### Features
+
+* **s2s:** single-site identity endpoint to bootstrap customer-scoped tokens (GET /sites/:siteId/identity) ([#2586](https://github.com/adobe/spacecat-api-service/issues/2586)) ([c94a698](https://github.com/adobe/spacecat-api-service/commit/c94a698cc631566c665a8ec0048f8e9b5ed575fc)), closes [adobe/spacecat-api-service#2585](https://github.com/adobe/spacecat-api-service/issues/2585)
+
+# [1.565.0](https://github.com/adobe/spacecat-api-service/compare/v1.564.1...v1.565.0) (2026-06-10)
+
+
+### Features
+
+* **prompts:** classify intent on write for human-added prompts ([#2565](https://github.com/adobe/spacecat-api-service/issues/2565)) ([479170b](https://github.com/adobe/spacecat-api-service/commit/479170b7e0aa636941a382b06861f4f438d4a204)), closes [#2562](https://github.com/adobe/spacecat-api-service/issues/2562) [#2562](https://github.com/adobe/spacecat-api-service/issues/2562)
+
+## [1.564.1](https://github.com/adobe/spacecat-api-service/compare/v1.564.0...v1.564.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* generate fallback slug for all-multibyte category names | LLMO-5473 ([#2578](https://github.com/adobe/spacecat-api-service/issues/2578)) ([c98468c](https://github.com/adobe/spacecat-api-service/commit/c98468ce857eff4986ed8bebf96fb1b5fb420953))
+
+# [1.564.0](https://github.com/adobe/spacecat-api-service/compare/v1.563.1...v1.564.0) (2026-06-09)
+
+
+### Features
+
+* adding new `ensure preflight` slack command ([#2561](https://github.com/adobe/spacecat-api-service/issues/2561)) ([77a0b5e](https://github.com/adobe/spacecat-api-service/commit/77a0b5e1ef52fa195b9ba5ab072f6c54ecba3f03)), closes [#1674](https://github.com/adobe/spacecat-api-service/issues/1674)
+
 ## [1.563.1](https://github.com/adobe/spacecat-api-service/compare/v1.563.0...v1.563.1) (2026-06-09)
 
 
