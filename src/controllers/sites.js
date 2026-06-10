@@ -692,6 +692,9 @@ function SitesController(ctx, log, env) {
 
     if (s2sResult.allowed) {
       log.info(`[s2s-readall] GET /sites/:siteId/identity granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} siteId=${siteId} requestId=${requestId}`);
+    } else if (isAdmin) {
+      // This is a cross-tenant readAll-class route; log admin access for auditability too.
+      log.info(`[acl] GET /sites/:siteId/identity granted via admin bypass siteId=${siteId} requestId=${requestId}`);
     }
 
     return ok(SiteIdentityDto.toJSON(site, imsOrgId));

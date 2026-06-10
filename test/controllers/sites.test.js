@@ -1390,6 +1390,9 @@ describe('Sites Controller', () => {
         baseURL: 'https://site1.com',
         deliveryType: 'aem_edge',
       });
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] GET \/sites\/:siteId\/identity granted via admin bypass siteId=.* requestId=unknown/,
+      );
     });
 
     it('returns 404 for an unknown site without touching the org lookup', async () => {
@@ -1418,6 +1421,19 @@ describe('Sites Controller', () => {
       const body = await result.json();
 
       expect(result.status).to.equal(200);
+      expect(body.organizationId).to.equal(ORG_ID);
+      expect(body.imsOrgId).to.equal(null);
+    });
+
+    it('returns 200 with imsOrgId null when the organizationId is orphaned (org not found)', async () => {
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith(ORG_ID);
       expect(body.organizationId).to.equal(ORG_ID);
       expect(body.imsOrgId).to.equal(null);
     });
