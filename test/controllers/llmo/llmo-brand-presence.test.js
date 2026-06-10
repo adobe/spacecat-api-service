@@ -299,6 +299,102 @@ describe('llmo-brand-presence', () => {
     sandbox.restore();
   });
 
+  // ── Row factories ────────────────────────────────────────────────────────────
+  // Provide full-row defaults so tests only specify fields relevant to what they assert.
+  function makeExecRow(overrides = {}) {
+    return {
+      topics: 'PDF',
+      prompt: 'q1',
+      region_code: 'US',
+      mentions: true,
+      citations: false,
+      visibility_score: 80,
+      position: '2',
+      sentiment: 'Positive',
+      volume: 100,
+      origin: 'human',
+      category_name: 'Cat',
+      execution_date: '2026-03-01',
+      url: '',
+      error_code: null,
+      ...overrides,
+    };
+  }
+
+  function makeDetailRow(overrides = {}) {
+    return makeExecRow({
+      id: 'e1',
+      topic_id: null,
+      prompt_id: null,
+      answer: '',
+      business_competitors: null,
+      detected_brand_mentions: null,
+      ...overrides,
+    });
+  }
+
+  function makeSovRow(overrides = {}) {
+    return {
+      topic: 'T',
+      brand_mentions: 1,
+      competitor_name: null,
+      competitor_mentions: 0,
+      volume: -20,
+      ...overrides,
+    };
+  }
+
+  // ── Shared withBrandPresenceAuth error tests ─────────────────────────────────
+  // withBrandPresenceAuth is the single shared wrapper used by all handlers below.
+  // These 4 error paths are tested once here rather than duplicated per handler.
+  describe('withBrandPresenceAuth', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when organization not found', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization not found: 0178a3f0-1234-7000-8000-000000000001');
+    });
+
+    it('returns badRequest and logs for generic errors', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Database connection failed'));
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Database connection failed');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Brand presence weeks error: Database connection failed',
+      );
+    });
+  });
+
   describe('strCompare', () => {
     it('handles null/undefined first arg (uses empty string fallback)', () => {
       expect(strCompare(null, 'b')).to.be.lessThan(0);
@@ -1118,46 +1214,6 @@ describe('llmo-brand-presence', () => {
   });
 
   describe('createFilterDimensionsHandler', () => {
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(getOrgAndValidateAccess).not.to.have.been.called;
-    });
-
-    it('returns forbidden when user has no org access', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
-
-      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when organization not found', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
-
-      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns badRequest when generic error is thrown', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Database connection failed'));
-
-      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(mockContext.log.error).to.have.been.calledWith('Brand presence filter-dimensions error: Database connection failed');
-    });
-
     it('returns dimensions with stats (prompt count + placeholder execution counts), origins, page_intents', async () => {
       mockContext.params.brandId = 'all';
       mockContext.data = {};
@@ -1905,52 +1961,6 @@ describe('llmo-brand-presence', () => {
   });
 
   describe('createBrandPresenceWeeksHandler', () => {
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(getOrgAndValidateAccess).not.to.have.been.called;
-    });
-
-    it('returns forbidden when user has no org access', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
-
-      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when organization not found', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
-
-      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Organization not found: 0178a3f0-1234-7000-8000-000000000001');
-    });
-
-    it('returns badRequest when generic error is thrown', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Database connection failed'));
-
-      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Database connection failed');
-      expect(mockContext.log.error).to.have.been.calledWith(
-        'Brand presence weeks error: Database connection failed',
-      );
-    });
-
     it('returns badRequest when RPC returns an error', async () => {
       const rpcError = { message: 'function rpc_brand_presence_execution_date_range does not exist' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
@@ -2092,75 +2102,29 @@ describe('llmo-brand-presence', () => {
       );
     });
 
-    it('defaults model to chatgpt-free when not provided', async () => {
-      const chainMock = createChainableMock(
-        { data: null, error: null },
-        null,
-        { data: [], error: null },
-      );
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.rpc).to.have.been.calledWith(
-        'rpc_brand_presence_execution_date_range',
-        sinon.match({ p_model: 'chatgpt-free' }),
-      );
-    });
-
-    it('uses model from query param when provided', async () => {
-      const chainMock = createChainableMock(
-        { data: null, error: null },
-        null,
-        { data: [], error: null },
-      );
-      mockContext.data = { model: 'gemini' };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.rpc).to.have.been.calledWith(
-        'rpc_brand_presence_execution_date_range',
-        sinon.match({ p_model: 'gemini' }),
-      );
-    });
-
-    it('maps model query alias "all" to chatgpt-paid', async () => {
-      const chainMock = createChainableMock(
-        { data: null, error: null },
-        null,
-        { data: [], error: null },
-      );
-      mockContext.data = { model: 'all' };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.rpc).to.have.been.calledWith(
-        'rpc_brand_presence_execution_date_range',
-        sinon.match({ p_model: 'chatgpt-paid' }),
-      );
-    });
-
-    it('maps legacy model query "chatgpt" to chatgpt-free', async () => {
-      const chainMock = createChainableMock(
-        { data: null, error: null },
-        null,
-        { data: [], error: null },
-      );
-      mockContext.data = { model: 'chatgpt' };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.rpc).to.have.been.calledWith(
-        'rpc_brand_presence_execution_date_range',
-        sinon.match({ p_model: 'chatgpt-free' }),
-      );
+    [
+      ['defaults model to chatgpt-free when not provided', undefined, 'chatgpt-free'],
+      ['uses model from query param when provided', 'gemini', 'gemini'],
+      ['maps model query alias "all" to chatgpt-paid', 'all', 'chatgpt-paid'],
+      ['maps legacy model query "chatgpt" to chatgpt-free', 'chatgpt', 'chatgpt-free'],
+    ].forEach(([desc, model, expectedModel]) => {
+      it(desc, async () => {
+        const chainMock = createChainableMock(
+          { data: null, error: null },
+          null,
+          { data: [], error: null },
+        );
+        if (model !== undefined) {
+          mockContext.data = { model };
+        }
+        mockContext.dataAccess.Site.postgrestService = chainMock;
+        const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+        await handler(mockContext);
+        expect(chainMock.rpc).to.have.been.calledWith(
+          'rpc_brand_presence_execution_date_range',
+          sinon.match({ p_model: expectedModel }),
+        );
+      });
     });
 
     it('does not reject unknown model string', async () => {
@@ -2466,20 +2430,18 @@ describe('llmo-brand-presence', () => {
 
     it('returns zero percentages when no prompts have sentiment', () => {
       const rows = [
-        {
+        makeExecRow({
           execution_date: '2026-03-09',
           sentiment: '',
           prompt: 'p1',
-          region_code: 'US',
           topics: 't1',
-        },
-        {
+        }),
+        makeExecRow({
           execution_date: '2026-03-09',
           sentiment: null,
           prompt: 'p2',
-          region_code: 'US',
           topics: 't1',
-        },
+        }),
       ];
       const result = aggregateSentimentByWeek(rows);
 
@@ -2528,55 +2490,6 @@ describe('llmo-brand-presence', () => {
         ...overrides,
       };
     }
-
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(getOrgAndValidateAccess).not.to.have.been.called;
-    });
-
-    it('returns forbidden when user has no org access', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
-
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when RPC returns error', async () => {
-      const rpcError = { message: 'relation does not exist' };
-      mockContext.dataAccess.Site.postgrestService = createChainableMock(
-        { data: [], error: null },
-        null,
-        { data: null, error: rpcError },
-      );
-
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(mockContext.log.error).to.have.been.calledWith(
-        'Brand presence sentiment-overview RPC error: relation does not exist',
-      );
-    });
-
-    it('returns badRequest when multiple categoryIds are provided', async () => {
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-      mockContext.data = {
-        categoryIds: '0178a3f0-1234-7000-8000-000000000001,0178a3f0-1234-7000-8000-000000000002',
-      };
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
-    });
 
     it('returns ok with weeklyTrends for valid data', async () => {
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
@@ -2810,58 +2723,23 @@ describe('llmo-brand-presence', () => {
       );
     });
 
-    it('passes region_code to RPC', async () => {
-      const chainMock = createChainableMock(
-        { data: [], error: null },
-        null,
-        makeRpcResult(),
-      );
-      mockContext.data = { region: 'US' };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.rpc).to.have.been.calledWith(
-        RPC_NAME,
-        sinon.match({ p_region_code: 'US' }),
-      );
-    });
-
-    it('passes origin to RPC', async () => {
-      const chainMock = createChainableMock(
-        { data: [], error: null },
-        null,
-        makeRpcResult(),
-      );
-      mockContext.data = { origin: 'human' };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.rpc).to.have.been.calledWith(
-        RPC_NAME,
-        sinon.match({ p_origin: 'human' }),
-      );
-    });
-
-    it('passes resolved model to RPC', async () => {
-      const chainMock = createChainableMock(
-        { data: [], error: null },
-        null,
-        makeRpcResult(),
-      );
-      mockContext.data = { platform: 'gemini' };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.rpc).to.have.been.calledWith(
-        RPC_NAME,
-        sinon.match({ p_model: 'gemini' }),
-      );
+    [
+      ['passes region_code to RPC', { region: 'US' }, { p_region_code: 'US' }],
+      ['passes origin to RPC', { origin: 'human' }, { p_origin: 'human' }],
+      ['passes resolved model to RPC', { platform: 'gemini' }, { p_model: 'gemini' }],
+    ].forEach(([desc, inputData, matchParams]) => {
+      it(desc, async () => {
+        const chainMock = createChainableMock(
+          { data: [], error: null },
+          null,
+          makeRpcResult(),
+        );
+        mockContext.data = inputData;
+        mockContext.dataAccess.Site.postgrestService = chainMock;
+        const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+        await handler(mockContext);
+        expect(chainMock.rpc).to.have.been.calledWith(RPC_NAME, sinon.match(matchParams));
+      });
     });
 
     it('returns badRequest when multiple region codes are provided', async () => {
@@ -2907,46 +2785,6 @@ describe('llmo-brand-presence', () => {
   });
 
   describe('createMarketTrackingTrendsHandler', () => {
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(getOrgAndValidateAccess).not.to.have.been.called;
-    });
-
-    it('returns badRequest when multiple regionCodes are provided', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      mockContext.data = { regionCodes: 'US,DE' };
-      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
-    });
-
-    it('returns forbidden when user has no org access', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
-
-      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when organization not found', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
-
-      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
     it('returns badRequest when RPC returns error', async () => {
       const rpcError = { message: 'function rpc_market_tracking_trends does not exist' };
       mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
@@ -3200,59 +3038,40 @@ describe('llmo-brand-presence', () => {
       );
     });
 
-    it('defaults model to chatgpt-free when not provided', async () => {
-      const client = createTableAwareMock();
-      mockContext.dataAccess.Site.postgrestService = client;
-
-      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(client.rpc).to.have.been.calledWith(
-        'rpc_market_tracking_trends',
-        sinon.match({ p_model: 'chatgpt-free' }),
-      );
+    [
+      ['defaults model to chatgpt-free when not provided', undefined, 'chatgpt-free'],
+      ['uses model from query param when provided', 'gemini', 'gemini'],
+    ].forEach(([desc, model, expectedModel]) => {
+      it(desc, async () => {
+        const client = createTableAwareMock();
+        if (model !== undefined) {
+          mockContext.data = { model };
+        }
+        mockContext.dataAccess.Site.postgrestService = client;
+        const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+        await handler(mockContext);
+        expect(client.rpc).to.have.been.calledWith(
+          'rpc_market_tracking_trends',
+          sinon.match({ p_model: expectedModel }),
+        );
+      });
     });
 
-    it('uses model from query param when provided', async () => {
-      const client = createTableAwareMock();
-      mockContext.data = { model: 'gemini' };
-      mockContext.dataAccess.Site.postgrestService = client;
-
-      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(client.rpc).to.have.been.calledWith(
-        'rpc_market_tracking_trends',
-        sinon.match({ p_model: 'gemini' }),
-      );
-    });
-
-    it('passes brandId as p_brand_id when single brand route', async () => {
-      const client = createTableAwareMock();
-      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
-      mockContext.dataAccess.Site.postgrestService = client;
-
-      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(client.rpc).to.have.been.calledWith(
-        'rpc_market_tracking_trends',
-        sinon.match({ p_brand_id: '0178a3f0-1234-7000-8000-000000000002' }),
-      );
-    });
-
-    it('passes null p_brand_id when brandId is "all"', async () => {
-      const client = createTableAwareMock();
-      mockContext.params.brandId = 'all';
-      mockContext.dataAccess.Site.postgrestService = client;
-
-      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(client.rpc).to.have.been.calledWith(
-        'rpc_market_tracking_trends',
-        sinon.match({ p_brand_id: null }),
-      );
+    [
+      ['passes brandId as p_brand_id when single brand route', '0178a3f0-1234-7000-8000-000000000002', '0178a3f0-1234-7000-8000-000000000002'],
+      ['passes null p_brand_id when brandId is "all"', 'all', null],
+    ].forEach(([desc, brandId, expectedBrandId]) => {
+      it(desc, async () => {
+        const client = createTableAwareMock();
+        mockContext.params.brandId = brandId;
+        mockContext.dataAccess.Site.postgrestService = client;
+        const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+        await handler(mockContext);
+        expect(client.rpc).to.have.been.calledWith(
+          'rpc_market_tracking_trends',
+          sinon.match({ p_brand_id: expectedBrandId }),
+        );
+      });
     });
 
     it('passes p_category_id when categoryId is a valid UUID', async () => {
@@ -3580,53 +3399,6 @@ describe('llmo-brand-presence', () => {
   });
 
   describe('createCompetitorSummaryHandler', () => {
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(getOrgAndValidateAccess).not.to.have.been.called;
-    });
-
-    it('returns badRequest when multiple categoryIds are provided', async () => {
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-      mockContext.data = {
-        categoryIds: '0178a3f0-1234-7000-8000-000000000001,0178a3f0-1234-7000-8000-000000000002',
-      };
-      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
-    });
-
-    it('returns forbidden when user has no org access', async () => {
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
-
-      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns ok with empty competitors when no data', async () => {
-      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
-        {},
-        { data: [], error: null },
-        { rpc_market_tracking_competitor_summary: { data: [], error: null } },
-      );
-
-      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.competitors).to.deep.equal([]);
-    });
-
     it('returns competitors with correct shape', async () => {
       const rpcRows = [
         { competitor_name: 'CompA', total_mentions: 10, total_citations: 5 },
@@ -3823,51 +3595,6 @@ describe('llmo-brand-presence', () => {
       chainMock.rpc = rpcStub;
       return chainMock;
     }
-
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(getOrgAndValidateAccess).not.to.have.been.called;
-    });
-
-    it('returns forbidden when user has no org access', async () => {
-      mockContext.dataAccess.Site.postgrestService = createRpcMock();
-      getOrgAndValidateAccess.rejects(
-        new Error('Only users belonging to the organization can view brand presence data'),
-      );
-
-      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest for invalid type parameter', async () => {
-      mockContext.data = { type: 'invalid' };
-      mockContext.dataAccess.Site.postgrestService = createRpcMock();
-
-      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.text();
-      expect(body).to.include('Invalid type parameter');
-    });
-
-    it('returns badRequest when multiple regionCodes are provided', async () => {
-      mockContext.data = { type: 'top', regionCodes: 'US,DE' };
-      mockContext.dataAccess.Site.postgrestService = createRpcMock();
-
-      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
-    });
 
     it('returns ok with movers for valid data', async () => {
       const rpcData = {
@@ -4087,27 +3814,21 @@ describe('llmo-brand-presence', () => {
 
     it('groups by topic, counts brand mentions and competitors', () => {
       const rows = [
-        {
+        makeSovRow({
           topic: 'EVs',
           brand_mentions: 2,
           competitor_name: 'Tesla',
           competitor_mentions: 2,
           volume: -30,
-        },
-        {
+        }),
+        makeSovRow({
           topic: 'EVs',
           brand_mentions: 2,
           competitor_name: 'Ford',
           competitor_mentions: 2,
           volume: -30,
-        },
-        {
-          topic: 'SUVs',
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: -20,
-        },
+        }),
+        makeSovRow({ topic: 'SUVs' }),
       ];
       const configured = new Set(['tesla']);
       const result = aggregateShareOfVoice(rows, configured, 'BrandX');
@@ -4133,13 +3854,13 @@ describe('llmo-brand-presence', () => {
 
     it('sets shareOfVoice to null when brand has no mentions', () => {
       const rows = [
-        {
+        makeSovRow({
           topic: 'Topic1',
           brand_mentions: 0,
           competitor_name: 'CompA',
           competitor_mentions: 3,
           volume: -10,
-        },
+        }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'BrandX');
       expect(result[0].shareOfVoice).to.equal(null);
@@ -4148,27 +3869,9 @@ describe('llmo-brand-presence', () => {
 
     it('sorts by popularity desc then shareOfVoice desc', () => {
       const rows = [
-        {
-          topic: 'LowTopic',
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: -10,
-        },
-        {
-          topic: 'HighTopic',
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: -30,
-        },
-        {
-          topic: 'MedTopic',
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: -20,
-        },
+        makeSovRow({ topic: 'LowTopic', volume: -10 }),
+        makeSovRow({ topic: 'HighTopic', volume: -30 }),
+        makeSovRow({ topic: 'MedTopic' }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'BrandX');
       expect(result[0].topic).to.equal('HighTopic');
@@ -4187,13 +3890,7 @@ describe('llmo-brand-presence', () => {
 
     it('includes brandShareOfVoice when brand has mentions', () => {
       const rows = [
-        {
-          topic: 'T',
-          brand_mentions: 1,
-          competitor_name: 'Comp1',
-          competitor_mentions: 2,
-          volume: -20,
-        },
+        makeSovRow({ competitor_name: 'Comp1', competitor_mentions: 2 }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'MyBrand');
       expect(result[0].brandShareOfVoice).to.deep.include({ name: 'MyBrand', mentions: 1 });
@@ -4201,13 +3898,7 @@ describe('llmo-brand-presence', () => {
 
     it('handles Unknown topic for rows without topic field', () => {
       const rows = [
-        {
-          topic: null,
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: -10,
-        },
+        makeSovRow({ topic: null, volume: -10 }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
       expect(result[0].topic).to.equal('Unknown');
@@ -4215,20 +3906,16 @@ describe('llmo-brand-presence', () => {
 
     it('accumulates mentions when same competitor appears in multiple rows', () => {
       const rows = [
-        {
-          topic: 'T',
-          brand_mentions: 1,
+        makeSovRow({
           competitor_name: 'Tesla',
           competitor_mentions: 3,
           volume: -30,
-        },
-        {
-          topic: 'T',
-          brand_mentions: 1,
+        }),
+        makeSovRow({
           competitor_name: 'Tesla',
           competitor_mentions: 2,
           volume: -30,
-        },
+        }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
       const tesla = result[0].allCompetitors.find((c) => c.name === 'tesla');
@@ -4237,20 +3924,8 @@ describe('llmo-brand-presence', () => {
 
     it('handles positive volume for percentile-based popularity', () => {
       const rows = [
-        {
-          topic: 'HighVol',
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: 900,
-        },
-        {
-          topic: 'LowVol',
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: 100,
-        },
+        makeSovRow({ topic: 'HighVol', volume: 900 }),
+        makeSovRow({ topic: 'LowVol', volume: 100 }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
       expect(result).to.have.lengthOf(2);
@@ -4262,13 +3937,12 @@ describe('llmo-brand-presence', () => {
 
     it('returns 0 sov for competitors when totalMentions is 0', () => {
       const rows = [
-        {
+        makeSovRow({
           topic: 'Empty',
           brand_mentions: 0,
           competitor_name: 'CompX',
-          competitor_mentions: 0,
           volume: -10,
-        },
+        }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
       expect(result[0].allCompetitors[0].shareOfVoice).to.equal(0);
@@ -4276,13 +3950,7 @@ describe('llmo-brand-presence', () => {
 
     it('falls back to "Our Brand" when brandName is falsy', () => {
       const rows = [
-        {
-          topic: 'T',
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: -20,
-        },
+        makeSovRow(),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), '');
       expect(result[0].brandShareOfVoice.name).to.equal('Our Brand');
@@ -4290,20 +3958,16 @@ describe('llmo-brand-presence', () => {
 
     it('sorts brand after competitor when they share the same sov', () => {
       const rows = [
-        {
-          topic: 'T',
-          brand_mentions: 1,
+        makeSovRow({
           competitor_name: 'CompA',
           competitor_mentions: 1,
           volume: -30,
-        },
-        {
-          topic: 'T',
-          brand_mentions: 1,
+        }),
+        makeSovRow({
           competitor_name: 'CompB',
           competitor_mentions: 1,
           volume: -30,
-        },
+        }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
       const entities = [
@@ -4316,20 +3980,19 @@ describe('llmo-brand-presence', () => {
 
     it('sorts topics with same popularity by shareOfVoice desc', () => {
       const rows = [
-        {
+        makeSovRow({
           topic: 'LowSov',
-          brand_mentions: 1,
           competitor_name: 'C',
           competitor_mentions: 10,
           volume: -30,
-        },
-        {
+        }),
+        makeSovRow({
           topic: 'HighSov',
           brand_mentions: 10,
           competitor_name: 'C',
           competitor_mentions: 1,
           volume: -30,
-        },
+        }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
       expect(result[0].topic).to.equal('HighSov');
@@ -4338,20 +4001,20 @@ describe('llmo-brand-presence', () => {
 
     it('sorts by shareOfVoice when popularity matches and sov is null', () => {
       const rows = [
-        {
+        makeSovRow({
           topic: 'A',
           brand_mentions: 0,
           competitor_name: 'C1',
           competitor_mentions: 5,
           volume: -30,
-        },
-        {
+        }),
+        makeSovRow({
           topic: 'B',
           brand_mentions: 0,
           competitor_name: 'C2',
           competitor_mentions: 3,
           volume: -30,
-        },
+        }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
       expect(result[0].shareOfVoice).to.equal(null);
@@ -4360,20 +4023,8 @@ describe('llmo-brand-presence', () => {
 
     it('sorts Low-popularity topics after High-popularity ones', () => {
       const rows = [
-        {
-          topic: 'Normal',
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: -30,
-        },
-        {
-          topic: 'NoVol',
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: 0,
-        },
+        makeSovRow({ topic: 'Normal', volume: -30 }),
+        makeSovRow({ topic: 'NoVol', volume: 0 }),
       ];
       const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
       expect(result[0].topic).to.equal('Normal');
@@ -4385,48 +4036,6 @@ describe('llmo-brand-presence', () => {
   // ── createShareOfVoiceHandler ──────────────────────────────────────────────
 
   describe('createShareOfVoiceHandler', () => {
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(getOrgAndValidateAccess).not.to.have.been.called;
-    });
-
-    it('returns badRequest when multiple categoryIds are provided', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      mockContext.data = {
-        categoryIds: '0178a3f0-1234-7000-8000-000000000001,0178a3f0-1234-7000-8000-000000000002',
-      };
-      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
-    });
-
-    it('returns forbidden when user has no org access', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
-
-      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when organization not found', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
-
-      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
     it('returns badRequest when RPC returns error', async () => {
       const rpcError = { message: 'function rpc_share_of_voice does not exist' };
       mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
@@ -4446,27 +4055,24 @@ describe('llmo-brand-presence', () => {
 
     it('returns share-of-voice data for valid request', async () => {
       const rpcRows = [
-        {
+        makeSovRow({
           topic: 'EVs',
-          brand_mentions: 1,
           competitor_name: 'Tesla',
           competitor_mentions: 2,
           volume: -30,
-        },
-        {
+        }),
+        makeSovRow({
           topic: 'EVs',
-          brand_mentions: 1,
           competitor_name: 'Tesla Motors',
           competitor_mentions: 1,
           volume: -30,
-        },
-        {
+        }),
+        makeSovRow({
           topic: 'EVs',
-          brand_mentions: 1,
           competitor_name: 'Ford',
           competitor_mentions: 1,
           volume: -30,
-        },
+        }),
       ];
       mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
         {
@@ -4519,13 +4125,7 @@ describe('llmo-brand-presence', () => {
     it('resolves brand name when brandId is specified', async () => {
       mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000099';
       const rpcRows = [
-        {
-          topic: 'T1',
-          brand_mentions: 1,
-          competitor_name: null,
-          competitor_mentions: 0,
-          volume: -20,
-        },
+        makeSovRow({ topic: 'T1' }),
       ];
       mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
         {
@@ -4592,13 +4192,7 @@ describe('llmo-brand-presence', () => {
 
     it('returns empty configured names when competitors query errors', async () => {
       const rpcRows = [
-        {
-          topic: 'T',
-          brand_mentions: 1,
-          competitor_name: 'SomeComp',
-          competitor_mentions: 2,
-          volume: -20,
-        },
+        makeSovRow({ competitor_name: 'SomeComp', competitor_mentions: 2 }),
       ];
       mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
         {
@@ -4685,57 +4279,6 @@ describe('llmo-brand-presence', () => {
       total_mentions: 11,
       total_citations: 76,
     };
-
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(getOrgAndValidateAccess).not.to.have.been.called;
-    });
-
-    it('returns forbidden when user has no org access', async () => {
-      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
-      mockContext.dataAccess.Site.postgrestService = rpcMock;
-      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
-
-      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when organization not found', async () => {
-      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
-      mockContext.dataAccess.Site.postgrestService = rpcMock;
-      getOrgAndValidateAccess.rejects(new Error('Organization not found: x'));
-
-      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns forbidden when site does not belong to org', async () => {
-      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
-      const sitesChain = {
-        from: sinon.stub().returnsThis(),
-        select: sinon.stub().returnsThis(),
-        eq: sinon.stub().returnsThis(),
-        limit: sinon.stub().resolves({ data: [], error: null }),
-      };
-      mockContext.dataAccess.Site.postgrestService = {
-        ...rpcMock,
-        from: sinon.stub().returns(sitesChain),
-      };
-      mockContext.data = { siteId: '0178a3f0-1234-7000-8000-000000000099' };
-
-      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
 
     it('returns badRequest when RPC returns error', async () => {
       const rpcMock = createStatsRpcMock({ data: null, error: { message: 'relation does not exist' } });
@@ -5126,23 +4669,8 @@ describe('llmo-brand-presence', () => {
 
     it('groups rows by topics column', () => {
       const rows = [
-        {
-          topics: 'PDF',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
-          visibility_score: 80,
-          position: '2',
-          sentiment: 'Positive',
-          volume: 100,
-          origin: 'human',
-          category_name: 'Cat1',
-          execution_date: '2026-03-01',
-          url: 'https://example.com',
-          error_code: null,
-        },
-        {
+        makeExecRow({ category_name: 'Cat1', url: 'https://example.com' }),
+        makeExecRow({
           topics: 'AI',
           prompt: 'q2',
           region_code: 'DE',
@@ -5156,8 +4684,7 @@ describe('llmo-brand-presence', () => {
           category_name: 'Cat2',
           execution_date: '2026-03-02',
           url: null,
-          error_code: null,
-        },
+        }),
       ];
       const result = aggregateTopicData(rows);
       expect(result).to.have.lengthOf(2);
@@ -5173,21 +4700,8 @@ describe('llmo-brand-presence', () => {
 
     it('sets topicId to max topic_id per topic group (matches rpc ordering)', () => {
       const rows = [
-        {
-          topics: 'PDF',
-          topic_id: '00000000-0000-4000-8000-000000000001',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
-          visibility_score: 80,
-          position: '2',
-          sentiment: 'Positive',
-          volume: 100,
-          execution_date: '2026-03-01',
-        },
-        {
-          topics: 'PDF',
+        makeExecRow({ topic_id: '00000000-0000-4000-8000-000000000001' }),
+        makeExecRow({
           topic_id: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
           prompt: 'q2',
           region_code: 'DE',
@@ -5198,7 +4712,7 @@ describe('llmo-brand-presence', () => {
           sentiment: 'Neutral',
           volume: 200,
           execution_date: '2026-03-02',
-        },
+        }),
       ];
       const result = aggregateTopicData(rows);
       expect(result).to.have.lengthOf(1);
@@ -5225,30 +4739,14 @@ describe('llmo-brand-presence', () => {
 
     it('deduplicates prompts by prompt|region within a topic', () => {
       const rows = [
-        {
-          topics: 'PDF',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
-          visibility_score: 80,
-          position: '2',
-          sentiment: 'Positive',
-          volume: 100,
-          execution_date: '2026-03-01',
-        },
-        {
-          topics: 'PDF',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
+        makeExecRow(),
+        makeExecRow({
           citations: true,
           visibility_score: 90,
           position: '1',
-          sentiment: 'Positive',
           volume: 150,
           execution_date: '2026-03-05',
-        },
+        }),
       ];
       const result = aggregateTopicData(rows);
       expect(result).to.have.lengthOf(1);
@@ -5299,30 +4797,9 @@ describe('llmo-brand-presence', () => {
 
     it('counts mentions across all executions, not just deduplicated', () => {
       const rows = [
-        {
-          topics: 'PDF',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          citations: true,
-          execution_date: '2026-03-01',
-        },
-        {
-          topics: 'PDF',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
-          execution_date: '2026-03-02',
-        },
-        {
-          topics: 'PDF',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          citations: true,
-          execution_date: '2026-03-03',
-        },
+        makeExecRow({ citations: true }),
+        makeExecRow({ execution_date: '2026-03-02' }),
+        makeExecRow({ citations: true, execution_date: '2026-03-03' }),
       ];
       const result = aggregateTopicData(rows);
       expect(result[0].promptCount).to.equal(1);
@@ -5332,15 +4809,7 @@ describe('llmo-brand-presence', () => {
 
     it('returns sourceCount 0 when no brand_presence_sources on rows', () => {
       const rows = [
-        {
-          id: 'exec-1',
-          topics: 'PDF',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
-          execution_date: '2026-03-01',
-        },
+        makeDetailRow({ id: 'exec-1' }),
       ];
       const result = aggregateTopicData(rows);
       expect(result[0].sourceCount).to.equal(0);
@@ -5348,12 +4817,7 @@ describe('llmo-brand-presence', () => {
 
     it('uses "Unknown" for rows with null topics', () => {
       const rows = [
-        {
-          topics: null,
-          prompt: 'q1',
-          region_code: 'US',
-          execution_date: '2026-03-01',
-        },
+        makeExecRow({ topics: null }),
       ];
       const result = aggregateTopicData(rows);
       expect(result[0].topic).to.equal('Unknown');
@@ -5361,18 +4825,14 @@ describe('llmo-brand-presence', () => {
 
     it('handles null visibility_score and volume gracefully', () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'X',
-          prompt: 'q1',
-          region_code: 'US',
           visibility_score: null,
           volume: null,
           position: null,
           sentiment: null,
           mentions: false,
-          citations: false,
-          execution_date: '2026-03-01',
-        },
+        }),
       ];
       const result = aggregateTopicData(rows);
       expect(result[0].averageVisibilityScore).to.equal(0);
@@ -5383,22 +4843,17 @@ describe('llmo-brand-presence', () => {
 
     it('skips "Not Mentioned" positions in average calculation', () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
           position: 'Not Mentioned',
           visibility_score: 50,
-          execution_date: '2026-03-01',
-        },
-        {
+        }),
+        makeExecRow({
           topics: 'T',
           prompt: 'q2',
-          region_code: 'US',
           position: '4',
           visibility_score: 50,
-          execution_date: '2026-03-01',
-        },
+        }),
       ];
       const result = aggregateTopicData(rows);
       expect(result[0].averagePosition).to.equal(4);
@@ -5406,13 +4861,7 @@ describe('llmo-brand-presence', () => {
 
     it('does not include items array in output', () => {
       const rows = [
-        {
-          topics: 'PDF',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          execution_date: '2026-03-01',
-        },
+        makeExecRow(),
       ];
       const result = aggregateTopicData(rows);
       expect(result[0]).to.not.have.property('items');
@@ -5421,37 +4870,19 @@ describe('llmo-brand-presence', () => {
 
     it('uses 0-100 sentiment scale: neutral = 50, positive = 100', () => {
       const neutralRows = [
-        {
-          topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          sentiment: 'Neutral',
-          execution_date: '2026-03-01',
-        },
+        makeExecRow({ topics: 'T', sentiment: 'Neutral' }),
       ];
       const neutralResult = aggregateTopicData(neutralRows);
       expect(neutralResult[0].averageSentiment).to.equal(50);
 
       const positiveRows = [
-        {
-          topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          sentiment: 'Positive',
-          execution_date: '2026-03-01',
-        },
+        makeExecRow({ topics: 'T' }),
       ];
       const positiveResult = aggregateTopicData(positiveRows);
       expect(positiveResult[0].averageSentiment).to.equal(100);
 
       const negativeRows = [
-        {
-          topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          sentiment: 'Negative',
-          execution_date: '2026-03-01',
-        },
+        makeExecRow({ topics: 'T', sentiment: 'Negative' }),
       ];
       const negativeResult = aggregateTopicData(negativeRows);
       expect(negativeResult[0].averageSentiment).to.equal(0);
@@ -5459,59 +4890,33 @@ describe('llmo-brand-presence', () => {
 
     it('converts imputed volume values to categorical labels', () => {
       const highRows = [
-        {
-          topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          volume: -30,
-          execution_date: '2026-03-01',
-        },
+        makeExecRow({ topics: 'T', volume: -30 }),
       ];
       expect(aggregateTopicData(highRows)[0].popularityVolume).to.equal('High');
 
       const medRows = [
-        {
-          topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          volume: -20,
-          execution_date: '2026-03-01',
-        },
+        makeExecRow({ topics: 'T', volume: -20 }),
       ];
       expect(aggregateTopicData(medRows)[0].popularityVolume).to.equal('Medium');
 
       const lowRows = [
-        {
-          topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          volume: -10,
-          execution_date: '2026-03-01',
-        },
+        makeExecRow({ topics: 'T', volume: -10 }),
       ];
       expect(aggregateTopicData(lowRows)[0].popularityVolume).to.equal('Low');
     });
 
     it('deduplicates for promptCount but aggregates metrics across all executions', () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
           execution_date: '2026-03-10',
-          sentiment: 'Positive',
           visibility_score: 90,
-          mentions: true,
-        },
-        {
+        }),
+        makeExecRow({
           topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          execution_date: '2026-03-01',
           sentiment: 'Negative',
           visibility_score: 50,
-          mentions: true,
-        },
+        }),
       ];
       const result = aggregateTopicData(rows);
       expect(result[0].promptCount).to.equal(1);
@@ -5529,21 +4934,11 @@ describe('llmo-brand-presence', () => {
 
     it('builds correct PromptDetail items', () => {
       const rows = [
-        {
-          topics: 'PDF',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
-          visibility_score: 80,
+        makeExecRow({
           position: '3',
-          sentiment: 'Positive',
-          origin: 'human',
           category_name: 'Docs',
-          execution_date: '2026-03-01',
           url: 'https://example.com',
-          error_code: null,
-        },
+        }),
       ];
       const result = buildPromptDetails(rows);
       expect(result).to.have.lengthOf(1);
@@ -5567,20 +4962,12 @@ describe('llmo-brand-presence', () => {
 
     it('deduplicates by prompt|region_code keeping latest execution', () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
           execution_date: '2026-03-10',
           visibility_score: 90,
-        },
-        {
-          topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          execution_date: '2026-03-01',
-          visibility_score: 50,
-        },
+        }),
+        makeExecRow({ topics: 'T', visibility_score: 50 }),
       ];
       const result = buildPromptDetails(rows);
       expect(result).to.have.lengthOf(1);
@@ -5592,13 +4979,7 @@ describe('llmo-brand-presence', () => {
 
     it('sets isAnswered to false when error_code is present', () => {
       const rows = [
-        {
-          topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          execution_date: '2026-03-01',
-          error_code: 'TIMEOUT',
-        },
+        makeExecRow({ topics: 'T', error_code: 'TIMEOUT' }),
       ];
       const result = buildPromptDetails(rows);
       expect(result[0].isAnswered).to.equal(false);
@@ -5607,7 +4988,7 @@ describe('llmo-brand-presence', () => {
 
     it('uses empty string fallbacks for null fields', () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'T',
           prompt: null,
           region_code: null,
@@ -5615,13 +4996,12 @@ describe('llmo-brand-presence', () => {
           execution_date: null,
           url: null,
           sentiment: null,
-          error_code: null,
           origin: null,
           mentions: null,
           citations: null,
           visibility_score: null,
           position: null,
-        },
+        }),
       ];
       const result = buildPromptDetails(rows);
       expect(result[0].executionDate).to.equal('');
@@ -5638,33 +5018,19 @@ describe('llmo-brand-presence', () => {
 
     it('aggregates mentions and citations across all execution rows per prompt', () => {
       const rows = [
-        {
-          topics: 'PDF',
+        makeExecRow({ prompt: 'best pdf editor', citations: true }),
+        makeExecRow({
           prompt: 'best pdf editor',
-          region_code: 'US',
-          mentions: true,
-          citations: true,
-          visibility_score: 80,
-          execution_date: '2026-03-01',
-        },
-        {
-          topics: 'PDF',
-          prompt: 'best pdf editor',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
           visibility_score: 70,
           execution_date: '2026-03-08',
-        },
-        {
-          topics: 'PDF',
+        }),
+        makeExecRow({
           prompt: 'best pdf editor',
-          region_code: 'US',
           mentions: false,
           citations: true,
           visibility_score: 90,
           execution_date: '2026-03-15',
-        },
+        }),
       ];
       const result = buildPromptDetails(rows);
       expect(result).to.have.lengthOf(1);
@@ -5679,15 +5045,12 @@ describe('llmo-brand-presence', () => {
 
     it('uses "Unknown" for null topics and counts citations correctly', () => {
       const rows = [
-        {
+        makeExecRow({
           topics: null,
-          prompt: 'q1',
-          region_code: 'US',
           mentions: false,
           citations: true,
           visibility_score: 50,
-          execution_date: '2026-03-01',
-        },
+        }),
       ];
       const result = buildPromptDetails(rows);
       expect(result[0].topic).to.equal('Unknown');
@@ -5701,24 +5064,17 @@ describe('llmo-brand-presence', () => {
       const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
       const promptUuid = 'f1e2d3c4-b5a6-9876-5432-10fedcba9876';
       const rows = [
-        {
-          topics: 'PDF',
+        makeDetailRow({
           topic_id: topicUuid,
-          prompt: 'q1',
           prompt_id: promptUuid,
-          region_code: 'US',
-          execution_date: '2026-03-01',
           visibility_score: 50,
-        },
-        {
-          topics: 'PDF',
+        }),
+        makeDetailRow({
           topic_id: topicUuid,
-          prompt: 'q1',
           prompt_id: 'should-not-win',
-          region_code: 'US',
           execution_date: '2026-03-10',
           visibility_score: 90,
-        },
+        }),
       ];
       const result = buildPromptDetails(rows);
       expect(result).to.have.lengthOf(1);
@@ -5755,50 +5111,6 @@ describe('llmo-brand-presence', () => {
         from: sinon.stub().returns(siteChain),
       };
     }
-
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-
-      const handler = createTopicsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns badRequest when multiple regionCodes are provided', async () => {
-      mockContext.dataAccess.Site.postgrestService = createTopicsRpcMock();
-      mockContext.data = { regionCodes: 'US,DE' };
-      const handler = createTopicsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
-    });
-
-    it('returns forbidden when org access check fails', async () => {
-      getOrgAndValidateAccess.rejects(
-        new Error('Only users belonging to the organization can view brand presence data'),
-      );
-      mockContext.dataAccess.Site.postgrestService = createTopicsRpcMock();
-
-      const handler = createTopicsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when RPC returns error', async () => {
-      mockContext.dataAccess.Site.postgrestService = createTopicsRpcMock({
-        data: null,
-        error: { message: 'function not found' },
-      });
-
-      const handler = createTopicsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
 
     it('returns ok with topicDetails and totalCount for valid data', async () => {
       mockContext.dataAccess.Site.postgrestService = createTopicsRpcMock({
@@ -6075,100 +5387,16 @@ describe('llmo-brand-presence', () => {
 
   // ── createTopicPromptsHandler ───────────────────────────────────────────────
   describe('createTopicPromptsHandler', () => {
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-
-      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns forbidden when org access check fails', async () => {
-      getOrgAndValidateAccess.rejects(
-        new Error(
-          'Only users belonging to the organization can view brand presence data',
-        ),
-      );
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest for malformed percent-encoded topicId', async () => {
-      mockContext.params.topicId = '%GG';
-      mockContext.dataAccess.Site.postgrestService = createChainableMock({
-        data: [],
-        error: null,
-      });
-
-      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns ok with items and totalCount for valid data', async () => {
-      const rows = [
-        {
-          topics: 'PDF',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
-          visibility_score: 80,
-          position: '2',
-          sentiment: 'Positive',
-          execution_date: '2026-03-01',
-          url: 'https://x.com',
-          error_code: null,
-          origin: 'human',
-          category_name: 'Docs',
-        },
-      ];
-      mockContext.params.topicId = 'PDF';
-      mockContext.dataAccess.Site.postgrestService = createChainableMock({
-        data: rows,
-        error: null,
-      });
-
-      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.items).to.have.lengthOf(1);
-      expect(body.items[0].prompt).to.equal('q1');
-      expect(body.items[0].topicId).to.equal('');
-      expect(body.items[0].promptId).to.equal('');
-      expect(body.totalCount).to.equal(1);
-      expect(body.topic).to.equal('PDF');
-      expect(body.topicId).to.be.null;
-    });
-
     it('returns topic and topicId when path is a topic UUID', async () => {
       const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
       const rows = [
-        {
+        makeDetailRow({
           topic_id: topicUuid,
           topics: 'Resolved Label',
-          prompt: 'q1',
           prompt_id: 'prompt-row-uuid',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
-          visibility_score: 80,
-          position: '2',
-          sentiment: 'Positive',
-          execution_date: '2026-03-01',
           url: 'https://x.com',
-          error_code: null,
-          origin: 'human',
           category_name: 'Docs',
-        },
+        }),
       ];
       mockContext.params.topicId = topicUuid;
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
@@ -6320,24 +5548,9 @@ describe('llmo-brand-presence', () => {
 
     it('filters prompts by query param when provided', async () => {
       const rows = [
-        {
-          topics: 'PDF Tools',
-          prompt: 'How to edit PDF files',
-          region_code: 'US',
-          execution_date: '2026-03-01',
-        },
-        {
-          topics: 'PDF Tools',
-          prompt: 'Best image converter',
-          region_code: 'US',
-          execution_date: '2026-03-01',
-        },
-        {
-          topics: 'PDF Tools',
-          prompt: 'PDF merge online',
-          region_code: 'US',
-          execution_date: '2026-03-01',
-        },
+        makeExecRow({ topics: 'PDF Tools', prompt: 'How to edit PDF files' }),
+        makeExecRow({ topics: 'PDF Tools', prompt: 'Best image converter' }),
+        makeExecRow({ topics: 'PDF Tools', prompt: 'PDF merge online' }),
       ];
       mockContext.params.topicId = 'PDF%20Tools';
       mockContext.data = { query: 'pdf' };
@@ -6361,18 +5574,8 @@ describe('llmo-brand-presence', () => {
 
     it('returns all prompts when query param is empty', async () => {
       const rows = [
-        {
-          topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          execution_date: '2026-03-01',
-        },
-        {
-          topics: 'T',
-          prompt: 'q2',
-          region_code: 'US',
-          execution_date: '2026-03-01',
-        },
+        makeExecRow({ topics: 'T' }),
+        makeExecRow({ topics: 'T', prompt: 'q2' }),
       ];
       mockContext.params.topicId = 'T';
       mockContext.data = { query: '' };
@@ -6409,57 +5612,6 @@ describe('llmo-brand-presence', () => {
   });
 
   describe('createSearchHandler', () => {
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      mockContext.data = { query: 'pdf' };
-
-      const handler = createSearchHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns forbidden when org access check fails', async () => {
-      getOrgAndValidateAccess.rejects(
-        new Error(
-          'Only users belonging to the organization can view brand presence data',
-        ),
-      );
-      mockContext.data = { query: 'pdf' };
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createSearchHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns empty results when query is empty', async () => {
-      mockContext.data = { query: '' };
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createSearchHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.topicDetails).to.deep.equal([]);
-      expect(body.totalCount).to.equal(0);
-    });
-
-    it('returns empty results when query is missing', async () => {
-      mockContext.data = {};
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createSearchHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.topicDetails).to.deep.equal([]);
-      expect(body.totalCount).to.equal(0);
-    });
-
     it('returns empty results when context.data is undefined', async () => {
       mockContext.data = undefined;
       mockContext.dataAccess.Site.postgrestService = createChainableMock();
@@ -6501,23 +5653,13 @@ describe('llmo-brand-presence', () => {
 
     it('returns ok with matching topics and matchType=topic', async () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'PDF Editing',
           topic_id: '0178a3f0-1234-7000-8000-000000000099',
           prompt: 'best pdf editor',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
-          visibility_score: 80,
-          position: '2',
-          sentiment: 'Positive',
-          volume: 100,
-          origin: 'human',
           category_name: 'Docs',
-          execution_date: '2026-03-01',
           url: 'https://x.com',
-          error_code: null,
-        },
+        }),
       ];
       mockContext.data = { query: 'pdf' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
@@ -6539,11 +5681,9 @@ describe('llmo-brand-presence', () => {
 
     it('returns matchType=prompt when only prompt matches', async () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'Image Tools',
           prompt: 'convert pdf to image',
-          region_code: 'US',
-          mentions: true,
           citations: true,
           visibility_score: 70,
           position: '3',
@@ -6551,10 +5691,8 @@ describe('llmo-brand-presence', () => {
           volume: 50,
           origin: 'ai',
           category_name: 'Creative',
-          execution_date: '2026-03-01',
           url: 'https://y.com',
-          error_code: null,
-        },
+        }),
       ];
       mockContext.data = { query: 'pdf' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
@@ -6574,57 +5712,42 @@ describe('llmo-brand-presence', () => {
 
     it('adjusts promptCount for prompt-matched topics to only count matching prompts', async () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'Image Tools',
           prompt: 'convert pdf to image',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
           visibility_score: 70,
           position: '3',
           sentiment: 'Neutral',
           volume: 50,
           origin: 'ai',
           category_name: 'Creative',
-          execution_date: '2026-03-01',
           url: 'https://y.com',
-          error_code: null,
           brand_presence_sources: [],
-        },
-        {
+        }),
+        makeExecRow({
           topics: 'Image Tools',
           prompt: 'best image editor',
-          region_code: 'US',
           mentions: false,
-          citations: false,
           visibility_score: 60,
           position: '5',
-          sentiment: 'Positive',
           volume: 40,
           origin: 'ai',
           category_name: 'Creative',
-          execution_date: '2026-03-01',
           url: 'https://z.com',
-          error_code: null,
           brand_presence_sources: [],
-        },
-        {
+        }),
+        makeExecRow({
           topics: 'Image Tools',
           prompt: 'pdf merge tool',
           region_code: 'EU',
-          mentions: true,
           citations: true,
-          visibility_score: 80,
           position: '1',
-          sentiment: 'Positive',
           volume: 60,
           origin: 'ai',
           category_name: 'Creative',
-          execution_date: '2026-03-01',
           url: 'https://w.com',
-          error_code: null,
           brand_presence_sources: [],
-        },
+        }),
       ];
       mockContext.data = { query: 'pdf' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
@@ -6645,40 +5768,27 @@ describe('llmo-brand-presence', () => {
 
     it('keeps full promptCount for topic-matched topics', async () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'PDF Editing',
           prompt: 'how to merge files',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
           visibility_score: 90,
           position: '1',
-          sentiment: 'Positive',
           volume: 80,
-          origin: 'human',
           category_name: 'Docs',
-          execution_date: '2026-03-01',
           url: 'https://a.com',
-          error_code: null,
           brand_presence_sources: [],
-        },
-        {
+        }),
+        makeExecRow({
           topics: 'PDF Editing',
           prompt: 'best editor tool',
-          region_code: 'US',
           mentions: false,
-          citations: false,
           visibility_score: 85,
-          position: '2',
           sentiment: 'Neutral',
           volume: 70,
-          origin: 'human',
           category_name: 'Docs',
-          execution_date: '2026-03-01',
           url: 'https://b.com',
-          error_code: null,
           brand_presence_sources: [],
-        },
+        }),
       ];
       mockContext.data = { query: 'pdf' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
@@ -6699,40 +5809,29 @@ describe('llmo-brand-presence', () => {
 
     it('handles rows with null topics and prompt in search matching', async () => {
       const rows = [
-        {
+        makeExecRow({
           topics: null,
           prompt: null,
-          region_code: 'US',
           mentions: false,
-          citations: false,
           visibility_score: 50,
           position: '4',
           sentiment: 'Neutral',
           volume: 30,
           origin: 'ai',
           category_name: 'General',
-          execution_date: '2026-03-01',
           url: null,
-          error_code: null,
           brand_presence_sources: [],
-        },
-        {
+        }),
+        makeExecRow({
           topics: null,
           prompt: 'unknown topic pdf query',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
           visibility_score: 60,
-          position: '2',
-          sentiment: 'Positive',
           volume: 40,
           origin: 'ai',
           category_name: 'General',
-          execution_date: '2026-03-01',
           url: null,
-          error_code: null,
           brand_presence_sources: [],
-        },
+        }),
       ];
       mockContext.data = { query: 'pdf' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
@@ -6924,38 +6023,21 @@ describe('llmo-brand-presence', () => {
 
     it('sorts by visibility descending when requested', async () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'LowVis',
           prompt: 'pdf low',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
           visibility_score: 20,
           position: '5',
           sentiment: 'Neutral',
           volume: 10,
-          origin: 'human',
-          category_name: 'Cat',
-          execution_date: '2026-03-01',
-          url: '',
-          error_code: null,
-        },
-        {
+        }),
+        makeExecRow({
           topics: 'HighVis',
           prompt: 'pdf high',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
           visibility_score: 90,
           position: '1',
-          sentiment: 'Positive',
           volume: 50,
-          origin: 'human',
-          category_name: 'Cat',
-          execution_date: '2026-03-01',
-          url: '',
-          error_code: null,
-        },
+        }),
       ];
       mockContext.data = { query: 'pdf', sortBy: 'visibility', sortOrder: 'desc' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
@@ -7079,40 +6161,28 @@ describe('llmo-brand-presence', () => {
 
     it('falls back to sorting by topic when sortBy is unknown', async () => {
       const rows = [
-        {
+        makeExecRow({
           topics: 'Bravo',
           prompt: 'pdf bravo',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
           visibility_score: 70,
-          position: '2',
           sentiment: 'Neutral',
           volume: 10,
           origin: 'ai',
-          category_name: 'Cat',
-          execution_date: '2026-03-01',
           url: 'https://b.com',
-          error_code: null,
           brand_presence_sources: [],
-        },
-        {
+        }),
+        makeExecRow({
           topics: 'Alpha',
           prompt: 'pdf alpha',
-          region_code: 'US',
           mentions: false,
-          citations: false,
           visibility_score: 60,
           position: '3',
           sentiment: 'Neutral',
           volume: 5,
           origin: 'ai',
-          category_name: 'Cat',
-          execution_date: '2026-03-01',
           url: 'https://a.com',
-          error_code: null,
           brand_presence_sources: [],
-        },
+        }),
       ];
       mockContext.data = { query: 'pdf', sortBy: 'nonexistent' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
@@ -7317,53 +6387,6 @@ describe('llmo-brand-presence', () => {
       mockContext.params.topicId = 'AI%20Overview';
     });
 
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-
-      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns forbidden when org access check fails', async () => {
-      getOrgAndValidateAccess.rejects(
-        new Error('Only users belonging to the organization can view brand presence data'),
-      );
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest for malformed percent-encoded topicId', async () => {
-      mockContext.params.topicId = '%GG';
-      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
-
-      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns ok with zeroed stats and empty arrays when no rows', async () => {
-      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
-
-      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.topic).to.equal('AI Overview');
-      expect(body.topicId).to.be.null;
-      expect(body.weeklyStats).to.deep.equal([]);
-      expect(body.executions).to.deep.equal([]);
-      expect(body.sources).to.deep.equal([]);
-      expect(body.stats.averageVisibilityScore).to.equal(0);
-    });
-
     it('returns topicId when path is UUID and no execution rows', async () => {
       const topicUuid = 'd4e5f6a7-b8c9-0123-def0-123456789012';
       const client = createTableAwareMock({
@@ -7437,27 +6460,20 @@ describe('llmo-brand-presence', () => {
     it('returns topics display name in body.topic when path used a UUID', async () => {
       const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
       const rows = [
-        {
+        makeDetailRow({
           id: 'exec-1',
           topics: 'Resolved Topic Title',
           topic_id: topicUuid,
           prompt: 'q',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
           visibility_score: 10,
           position: '1',
-          sentiment: 'Positive',
           volume: '1',
           origin: 'o',
           category_name: 'C',
-          execution_date: '2026-03-01',
           answer: 'a',
-          url: '',
-          error_code: null,
           business_competitors: '',
           detected_brand_mentions: '',
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -7478,27 +6494,22 @@ describe('llmo-brand-presence', () => {
     it('uses path param for body.topic when rows have null topics', async () => {
       const topicUuid = 'c3d4e5f6-a7b8-9012-cdef-123456789012';
       const rows = [
-        {
+        makeDetailRow({
           id: 'exec-1',
           topics: null,
           topic_id: topicUuid,
           prompt: 'q',
-          region_code: 'US',
           mentions: false,
-          citations: false,
           visibility_score: 10,
           position: '1',
           sentiment: 'Neutral',
           volume: '1',
           origin: 'o',
           category_name: 'C',
-          execution_date: '2026-03-01',
           answer: 'a',
-          url: '',
-          error_code: null,
           business_competitors: '',
           detected_brand_mentions: '',
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -7534,27 +6545,19 @@ describe('llmo-brand-presence', () => {
     it('returns topicId from row when path is topic name', async () => {
       const topicDbId = 'e5f6a7b8-c9d0-1234-e789-012345678901';
       const rows = [
-        {
+        makeDetailRow({
           id: 'exec-1',
           topics: 'AI Overview',
           topic_id: topicDbId,
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
-          citations: false,
           visibility_score: 10,
           position: '1',
-          sentiment: 'Positive',
           volume: '1',
           origin: 'o',
           category_name: 'C',
-          execution_date: '2026-03-01',
           answer: 'a',
-          url: '',
-          error_code: null,
           business_competitors: '',
           detected_brand_mentions: '',
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -7597,13 +6600,12 @@ describe('llmo-brand-presence', () => {
           business_competitors: null,
           detected_brand_mentions: null,
         },
-        {
+        makeDetailRow({
           id: 'exec-2',
           topic_id: topicRowId,
           topics: 'AI Overview',
           prompt: 'q2',
           prompt_id: 'p2-id',
-          region_code: 'US',
           mentions: false,
           citations: true,
           visibility_score: 50,
@@ -7618,7 +6620,7 @@ describe('llmo-brand-presence', () => {
           error_code: 'E01',
           business_competitors: 'CompA;CompB',
           detected_brand_mentions: 'Our Brand, Other',
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -7677,24 +6679,16 @@ describe('llmo-brand-presence', () => {
 
     it('aggregates sources from fetchSourcesForExecutions', async () => {
       const execRows = [
-        {
+        makeDetailRow({
           id: 'exec-1',
           topics: 'T',
-          prompt: 'q1',
-          region_code: 'US',
-          mentions: true,
           citations: true,
-          visibility_score: 80,
           position: '1',
-          sentiment: 'Positive',
           volume: null,
           origin: 'organic',
           category_name: 'C',
           execution_date: '2026-03-02',
-          answer: '',
-          url: '',
-          error_code: null,
-        },
+        }),
       ];
       const sourceRows = [
         {
@@ -7787,13 +6781,12 @@ describe('llmo-brand-presence', () => {
 
     it('uses empty-string fallback for null execution_date, prompt, region_code in execution map', async () => {
       const rows = [
-        {
+        makeDetailRow({
           id: null,
           topics: 'T',
           prompt: null,
           region_code: null,
           mentions: false,
-          citations: false,
           visibility_score: null,
           position: null,
           sentiment: null,
@@ -7803,15 +6796,13 @@ describe('llmo-brand-presence', () => {
           execution_date: null,
           answer: null,
           url: null,
-          error_code: null,
-        },
-        {
+        }),
+        makeDetailRow({
           id: null,
           topics: 'T',
           prompt: null,
           region_code: null,
           mentions: false,
-          citations: false,
           visibility_score: null,
           position: null,
           sentiment: null,
@@ -7821,8 +6812,7 @@ describe('llmo-brand-presence', () => {
           execution_date: null,
           answer: null,
           url: null,
-          error_code: null,
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -7853,47 +6843,6 @@ describe('llmo-brand-presence', () => {
     beforeEach(() => {
       mockContext.params.topicId = 'AI%20Overview';
       mockContext.data = { prompt: 'What is AI?' };
-    });
-
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-
-      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns forbidden when org access check fails', async () => {
-      getOrgAndValidateAccess.rejects(
-        new Error('Only users belonging to the organization can view brand presence data'),
-      );
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest for malformed percent-encoded topicId', async () => {
-      mockContext.params.topicId = '%GG';
-      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
-
-      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns badRequest when prompt parameter is missing', async () => {
-      mockContext.data = {};
-      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
-
-      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
     });
 
     it('returns badRequest when ctx.data is null (prompt missing)', async () => {
@@ -8003,28 +6952,20 @@ describe('llmo-brand-presence', () => {
     it('returns topics display name in body.topic when path used a UUID (prompt-detail)', async () => {
       const topicUuid = 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
       const rows = [
-        {
-          id: 'e1',
+        makeDetailRow({
           topics: 'Shown Topic Name',
           topic_id: topicUuid,
           prompt: 'What is AI?',
           prompt_id: 'prompt-envelope-1',
-          region_code: 'US',
-          mentions: true,
           citations: true,
-          visibility_score: 80,
-          position: '2',
-          sentiment: 'Positive',
           volume: '100',
           origin: 'organic',
           category_name: 'Search',
-          execution_date: '2026-03-01',
           answer: 'Answer A',
           url: 'https://a.com',
-          error_code: null,
           business_competitors: '',
           detected_brand_mentions: '',
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -8047,28 +6988,20 @@ describe('llmo-brand-presence', () => {
     it('uses path param for body.topic when rows have null topics (prompt-detail)', async () => {
       const topicUuid = 'd4e5f6a7-b8c9-0123-def4-567890abcdef';
       const rows = [
-        {
-          id: 'e1',
+        makeDetailRow({
           topics: null,
           topic_id: topicUuid,
           prompt: 'What is AI?',
           prompt_id: 'p1',
-          region_code: 'US',
-          mentions: true,
           citations: true,
-          visibility_score: 80,
-          position: '2',
-          sentiment: 'Positive',
           volume: '100',
           origin: 'organic',
           category_name: 'Search',
-          execution_date: '2026-03-01',
           answer: 'Answer A',
           url: 'https://a.com',
-          error_code: null,
           business_competitors: '',
           detected_brand_mentions: '',
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -8134,37 +7067,25 @@ describe('llmo-brand-presence', () => {
     it('computes averaged stats and returns executions sorted newest first', async () => {
       const topicRowId = 'f1a2b3c4-d5e6-7890-abcd-ef1234567890';
       const rows = [
-        {
-          id: 'e1',
+        makeDetailRow({
           topic_id: topicRowId,
           topics: 'AI Overview',
           prompt: 'What is AI?',
           prompt_id: 'pd-older',
-          region_code: 'US',
-          mentions: true,
           citations: true,
-          visibility_score: 80,
-          position: '2',
-          sentiment: 'Positive',
           volume: '100',
           origin: 'organic',
           category_name: 'Search',
-          execution_date: '2026-03-01',
           answer: 'Answer A',
           url: 'https://a.com',
-          error_code: null,
-          business_competitors: null,
-          detected_brand_mentions: null,
-        },
-        {
+        }),
+        makeDetailRow({
           id: 'e2',
           topic_id: topicRowId,
           topics: 'AI Overview',
           prompt: 'What is AI?',
           prompt_id: 'pd-newer',
-          region_code: 'US',
           mentions: false,
-          citations: false,
           visibility_score: 60,
           position: '4',
           sentiment: 'Neutral',
@@ -8173,11 +7094,9 @@ describe('llmo-brand-presence', () => {
           category_name: 'Search',
           execution_date: '2026-03-08',
           answer: 'Answer B',
-          url: '',
-          error_code: null,
           business_competitors: 'Rival;OtherCo',
           detected_brand_mentions: 'Acme',
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -8216,13 +7135,10 @@ describe('llmo-brand-presence', () => {
 
     it('counts negative sentiment rows but scores them at 0', async () => {
       const rows = [
-        {
-          id: 'e1',
+        makeDetailRow({
           topics: 'T',
           prompt: 'q',
-          region_code: 'US',
           mentions: false,
-          citations: false,
           visibility_score: null,
           position: null,
           sentiment: 'Negative',
@@ -8230,28 +7146,19 @@ describe('llmo-brand-presence', () => {
           origin: '',
           category_name: '',
           execution_date: '2026-03-02',
-          answer: '',
-          url: '',
-          error_code: null,
-        },
-        {
+        }),
+        makeDetailRow({
           id: 'e2',
           topics: 'T',
           prompt: 'q',
-          region_code: 'US',
           mentions: false,
-          citations: false,
           visibility_score: null,
           position: null,
-          sentiment: 'Positive',
           volume: null,
           origin: '',
           category_name: '',
           execution_date: '2026-03-02',
-          answer: '',
-          url: '',
-          error_code: null,
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -8271,13 +7178,10 @@ describe('llmo-brand-presence', () => {
 
     it('returns sentiment -1 when no sentiments present', async () => {
       const rows = [
-        {
-          id: 'e1',
+        makeDetailRow({
           topics: 'T',
           prompt: 'q',
-          region_code: 'US',
           mentions: false,
-          citations: false,
           visibility_score: null,
           position: null,
           sentiment: '',
@@ -8285,10 +7189,7 @@ describe('llmo-brand-presence', () => {
           origin: '',
           category_name: '',
           execution_date: '2026-03-02',
-          answer: '',
-          url: '',
-          error_code: null,
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -8332,13 +7233,11 @@ describe('llmo-brand-presence', () => {
 
     it('uses empty-string fallback for null execution_date, prompt, region_code', async () => {
       const rows = [
-        {
-          id: 'e1',
+        makeDetailRow({
           topics: 'T',
           prompt: null,
           region_code: null,
           mentions: false,
-          citations: false,
           visibility_score: null,
           position: null,
           sentiment: '',
@@ -8346,17 +7245,13 @@ describe('llmo-brand-presence', () => {
           origin: '',
           category_name: '',
           execution_date: null,
-          answer: '',
-          url: '',
-          error_code: null,
-        },
-        {
+        }),
+        makeDetailRow({
           id: 'e2',
           topics: 'T',
           prompt: null,
           region_code: null,
           mentions: false,
-          citations: false,
           visibility_score: null,
           position: null,
           sentiment: '',
@@ -8364,10 +7259,7 @@ describe('llmo-brand-presence', () => {
           origin: '',
           category_name: '',
           execution_date: null,
-          answer: '',
-          url: '',
-          error_code: null,
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -8396,27 +7288,21 @@ describe('llmo-brand-presence', () => {
 
     it('returns empty executionId when execution row id is null (prompt detail map)', async () => {
       const rows = [
-        {
+        makeDetailRow({
           id: null,
           topics: 'T',
           prompt: 'q',
           prompt_id: 'p-null-id',
-          region_code: 'US',
           mentions: false,
-          citations: false,
           visibility_score: 10,
           position: '1',
           sentiment: 'Neutral',
           volume: '1',
           origin: 'o',
           category_name: 'C',
-          execution_date: '2026-03-01',
-          answer: '',
-          url: '',
-          error_code: null,
           business_competitors: '',
           detected_brand_mentions: '',
-        },
+        }),
       ];
       const client = createTableAwareMock({
         brand_presence_executions_active: { data: rows, error: null },
@@ -8438,24 +7324,17 @@ describe('llmo-brand-presence', () => {
 
     it('includes sources aggregated from fetchSourcesForExecutions', async () => {
       const execRows = [
-        {
+        makeDetailRow({
           id: 'exec-1',
           topics: 'T',
           prompt: 'q',
-          region_code: 'US',
-          mentions: true,
           citations: true,
           visibility_score: 70,
-          position: '2',
-          sentiment: 'Positive',
           volume: null,
           origin: '',
           category_name: '',
           execution_date: '2026-03-02',
-          answer: '',
-          url: '',
-          error_code: null,
-        },
+        }),
       ];
       const sourceRows = [
         {
@@ -8502,86 +7381,6 @@ describe('llmo-brand-presence', () => {
       const result = await handler(mockContext);
 
       expect(result.status).to.equal(400);
-    });
-
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-
-      const handler = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('filters brand_presence_executions_active by prompt_id', async () => {
-      const client = createTableAwareMock({
-        brand_presence_executions_active: { data: [], error: null },
-        brand_presence_sources: { data: [], error: null },
-      });
-      mockContext.dataAccess.Site.postgrestService = client;
-
-      const handler = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(client.eq).to.have.been.calledWith('prompt_id', promptUuid);
-    });
-
-    it('returns prompt detail shape scoped by prompt_id', async () => {
-      const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
-      const rows = [
-        {
-          id: 'e1',
-          topic_id: topicUuid,
-          topics: 'AI Overview',
-          prompt: 'What is AI?',
-          prompt_id: promptUuid,
-          region_code: 'US',
-          mentions: true,
-          citations: false,
-          visibility_score: 80,
-          position: '2',
-          sentiment: 'Positive',
-          volume: '100',
-          origin: 'organic',
-          category_name: 'Search',
-          execution_date: '2026-03-01',
-          answer: 'Answer A',
-          url: 'https://a.com',
-          error_code: null,
-          business_competitors: '',
-          detected_brand_mentions: '',
-        },
-      ];
-      const client = createTableAwareMock({
-        brand_presence_executions_active: { data: rows, error: null },
-        brand_presence_sources: { data: [], error: null },
-      });
-      mockContext.dataAccess.Site.postgrestService = client;
-
-      const handler = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.promptId).to.equal(promptUuid);
-      expect(body.prompt).to.equal('What is AI?');
-      expect(body.topic).to.equal('AI Overview');
-      expect(body.topicId).to.equal(topicUuid);
-      expect(body.region).to.equal('');
-      expect(body.executions).to.have.lengthOf(1);
-    });
-
-    it('returns empty executions but keeps requested promptId when no rows', async () => {
-      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
-
-      const handler = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.promptId).to.equal(promptUuid);
-      expect(body.prompt).to.equal('');
-      expect(body.executions).to.deep.equal([]);
     });
 
     it('applies optional promptRegion filter', async () => {
@@ -8637,83 +7436,20 @@ describe('llmo-brand-presence', () => {
       };
     });
 
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-
-      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns forbidden when org access check fails', async () => {
-      getOrgAndValidateAccess.rejects(
-        new Error('Only users belonging to the organization can view brand presence data'),
-      );
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest for invalid execution id', async () => {
-      mockContext.params.executionId = 'not-a-uuid';
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns badRequest when startDate is missing', async () => {
-      mockContext.data = { endDate: '2026-04-15', platform: 'chatgpt-free' };
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Missing required query parameter: startDate');
-    });
-
-    it('treats null context.data as empty query for required params', async () => {
-      mockContext.data = null;
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Missing required query parameter: startDate');
-    });
-
-    it('returns badRequest when endDate is missing', async () => {
-      mockContext.data = { startDate: '2026-02-01', platform: 'chatgpt-free' };
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Missing required query parameter: endDate');
-    });
-
-    it('returns badRequest when platform is missing', async () => {
-      mockContext.data = { startDate: '2026-02-01', endDate: '2026-04-15' };
-      mockContext.dataAccess.Site.postgrestService = createChainableMock();
-
-      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Missing required query parameter: platform');
+    [
+      ['treats null context.data as empty query for required params', null, 'Missing required query parameter: startDate'],
+      ['returns badRequest when endDate is missing', { startDate: '2026-02-01', platform: 'chatgpt-free' }, 'Missing required query parameter: endDate'],
+      ['returns badRequest when platform is missing', { startDate: '2026-02-01', endDate: '2026-04-15' }, 'Missing required query parameter: platform'],
+    ].forEach(([desc, data, message]) => {
+      it(desc, async () => {
+        mockContext.data = data;
+        mockContext.dataAccess.Site.postgrestService = createChainableMock();
+        const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+        const result = await handler(mockContext);
+        expect(result.status).to.equal(400);
+        const body = await result.json();
+        expect(body.message).to.equal(message);
+      });
     });
 
     it('accepts start_date, end_date, and model as required query aliases', async () => {
@@ -9172,52 +7908,6 @@ describe('llmo-brand-presence', () => {
   describe('createPromptExecutionStatusHandler', () => {
     const VALID_PROMPT_ID_1 = 'aaaaaaaa-1111-4000-8000-000000000001';
     const VALID_PROMPT_ID_2 = 'bbbbbbbb-2222-4000-8000-000000000002';
-
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(getOrgAndValidateAccess).not.to.have.been.called;
-    });
-
-    it('returns forbidden when user has no org access', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
-      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
-
-      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when organization not found', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
-      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
-
-      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Organization not found: 0178a3f0-1234-7000-8000-000000000001');
-    });
-
-    it('returns badRequest when generic error is thrown', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      mockContext.data = { promptIds: [VALID_PROMPT_ID_1] };
-      getOrgAndValidateAccess.rejects(new Error('Database connection failed'));
-
-      const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('Database connection failed');
-    });
 
     it('returns badRequest when promptIds is missing', async () => {
       mockContext.dataAccess.Site.postgrestService = createChainableMock();
