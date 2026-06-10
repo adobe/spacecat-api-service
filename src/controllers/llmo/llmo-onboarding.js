@@ -1547,11 +1547,11 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // operator can bind one via PATCH /organizations/:id and retry cleanly with
     // nothing left behind. Only the org is needed for this check; the brand-keyed
     // fan-out (M6–M8) runs later, once the brand row exists. `serenityEnabled` is
-    // reused there to avoid evaluating the allowlist twice.
-    const serenityEnabled = isSerenityOnboardingEnabled(
+    // reused there to avoid evaluating the cohort gate twice.
+    const serenityEnabled = await isSerenityOnboardingEnabled(
       organization.getId(),
       imsOrgId,
-      env,
+      context,
     );
     if (serenityEnabled) {
       // T4 (LLMO-5206): emitted before M5 so the dashboard counts every cohort

@@ -15,26 +15,25 @@ import { readFeatureFlag, upsertFeatureFlag } from './feature-flags-storage.js';
 export const LLMO_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const LLMO_BRANDALF_FLAG = 'brandalf';
 export const LLMO_BRANDALF_MIGRATION_FLAG = 'brandalf_migration';
+export const LLMO_SERENITY_FLAG = 'serenity';
 export const LLMO_ONBOARDING_MODE_V1 = 'v1';
 export const LLMO_ONBOARDING_MODE_V2 = 'v2';
 export const SERENITY_SITE_ALLOWLIST = 'SERENITY_SITE_ALLOWLIST';
 
 /**
- * Returns true if the given org is in the SERENITY_SITE_ALLOWLIST env var, which
- * gates the Semrush provisioning path (M5–M8) during the cohort prototype phase.
- * Matches against both the SpaceCat org ID and the IMS org ID.
+ * Legacy env-var allowlist check (SERENITY_SITE_ALLOWLIST). Matches against both
+ * the SpaceCat org ID and the IMS org ID.
  *
- * TRANSITIONAL — env-var allowlist is intentional for the prototype phase (small
- * cohort, fast iteration). Once the cohort exceeds ~10 orgs or requires real-time
- * add/remove without a deploy, migrate to a DB flag. Env-var changes require a
- * deployment, cannot be audited in real-time, and have no rollback semantics.
+ * DEPRECATED — retained only as the transitional fallback for orgs that do not
+ * yet have a `serenity` row in the feature_flags table (see
+ * isSerenityOnboardingEnabled). Remove once every cohort org has a DB row.
  *
  * @param {string} organizationId - SpaceCat org ID
  * @param {string} imsOrgId - IMS org ID
  * @param {object} env - Environment variables object
  * @returns {boolean}
  */
-export function isSerenityOnboardingEnabled(organizationId, imsOrgId, env) {
+export function isInSerenityAllowlist(organizationId, imsOrgId, env) {
   const allowlist = env?.[SERENITY_SITE_ALLOWLIST];
   if (!allowlist) {
     return false;
@@ -45,6 +44,78 @@ export function isSerenityOnboardingEnabled(organizationId, imsOrgId, env) {
   const imsLower = imsOrgId?.toLowerCase();
   return allowed.includes(organizationId)
     || allowed.some((entry) => entry.toLowerCase() === imsLower);
+}
+
+/**
+ * Reads the per-org `serenity` cohort flag from the feature_flags table
+ * (product LLMO). Mirrors readBrandalfFlagOverride.
+ *
+ * @param {string} organizationId - SpaceCat org ID
+ * @param {object} postgrestClient
+ * @returns {Promise<boolean|null>} true/false when a row exists, null when absent.
+ */
+export async function readSerenityFlagOverride(organizationId, postgrestClient) {
+  if (!organizationId || !postgrestClient?.from) {
+    return null;
+  }
+
+  return readFeatureFlag({
+    organizationId,
+    product: LLMO_FEATURE_FLAG_PRODUCT,
+    flagName: LLMO_SERENITY_FLAG,
+    postgrestClient,
+  });
+}
+
+/**
+ * Returns true if the given org is in the Semrush onboarding cohort, which gates
+ * the Semrush provisioning path (M5–M8).
+ *
+ * Membership is the per-org `serenity` flag in the feature_flags table (product
+ * LLMO), seedable at runtime via PUT /organizations/:id/feature-flags/LLMO/serenity
+ * — no deploy needed.
+ *
+ * TRANSITIONAL dual-read (LLMO-5493): the DB flag is authoritative. When no row
+ * exists for the org (read returns null), the legacy SERENITY_SITE_ALLOWLIST env
+ * var is still honored so the prototype cohort keeps working during the migration
+ * window. An explicit `false` in the DB always wins over the env arm. Remove the
+ * env fallback (and isInSerenityAllowlist / SERENITY_SITE_ALLOWLIST) once every
+ * cohort org has a DB row.
+ *
+ * @param {string} organizationId - SpaceCat org ID
+ * @param {string} imsOrgId - IMS org ID
+ * @param {object} context - Request context (env + dataAccess.services.postgrestClient + log)
+ * @returns {Promise<boolean>}
+ */
+export async function isSerenityOnboardingEnabled(organizationId, imsOrgId, context) {
+  const postgrestClient = context?.dataAccess?.services?.postgrestClient;
+  const log = context?.log;
+
+  let flag = null;
+  try {
+    flag = await readSerenityFlagOverride(organizationId, postgrestClient);
+  } catch (err) {
+    log?.warn?.(
+      `Failed to read serenity flag for org ${organizationId}: ${err.message} `
+      + '— falling back to SERENITY_SITE_ALLOWLIST env',
+    );
+  }
+
+  // DB row present → authoritative (true or false).
+  if (flag !== null) {
+    return flag === true;
+  }
+
+  // No DB row → transitional fallback to the legacy env allowlist.
+  const inAllowlist = isInSerenityAllowlist(organizationId, imsOrgId, context?.env);
+  if (inAllowlist) {
+    log?.warn?.(
+      `Serenity cohort: org ${organizationId} matched the deprecated `
+      + 'SERENITY_SITE_ALLOWLIST env var (no feature_flags row). Seed a `serenity` '
+      + 'DB flag via PUT /organizations/:id/feature-flags/LLMO/serenity to migrate.',
+    );
+  }
+  return inAllowlist;
 }
 
 /**
