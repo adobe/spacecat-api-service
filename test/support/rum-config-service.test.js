@@ -51,6 +51,7 @@ describe('rum-config-service', () => {
     };
 
     site = {
+      getId: sandbox.stub().returns('site-123'),
       getBaseURL: () => 'https://example.com',
       getConfig: () => siteConfig,
       setConfig: sandbox.stub(),

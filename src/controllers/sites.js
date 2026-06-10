@@ -49,6 +49,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { updateRumConfig } from '../support/rum-config-service.js';
+import { autoDetectOverrideBaseURL } from '../support/base-url-detection.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 import {
   ensureSiteEntitlementAndEnrollment,
@@ -402,9 +403,10 @@ function SitesController(ctx, log, env) {
           ...context.data,
           baseURL, // override with normalized value
         });
-        updateRumConfig(site, context).catch((e) => {
-          log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
-        });
+        updateRumConfig(site, context)
+          .catch((e) => log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`))
+          .then(() => autoDetectOverrideBaseURL(site, context))
+          .catch((e) => log.warn(`[sites] base URL auto-detect failed for ${site.getBaseURL()}: ${e.message}`));
         status = 201;
       }
     } catch (error) {
