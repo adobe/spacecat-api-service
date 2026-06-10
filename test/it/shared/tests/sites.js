@@ -25,6 +25,7 @@ import {
   SITE_NEW_LLMO_ID,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
+  PROJECT_2_ID,
 } from '../seed-ids.js';
 
 // LLMO-4176 mode-resolution test sites are seeded with intentionally
@@ -497,6 +498,17 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.patch(`/sites/${SITE_1_ID}`, {
           organizationId: ORG_2_ID,
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 403 when trying to change projectId', async () => {
+        // Re-parenting a site to a project in another org via this endpoint is
+        // disallowed (projects are org-scoped) — SITES-46200. SITE_1 belongs to
+        // PROJECT_1_ID, so patching it to PROJECT_2_ID must be rejected.
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_1_ID}`, {
+          projectId: PROJECT_2_ID,
         });
         expect(res.status).to.equal(403);
       });

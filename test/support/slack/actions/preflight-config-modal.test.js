@@ -35,6 +35,9 @@ describe('preflight-config-modal', () => {
 
     siteMock = {
       findById: sandbox.stub(),
+      allByExternalOwnerIdAndExternalSiteId: sandbox.stub().resolves([]),
+      getId: sandbox.stub().returns('site123'),
+      getOrganizationId: sandbox.stub().returns('org1'),
       getBaseURL: sandbox.stub().returns('https://example.com'),
       setAuthoringType: sandbox.stub(),
       setDeliveryConfig: sandbox.stub(),
@@ -100,6 +103,79 @@ describe('preflight-config-modal', () => {
   });
 
   describe('preflightConfigModal', () => {
+    it('should require content source path when multiple sites share program and environment', async () => {
+      siteMock.allByExternalOwnerIdAndExternalSiteId.resolves([
+        siteMock,
+        {
+          getId: () => 'site456',
+          getOrganizationId: () => 'org1',
+          getAuthoringType: () => 'cs',
+        },
+      ]);
+      siteMock.findById.resolves(siteMock);
+
+      const mockedModule = await esmock('../../../../src/support/slack/actions/preflight-config-modal.js', {
+        '../../../../src/support/slack/actions/onboard-modal.js': {
+          extractDeliveryConfigFromPreviewUrl: sinon.stub().returns({
+            programId: '12345',
+            environmentId: '67890',
+            authorURL: 'https://author-p12345-e67890.adobeaemcloud.com',
+          }),
+        },
+      });
+
+      const modalAction = mockedModule.preflightConfigModal(context);
+      await modalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.calledWith({
+        response_action: 'errors',
+        errors: {
+          content_source_path_input: 'Content source path is required when multiple sites in this organization share the same AEM CS program and environment.',
+        },
+      });
+    });
+
+    it('should persist optional content source path for unique program and environment', async () => {
+      body.view.state.values.content_source_path_input = {
+        content_source_path: {
+          value: '/content/mysite',
+        },
+      };
+
+      const mockedModule = await esmock('../../../../src/support/slack/actions/preflight-config-modal.js', {
+        '../../../../src/support/slack/actions/onboard-modal.js': {
+          extractDeliveryConfigFromPreviewUrl: sinon.stub().returns({
+            programId: '12345',
+            environmentId: '67890',
+            authorURL: 'https://author-p12345-e67890.adobeaemcloud.com',
+          }),
+        },
+      });
+
+      siteMock.findById.resolves(siteMock);
+
+      const modalAction = mockedModule.preflightConfigModal(context);
+      await modalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(siteMock.setDeliveryConfig).to.have.been.calledWith({
+        programId: '12345',
+        environmentId: '67890',
+        authorURL: 'https://author-p12345-e67890.adobeaemcloud.com',
+        contentSourcePath: '/content/mysite',
+      });
+      expect(clientMock.chat.postMessage).to.have.been.calledWithMatch({
+        text: sinon.match(/Content Source Path:\* \/content\/mysite/),
+      });
+    });
+
     it('should handle AEM CS preview URL for cs authoring type', async () => {
       const mockedModule = await esmock('../../../../src/support/slack/actions/preflight-config-modal.js', {
         '../../../../src/support/slack/actions/onboard-modal.js': {

@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import crypto from 'node:crypto';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 // Zero-width / BOM characters that pass `trim()` but render invisible. Strip
@@ -274,7 +275,7 @@ export async function createCategory({
   // Derive a slug from the canonical name when none supplied, trimming
   // leading/trailing dashes so "   !!  " and Unicode-only names don't
   // produce a degenerate bare '-'. The client-supplied slug is trusted
-  // verbatim (FK-stability).
+  // verbatim.
   let derivedSlug;
   if (category.id) {
     derivedSlug = category.id;
@@ -283,10 +284,25 @@ export async function createCategory({
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
+    // Names with no ASCII alphanumerics (e.g. CJK "カテゴリ") and
+    // punctuation-only names slugify to empty. Fall back to a synthetic
+    // UUID slug rather than failing — mirrors the DB column default
+    // (gen_random_uuid()::text). Idempotency keys on `name` (lookup above)
+    // and every FK targets categories.id (the UUID PK), not this text slug,
+    // so a synthetic category_id is safe and stable across re-posts. The
+    // same name re-resolves to the existing row and never regenerates.
+    // LLMO-5473.
     if (!derivedSlug) {
-      throw new Error(
-        'Category name produces an empty slug after normalization; supply an explicit `id`',
-      );
+      derivedSlug = crypto.randomUUID();
+      // `category_id` is now polymorphic (human-readable slug OR synthetic
+      // UUID). Emit a structured signal so operators can quantify the
+      // fallback rate and find affected rows in Coralogix — otherwise the
+      // UUID slugs are indistinguishable from client-supplied ones.
+      log?.warn?.('Category name slugifies to empty; generated synthetic UUID slug', {
+        organization_id: organizationId,
+        category_id: derivedSlug,
+        name: canonicalName,
+      });
     }
   }
 
@@ -331,7 +347,7 @@ export async function createCategory({
         }
       } else {
         // Any other unique-constraint violation (e.g. slug collision via
-        // uq_category_id_per_org when the client ships a drifted `id` that
+        // uq_category_per_org when the client ships a drifted `id` that
         // maps to a different name already occupying that slug) surfaces as
         // a typed 409 echoing the actual constraint — mirrors the topics
         // pattern so callers don't have to mine 500 bodies. LLMO-4370 #5/#6.

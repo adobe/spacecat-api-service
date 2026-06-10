@@ -1203,6 +1203,158 @@ describe('Preflight Controller', () => {
       expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
     });
 
+    // -- mystiqueUrl dev override (SITES-46216) --
+
+    // The default preflightController in this describe block is built with
+    // AWS_ENV='prod'. Override tests need a separate dev-mode controller.
+    const buildDevController = () => CreatePreflightController(
+      {
+        dataAccess: mockDataAccess,
+        sqs: mockSqs,
+        attributes: { authInfo: mockAuthInfo },
+        pathInfo: { headers: {} },
+      },
+      loggerStub,
+      {
+        AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+        MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+        AWS_ENV: 'dev',
+      },
+    );
+
+    it('honors mystiqueUrl override on non-prod when host is *.adobe.io', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'https://m-dev.adobe.io',
+        },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      const [calledUrl] = fetchStub.secondCall.args;
+      expect(calledUrl).to.equal('https://m-dev.adobe.io/v1/preflight/analyze');
+    });
+
+    it('falls back to env.MYSTIQUE_API_BASE_URL when mystiqueUrl is absent on non-prod', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      const [calledUrl] = fetchStub.secondCall.args;
+      expect(calledUrl).to.equal('https://mysticat.example.com/v1/preflight/analyze');
+    });
+
+    it('returns 400 PREFLIGHT_INVALID_REQUEST when mystiqueUrl is not a valid URL', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'not-a-url',
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.message).to.include('mystiqueUrl');
+    });
+
+    it('returns 400 PREFLIGHT_INVALID_REQUEST when mystiqueUrl host is not *.adobe.io', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'https://evil.example.com',
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.message).to.include('*.adobe.io');
+    });
+
+    it('returns 400 PREFLIGHT_INVALID_REQUEST when mystiqueUrl scheme is not https', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'http://m-dev.adobe.io', // http, not https
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.message).to.include('https');
+    });
+
+    it('ignores mystiqueUrl in prod (override is dead code there)', async () => {
+      const controller = CreatePreflightController(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'https://m-dev.adobe.io', // would be allowed in dev, ignored in prod
+        },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      const [calledUrl] = fetchStub.secondCall.args;
+      // Hit the env-configured URL, NOT the body-supplied override
+      expect(calledUrl).to.equal('https://mysticat.example.com/v1/preflight/analyze');
+    });
+
+    it('allows mystiqueUrl override even when MYSTIQUE_API_BASE_URL env is empty (non-prod)', async () => {
+      // Sanity check that an operator can use the override to test even if
+      // the env var hasn't been configured yet — the override path should
+      // sidestep the "Analyze service not configured" 500.
+      const controller = CreatePreflightController(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'dev',
+          // MYSTIQUE_API_BASE_URL: deliberately unset
+        },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'https://m-dev.adobe.io',
+        },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      // Confirm the override was actually used — not just that the request
+      // avoided the "Analyze service not configured" 500.
+      expect(fetchStub.secondCall.args[0]).to.equal('https://m-dev.adobe.io/v1/preflight/analyze');
+    });
+
     it('returns 404 when site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
       const response = await preflightController.createPreflight({

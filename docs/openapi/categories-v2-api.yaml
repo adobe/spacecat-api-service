@@ -118,7 +118,7 @@ v2-categories-for-org:
              deleted) between our lookup and our update — message
              `Category was concurrently modified; please retry`.
           2. A unique-constraint other than `uq_category_name_per_org` was
-             tripped on insert (e.g. `uq_category_id_per_org` when the
+             tripped on insert (e.g. `uq_category_per_org` when the
              client-supplied slug collides with an unrelated existing
              row). Message echoes the actual constraint name.
           Treated as an idempotent retry signal by DRS-class clients;

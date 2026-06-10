@@ -4379,16 +4379,16 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(500);
     });
 
-    it('maps a 400 from sheet-write (unknown column) to 400 response', async () => {
+    it('maps a 400 from sheet-write (unknown match column) to 400 response', async () => {
       const { subjectController } = await buildControllerWithSheetWriteStub(async () => {
-        const err = new Error('Unknown column(s) foo. Available: topic_id, prompt, deleted');
+        const err = new Error('Unknown match column(s) foo. Available: topic_id, prompt, deleted');
         err.statusCode = 400;
         throw err;
       });
       const result = await subjectController.patchLlmoDataRow({
         ...mockContext,
         params: baseParams,
-        data: { sheet: 'Semrush', match: { topic_id: 'x' }, values: { foo: 'bar' } },
+        data: { sheet: 'Semrush', match: { foo: 'x' }, values: { deleted: 'true' } },
       });
       expect(result.status).to.equal(400);
     });

@@ -617,8 +617,10 @@ llmo-data-row-with-datasource:
       each other.
 
       Within each entry, the `match` object must uniquely identify exactly one row
-      (no match → 404, multiple matches → 409). Column names in `match` and `values`
-      must exist in the worksheet header row.
+      (no match → 404, multiple matches → 409). `match` column names must exist in the
+      worksheet header row (unknown → 400). `values` column names that do not exist yet
+      are created on the fly (appended after the last header column), so the first write
+      of e.g. a `status` column the generator never emitted succeeds rather than 400ing.
     operationId: patchLlmoDataRow
     requestBody:
       required: true
@@ -679,7 +681,9 @@ llmo-data-row-with-type:
 
       Used by the elmo UI to mark prompt(s) in the Strategic Recommendations
       workbook as deleted by writing `"deleted": "true"` on the matching row(s) of
-      the `Semrush`, `Synthetic Personas`, or `Citation Attempt` worksheet.
+      the `Semrush`, `Synthetic Personas`, or `Citation Attempt` worksheet, and to
+      dismiss GSC prompts by writing `"status": "dismissed"` on the matching row of
+      the GSC workbook — the `status` column is created automatically on first write.
     operationId: patchLlmoDataRowWithType
     requestBody:
       required: true
