@@ -503,9 +503,32 @@ export async function upsertBrand({
     .eq('name', brand.name)
     .maybeSingle();
 
+  // LLMO-5494: the base site is the brand's stable identity; the name is
+  // mutable (the brandalf write-back refines it, sometimes to a different
+  // name). Resolve any existing active brand by (org, site) so a rename
+  // updates THAT row in place — preserving the UUID and therefore the
+  // brand_to_semrush_projects link — instead of inserting a new row on the
+  // changed name, which strands the Semrush projects on the old UUID.
+  // Mirrors getBrandBySite's "one active brand per (org, site)" invariant
+  // (LLMO-4592): order by name and take the first deterministically.
+  let existingBySite = null;
+  if (hasText(brand.baseSiteId)) {
+    const { data: bySite } = await postgrestClient
+      .from('brands')
+      .select('id, name, site_id')
+      .eq('organization_id', organizationId)
+      .eq('site_id', brand.baseSiteId)
+      .eq('status', 'active')
+      .order('name', { ascending: true })
+      .limit(1);
+    existingBySite = bySite?.[0] ?? null;
+  }
+
   // A brand cannot be active without a base site ID — but respect persisted state
   // on the update path (the DB row may already have site_id set).
-  const hasBaseSite = hasText(brand.baseSiteId) || hasText(existing?.site_id);
+  const hasBaseSite = hasText(brand.baseSiteId)
+    || hasText(existing?.site_id)
+    || hasText(existingBySite?.site_id);
   const status = (!hasBaseSite && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
@@ -529,15 +552,43 @@ export async function upsertBrand({
     row.site_id = brand.baseSiteId;
   }
 
-  const { data: upserted, error } = await postgrestClient
-    .from('brands')
-    .upsert(row, { onConflict: 'organization_id,name' })
-    .select('id, name')
-    .single();
+  let upserted;
+  let error;
+  if (existingBySite && existingBySite.name !== brand.name) {
+    // Rename of the brand that already owns this base site → update in place by
+    // id so the UUID (and the Semrush project link) survives the name change.
+    ({ data: upserted, error } = await postgrestClient
+      .from('brands')
+      .update(row)
+      .eq('organization_id', organizationId)
+      .eq('id', existingBySite.id)
+      .select('id, name')
+      .single());
+  } else {
+    // First write for this site, or a same-name re-upsert → conflict on name.
+    ({ data: upserted, error } = await postgrestClient
+      .from('brands')
+      .upsert(row, { onConflict: 'organization_id,name' })
+      .select('id, name')
+      .single());
+  }
 
   if (error) {
     if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
       const err = new Error('This site is already the primary URL for another brand');
+      err.status = 409;
+      throw err;
+    }
+    // LLMO-5494: renaming the site's brand to a name another brand in the org
+    // already holds (uq_brand_name_per_org) means a genuinely distinct brand
+    // exists — don't clobber it. Surface clearly; re-pointing the stub's
+    // projects to that brand (AC#2) is handled by repointSemrushProjects once
+    // the write-back signals the new-brand case.
+    if (error.code === '23505' && error.message?.includes('uq_brand_name_per_org')) {
+      const err = new Error(
+        `Cannot rename brand for site ${brand.baseSiteId}: name "${brand.name}" `
+        + 'is already used by another brand in this organization',
+      );
       err.status = 409;
       throw err;
     }
@@ -709,6 +760,64 @@ export async function deleteBrand(organizationId, brandId, postgrestClient, upda
     throw new Error(`Failed to delete brand: ${error.message}`);
   }
   return !!data;
+}
+
+/**
+ * Re-points every brand_to_semrush_projects row from one brand to another
+ * (LLMO-5494 AC#2). Used when the write-back creates a genuinely new brand row
+ * for a site whose stub already owns Semrush projects: the projects must follow
+ * the now-authoritative brand instead of being stranded on the stub UUID.
+ *
+ * Idempotent: a re-run after the rows have already moved matches nothing and
+ * returns 0. Callers should re-point BEFORE soft-deleting the stub (via
+ * deleteBrand) so the projects always have a live owner; a retried sequence
+ * converges.
+ *
+ * @param {object} params
+ * @param {string} params.fromBrandId - Stub brand UUID currently owning the rows.
+ * @param {string} params.toBrandId - Authoritative brand UUID to move them to.
+ * @param {object} params.postgrestClient - PostgREST client.
+ * @param {string} [params.updatedBy] - User performing the operation.
+ * @returns {Promise<number>} Count of rows re-pointed.
+ */
+export async function repointSemrushProjects({
+  fromBrandId,
+  toBrandId,
+  postgrestClient,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+  if (!hasText(fromBrandId) || !hasText(toBrandId)) {
+    throw new Error('fromBrandId and toBrandId are required');
+  }
+  if (fromBrandId === toBrandId) {
+    return 0;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brand_to_semrush_projects')
+    .update({ brand_id: toBrandId, updated_by: updatedBy })
+    .eq('brand_id', fromBrandId)
+    .select('id');
+
+  if (error) {
+    // uq_brand_to_semrush_slice: the target brand already owns a row for the
+    // same (location, language) slice. Surface rather than silently dropping
+    // the stub's project — the operator must reconcile the duplicate.
+    if (error.code === '23505') {
+      const err = new Error(
+        `Cannot re-point Semrush projects from ${fromBrandId} to ${toBrandId}: `
+        + 'target brand already owns an overlapping market slice',
+      );
+      err.status = 409;
+      throw err;
+    }
+    throw new Error(`Failed to re-point Semrush projects: ${error.message}`);
+  }
+
+  return data?.length ?? 0;
 }
 
 /**

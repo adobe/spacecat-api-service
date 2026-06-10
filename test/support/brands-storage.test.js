@@ -22,6 +22,7 @@ import {
   upsertBrand,
   updateBrand,
   deleteBrand,
+  repointSemrushProjects,
   listRegions,
 } from '../../src/support/brands-storage.js';
 
@@ -1680,6 +1681,192 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(deleteBrand(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to delete brand: delete failed');
+    });
+  });
+
+  describe('upsertBrand — resolve-by-site (LLMO-5494)', () => {
+    const SITE_ID = '33333333-3333-4333-8333-333333333333';
+    const STUB_ID = '44444444-4444-4444-8444-444444444444';
+
+    // Mock that distinguishes the four sequential `.from('brands')` calls
+    // upsertBrand makes when a baseSiteId is set (existing-by-name, then
+    // existing-by-site, then the write, then getBrandById) and records whether
+    // the write went through `.update` (in place) or `.upsert` (insert-on-name).
+    function createSiteAwareClient({
+      byName = { data: null, error: null },
+      bySite = { data: [], error: null },
+      write = { data: { id: STUB_ID, name: 'NewName' }, error: null },
+      finalRow = makeBrandRow({ id: STUB_ID, name: 'NewName', site_id: SITE_ID }),
+    }) {
+      const ops = [];
+      let maybeSingleCount = 0;
+      const from = sinon.stub().callsFake((table) => {
+        if (table !== 'brands') {
+          return createChainableQuery({ data: null, error: null });
+        }
+        const q = {};
+        const self = () => q;
+        q.select = sinon.stub().callsFake(self);
+        q.eq = sinon.stub().callsFake(self);
+        q.order = sinon.stub().callsFake(self);
+        q.upsert = sinon.stub().callsFake(() => {
+          ops.push('upsert');
+          return q;
+        });
+        q.update = sinon.stub().callsFake(() => {
+          ops.push('update');
+          return q;
+        });
+        q.limit = sinon.stub().callsFake(() => Promise.resolve(bySite));
+        q.single = sinon.stub().callsFake(() => Promise.resolve(write));
+        q.maybeSingle = sinon.stub().callsFake(() => {
+          maybeSingleCount += 1;
+          return Promise.resolve(maybeSingleCount === 1 ? byName : { data: finalRow, error: null });
+        });
+        return q;
+      });
+      return { client: { from }, ops };
+    }
+
+    it('updates the brand in place by id when the site already has a (differently named) active brand', async () => {
+      const { client, ops } = createSiteAwareClient({
+        bySite: { data: [{ id: STUB_ID, name: 'OldName', site_id: SITE_ID }], error: null },
+        write: { data: { id: STUB_ID, name: 'NewName' }, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'NewName', baseSiteId: SITE_ID },
+        postgrestClient: client,
+      });
+
+      // UUID preserved → the BrandSemrushProject rows stay linked.
+      expect(result.id).to.equal(STUB_ID);
+      expect(result.name).to.equal('NewName');
+      expect(ops).to.include('update');
+      expect(ops).to.not.include('upsert');
+    });
+
+    it('inserts via upsert when no active brand exists for the site', async () => {
+      const { client, ops } = createSiteAwareClient({
+        bySite: { data: [], error: null },
+        write: { data: { id: BRAND_ID, name: 'Brand' }, error: null },
+        finalRow: makeBrandRow({ id: BRAND_ID, name: 'Brand', site_id: SITE_ID }),
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Brand', baseSiteId: SITE_ID },
+        postgrestClient: client,
+      });
+
+      expect(result.id).to.equal(BRAND_ID);
+      expect(ops).to.include('upsert');
+      expect(ops).to.not.include('update');
+    });
+
+    it('uses upsert (not in-place update) when the site brand keeps the same name', async () => {
+      const { client, ops } = createSiteAwareClient({
+        bySite: { data: [{ id: BRAND_ID, name: 'Brand', site_id: SITE_ID }], error: null },
+        write: { data: { id: BRAND_ID, name: 'Brand' }, error: null },
+        finalRow: makeBrandRow({ id: BRAND_ID, name: 'Brand', site_id: SITE_ID }),
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Brand', baseSiteId: SITE_ID },
+        postgrestClient: client,
+      });
+
+      expect(ops).to.include('upsert');
+      expect(ops).to.not.include('update');
+    });
+
+    it('throws 409 when renaming the site brand to a name another brand in the org owns', async () => {
+      const { client } = createSiteAwareClient({
+        bySite: { data: [{ id: STUB_ID, name: 'OldName', site_id: SITE_ID }], error: null },
+        write: { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"' } },
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'NewName', baseSiteId: SITE_ID },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.message).to.match(/already used by another brand/);
+    });
+  });
+
+  describe('repointSemrushProjects (LLMO-5494)', () => {
+    const STUB_ID = '44444444-4444-4444-8444-444444444444';
+    const NEW_ID = '55555555-5555-4555-8555-555555555555';
+
+    it('throws when postgrestClient is missing', async () => {
+      await expect(repointSemrushProjects({
+        fromBrandId: STUB_ID, toBrandId: NEW_ID, postgrestClient: null,
+      })).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('throws when fromBrandId or toBrandId is missing', async () => {
+      await expect(repointSemrushProjects({
+        fromBrandId: '', toBrandId: NEW_ID, postgrestClient: { from: () => {} },
+      })).to.be.rejectedWith('fromBrandId and toBrandId are required');
+    });
+
+    it('is a no-op (returns 0) when from and to are the same brand', async () => {
+      const from = sinon.stub();
+      const result = await repointSemrushProjects({
+        fromBrandId: STUB_ID, toBrandId: STUB_ID, postgrestClient: { from },
+      });
+      expect(result).to.equal(0);
+      expect(from).to.not.have.been.called;
+    });
+
+    it('re-points all rows and returns the count', async () => {
+      const query = createChainableQuery({ data: [{ id: 'r1' }, { id: 'r2' }], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await repointSemrushProjects({
+        fromBrandId: STUB_ID, toBrandId: NEW_ID, postgrestClient, updatedBy: 'brandalf',
+      });
+      expect(result).to.equal(2);
+      expect(postgrestClient.from).to.have.been.calledWith('brand_to_semrush_projects');
+    });
+
+    it('is idempotent — returns 0 when no rows remain on the source brand', async () => {
+      const query = createChainableQuery({ data: [], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await repointSemrushProjects({
+        fromBrandId: STUB_ID, toBrandId: NEW_ID, postgrestClient,
+      });
+      expect(result).to.equal(0);
+    });
+
+    it('throws 409 when the target brand already owns an overlapping market slice', async () => {
+      const query = createChainableQuery({
+        data: null,
+        error: { code: '23505', message: 'duplicate key value violates unique constraint "uq_brand_to_semrush_slice"' },
+      });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const err = await repointSemrushProjects({
+        fromBrandId: STUB_ID, toBrandId: NEW_ID, postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.message).to.match(/overlapping market slice/);
+    });
+
+    it('throws on a generic database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'boom' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      await expect(repointSemrushProjects({
+        fromBrandId: STUB_ID, toBrandId: NEW_ID, postgrestClient,
+      })).to.be.rejectedWith('Failed to re-point Semrush projects: boom');
     });
   });
 });
