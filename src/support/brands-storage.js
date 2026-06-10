@@ -11,6 +11,7 @@
  */
 
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
+import { marketFromGeoTargetId } from './serenity/handlers/markets.js';
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -24,6 +25,7 @@ const BRAND_SELECT = [
   'competitors(name, url, regions)',
   'brand_sites(site_id, paths, type, sites(base_url))',
   'brand_urls(url)',
+  'brand_to_semrush_projects(geo_target_id, language_code)',
 ].join(', ');
 
 /**
@@ -142,6 +144,15 @@ function mapDbBrandToV2(row) {
       regions: c.regions || [],
     })),
     siteIds,
+    // Semrush markets provisioned for this brand — one entry per (market, language)
+    // slice in brand_to_semrush_projects. Empty for non-cohort brands.
+    markets: (row.brand_to_semrush_projects || []).reduce((acc, p) => {
+      const market = marketFromGeoTargetId(p.geo_target_id);
+      if (market) {
+        acc.push({ market, language: p.language_code });
+      }
+      return acc;
+    }, []),
     createdAt: row.created_at,
     createdBy: row.created_by,
     updatedAt: row.updated_at,

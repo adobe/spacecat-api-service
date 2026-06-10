@@ -196,6 +196,42 @@ describe('brands-storage', () => {
       expect(result[0].brandAliases).to.deep.equal([]);
       expect(result[0].competitors).to.deep.equal([]);
       expect(result[0].siteIds).to.deep.equal([]);
+      expect(result[0].markets).to.deep.equal([]);
+    });
+
+    it('exposes provisioned Semrush markets on the brand (LLMO-5007)', async () => {
+      const dbRow = makeBrandRow({
+        brand_to_semrush_projects: [
+          { geo_target_id: 2840, language_code: 'en' }, // US
+          { geo_target_id: 2276, language_code: 'de' }, // DE
+        ],
+      });
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].markets).to.deep.equal([
+        { market: 'US', language: 'en' },
+        { market: 'DE', language: 'de' },
+      ]);
+    });
+
+    it('omits Semrush markets with unknown geoTargetId from the brand (LLMO-5007)', async () => {
+      const dbRow = makeBrandRow({
+        brand_to_semrush_projects: [
+          { geo_target_id: 9999999, language_code: 'en' }, // unknown
+          { geo_target_id: 2840, language_code: 'en' }, // US — known
+        ],
+      });
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].markets).to.deep.equal([
+        { market: 'US', language: 'en' },
+      ]);
     });
 
     it('returns empty array when data is null', async () => {
