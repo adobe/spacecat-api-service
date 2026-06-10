@@ -1,3 +1,10 @@
+## [1.564.1](https://github.com/adobe/spacecat-api-service/compare/v1.564.0...v1.564.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* generate fallback slug for all-multibyte category names | LLMO-5473 ([#2578](https://github.com/adobe/spacecat-api-service/issues/2578)) ([c98468c](https://github.com/adobe/spacecat-api-service/commit/c98468ce857eff4986ed8bebf96fb1b5fb420953))
+
 # [1.564.0](https://github.com/adobe/spacecat-api-service/compare/v1.563.1...v1.564.0) (2026-06-09)
 
 
