@@ -33,6 +33,18 @@ const SAFE_PATH_SEGMENT_RE = /^[A-Za-z0-9_-]+$/;
 export const isSafePathSegment = (value) => typeof value === 'string'
   && value.length > 0 && SAFE_PATH_SEGMENT_RE.test(value);
 
+// A `values` write may create a header column that doesn't exist yet (see
+// updateWorksheet). Existing columns are never re-validated, but a *new* column
+// name is gated so an authenticated caller can't pollute the worksheet header with
+// arbitrary or oversized keys. The set is deliberately wider than isSafePathSegment
+// (sheet headers legitimately contain spaces and '+', e.g. "Source GSC+Keywords")
+// but still excludes control characters and caps length.
+export const MAX_NEW_COLUMN_NAME_LENGTH = 100;
+const NEW_COLUMN_NAME_RE = /^[\w .+-]+$/;
+export const isCreatableColumnName = (value) => typeof value === 'string'
+  && value.length > 0 && value.length <= MAX_NEW_COLUMN_NAME_LENGTH
+  && NEW_COLUMN_NAME_RE.test(value);
+
 const buildSharePointPath = (dataFolder, sheetType, dataSource) => {
   const segments = [SHAREPOINT_FILE_PREFIX, dataFolder];
   if (sheetType) {
@@ -220,13 +232,39 @@ export const validateSheetRowPatch = (data) => {
 // identical to the pre-batch contract.
 const updateWorksheet = (worksheet, entryRef, headerMap, match, values) => {
   const prefix = entryRef ? `${entryRef}: ` : '';
+
+  // `match` columns must already exist — you cannot identify a row by a column the
+  // worksheet doesn't have, so an unknown match column is a caller error (400).
   const unknownMatchCols = Object.keys(match).filter((c) => !headerMap.has(c));
-  const unknownValueCols = Object.keys(values).filter((c) => !headerMap.has(c));
-  if (unknownMatchCols.length > 0 || unknownValueCols.length > 0) {
+  if (unknownMatchCols.length > 0) {
     const headers = [...headerMap.keys()].join(', ');
-    const err = new Error(`${prefix}Unknown column(s) ${[...unknownMatchCols, ...unknownValueCols].join(', ')}. Available: ${headers}`);
+    const err = new Error(`${prefix}Unknown match column(s) ${unknownMatchCols.join(', ')}. Available: ${headers}`);
     err.statusCode = 400;
     throw err;
+  }
+
+  // `values` columns are created on demand: a value column that isn't in the header
+  // row yet is appended after the last existing column, so e.g. the first-ever GSC
+  // prompt dismissal can introduce a `status` column the generator never emitted.
+  // `headerMap` is mutated in place so subsequent entries in the same batch (which
+  // share the cached map) see the new column. Existing data rows leave the new cell
+  // empty — only the matched row below gets a value.
+  const missingValueCols = Object.keys(values).filter((c) => !headerMap.has(c));
+  if (missingValueCols.length > 0) {
+    const invalidNewCols = missingValueCols.filter((c) => !isCreatableColumnName(c));
+    if (invalidNewCols.length > 0) {
+      const err = new Error(`${prefix}Cannot create column(s) ${invalidNewCols.join(', ')}: new column names must be 1-${MAX_NEW_COLUMN_NAME_LENGTH} characters of letters, digits, spaces, and . _ + - only`);
+      err.statusCode = 400;
+      throw err;
+    }
+    const headerRow = worksheet.getRow(1);
+    let nextCol = headerMap.size > 0 ? Math.max(...headerMap.values()) : 0;
+    missingValueCols.forEach((column) => {
+      nextCol += 1;
+      headerRow.getCell(nextCol).value = column;
+      headerMap.set(column, nextCol);
+    });
+    headerRow.commit();
   }
 
   const matchedRows = findRowMatching(worksheet, headerMap, match);
@@ -259,6 +297,8 @@ const updateWorksheet = (worksheet, entryRef, headerMap, match, values) => {
  *  - All-or-nothing. Every entry must validate AND match exactly one row in its
  *    target worksheet before any writes happen. The first failing entry throws
  *    with `.statusCode` (400/404/409) and the workbook is not uploaded.
+ *  - `values` columns missing from the header row are created on the fly (appended
+ *    after the last column); `match` columns must already exist (unknown → 400).
  *  - Worksheet header maps are cached per-sheet across entries so a 100-update
  *    batch against the same sheet still scans the header row once.
  *
