@@ -294,6 +294,15 @@ export async function createCategory({
     // LLMO-5473.
     if (!derivedSlug) {
       derivedSlug = crypto.randomUUID();
+      // `category_id` is now polymorphic (human-readable slug OR synthetic
+      // UUID). Emit a structured signal so operators can quantify the
+      // fallback rate and find affected rows in Coralogix — otherwise the
+      // UUID slugs are indistinguishable from client-supplied ones.
+      log?.warn?.('Category name slugifies to empty; generated synthetic UUID slug', {
+        organization_id: organizationId,
+        category_id: derivedSlug,
+        name: canonicalName,
+      });
     }
   }
 
@@ -338,7 +347,7 @@ export async function createCategory({
         }
       } else {
         // Any other unique-constraint violation (e.g. slug collision via
-        // uq_category_id_per_org when the client ships a drifted `id` that
+        // uq_category_per_org when the client ships a drifted `id` that
         // maps to a different name already occupying that slug) surfaces as
         // a typed 409 echoing the actual constraint — mirrors the topics
         // pattern so callers don't have to mine 500 bodies. LLMO-4370 #5/#6.
