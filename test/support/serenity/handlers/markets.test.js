@@ -239,6 +239,57 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(upstreamBody.brand_names).to.deep.equal(['Adobe']);
   });
 
+  // LLMO-5492: defer-publish path — create + write row, but never publish.
+  it('skips publish but still writes the row and returns 201 when publish:false', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-draft' }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      name: 'Adobe-US-en',
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+    }, fakeLog(), { publish: false });
+
+    expect(result.status).to.equal(201);
+    expect(transport.createProject).to.have.been.calledOnce;
+    // The whole point: the draft is never published at create time.
+    expect(transport.publishProject).to.not.have.been.called;
+    expect(dataAccess.BrandSemrushProject.create).to.have.been.calledOnceWithExactly({
+      brandId: BRAND,
+      semrushProjectId: 'proj-draft',
+      geoTargetId: 2840,
+      languageCode: 'en',
+    });
+  });
+
+  it('publishes by default (no options) — preserves the standalone endpoint contract', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-pub' }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-pub');
+  });
+
   // Branch coverage: validateCreateBody has a "name provided but invalid"
   // check that's distinct from "name omitted" (omitted is fine; provided as
   // an empty string is a 400).

@@ -4098,6 +4098,41 @@ describe('LLMO Onboarding Functions', () => {
       expect(body).to.not.have.property('projectType');
     });
 
+    // LLMO-5492: publish defaults on (no flag) so projects are never left
+    // unpublished until the finalize trigger is live.
+    it('passes publish:true to handleCreateMarket by default (flag off)', async () => {
+      const hcp = sinon.stub().resolves({ status: 201, body: {} });
+      const performSerenityFanOut = await loadFanOut(hcp);
+
+      await performSerenityFanOut(
+        makeContext(),
+        { ...baseArgs, markets: [{ market: 'US', language: 'en' }] },
+      );
+
+      const options = hcp.firstCall.args[6];
+      expect(options).to.deep.equal({ publish: true });
+    });
+
+    // LLMO-5492: with SERENITY_DEFER_PUBLISH=true the fan-out provisions drafts
+    // and defers the publish to the finalize step.
+    it('passes publish:false when SERENITY_DEFER_PUBLISH is true', async () => {
+      const hcp = sinon.stub().resolves({ status: 201, body: {} });
+      const performSerenityFanOut = await loadFanOut(hcp);
+
+      await performSerenityFanOut(
+        makeContext({
+          env: {
+            SEMRUSH_PROJECTS_BASE_URL: 'https://sr.example.com',
+            SERENITY_DEFER_PUBLISH: 'true',
+          },
+        }),
+        { ...baseArgs, markets: [{ market: 'US', language: 'en' }] },
+      );
+
+      const options = hcp.firstCall.args[6];
+      expect(options).to.deep.equal({ publish: false });
+    });
+
     it('treats 409 (slice already exists) as an idempotent success', async () => {
       const hcp = sinon.stub().resolves({ status: 409, body: { error: 'sliceExists' } });
       const performSerenityFanOut = await loadFanOut(hcp);

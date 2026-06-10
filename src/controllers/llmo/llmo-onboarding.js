@@ -30,6 +30,7 @@ import { convertV1ToV2, generateBrandId } from '../../support/customer-config-ma
 import {
   resolveLlmoOnboardingMode,
   isSerenityOnboardingEnabled,
+  isSerenityDeferPublishEnabled,
   LLMO_ONBOARDING_MODE_V1,
   LLMO_ONBOARDING_MODE_V2,
   LLMO_FEATURE_FLAG_PRODUCT,
@@ -1323,6 +1324,12 @@ export async function performSerenityFanOut(context, {
   }
   const { transport, brandSlug, brandDomain } = ctx;
 
+  // LLMO-5492: when the defer-publish flag is on, provision drafts here and let
+  // the finalize step publish once after prompts/models are pushed. Default off
+  // → keep publishing at create time so projects are never left unpublished
+  // until the finalize trigger (separate repo) is live.
+  const publishAtCreate = !isSerenityDeferPublishEnabled(context.env);
+
   for (const { market, languageCode } of requested) {
     const body = {
       name: `${brandSlug} · ${market} · ${languageCode}`,
@@ -1366,6 +1373,7 @@ export async function performSerenityFanOut(context, {
         workspaceId,
         body,
         log,
+        { publish: publishAtCreate },
       );
     } catch (e) {
       // Record the throw and fall through to the per-tuple metric; the loop continues.

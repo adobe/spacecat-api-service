@@ -220,7 +220,13 @@ export async function handleCreatePrompts(
   semrushWorkspaceId,
   body,
   log,
+  options = {},
 ) {
+  // LLMO-5492: publish defaults to true to preserve the standalone
+  // POST /serenity/prompts contract. The finalize step passes
+  // `{ publish: false }` so it can push prompts and set models first, then
+  // publish each project exactly once at the end.
+  const { publish = true } = options;
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
     throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
@@ -312,18 +318,23 @@ export async function handleCreatePrompts(
     invalidateTagCacheForProject(semrushWorkspaceId, pid);
   }
 
-  const publishErrors = await publishAffected(
-    transport,
-    semrushWorkspaceId,
-    affectedProjectIds,
-    log,
-  );
-  for (const e of publishErrors) {
-    failed.push({
-      text: '',
-      status: 502,
-      message: `publish: ${e.message}`,
-    });
+  // LLMO-5492: skip the per-project publish when the caller defers it (the
+  // finalize step publishes once after models are also set). Default true keeps
+  // the standalone endpoint's publish-on-create-prompt behavior.
+  if (publish) {
+    const publishErrors = await publishAffected(
+      transport,
+      semrushWorkspaceId,
+      affectedProjectIds,
+      log,
+    );
+    for (const e of publishErrors) {
+      failed.push({
+        text: '',
+        status: 502,
+        message: `publish: ${e.message}`,
+      });
+    }
   }
 
   return { created, skipped, failed };

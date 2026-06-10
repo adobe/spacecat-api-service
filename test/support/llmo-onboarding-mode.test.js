@@ -18,9 +18,11 @@ import sinonChai from 'sinon-chai';
 import {
   LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT,
   SERENITY_SITE_ALLOWLIST,
+  SERENITY_DEFER_PUBLISH,
   hasPreBrandalfSites,
   isInSerenityAllowlist,
   isSerenityOnboardingEnabled,
+  isSerenityDeferPublishEnabled,
   readBrandalfFlagOverride,
   readBrandalfMigrationFlagOverride,
   readSerenityFlagOverride,
@@ -802,6 +804,31 @@ describe('llmo-onboarding-mode', () => {
       });
       expect(await isSerenityOnboardingEnabled('org-1', 'ims-1', ctx)).to.be.true;
       expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to read serenity flag/);
+    });
+  });
+
+  describe('isSerenityDeferPublishEnabled (LLMO-5492)', () => {
+    it('returns true when the flag is the string "true"', () => {
+      expect(isSerenityDeferPublishEnabled({ [SERENITY_DEFER_PUBLISH]: 'true' })).to.be.true;
+    });
+
+    it('is case- and whitespace-insensitive', () => {
+      expect(isSerenityDeferPublishEnabled({ [SERENITY_DEFER_PUBLISH]: '  TRUE ' })).to.be.true;
+    });
+
+    it('defaults to false when the flag is absent (current behavior)', () => {
+      expect(isSerenityDeferPublishEnabled({})).to.be.false;
+    });
+
+    it('returns false for any non-"true" value', () => {
+      expect(isSerenityDeferPublishEnabled({ [SERENITY_DEFER_PUBLISH]: 'false' })).to.be.false;
+      expect(isSerenityDeferPublishEnabled({ [SERENITY_DEFER_PUBLISH]: '1' })).to.be.false;
+      expect(isSerenityDeferPublishEnabled({ [SERENITY_DEFER_PUBLISH]: 'yes' })).to.be.false;
+    });
+
+    it('returns false when env is null or undefined', () => {
+      expect(isSerenityDeferPublishEnabled(null)).to.be.false;
+      expect(isSerenityDeferPublishEnabled(undefined)).to.be.false;
     });
   });
 });

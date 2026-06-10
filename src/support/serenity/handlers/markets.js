@@ -324,7 +324,14 @@ export async function handleCreateMarket(
   semrushWorkspaceId,
   body,
   log,
+  options = {},
 ) {
+  // LLMO-5492: publish defaults to true to preserve the standalone
+  // POST /serenity/markets contract. The onboarding fan-out passes
+  // `{ publish: false }` (when the defer-publish flag is on) so projects are
+  // created as drafts and published later by the finalize step — never
+  // published empty.
+  const { publish = true } = options;
   const errors = validateCreateBody(body);
   if (errors.length > 0) {
     // Join into a single `message` so the response body matches the
@@ -402,52 +409,58 @@ export async function handleCreateMarket(
     };
   }
 
-  try {
-    await transport.publishProject(semrushWorkspaceId, semrushProjectId);
-  } catch (e) {
-    // Best-effort upstream cleanup so the documented retry contract holds.
-    // Without this, every retry generates a fresh `defaultMarketName` (random
-    // hex suffix) and the upstream `createProject` body has no idempotency
-    // key — a retry after a `publishProject` failure would create a SECOND
-    // upstream project, not recover the first. The 409 gate only fires when
-    // a DB row exists; it never sees orphan upstream projects.
-    //
-    // Swallow the delete's own errors: the publishProject error is what we
-    // need to propagate to the caller, and we don't want a follow-on cleanup
-    // failure to mask it. Both outcomes are logged so an operator can still
-    // reconcile if cleanup itself fails.
-    let cleanedUp = false;
+  // LLMO-5492: skip publishing when the caller defers it (draft project). The
+  // DB row is still written below so M8 read-back and the later finalize step
+  // can resolve the project; publish runs once at finalize after prompts and
+  // models have been pushed.
+  if (publish) {
     try {
-      await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
-      cleanedUp = true;
-    } catch (cleanupErr) {
+      await transport.publishProject(semrushWorkspaceId, semrushProjectId);
+    } catch (e) {
+      // Best-effort upstream cleanup so the documented retry contract holds.
+      // Without this, every retry generates a fresh `defaultMarketName` (random
+      // hex suffix) and the upstream `createProject` body has no idempotency
+      // key — a retry after a `publishProject` failure would create a SECOND
+      // upstream project, not recover the first. The 409 gate only fires when
+      // a DB row exists; it never sees orphan upstream projects.
+      //
+      // Swallow the delete's own errors: the publishProject error is what we
+      // need to propagate to the caller, and we don't want a follow-on cleanup
+      // failure to mask it. Both outcomes are logged so an operator can still
+      // reconcile if cleanup itself fails.
+      let cleanedUp = false;
+      try {
+        await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
+        cleanedUp = true;
+      } catch (cleanupErr) {
+        log?.error?.(
+          'handleCreateMarket: best-effort cleanup deleteProject failed; orphan upstream project remains',
+          {
+            brandId,
+            semrushWorkspaceId,
+            semrushProjectId,
+            geoTargetId: location.geoTargetId,
+            languageCode,
+            error: cleanupErr.message,
+          },
+        );
+      }
       log?.error?.(
-        'handleCreateMarket: best-effort cleanup deleteProject failed; orphan upstream project remains',
+        cleanedUp
+          ? 'handleCreateMarket: publish failed; upstream project cleaned up'
+          : 'handleCreateMarket: orphaned upstream project after publish failure',
         {
           brandId,
           semrushWorkspaceId,
           semrushProjectId,
           geoTargetId: location.geoTargetId,
           languageCode,
-          error: cleanupErr.message,
+          error: e.message,
+          cleanedUp,
         },
       );
+      throw e;
     }
-    log?.error?.(
-      cleanedUp
-        ? 'handleCreateMarket: publish failed; upstream project cleaned up'
-        : 'handleCreateMarket: orphaned upstream project after publish failure',
-      {
-        brandId,
-        semrushWorkspaceId,
-        semrushProjectId,
-        geoTargetId: location.geoTargetId,
-        languageCode,
-        error: e.message,
-        cleanedUp,
-      },
-    );
-    throw e;
   }
 
   try {
