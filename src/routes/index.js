@@ -252,6 +252,7 @@ export default function getRouteHandlers(
     'GET /sites.csv': sitesController.getAllAsCsv,
     'GET /sites.xlsx': sitesController.getAllAsExcel,
     'GET /sites/:siteId': sitesController.getByID,
+    'GET /sites/:siteId/identity': sitesController.getIdentity,
     'PATCH /sites/:siteId': sitesController.updateSite,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
     'GET /sites/:siteId/config/scraper': sitesController.getScraperConfig,
