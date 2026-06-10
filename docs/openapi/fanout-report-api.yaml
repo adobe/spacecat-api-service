@@ -59,7 +59,7 @@ fanout-report:
             schema:
               type: string
               format: uri
-              example: 'https://spacecat-prod.s3.amazonaws.com/fanout/llmo/<spaceCatId>/<brandId>/data.json.gz?X-Amz-Algorithm=...'
+              example: 'https://<BUCKET>.s3.<REGION>.amazonaws.com/fanout/llmo/<spaceCatId>/<brandId>/data.json.gz?X-Amz-Algorithm=...'
       '400':
         $ref: './responses.yaml#/400'
       '401':

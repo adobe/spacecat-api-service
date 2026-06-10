@@ -1,3 +1,17 @@
+# [1.565.0](https://github.com/adobe/spacecat-api-service/compare/v1.564.1...v1.565.0) (2026-06-10)
+
+
+### Features
+
+* **prompts:** classify intent on write for human-added prompts ([#2565](https://github.com/adobe/spacecat-api-service/issues/2565)) ([479170b](https://github.com/adobe/spacecat-api-service/commit/479170b7e0aa636941a382b06861f4f438d4a204)), closes [#2562](https://github.com/adobe/spacecat-api-service/issues/2562) [#2562](https://github.com/adobe/spacecat-api-service/issues/2562)
+
+## [1.564.1](https://github.com/adobe/spacecat-api-service/compare/v1.564.0...v1.564.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* generate fallback slug for all-multibyte category names | LLMO-5473 ([#2578](https://github.com/adobe/spacecat-api-service/issues/2578)) ([c98468c](https://github.com/adobe/spacecat-api-service/commit/c98468ce857eff4986ed8bebf96fb1b5fb420953))
+
 # [1.564.0](https://github.com/adobe/spacecat-api-service/compare/v1.563.1...v1.564.0) (2026-06-09)
 
 

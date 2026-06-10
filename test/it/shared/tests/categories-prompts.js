@@ -147,5 +147,47 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
         expect(matches[0].name).to.equal('Test');
       });
     });
+
+    // ── Multibyte / non-ASCII-only names (LLMO-5473) ──
+
+    describe('Category creation with an all-multibyte name (no explicit id)', () => {
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      before(() => resetData());
+
+      it('creates a CJK-named category, generating a synthetic slug, and is idempotent by name', async () => {
+        const http = getHttpClient();
+
+        // Name slugifies to empty (no ASCII alphanumerics). Previously this
+        // threw "empty slug after normalization" → HTTP 500 (LLMO-5473). Now
+        // the API falls back to a synthetic UUID slug and the create succeeds.
+        const res1 = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/categories`,
+          { name: 'カテゴリ' },
+        );
+        expect(res1.status).to.equal(201);
+        expect(res1.body.name).to.equal('カテゴリ');
+        expect(res1.body.id).to.match(UUID_RE);
+
+        const generatedId = res1.body.id;
+
+        // Idempotent by name: re-posting the same name resolves the existing
+        // row (no new synthetic slug) and returns 200.
+        const res2 = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/categories`,
+          { name: 'カテゴリ' },
+        );
+        expect(res2.status).to.equal(200);
+        expect(res2.body.id).to.equal(generatedId);
+
+        // Exactly one category exists, name preserved verbatim, stable id.
+        const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/categories`);
+        expect(listRes.status).to.equal(200);
+
+        const matches = listRes.body.categories.filter((c) => c.name === 'カテゴリ');
+        expect(matches).to.have.lengthOf(1);
+        expect(matches[0].id).to.equal(generatedId);
+      });
+    });
   });
 }
