@@ -881,7 +881,7 @@ ai-visibility-v1-meta-meta:
     summary: Get AI Visibility metadata (Meta v1 JSON)
     description: |
       Returns Semrush `cr.v1 Meta/Meta` protobuf JSON using proto field names.
-      Еhe response appends a computed `WORLDWIDE` country entry: 
+      The response appends a computed `WORLDWIDE` country entry: 
       daily dates are the intersection across countries with daily snapshots, 
       and monthly dates are the union up to the minimum latest
       monthly snapshot available across countries.

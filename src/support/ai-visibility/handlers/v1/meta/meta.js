@@ -12,7 +12,6 @@
 
 /* c8 ignore start */
 import { MetaResponseSchema } from '@quazar/ai-seo-ts/ai-cr/messages_pb.js';
-import { COUNTRY_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import { responseFromGrpcError } from '../../../grpc-utils.js';
 import { messageToJson } from '../../../proto-json.js';
 
@@ -50,16 +49,6 @@ function sortCountryDates(country) {
     daily: sortDatesDesc(country.daily || []),
     monthly: sortDatesDesc(country.monthly || []),
   };
-}
-
-function isWorldwideCountry(country) {
-  if (country === COUNTRY_ENUM.WORLDWIDE) {
-    return true;
-  }
-  const normalized = String(country || '')
-    .trim()
-    .toUpperCase();
-  return normalized === WORLDWIDE_COUNTRY || normalized === 'WW';
 }
 
 function computeWorldwideMeta(countries) {
@@ -117,18 +106,12 @@ export async function handleMeta(_sp, clients) {
     const countries = Array.isArray(metaJson.countries)
       ? metaJson.countries.map(sortCountryDates)
       : [];
-    const hasWorldwide = countries.some((country) => isWorldwideCountry(country.country));
-    const sourceCountries = countries.filter(
-      (country) => !isWorldwideCountry(country.country),
-    );
 
     return {
       status: 200,
       body: {
         ...metaJson,
-        countries: hasWorldwide
-          ? countries
-          : [...countries, computeWorldwideMeta(sourceCountries)],
+        countries: [...countries, computeWorldwideMeta(countries)],
       },
     };
   } catch (error) {
