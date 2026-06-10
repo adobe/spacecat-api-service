@@ -1,3 +1,10 @@
+# [1.567.0](https://github.com/adobe/spacecat-api-service/compare/v1.566.2...v1.567.0) (2026-06-10)
+
+
+### Features
+
+* **rum:** align updateRumConfig with rumConfigRefresh candidate fallback logic ([#2549](https://github.com/adobe/spacecat-api-service/issues/2549)) ([4673670](https://github.com/adobe/spacecat-api-service/commit/467367025c366bd8e51c67588521e457d17cb518))
+
 ## [1.566.2](https://github.com/adobe/spacecat-api-service/compare/v1.566.1...v1.566.2) (2026-06-10)
 
 
