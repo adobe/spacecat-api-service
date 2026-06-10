@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import { expectISOTimestamp } from '../helpers/assertions.js';
 import {
   ORG_1_ID,
+  ORG_1_IMS_ORG_ID,
   ORG_2_ID,
   SITE_1_ID,
   SITE_1_BASE_URL,
@@ -265,6 +266,60 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.readOnlyAdmin.post('/sites', { baseURL: 'https://ro-admin-test.example.com' });
         expect(res.status).to.equal(403);
+      });
+    });
+
+    describe('GET /sites/:siteId/identity', () => {
+      // readAll-class single-site route: returns only the routing identity and resolves
+      // imsOrgId via the site->organization join. Gated on site:readAll, NOT site:read,
+      // so it is cross-tenant and there is no hasAccess(site) per-entity check.
+      // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
+
+      it('admin: returns the routing identity with the resolved imsOrgId', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.deep.equal({
+          siteId: SITE_1_ID,
+          organizationId: ORG_1_ID,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+          baseURL: SITE_1_BASE_URL,
+          deliveryType: 'aem_edge',
+        });
+      });
+
+      it('s2sConsumerReadAll: returns the identity for any site (site:readAll, cross-tenant)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(200);
+        expect(res.body.siteId).to.equal(SITE_1_ID);
+        expect(res.body.imsOrgId).to.equal(ORG_1_IMS_ORG_ID);
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no site:readAll)', async () => {
+        // Layer 1 (s2sAuthWrapper) denies — the route maps to site:readAll which
+        // CONSUMER_1 does NOT hold.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerUnknown: returns 403 (no Consumer row for the (clientId, imsOrgId) pair)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerUnknown.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${NON_EXISTENT_SITE_ID}/identity`);
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 for an invalid UUID', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/not-a-uuid/identity');
+        expect(res.status).to.equal(400);
       });
     });
 

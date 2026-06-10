@@ -130,6 +130,7 @@ describe('Sites Controller', () => {
     'getAuditForSite',
     'getByBaseURL',
     'getByID',
+    'getIdentity',
     'getBrandProfile',
     'removeSite',
     'updateSite',
@@ -1349,6 +1350,132 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.findById).to.have.been.calledOnce;
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+  });
+
+  describe('getIdentity (GET /sites/:siteId/identity)', () => {
+    const ORG_ID = '11111111-1111-4111-b111-111111111111';
+
+    function makeS2SConsumer({ clientId = 'svc-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
+      return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
+    }
+
+    function makeFreshConsumer({
+      id = 'consumer-id-1',
+      capabilities = ['site:readAll'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) {
+      return {
+        getId: () => id,
+        getCapabilities: () => capabilities,
+        getStatus: () => status,
+        isRevoked: () => revoked,
+      };
+    }
+
+    it('admin: returns the site identity and resolves imsOrgId via the org join', async () => {
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => 'ABC123DEF456@AdobeOrg' });
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Site.findById).to.have.been.calledOnceWith(SITE_IDS[0]);
+      expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith(ORG_ID);
+      expect(body).to.deep.equal({
+        siteId: SITE_IDS[0],
+        organizationId: ORG_ID,
+        imsOrgId: 'ABC123DEF456@AdobeOrg',
+        baseURL: 'https://site1.com',
+        deliveryType: 'aem_edge',
+      });
+    });
+
+    it('returns 404 for an unknown site without touching the org lookup', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Site not found');
+      expect(mockDataAccess.Organization.findById).to.not.have.been.called;
+    });
+
+    it('returns 400 for an invalid site id', async () => {
+      const result = await sitesController.getIdentity({ params: { siteId: 'not-a-uuid' } });
+
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+    });
+
+    it('returns 200 with imsOrgId null when the owning org has no imsOrgId', async () => {
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => null });
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.organizationId).to.equal(ORG_ID);
+      expect(body.imsOrgId).to.equal(null);
+    });
+
+    it('returns 200 with null ids when the site has no organization', async () => {
+      sites[0].getOrganizationId = () => undefined;
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.organizationId).to.equal(null);
+      expect(body.imsOrgId).to.equal(null);
+      expect(mockDataAccess.Organization.findById).to.not.have.been.called;
+    });
+
+    it('grants access to an S2S consumer holding site:readAll', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-identity-1' };
+      mockDataAccess.Consumer = {
+        findByClientIdAndImsOrgId: sandbox.stub().resolves(makeFreshConsumer()),
+      };
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => 'ABC123DEF456@AdobeOrg' });
+
+      const result = await sitesController.getIdentity({
+        ...context, params: { siteId: SITE_IDS[0] },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.imsOrgId).to.equal('ABC123DEF456@AdobeOrg');
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[s2s-readall\] GET \/sites\/:siteId\/identity granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll siteId=.* requestId=req-identity-1/,
+      );
+    });
+
+    it('denies an S2S consumer that only holds site:read', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer = {
+        findByClientIdAndImsOrgId: sandbox.stub().resolves(makeFreshConsumer({ capabilities: ['site:read'] })),
+      };
+
+      const result = await sitesController.getIdentity({
+        ...context, params: { siteId: SITE_IDS[0] },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied GET \/sites\/:siteId\/identity - reason=missing-capability clientId=svc-1 consumerId=consumer-id-1/,
+      );
+    });
   });
 
   it('gets a site by base URL', async () => {
