@@ -7126,6 +7126,96 @@ describe('Suggestions Controller', () => {
         const body = await response.json();
         expect(body.suggestions[0]?.message).to.not.include('outside the scope');
       });
+
+      it('passes suggestion through when site base URL is unparseable', async () => {
+        site.getBaseURL = sandbox.stub().returns('not a valid base url');
+        const sugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://example.com/page',
+            recommendedAction: 'New Heading Title',
+            prompts: [{ prompt: 'foo', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([sugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        const body = await response.json();
+        expect(body.suggestions[0]?.message).to.not.include('outside the scope');
+      });
+
+      it('passes domain-wide suggestion with null patterns through the scope guard', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const noPatternsSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({ isDomainWide: true }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([noPatternsSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.suggestions[0].message).to.not.include('outside the scope');
+      });
+
+      it('passes regular suggestion with no URL through the scope guard', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const noUrlSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            recommendedAction: 'New Heading Title',
+            prompts: [{ prompt: 'foo', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([noUrlSugg]);
+        mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves({
+          getId: sandbox.stub().returns(OPPORTUNITY_ID),
+          getSiteId: sandbox.stub().returns(SITE_ID),
+          getType: sandbox.stub().returns('headings'),
+          getData: sandbox.stub().returns({}),
+        });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        const body = await response.json();
+        expect(body.suggestions[0]?.message).to.not.include('outside the scope');
+      });
+
+      it('passes regular suggestion with unparseable URL through the scope guard', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const badUrlSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'not a valid suggestion url',
+            recommendedAction: 'New Heading Title',
+            prompts: [{ prompt: 'foo', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([badUrlSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        const body = await response.json();
+        expect(body.suggestions[0]?.message).to.not.include('outside the scope');
+      });
     });
 
     it('returns 207 with failure when GeoExperiment data access is missing', async () => {
