@@ -3690,14 +3690,14 @@ describe('LlmoController', () => {
         ...onboardingContext,
         data: {
           ...onboardingContext.data,
-          markets: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
+          markets: [{ market: 'US', languageCode: 'en' }, { market: 'DE', languageCode: 'de' }],
         },
       };
       const result = await ctrl.onboardCustomer(ctx);
       expect(result.status).to.equal(200);
       expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
-        { market: 'US', language: 'en' },
-        { market: 'DE', language: 'de' },
+        { market: 'US', languageCode: 'en' },
+        { market: 'DE', languageCode: 'de' },
       ]);
     });
 
@@ -3707,7 +3707,7 @@ describe('LlmoController', () => {
       const result = await ctrl.onboardCustomer(ctx);
       expect(result.status).to.equal(200);
       expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
-        { market: 'IN', language: 'en' },
+        { market: 'IN', languageCode: 'en' },
       ]);
     });
 
@@ -3718,13 +3718,13 @@ describe('LlmoController', () => {
         data: {
           ...onboardingContext.data,
           region: 'IN',
-          markets: [{ market: 'US', language: 'en' }],
+          markets: [{ market: 'US', languageCode: 'en' }],
         },
       };
       const result = await ctrl.onboardCustomer(ctx);
       expect(result.status).to.equal(200);
       expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
-        { market: 'US', language: 'en' },
+        { market: 'US', languageCode: 'en' },
       ]);
     });
 
@@ -3732,7 +3732,7 @@ describe('LlmoController', () => {
       const ctrl = await makeOnboardController(performLlmoOnboardingStub);
       const ctx = {
         ...onboardingContext,
-        data: { ...onboardingContext.data, markets: [{ market: 'usa', language: 'en' }] },
+        data: { ...onboardingContext.data, markets: [{ market: 'usa', languageCode: 'en' }] },
       };
       const result = await ctrl.onboardCustomer(ctx);
       expect(result.status).to.equal(400);
@@ -3743,7 +3743,7 @@ describe('LlmoController', () => {
       const ctrl = await makeOnboardController(performLlmoOnboardingStub);
       const ctx = {
         ...onboardingContext,
-        data: { ...onboardingContext.data, markets: [{ market: 'US', language: 'EN' }] },
+        data: { ...onboardingContext.data, markets: [{ market: 'US', languageCode: 'EN' }] },
       };
       const result = await ctrl.onboardCustomer(ctx);
       expect(result.status).to.equal(400);
@@ -3775,7 +3775,7 @@ describe('LlmoController', () => {
       const ctrl = await makeOnboardController(performLlmoOnboardingStub);
       const ctx = {
         ...onboardingContext,
-        data: { ...onboardingContext.data, markets: [{ language: 'en' }] },
+        data: { ...onboardingContext.data, markets: [{ languageCode: 'en' }] },
       };
       const result = await ctrl.onboardCustomer(ctx);
       expect(result.status).to.equal(400);
@@ -3788,7 +3788,7 @@ describe('LlmoController', () => {
         // eslint-disable-next-line no-await-in-loop
         const result = await ctrl.onboardCustomer({
           ...onboardingContext,
-          data: { ...onboardingContext.data, markets: [{ market: bad, language: 'en' }] },
+          data: { ...onboardingContext.data, markets: [{ market: bad, languageCode: 'en' }] },
         });
         expect(result.status).to.equal(400);
         // eslint-disable-next-line no-await-in-loop
@@ -3804,7 +3804,7 @@ describe('LlmoController', () => {
         // eslint-disable-next-line no-await-in-loop
         const result = await ctrl.onboardCustomer({
           ...onboardingContext,
-          data: { ...onboardingContext.data, markets: [{ market: 'US', language: bad }] },
+          data: { ...onboardingContext.data, markets: [{ market: 'US', languageCode: bad }] },
         });
         expect(result.status).to.equal(400);
         // eslint-disable-next-line no-await-in-loop
@@ -3819,7 +3819,7 @@ describe('LlmoController', () => {
       const longMarket = 'TOOLONGMARKETCODE'; // 17 chars — over the 16-char display cap
       const result = await ctrl.onboardCustomer({
         ...onboardingContext,
-        data: { ...onboardingContext.data, markets: [{ market: longMarket, language: 'en' }] },
+        data: { ...onboardingContext.data, markets: [{ market: longMarket, languageCode: 'en' }] },
       });
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -3832,7 +3832,7 @@ describe('LlmoController', () => {
       const longLang = 'toolonglanguagetag'; // 18 chars — over the 16-char display cap
       const result = await ctrl.onboardCustomer({
         ...onboardingContext,
-        data: { ...onboardingContext.data, markets: [{ market: 'US', language: longLang }] },
+        data: { ...onboardingContext.data, markets: [{ market: 'US', languageCode: longLang }] },
       });
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -3858,7 +3858,7 @@ describe('LlmoController', () => {
       // not incidental per-entry validation. Markets AA, AB, … BY.
       const many = Array.from({ length: 51 }, (_, i) => ({
         market: `${String.fromCharCode(65 + Math.floor(i / 26))}${String.fromCharCode(65 + (i % 26))}`,
-        language: 'en',
+        languageCode: 'en',
       }));
       const result = await ctrl.onboardCustomer({
         ...onboardingContext,
@@ -3875,17 +3875,17 @@ describe('LlmoController', () => {
         data: {
           ...onboardingContext.data,
           markets: [
-            { market: 'US', language: 'en' },
-            { market: 'US', language: 'en' },
-            { market: 'DE', language: 'de' },
+            { market: 'US', languageCode: 'en' },
+            { market: 'US', languageCode: 'en' },
+            { market: 'DE', languageCode: 'de' },
           ],
         },
       };
       const result = await ctrl.onboardCustomer(ctx);
       expect(result.status).to.equal(200);
       expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
-        { market: 'US', language: 'en' },
-        { market: 'DE', language: 'de' },
+        { market: 'US', languageCode: 'en' },
+        { market: 'DE', languageCode: 'de' },
       ]);
       expect(onboardingContext.log.info).to.have.been.calledWithMatch(/collapsed 1 duplicate/);
     });
@@ -3934,12 +3934,12 @@ describe('LlmoController', () => {
         dataFolder: 'dev/example-com',
         message: 'LLMO onboarding completed successfully',
         serenity: {
-          requested: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
+          requested: [{ market: 'US', languageCode: 'en' }, { market: 'DE', languageCode: 'de' }],
           succeeded: [{
-            market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+            market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
           }],
           failed: [{
-            market: 'DE', language: 'de', status: 502, error: 'semrushUpstreamError',
+            market: 'DE', languageCode: 'de', status: 502, error: 'semrushUpstreamError',
           }],
         },
       });
@@ -3954,10 +3954,10 @@ describe('LlmoController', () => {
       expect(body.status).to.equal('completed');
       expect(body.requested).to.have.length(2);
       expect(body.succeeded).to.deep.equal([{
-        market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+        market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
       }]);
       expect(body.failed).to.deep.equal([{
-        market: 'DE', language: 'de', status: 502, error: 'semrushUpstreamError',
+        market: 'DE', languageCode: 'de', status: 502, error: 'semrushUpstreamError',
       }]);
     });
 
@@ -3969,9 +3969,9 @@ describe('LlmoController', () => {
         dataFolder: 'dev/example-com',
         message: 'LLMO onboarding completed successfully',
         serenity: {
-          requested: [{ market: 'US', language: 'en' }],
+          requested: [{ market: 'US', languageCode: 'en' }],
           succeeded: [{
-            market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+            market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
           }],
           failed: [],
         },

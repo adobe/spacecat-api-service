@@ -3615,7 +3615,7 @@ describe('LLMO Onboarding Functions', () => {
         domain: 'example.com',
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
-        markets: [{ market: 'US', language: 'en' }],
+        markets: [{ market: 'US', languageCode: 'en' }],
       }, context);
 
       // The fan-out was actually invoked with the create-market body contract.
@@ -3630,9 +3630,9 @@ describe('LLMO Onboarding Functions', () => {
 
       // The M8 read-back composed into result.serenity.
       expect(result.serenity).to.exist;
-      expect(result.serenity.requested).to.deep.equal([{ market: 'US', language: 'en' }]);
+      expect(result.serenity.requested).to.deep.equal([{ market: 'US', languageCode: 'en' }]);
       expect(result.serenity.succeeded).to.deep.equal([{
-        market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+        market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
       }]);
       expect(result.serenity.failed).to.be.empty;
 
@@ -3734,7 +3734,7 @@ describe('LLMO Onboarding Functions', () => {
         domain: 'example.com',
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
-        markets: [{ market: 'US', language: 'en' }],
+        markets: [{ market: 'US', languageCode: 'en' }],
       }, context);
 
       // The v1 branch warns that markets are not provisioned, and never sets
@@ -3970,7 +3970,7 @@ describe('LLMO Onboarding Functions', () => {
       workspaceId: 'ws-1',
       brandName: 'Example Brand',
       baseURL: 'https://example.com',
-      markets: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
+      markets: [{ market: 'US', languageCode: 'en' }, { market: 'DE', languageCode: 'de' }],
     };
 
     const makeContext = (overrides = {}) => ({
@@ -4019,13 +4019,13 @@ describe('LLMO Onboarding Functions', () => {
       const res = await performSerenityFanOut(makeContext(), baseArgs);
 
       expect(res.requested).to.deep.equal([
-        { market: 'US', language: 'en' }, { market: 'DE', language: 'de' },
+        { market: 'US', languageCode: 'en' }, { market: 'DE', languageCode: 'de' },
       ]);
       // The create response does not echo the project id/geo target; M8 fills
       // those from the DB. M7 just records the tuple as succeeded.
       expect(res.succeeded).to.deep.equal([
-        { market: 'US', language: 'en' },
-        { market: 'DE', language: 'de' },
+        { market: 'US', languageCode: 'en' },
+        { market: 'DE', languageCode: 'de' },
       ]);
       expect(res.failed).to.be.empty;
       expect(hcp).to.have.been.calledTwice;
@@ -4047,10 +4047,10 @@ describe('LLMO Onboarding Functions', () => {
       const performSerenityFanOut = await loadFanOut(hcp);
       const res = await performSerenityFanOut(
         makeContext(),
-        { ...baseArgs, markets: [{ market: 'US', language: 'en' }] },
+        { ...baseArgs, markets: [{ market: 'US', languageCode: 'en' }] },
       );
       expect(res.succeeded).to.deep.equal([
-        { market: 'US', language: 'en' },
+        { market: 'US', languageCode: 'en' },
       ]);
       expect(res.failed).to.be.empty;
     });
@@ -4066,11 +4066,11 @@ describe('LLMO Onboarding Functions', () => {
       expect(hcp).to.have.been.calledTwice;
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 502, error: 'upstreamRejected',
+          market: 'US', languageCode: 'en', status: 502, error: 'upstreamRejected',
         },
       ]);
       expect(res.succeeded).to.deep.equal([
-        { market: 'DE', language: 'de' },
+        { market: 'DE', languageCode: 'de' },
       ]);
     });
 
@@ -4091,7 +4091,7 @@ describe('LLMO Onboarding Functions', () => {
 
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 503, error: 'semrushUpstreamError',
+          market: 'US', languageCode: 'en', status: 503, error: 'semrushUpstreamError',
         },
       ]);
       expect(res.succeeded).to.have.length(1);
@@ -4109,10 +4109,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.succeeded).to.be.empty;
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 401, error: 'missingImsBearer',
+          market: 'US', languageCode: 'en', status: 401, error: 'missingImsBearer',
         },
         {
-          market: 'DE', language: 'de', status: 401, error: 'missingImsBearer',
+          market: 'DE', languageCode: 'de', status: 401, error: 'missingImsBearer',
         },
       ]);
     });
@@ -4185,10 +4185,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(hcp).to.not.have.been.called;
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 503, error: 'transportUnavailable',
+          market: 'US', languageCode: 'en', status: 503, error: 'transportUnavailable',
         },
         {
-          market: 'DE', language: 'de', status: 503, error: 'transportUnavailable',
+          market: 'DE', languageCode: 'de', status: 503, error: 'transportUnavailable',
         },
       ]);
     });
@@ -4200,11 +4200,11 @@ describe('LLMO Onboarding Functions', () => {
       const performSerenityFanOut = await loadFanOut(hcp);
       const res = await performSerenityFanOut(
         makeContext(),
-        { ...baseArgs, markets: [{ market: 'US', language: 'en' }] },
+        { ...baseArgs, markets: [{ market: 'US', languageCode: 'en' }] },
       );
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 400, error: 'upstreamRejected',
+          market: 'US', languageCode: 'en', status: 400, error: 'upstreamRejected',
         },
       ]);
     });
@@ -4216,11 +4216,11 @@ describe('LLMO Onboarding Functions', () => {
       const performSerenityFanOut = await loadFanOut(hcp);
       const res = await performSerenityFanOut(
         makeContext(),
-        { ...baseArgs, markets: [{ market: 'US', language: 'en' }] },
+        { ...baseArgs, markets: [{ market: 'US', languageCode: 'en' }] },
       );
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 502, error: 'internalError',
+          market: 'US', languageCode: 'en', status: 502, error: 'internalError',
         },
       ]);
     });
@@ -4240,17 +4240,17 @@ describe('LLMO Onboarding Functions', () => {
 
       // US succeeded (201); DE failed (502). orgId tagged; durationMs is numeric.
       expect(fanoutEvents[0]).to.include({
-        event: 'serenity_project_fanout', orgId: 'org-1', market: 'US', language: 'en', success: true,
+        event: 'serenity_project_fanout', orgId: 'org-1', market: 'US', languageCode: 'en', success: true,
       });
       expect(fanoutEvents[0].durationMs).to.be.a('number').and.to.be.at.least(0);
       expect(fanoutEvents[1]).to.include({
-        event: 'serenity_project_fanout', orgId: 'org-1', market: 'DE', language: 'de', success: false,
+        event: 'serenity_project_fanout', orgId: 'org-1', market: 'DE', languageCode: 'de', success: false,
       });
       expect(fanoutEvents[1].durationMs).to.be.a('number').and.to.be.at.least(0);
 
-      // No PII: the metric carries only orgId/market/language/success/durationMs.
+      // No PII: the metric carries only orgId/market/languageCode/success/durationMs.
       expect(Object.keys(fanoutEvents[0]).sort()).to.deep.equal(
-        ['durationMs', 'event', 'language', 'market', 'orgId', 'success'],
+        ['durationMs', 'event', 'languageCode', 'market', 'orgId', 'success'],
       );
     });
 
@@ -4269,10 +4269,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.succeeded).to.be.empty;
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 503, error: 'timeout',
+          market: 'US', languageCode: 'en', status: 503, error: 'timeout',
         },
         {
-          market: 'DE', language: 'de', status: 503, error: 'timeout',
+          market: 'DE', languageCode: 'de', status: 503, error: 'timeout',
         },
       ]);
     });
@@ -4303,10 +4303,10 @@ describe('LLMO Onboarding Functions', () => {
         const res = await performSerenityFanOut(context, baseArgs);
 
         expect(hcp).to.have.been.calledOnce;
-        expect(res.succeeded).to.deep.equal([{ market: 'US', language: 'en' }]);
+        expect(res.succeeded).to.deep.equal([{ market: 'US', languageCode: 'en' }]);
         expect(res.failed).to.deep.equal([
           {
-            market: 'DE', language: 'de', status: 503, error: 'timeout',
+            market: 'DE', languageCode: 'de', status: 503, error: 'timeout',
           },
         ]);
       } finally {
@@ -4363,10 +4363,10 @@ describe('LLMO Onboarding Functions', () => {
     it('returns the fan-out result unchanged when the brand id is missing', async () => {
       const reconcileSerenityProjects = await loadReconcile();
       const fanOut = {
-        requested: [{ market: 'US', language: 'en' }],
+        requested: [{ market: 'US', languageCode: 'en' }],
         succeeded: [],
         failed: [{
-          market: 'US', language: 'en', status: 500, error: 'brandNotCreated',
+          market: 'US', languageCode: 'en', status: 500, error: 'brandNotCreated',
         }],
       };
       const ctx = makeContext([]);
@@ -4378,7 +4378,7 @@ describe('LLMO Onboarding Functions', () => {
     it('marks every requested tuple with a DB row as succeeded', async () => {
       const reconcileSerenityProjects = await loadReconcile();
       const fanOut = {
-        requested: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
+        requested: [{ market: 'US', languageCode: 'en' }, { market: 'DE', languageCode: 'de' }],
         succeeded: [],
         failed: [],
       };
@@ -4387,10 +4387,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.failed).to.be.empty;
       expect(res.succeeded).to.deep.equal([
         {
-          market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+          market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
         },
         {
-          market: 'DE', language: 'de', semrushProjectId: 'p-de', geoTargetId: 2276,
+          market: 'DE', languageCode: 'de', semrushProjectId: 'p-de', geoTargetId: 2276,
         },
       ]);
     });
@@ -4398,22 +4398,22 @@ describe('LLMO Onboarding Functions', () => {
     it('marks a tuple with no DB row as failed, enriched with the fan-out error', async () => {
       const reconcileSerenityProjects = await loadReconcile();
       const fanOut = {
-        requested: [{ market: 'US', language: 'en' }, { market: 'DE', language: 'de' }],
+        requested: [{ market: 'US', languageCode: 'en' }, { market: 'DE', languageCode: 'de' }],
         succeeded: [],
         failed: [{
-          market: 'DE', language: 'de', status: 502, error: 'semrushUpstreamError',
+          market: 'DE', languageCode: 'de', status: 502, error: 'semrushUpstreamError',
         }],
       };
       const ctx = makeContext([dbRow(2840, 'en', 'p-us')]); // DE row missing
       const res = await reconcileSerenityProjects(ctx, { brandId: 'b1', fanOut });
       expect(res.succeeded).to.deep.equal([
         {
-          market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+          market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
         },
       ]);
       expect(res.failed).to.deep.equal([
         {
-          market: 'DE', language: 'de', status: 502, error: 'semrushUpstreamError',
+          market: 'DE', languageCode: 'de', status: 502, error: 'semrushUpstreamError',
         },
       ]);
     });
@@ -4421,10 +4421,10 @@ describe('LLMO Onboarding Functions', () => {
     it('flags a silently-missing row as projectRowMissing even when the fan-out reported success', async () => {
       const reconcileSerenityProjects = await loadReconcile();
       const fanOut = {
-        requested: [{ market: 'US', language: 'en' }],
+        requested: [{ market: 'US', languageCode: 'en' }],
         // Fan-out thought it succeeded, but the row never landed (201-but-no-insert).
         succeeded: [{
-          market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+          market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
         }],
         failed: [],
       };
@@ -4433,7 +4433,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.succeeded).to.be.empty;
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 500, error: 'projectRowMissing',
+          market: 'US', languageCode: 'en', status: 500, error: 'projectRowMissing',
         },
       ]);
     });
@@ -4441,9 +4441,9 @@ describe('LLMO Onboarding Functions', () => {
     it('falls back to the fan-out result when the read-back throws', async () => {
       const reconcileSerenityProjects = await loadReconcile();
       const fanOut = {
-        requested: [{ market: 'US', language: 'en' }],
+        requested: [{ market: 'US', languageCode: 'en' }],
         succeeded: [{
-          market: 'US', language: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+          market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
         }],
         failed: [],
       };
@@ -4456,10 +4456,10 @@ describe('LLMO Onboarding Functions', () => {
     it('fails an unknown market code (resolveLocation null) without throwing', async () => {
       const reconcileSerenityProjects = await loadReconcile();
       const fanOut = {
-        requested: [{ market: 'ZZ', language: 'en' }],
+        requested: [{ market: 'ZZ', languageCode: 'en' }],
         succeeded: [],
         failed: [{
-          market: 'ZZ', language: 'en', status: 400, error: 'unknownMarket',
+          market: 'ZZ', languageCode: 'en', status: 400, error: 'unknownMarket',
         }],
       };
       // A row keyed to a real location must NOT be matched to the unknown 'ZZ' tuple.
@@ -4468,7 +4468,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.succeeded).to.be.empty;
       expect(res.failed).to.deep.equal([
         {
-          market: 'ZZ', language: 'en', status: 400, error: 'unknownMarket',
+          market: 'ZZ', languageCode: 'en', status: 400, error: 'unknownMarket',
         },
       ]);
     });
@@ -4476,8 +4476,8 @@ describe('LLMO Onboarding Functions', () => {
     it('treats a null read-back as no rows (all requested tuples fail)', async () => {
       const reconcileSerenityProjects = await loadReconcile();
       const fanOut = {
-        requested: [{ market: 'US', language: 'en' }],
-        succeeded: [{ market: 'US', language: 'en' }],
+        requested: [{ market: 'US', languageCode: 'en' }],
+        succeeded: [{ market: 'US', languageCode: 'en' }],
         failed: [],
       };
       const ctx = makeContext(null); // allByBrandId resolves null
@@ -4485,7 +4485,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(res.succeeded).to.be.empty;
       expect(res.failed).to.deep.equal([
         {
-          market: 'US', language: 'en', status: 500, error: 'projectRowMissing',
+          market: 'US', languageCode: 'en', status: 500, error: 'projectRowMissing',
         },
       ]);
     });
@@ -4493,8 +4493,8 @@ describe('LLMO Onboarding Functions', () => {
     it('logs a warning and uses first-write-wins when allByBrandId returns duplicate rows for the same slice', async () => {
       const reconcileSerenityProjects = await loadReconcile();
       const fanOut = {
-        requested: [{ market: 'US', language: 'en' }],
-        succeeded: [{ market: 'US', language: 'en' }],
+        requested: [{ market: 'US', languageCode: 'en' }],
+        succeeded: [{ market: 'US', languageCode: 'en' }],
         failed: [],
       };
       // Two rows with the same (geoTargetId=2840, languageCode='en') key.

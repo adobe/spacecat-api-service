@@ -1101,20 +1101,20 @@ llmo-onboard:
                   an invalid entry returns 400 regardless of cohort membership.
                   Semrush provisioning only runs for orgs in the `SERENITY_SITE_ALLOWLIST` cohort;
                   a valid `markets` array from a non-cohort org is accepted (200) but not provisioned.
-                  If absent and `region` is present, a single `{ market: region, language: "en" }`
+                  If absent and `region` is present, a single `{ market: region, languageCode: "en" }`
                   entry is synthesized for backward compatibility.
                 items:
                   type: object
                   required:
                     - market
-                    - language
+                    - languageCode
                   properties:
                     market:
                       type: string
                       pattern: '^[A-Z]{2}$'
                       description: ISO 3166-1 alpha-2 uppercase country code.
                       example: "US"
-                    language:
+                    languageCode:
                       type: string
                       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
                       description: |
@@ -1124,9 +1124,9 @@ llmo-onboard:
                       example: "en"
                 example:
                   - market: "US"
-                    language: "en"
+                    languageCode: "en"
                   - market: "DE"
-                    language: "de"
+                    languageCode: "de"
             required:
               - domain
               - brandName
@@ -1242,7 +1242,7 @@ llmo-onboard:
                     properties:
                       market:
                         type: string
-                      language:
+                      languageCode:
                         type: string
                 succeeded:
                   type: array
@@ -1255,7 +1255,7 @@ llmo-onboard:
                     properties:
                       market:
                         type: string
-                      language:
+                      languageCode:
                         type: string
                       semrushProjectId:
                         type: string
@@ -1269,7 +1269,7 @@ llmo-onboard:
                     properties:
                       market:
                         type: string
-                      language:
+                      languageCode:
                         type: string
                       status:
                         type: integer
@@ -1303,7 +1303,7 @@ llmo-onboard:
                     properties:
                       market:
                         type: string
-                      language:
+                      languageCode:
                         type: string
                 succeeded:
                   type: array
@@ -1312,7 +1312,7 @@ llmo-onboard:
                     properties:
                       market:
                         type: string
-                      language:
+                      languageCode:
                         type: string
                       semrushProjectId:
                         type: string
@@ -1325,7 +1325,7 @@ llmo-onboard:
                     properties:
                       market:
                         type: string
-                      language:
+                      languageCode:
                         type: string
                       status:
                         type: integer

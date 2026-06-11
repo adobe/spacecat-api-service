@@ -985,26 +985,26 @@ function LlmoController(ctx) {
         }
         for (const entry of markets) {
           if (!entry || typeof entry !== 'object') {
-            return badRequest('Each markets entry must be an object with market and language');
+            return badRequest('Each markets entry must be an object with market and languageCode');
           }
           if (typeof entry.market !== 'string' || !ISO_ALPHA2_UPPER_REGEX.test(entry.market)) {
             const displayMarket = typeof entry.market === 'string' ? entry.market.slice(0, 16) : '[invalid type]';
             return badRequest(`Invalid market "${displayMarket}". Must be an ISO 3166-1 alpha-2 uppercase code (e.g. US, DE)`);
           }
-          if (typeof entry.language !== 'string' || !LANGUAGE_TAG_REGEX.test(entry.language)) {
-            const displayLanguage = typeof entry.language === 'string' ? entry.language.slice(0, 16) : '[invalid type]';
-            return badRequest(`Invalid language "${displayLanguage}". Must be a BCP-47 lowercase language tag (e.g. en, de, zh-hans)`);
+          if (typeof entry.languageCode !== 'string' || !LANGUAGE_TAG_REGEX.test(entry.languageCode)) {
+            const displayLanguage = typeof entry.languageCode === 'string' ? entry.languageCode.slice(0, 16) : '[invalid type]';
+            return badRequest(`Invalid languageCode "${displayLanguage}". Must be a BCP-47 lowercase language tag (e.g. en, de, zh-hans)`);
           }
         }
         if (region !== undefined) {
           log.warn(`LLMO onboarding: both markets and region supplied for domain ${domain} — markets wins, region ignored`);
         }
-        // Collapse duplicate (market, language) tuples — otherwise the second
+        // Collapse duplicate (market, languageCode) tuples — otherwise the second
         // hits the proxy's 409 and the M8 read-back emits a duplicate succeeded
         // entry for the same slice.
         const seenTuples = new Set();
-        resolvedMarkets = markets.filter(({ market, language }) => {
-          const key = `${market}::${language}`;
+        resolvedMarkets = markets.filter(({ market, languageCode }) => {
+          const key = `${market}::${languageCode}`;
           if (seenTuples.has(key)) {
             return false;
           }
@@ -1016,7 +1016,7 @@ function LlmoController(ctx) {
         }
       } else if (region !== undefined) {
         log.debug(`LLMO onboarding: markets absent, synthesizing from region "${region}" for domain ${domain}`);
-        resolvedMarkets = [{ market: region, language: 'en' }];
+        resolvedMarkets = [{ market: region, languageCode: 'en' }];
       }
 
       let imsOrgId;

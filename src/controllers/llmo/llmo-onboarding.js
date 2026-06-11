@@ -1252,7 +1252,7 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @param {string} args.workspaceId - The org's Semrush workspace ID (M5-validated).
  * @param {string} args.brandName - The brand name from the onboard request.
  * @param {string} args.baseURL - The site base URL; its hostname is sent as `brandDomain`.
- * @param {Array<{market: string, language: string}>} [args.markets] - Tuples to provision.
+ * @param {Array<{market: string, languageCode: string}>} [args.markets] - Tuples to provision.
  * @returns {Promise<{requested: object[], succeeded: object[], failed: object[]}>}
  */
 /**
@@ -1300,7 +1300,7 @@ export async function performSerenityFanOut(context, {
 }) {
   const { log } = context;
   const requested = (Array.isArray(markets) ? markets : [])
-    .map(({ market, language }) => ({ market, language }));
+    .map(({ market, languageCode }) => ({ market, languageCode }));
   const succeeded = [];
   const failed = [];
 
@@ -1309,8 +1309,8 @@ export async function performSerenityFanOut(context, {
   }
 
   const failAll = (status, error) => {
-    requested.forEach(({ market, language }) => failed.push({
-      market, language, status, error,
+    requested.forEach(({ market, languageCode }) => failed.push({
+      market, languageCode, status, error,
     }));
     return { requested, succeeded, failed };
   };
@@ -1323,15 +1323,11 @@ export async function performSerenityFanOut(context, {
   }
   const { transport, brandSlug, brandDomain } = ctx;
 
-  for (const { market, language } of requested) {
-    // The AIO Proxy's create-market body: `languageCode` (not `language`), no
-    // `projectType` (the handler hard-codes `type: 'ai'`). `name` is optional;
-    // we set the design's `<brand-slug> · <ISO> · <lang>` form rather than let
-    // it default to `<brand>-<hex>`.
+  for (const { market, languageCode } of requested) {
     const body = {
-      name: `${brandSlug} · ${market} · ${language}`,
+      name: `${brandSlug} · ${market} · ${languageCode}`,
       market,
-      languageCode: language,
+      languageCode,
       brandDomain,
       brandNames: [brandName.trim()],
     };
@@ -1345,7 +1341,7 @@ export async function performSerenityFanOut(context, {
       log.warn(`Serenity fan-out: Lambda deadline too close — aborting after ${succeeded.length} of ${requested.length} tuple(s); remaining marked as 'timeout'`);
       for (const remaining of requested.slice(succeeded.length + failed.length)) {
         failed.push({
-          market: remaining.market, language: remaining.language, status: 503, error: 'timeout',
+          market: remaining.market, languageCode: remaining.languageCode, status: 503, error: 'timeout',
         });
       }
       break;
@@ -1382,10 +1378,10 @@ export async function performSerenityFanOut(context, {
       // Never forward raw error messages to API callers — SerenityTransportError
       // carries the upstream URL with workspace ID; unexpected internal errors may
       // contain file paths or internal hostnames. Log the raw message server-side.
-      log.error(`Serenity fan-out error for ${market}::${language}: ${thrown.message}`);
+      log.error(`Serenity fan-out error for ${market}::${languageCode}: ${thrown.message}`);
       failed.push({
         market,
-        language,
+        languageCode,
         status: thrown.status || 502,
         error: thrown instanceof SerenityTransportError ? 'semrushUpstreamError' : 'internalError',
       });
@@ -1395,12 +1391,12 @@ export async function performSerenityFanOut(context, {
       // Neither response echoes the project id or geo target, so this fan-out
       // entry just records the tuple — M8 (`reconcileSerenityProjects`) reads the
       // authoritative semrushProjectId + geoTargetId back from the DB.
-      succeeded.push({ market, language });
+      succeeded.push({ market, languageCode });
       success = true;
     } else {
       failed.push({
         market,
-        language,
+        languageCode,
         status: outcome.status,
         // Use an opaque token — outcome.body?.error comes from the upstream proxy
         // and may echo request-body content; treat it the same as thrown errors.
@@ -1414,7 +1410,7 @@ export async function performSerenityFanOut(context, {
       event: 'serenity_project_fanout',
       orgId,
       market,
-      language,
+      languageCode,
       success,
       durationMs,
     });
@@ -1473,31 +1469,31 @@ export async function reconcileSerenityProjects(context, { brandId, fanOut }) {
     rowBySlice.set(key, row);
   });
   const failureByTuple = new Map();
-  fanOut.failed.forEach((f) => failureByTuple.set(`${f.market}::${f.language}`, f));
+  fanOut.failed.forEach((f) => failureByTuple.set(`${f.market}::${f.languageCode}`, f));
 
   const succeeded = [];
   const failed = [];
-  requested.forEach(({ market, language }) => {
+  requested.forEach(({ market, languageCode }) => {
     // `resolveLocation` returns null for an unknown market, in which case no DB
     // slice can match and the tuple is treated as failed. This is consistent
     // with M7: the proxy also rejects such a tuple (`unknownMarket`), so it
     // never wrote a row. Unreachable given the `^[A-Z]{2}$` + proxy validation,
     // but guarded so a bad code degrades to a failure, not a thrown lookup.
     const location = resolveLocation(market);
-    const lang = String(language).toLowerCase();
+    const lang = String(languageCode).toLowerCase();
     const row = location ? rowBySlice.get(`${location.geoTargetId}::${lang}`) : undefined;
     if (row) {
       succeeded.push({
         market,
-        language,
+        languageCode,
         semrushProjectId: row.getSemrushProjectId(),
         geoTargetId: row.getGeoTargetId(),
       });
     } else {
-      const prior = failureByTuple.get(`${market}::${language}`);
+      const prior = failureByTuple.get(`${market}::${languageCode}`);
       failed.push({
         market,
-        language,
+        languageCode,
         status: prior?.status ?? 500,
         error: prior?.error ?? 'projectRowMissing',
       });
