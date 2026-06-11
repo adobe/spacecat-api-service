@@ -370,6 +370,29 @@ describe('Trial User Controller', () => {
       expect(mockLogger.error).to.have.been.calledWith(`Error getting trial users for organization ${organizationId}: ${orgError.message}`);
     });
 
+    it('should allow admin without calling hasS2SCapability or hasAccess', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(true);
+
+      const context = {
+        params: { organizationId },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        invocation: { id: 'req-admin' },
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.getByOrganizationID(context);
+
+      expect(result.status).to.equal(200);
+      expect(mockAccessControlUtil.hasS2SCapability).to.not.have.been.called;
+      expect(mockAccessControlUtil.hasAccess).to.not.have.been.called;
+    });
+
     it('should allow S2S consumer with trialUser:read capability', async () => {
       mockAccessControlUtil.hasAdminAccess.returns(false);
       mockAccessControlUtil.hasS2SCapability.resolves({

@@ -83,15 +83,16 @@ function TrialUsersController(ctx) {
       }
 
       // Dual-layer access check: admin bypass → S2S capability → org membership
+      const requestId = context?.invocation?.id || 'unknown';
       const isAdmin = accessControlUtil.hasAdminAccess();
       const s2sResult = isAdmin
         ? { allowed: false, reason: 'admin-bypass' }
         : await accessControlUtil.hasS2SCapability(CAP_TRIAL_USER_READ);
 
       if (s2sResult.allowed) {
-        const requestId = context?.invocation?.id || 'unknown';
         context.log.info(`[s2s] GET /organizations/:organizationId/trial-users granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_TRIAL_USER_READ} requestId=${requestId}`);
       } else if (!isAdmin && !await accessControlUtil.hasAccess(organization)) {
+        context.log.info(`[acl] Denied GET /organizations/:organizationId/trial-users - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
         return forbidden('Access denied to this organization');
       }
 
