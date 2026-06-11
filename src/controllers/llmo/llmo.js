@@ -1855,9 +1855,24 @@ function LlmoController(ctx) {
    * @param {string} prodBaseURL the production base URL to match against.
    * @returns {boolean} true if all URLs share the same domain as prodBaseURL
    */
+  function getPathname(urlString) {
+    try {
+      return new URL(urlString).pathname.replace(/\/$/, '') || '/';
+    } catch {
+      try {
+        return new URL(`https://${urlString}`).pathname.replace(/\/$/, '') || '/';
+      } catch {
+        return '/';
+      }
+    }
+  }
+
   function areDomainsSameAsBase(urlList, prodBaseURL) {
     const prodDomain = getDomain(prodBaseURL);
-    return urlList.every((stageBaseURL) => getDomain(stageBaseURL) === prodDomain);
+    const prodPath = getPathname(prodBaseURL);
+    return urlList.every(
+      (stageURL) => getDomain(stageURL) === prodDomain && getPathname(stageURL) === prodPath,
+    );
   }
 
   /**

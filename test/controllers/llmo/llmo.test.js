@@ -7533,6 +7533,51 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
       expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
     });
+
+    it('should return 400 when staging domain has no subpath but prod site has a subpath', async () => {
+      mockSite.getBaseURL.returns('https://www.lovesac.com/store');
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('same base domain');
+    });
+
+    it('should return 400 when staging domain has a different subpath from the prod site', async () => {
+      mockSite.getBaseURL.returns('https://www.lovesac.com/store');
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com/other'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('same base domain');
+    });
+
+    it('should succeed when staging domain subpath matches the prod site subpath', async () => {
+      mockSite.getBaseURL.returns('https://www.lovesac.com/store');
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com/store'] };
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockStageSite.getBaseURL.returns('https://staging.lovesac.com/store');
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0].domain).to.equal('staging.lovesac.com/store');
+    });
+
+    it('should succeed when both prod and staging are root domains (no subpath)', async () => {
+      mockSite.getBaseURL.returns('https://www.lovesac.com');
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+    });
   });
 
   describe('getEdgeConfig', () => {
