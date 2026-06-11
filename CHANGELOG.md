@@ -1,3 +1,10 @@
+## [1.568.1](https://github.com/adobe/spacecat-api-service/compare/v1.568.0...v1.568.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* update plg onboarding existing delivery type ([#2526](https://github.com/adobe/spacecat-api-service/issues/2526)) ([b1b90ac](https://github.com/adobe/spacecat-api-service/commit/b1b90ac6143403cafe480f1a4096b4992bd6cfc9))
+
 # [1.568.0](https://github.com/adobe/spacecat-api-service/compare/v1.567.0...v1.568.0) (2026-06-11)
 
 
