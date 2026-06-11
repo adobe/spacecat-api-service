@@ -232,6 +232,8 @@ paths:
     $ref: './site-metrics-api.yaml#/site-metrics-latest'
   /sites/{siteId}:
     $ref: './site-api.yaml#/site'
+  /sites/{siteId}/identity:
+    $ref: './site-api.yaml#/site-identity'
   /sites/{siteId}/audits:
     $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/audits/{auditType}:

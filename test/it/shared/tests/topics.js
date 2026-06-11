@@ -142,19 +142,21 @@ export default function topicTests(getHttpClient, resetData) {
       it('drops soft-deleted categories from categoryUuids', async () => {
         const http = getHttpClient();
 
-        // Create two categories and link both to one topic
+        // Create two categories and link both to one topic. Categories are
+        // addressed exclusively by their UUID `id` (LLMO-5515) — the server
+        // assigns it; no client-supplied business key is honored.
         const catARes = await http.admin.post(
           `/v2/orgs/${ORG_1_ID}/categories`,
-          { id: 'soft-del-cat-a', name: 'CatA', origin: 'human' },
+          { name: 'CatA', origin: 'human' },
         );
         const catBRes = await http.admin.post(
           `/v2/orgs/${ORG_1_ID}/categories`,
-          { id: 'soft-del-cat-b', name: 'CatB', origin: 'human' },
+          { name: 'CatB', origin: 'human' },
         );
         expect(catARes.status).to.equal(201);
         expect(catBRes.status).to.equal(201);
-        const catA = catARes.body.uuid;
-        const catB = catBRes.body.uuid;
+        const catA = catARes.body.id;
+        const catB = catBRes.body.id;
 
         // Create topic linked to catA, then patch a second link to catB via
         // re-POST (upsert keeps both junction rows).
@@ -167,9 +169,9 @@ export default function topicTests(getHttpClient, resetData) {
           { id: 'multi-cat-topic', name: 'Multi Cat Topic', categoryId: catB },
         );
 
-        // Soft-delete catB
+        // Soft-delete catB by its UUID
         const delRes = await http.admin.delete(
-          `/v2/orgs/${ORG_1_ID}/categories/soft-del-cat-b`,
+          `/v2/orgs/${ORG_1_ID}/categories/${catB}`,
         );
         expect(delRes.status).to.be.oneOf([200, 204]);
 
