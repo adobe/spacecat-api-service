@@ -15,6 +15,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../../utils.js';
 import { handleCreatePrompts } from './prompts.js';
 import { handleUpdateModels } from './markets.js';
+import { pollProjectPublished, PUBLISH_OUTCOME } from './publish-status.js';
 
 /**
  * LLMO-5492 — publish-after-populate finalize step.
@@ -49,6 +50,11 @@ import { handleUpdateModels } from './markets.js';
  * @param {string} semrushWorkspaceId - Org's Semrush workspace id.
  * @param {object} body - { prompts?: Array, models?: Array<{geoTargetId, languageCode, modelIds}> }
  * @param {object} [log] - Logger.
+ * @param {object} [options] - Publish-confirm tuning (AC3).
+ * @param {number} [options.confirmAttempts=1] - Max getProjectStatus reads per
+ *   project after publish (bounded to the Lambda budget; the unbounded ≤900s
+ *   reconcile loop is the DRS/worker's job, not this Lambda's).
+ * @param {number} [options.confirmIntervalMs=0] - Delay between confirm reads.
  * @returns {Promise<{prompts: object, models: Array, published: string[], publishFailed: Array}>}
  */
 export async function finalizeSerenityProjects(
@@ -58,6 +64,7 @@ export async function finalizeSerenityProjects(
   semrushWorkspaceId,
   body,
   log,
+  options = {},
 ) {
   if (!hasText(brandId)) {
     throw new ErrorWithStatusCode('brandId is required', 400);
@@ -149,13 +156,25 @@ export async function finalizeSerenityProjects(
   const projectIds = [...new Set(
     rows.map((r) => r.getSemrushProjectId()).filter((id) => hasText(id)),
   )];
+  // AC3: publish is async (202) with no completion webhook. After the publish
+  // is accepted we do a BOUNDED, best-effort confirm via the project's
+  // `publish_status` (handlers/publish-status.js). The bound stays inside the
+  // Lambda wall budget — the unbounded ≤900s reconcile poll is the DRS/worker's
+  // job. Confirm semantics:
+  //   - confirmed live                → published
+  //   - initial_publish_failed        → publishFailed (terminal, surfaced early)
+  //   - still draft/publishing/unknown within budget, OR status unreadable
+  //                                    → published (accepted; the worker
+  //                                      reconciles) — we do NOT mislabel an
+  //                                      in-progress async publish as a failure.
+  const { confirmAttempts = 1, confirmIntervalMs = 0 } = options;
+  const canConfirm = typeof transport.getProjectStatus === 'function';
   const published = [];
   const publishFailed = [];
   for (const projectId of projectIds) {
     try {
       // eslint-disable-next-line no-await-in-loop
       await transport.publishProject(semrushWorkspaceId, projectId);
-      published.push(projectId);
     } catch (e) {
       log?.error?.('finalizeSerenityProjects: publish failed', {
         brandId,
@@ -163,6 +182,37 @@ export async function finalizeSerenityProjects(
         error: e.message,
       });
       publishFailed.push({ projectId, error: e.message });
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    if (!canConfirm) {
+      published.push(projectId);
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    const confirm = await pollProjectPublished(transport, semrushWorkspaceId, projectId, {
+      attempts: confirmAttempts,
+      intervalMs: confirmIntervalMs,
+      log,
+    });
+    if (confirm.outcome === PUBLISH_OUTCOME.FAILED) {
+      log?.error?.('finalizeSerenityProjects: publish reported failed by upstream', {
+        brandId,
+        projectId,
+        publishStatus: confirm.status,
+        failedReason: confirm.failedReason,
+      });
+      publishFailed.push({
+        projectId,
+        error: confirm.failedReason || confirm.status || 'initial_publish_failed',
+        publishStatus: confirm.status,
+      });
+    } else {
+      // published (confirmed live) or pending (accepted, worker reconciles).
+      published.push(projectId);
     }
   }
 

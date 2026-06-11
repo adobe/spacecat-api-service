@@ -283,4 +283,127 @@ describe('handlers/finalize.js — finalizeSerenityProjects (LLMO-5492)', () => 
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
     expect(result.published).to.deep.equal(['proj-us-en']);
   });
+
+  // --- AC3: bounded publish-status confirm (opt-in via getProjectStatus) ----
+
+  it('confirms publish via publish_status=live → published', async () => {
+    const usEn = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+    const dataAccess = makeDataAccess([usEn]);
+    const transport = {
+      publishProject: sinon.stub().resolves(),
+      getProjectStatus: sinon.stub().resolves({ publish_status: 'live' }),
+    };
+
+    const result = await finalizeSerenityProjects(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      {},
+      fakeLog(),
+    );
+
+    expect(transport.getProjectStatus).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
+    expect(result.published).to.deep.equal(['proj-us-en']);
+    expect(result.publishFailed).to.have.lengthOf(0);
+  });
+
+  it('moves a project to publishFailed when upstream confirms initial_publish_failed', async () => {
+    const usEn = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+    const dataAccess = makeDataAccess([usEn]);
+    const transport = {
+      publishProject: sinon.stub().resolves(),
+      getProjectStatus: sinon.stub().resolves({
+        publish_status: 'initial_publish_failed',
+        publishing_failed_reason: 'bad location',
+      }),
+    };
+
+    const result = await finalizeSerenityProjects(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      {},
+      fakeLog(),
+    );
+
+    expect(result.published).to.have.lengthOf(0);
+    expect(result.publishFailed).to.have.lengthOf(1);
+    expect(result.publishFailed[0]).to.include({
+      projectId: 'proj-us-en',
+      error: 'bad location',
+      publishStatus: 'initial_publish_failed',
+    });
+  });
+
+  it('keeps an async-in-progress publish (still publishing within budget) in published — worker reconciles', async () => {
+    const usEn = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+    const dataAccess = makeDataAccess([usEn]);
+    const transport = {
+      publishProject: sinon.stub().resolves(),
+      getProjectStatus: sinon.stub().resolves({ publish_status: 'publishing' }),
+    };
+
+    const result = await finalizeSerenityProjects(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      {},
+      fakeLog(),
+      { confirmAttempts: 2, confirmIntervalMs: 0 },
+    );
+
+    expect(transport.getProjectStatus).to.have.been.calledTwice; // bounded poll
+    expect(result.published).to.deep.equal(['proj-us-en']);
+    expect(result.publishFailed).to.have.lengthOf(0);
+  });
+
+  it('falls back to accepted=published when the status read errors (best-effort confirm)', async () => {
+    const usEn = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+    const dataAccess = makeDataAccess([usEn]);
+    const transport = {
+      publishProject: sinon.stub().resolves(),
+      getProjectStatus: sinon.stub().rejects(new Error('status 500')),
+    };
+
+    const result = await finalizeSerenityProjects(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      {},
+      fakeLog(),
+    );
+
+    expect(result.published).to.deep.equal(['proj-us-en']);
+    expect(result.publishFailed).to.have.lengthOf(0);
+  });
+
+  it('mixes confirm outcomes across projects: live → published, initial_publish_failed → publishFailed', async () => {
+    const usEn = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+    const frFr = makeProject({ semrushProjectId: 'proj-fr-fr', geoTargetId: 2250, languageCode: 'fr' });
+    const dataAccess = makeDataAccess([usEn, frFr]);
+    const transport = {
+      publishProject: sinon.stub().resolves(),
+      getProjectStatus: sinon.stub(),
+    };
+    transport.getProjectStatus.withArgs(WORKSPACE, 'proj-us-en').resolves({ publish_status: 'live' });
+    transport.getProjectStatus.withArgs(WORKSPACE, 'proj-fr-fr').resolves({ publish_status: 'initial_publish_failed' });
+
+    const result = await finalizeSerenityProjects(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      {},
+      fakeLog(),
+    );
+
+    expect(transport.publishProject).to.have.been.calledTwice;
+    expect(result.published).to.deep.equal(['proj-us-en']);
+    expect(result.publishFailed).to.have.lengthOf(1);
+    expect(result.publishFailed[0]).to.include({ projectId: 'proj-fr-fr' });
+  });
 });

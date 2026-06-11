@@ -224,6 +224,25 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * GET /v1/workspaces/{ws}/projects/{pid} — fetches a single project,
+     * including its `publish_status` attribute. Publish is asynchronous and
+     * Semrush emits no completion webhook, so publish completion is observed by
+     * re-reading this resource (see handlers/publish-status.js for the
+     * classify + poll helpers built on top of this).
+     *
+     * Uses the v1 DEFAULT view (no `live` query param) deliberately: the v2
+     * list and the v1 `live=true` view return a live-view materialisation that
+     * defaults the location and empties config for a never-published draft,
+     * whereas the v1 default view echoes the draft's real settings and
+     * `publish_status` faithfully (verified against the tenant, serenity-docs
+     * §10). Returns the raw project JSON.
+     */
+    async getProjectStatus(semrushWorkspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
      * GET /v1/workspaces/{ws}/projects/{pid}/ai_models — list AI models
      * configured for a project. `model.key` is the value the Reporting API
      * expects as `CBF_model`.

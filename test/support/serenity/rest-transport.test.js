@@ -386,6 +386,26 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('getProjectStatus', () => {
+    it('GETs /v1/workspaces/{ws}/projects/{pid} (v1 default view) and returns the raw project', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID, publish_status: 'live', published_at: '2026-06-10T00:00:00Z' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getProjectStatus(WORKSPACE_ID, PROJECT_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      // v1 default view — no /publish suffix, no ?live param, no /ai_models.
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}`,
+      );
+      expect(init.body).to.be.undefined;
+      expect(result).to.deep.equal({
+        id: PROJECT_ID, publish_status: 'live', published_at: '2026-06-10T00:00:00Z',
+      });
+    });
+  });
+
   describe('listAiModels', () => {
     it('GETs /v1/.../ai_models with page=1&limit=100 by default', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
