@@ -18,6 +18,7 @@ import {
   CAP_SITE_CREATE,
   CAP_SITE_READ_ALL,
   CAP_SUGGESTION_WRITE,
+  CAP_TRIAL_USER_READ,
 } from './capability-constants.js';
 
 /**
@@ -138,9 +139,8 @@ export const INTERNAL_ROUTES = [
   'PATCH /plg/records/:plgOnboardingId',
   'DELETE /plg/records/:plgOnboardingId',
 
-  // Tier-specific - user activities (POST only), trial users, user details: end-user/admin flows
+  // Tier-specific - user activities (POST only), user details: end-user/admin flows
   'POST /sites/:siteId/user-activities',
-  'GET /organizations/:organizationId/trial-users',
   'GET /admin/users/:userId',
   'GET /organizations/:organizationId/userDetails/:externalUserId',
   'POST /organizations/:organizationId/userDetails',
@@ -619,6 +619,9 @@ const routeRequiredCapabilities = {
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
+
+  // Trial Users
+  'GET /organizations/:organizationId/trial-users': CAP_TRIAL_USER_READ,
 
   // Entitlements
   'GET /organizations/:organizationId/entitlements': 'entitlement:read',
