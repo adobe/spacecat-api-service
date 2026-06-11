@@ -286,6 +286,37 @@ describe('Semrush REST transport', () => {
       const result = await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
       expect(result).to.equal(null);
     });
+
+    it('captures the upstream content-type on the error (e.g. nginx 405 text/html quota rejection)', async () => {
+      fetchStub.resolves({
+        ok: false,
+        status: 405,
+        headers: { get: (h) => (h.toLowerCase() === 'content-type' ? 'text/html' : null) },
+        text: async () => '<html><body>405 Not Allowed</body></html>',
+      });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      try {
+        await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err).to.be.instanceOf(SerenityTransportError);
+        expect(err.status).to.equal(405);
+        expect(err.contentType).to.equal('text/html');
+      }
+    });
+
+    it('sets contentType to null when the response exposes no headers', async () => {
+      fetchStub.resolves(fetchFail(500, { code: 'boom' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      try {
+        await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err.contentType).to.equal(null);
+      }
+    });
   });
 
   describe('listPromptsByTags', () => {

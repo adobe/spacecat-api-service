@@ -26,11 +26,18 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  * NOT leak `.body` to clients — it is kept here only for server-side logging.
  */
 export class SerenityTransportError extends Error {
-  constructor(status, message, body) {
+  constructor(status, message, body, contentType) {
     super(message);
     this.name = 'SerenityTransportError';
     this.status = status;
     this.body = body;
+    // Raw upstream `content-type` header. Kept so callers can distinguish an
+    // application error (JSON envelope) from an infrastructure rejection that
+    // never reached the app — notably nginx's bare `405 text/html`, which
+    // Semrush returns for a publish on a workspace with zero `ai.projects`
+    // quota (a permanent allocation failure, not a transient outage). See
+    // errors.js `isPublishQuotaExhausted`.
+    this.contentType = contentType;
   }
 }
 
@@ -144,6 +151,7 @@ async function request(method, url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_
       response.status,
       `Semrush ${method} ${url} failed: ${response.status}`,
       parsed,
+      response.headers?.get?.('content-type') ?? null,
     );
   }
   return parsed;

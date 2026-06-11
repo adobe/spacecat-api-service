@@ -13,9 +13,15 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
+import { ERROR_CODES, isPublishQuotaExhausted } from '../errors.js';
 import { handleCreatePrompts } from './prompts.js';
 import { handleUpdateModels } from './markets.js';
 import { pollProjectPublished, PUBLISH_OUTCOME } from './publish-status.js';
+
+// Slice identity shared between the model results (echoed from body.models) and
+// the DB rows (canonical). Normalise both sides — geoTargetId may arrive as a
+// string from the trigger payload; languageCode casing is not guaranteed.
+const sliceKey = (geoTargetId, languageCode) => `${Number(geoTargetId)}::${String(languageCode ?? '').toLowerCase()}`;
 
 /**
  * LLMO-5492 — publish-after-populate finalize step.
@@ -32,10 +38,28 @@ import { pollProjectPublished, PUBLISH_OUTCOME } from './publish-status.js';
  * failure is recorded and the remaining work still runs, so a partial DRS
  * payload still makes forward progress.
  *
- * Publish is gated on population: if prompts were requested but every push
- * failed, the publish step is skipped so we never publish an empty project
- * (the bug this ticket fixes). A models-only or no-payload call still publishes
- * the brand's existing drafts.
+ * Publish is gated on population — Semrush does NO content validation on publish
+ * (an empty project goes live), so the populate gate is entirely ours
+ * (serenity-docs §5). A project is published only when BOTH hold:
+ *   - prompts: if prompts were requested for the brand, at least one was created
+ *     (every-push-failed → skip, reason `noPrompts`); and
+ *   - models: that project's slice ended with >=1 model set (reason `noModels`
+ *     otherwise). Per Semrush's official setup sequence, model creation is a
+ *     mandatory pre-publish step (serenity-docs §10 step 4 precedes step 6).
+ *
+ * DEFAULT-MODEL POLICY (trigger contract): finalize does NOT invent a fallback
+ * model set. `body.models` is owned by the DRS-completion trigger, which MUST
+ * supply >=1 model per slice it wants published. A slice that arrives with no
+ * models is left as an unpublished draft (recorded `publishSkipped`/`noModels`
+ * and logged) rather than published with an arbitrary default. So an empty
+ * `body.models` publishes nothing — the gate enforcing the contract.
+ *
+ * PUBLISH IS ASYNC (202 "accepted" != "observed live"). The bounded confirm only
+ * promotes a project to `published` when `publish_status` is read back as live.
+ * A 202 we could not confirm live in-budget goes to `publishPending` (NOT
+ * `published`) for the worker reconcile to resolve — consumers must not read a
+ * pending publish as live. A zero-`ai.projects`-quota rejection (405 + text/html)
+ * is a PERMANENT failure: `publishFailed` with `permanent: true` (alert, no retry).
  *
  * Retry semantics differ per step. Model sync (diff-based) and publish are
  * idempotent. Prompt push is NOT: handleCreatePrompts unconditionally creates
@@ -55,7 +79,8 @@ import { pollProjectPublished, PUBLISH_OUTCOME } from './publish-status.js';
  *   project after publish (bounded to the Lambda budget; the unbounded ≤900s
  *   reconcile loop is the DRS/worker's job, not this Lambda's).
  * @param {number} [options.confirmIntervalMs=0] - Delay between confirm reads.
- * @returns {Promise<{prompts: object, models: Array, published: string[], publishFailed: Array}>}
+ * @returns {Promise<{prompts: object, models: Array, published: string[],
+ *   publishPending: Array, publishSkipped: Array, publishFailed: Array}>}
  */
 export async function finalizeSerenityProjects(
   transport,
@@ -104,6 +129,9 @@ export async function finalizeSerenityProjects(
         semrushWorkspaceId,
         slice,
         log,
+        // Publish stays deferred to step 3 — handleUpdateModels must not push
+        // a per-slice publish of its own here.
+        { publish: false },
       );
       models.push({
         geoTargetId: slice?.geoTargetId,
@@ -127,11 +155,54 @@ export async function finalizeSerenityProjects(
     }
   }
 
-  // Don't publish empty: if prompts were requested but every push failed, the
-  // projects are still empty drafts — publishing would re-introduce the exact
-  // empty-publish bug this ticket fixes. Skip publish and surface it loudly so
-  // the trigger can retry the prompt push. (A models-only or no-prompt call has
-  // nothing to gate on and proceeds.)
+  // Resolve the brand's project rows once — needed by both populate gates and
+  // the publish loop. Dedupe projectId → its slice(s) so a project shared by
+  // multiple slices (defensive — slices map 1:1 to projects today) is handled
+  // exactly once.
+  const rows = (await dataAccess.BrandSemrushProject.allByBrandId(brandId)) || [];
+  const projectSlices = new Map();
+  for (const r of rows) {
+    const id = r.getSemrushProjectId();
+    if (!hasText(id)) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    if (!projectSlices.has(id)) {
+      projectSlices.set(id, []);
+    }
+    projectSlices.get(id).push({
+      geoTargetId: r.getGeoTargetId(),
+      languageCode: r.getLanguageCode(),
+    });
+  }
+
+  const published = [];
+  const publishPending = [];
+  const publishSkipped = [];
+  const publishFailed = [];
+
+  const result = () => {
+    log?.info?.('finalizeSerenityProjects: complete', {
+      brandId,
+      promptsCreated: prompts.created.length,
+      promptsFailed: prompts.failed.length,
+      promptsSkipped: prompts.skipped.length,
+      modelSlices: models.length,
+      modelSlicesFailed: models.filter((m) => m.status !== 200).length,
+      published: published.length,
+      publishPending: publishPending.length,
+      publishSkipped: publishSkipped.length,
+      publishFailed: publishFailed.length,
+    });
+    return {
+      prompts, models, published, publishPending, publishSkipped, publishFailed,
+    };
+  };
+
+  // POPULATE GATE (prompts). Semrush does no content validation on publish, so
+  // guarding against an empty publish is entirely ours. If prompts were
+  // requested for the brand but every push failed, the projects are still empty
+  // drafts — skip publish for ALL of them (the trigger retries the prompt push).
   const promptsRequested = promptInputs.length > 0;
   if (promptsRequested && prompts.created.length === 0) {
     log?.warn?.(
@@ -143,51 +214,86 @@ export async function finalizeSerenityProjects(
         promptsSkipped: prompts.skipped.length,
       },
     );
-    return {
-      prompts, models, published: [], publishFailed: [],
-    };
+    for (const projectId of projectSlices.keys()) {
+      publishSkipped.push({ projectId, reason: 'noPrompts' });
+    }
+    return result();
   }
 
-  // 3. Publish once per distinct project across the brand's slices. Every slice
-  //    was provisioned as a draft, so this is the step that makes the now
-  //    populated projects live. Dedupe so a project shared by multiple slices
-  //    (defensive — slices map 1:1 to projects today) is published only once.
-  const rows = (await dataAccess.BrandSemrushProject.allByBrandId(brandId)) || [];
-  const projectIds = [...new Set(
-    rows.map((r) => r.getSemrushProjectId()).filter((id) => hasText(id)),
-  )];
-  // AC3: publish is async (202) with no completion webhook. After the publish
-  // is accepted we do a BOUNDED, best-effort confirm via the project's
-  // `publish_status` (handlers/publish-status.js). The bound stays inside the
-  // Lambda wall budget — the unbounded ≤900s reconcile poll is the DRS/worker's
-  // job. Confirm semantics:
-  //   - confirmed live                → published
-  //   - initial_publish_failed        → publishFailed (terminal, surfaced early)
-  //   - still draft/publishing/unknown within budget, OR status unreadable
-  //                                    → published (accepted; the worker
-  //                                      reconciles) — we do NOT mislabel an
-  //                                      in-progress async publish as a failure.
+  // POPULATE GATE (models) + trigger contract. Model creation is a mandatory
+  // pre-publish step (serenity-docs §10). Build the set of slices that ended
+  // with >=1 model; a project is publishable only if at least one of its slices
+  // is in that set. A project with no models is left as a draft (publishSkipped /
+  // noModels) — finalize never invents a default model set; the DRS trigger owns
+  // supplying models. Empty body.models therefore publishes nothing.
+  const slicesWithModels = new Set(
+    models
+      .filter((m) => m.status === 200 && Array.isArray(m.items) && m.items.length > 0)
+      .map((m) => sliceKey(m.geoTargetId, m.languageCode)),
+  );
+
+  const publishable = [];
+  for (const [projectId, slices] of projectSlices) {
+    const hasModels = slices.some(
+      (s) => slicesWithModels.has(sliceKey(s.geoTargetId, s.languageCode)),
+    );
+    if (hasModels) {
+      publishable.push(projectId);
+    } else {
+      log?.warn?.(
+        'finalizeSerenityProjects: skipping publish — no models set for project '
+        + '(trigger contract: the DRS payload must supply >=1 model per slice to publish)',
+        { brandId, projectId },
+      );
+      publishSkipped.push({ projectId, reason: 'noModels' });
+    }
+  }
+
+  // 3. Publish once per publishable project. Publish is async (202) with no
+  //    completion webhook; after it is accepted we do a BOUNDED confirm via the
+  //    project's `publish_status` (the unbounded ≤900s reconcile is the worker's
+  //    job). Bucketing — note `published` means CONFIRMED LIVE only:
+  //      - confirmed live                → published
+  //      - initial_publish_failed        → publishFailed (terminal)
+  //      - 405 + text/html (no quota)    → publishFailed { permanent } (alert, no retry)
+  //      - other publish error           → publishFailed (transient; retry/reconcile)
+  //      - accepted but not confirmed live in-budget, OR status unreadable, OR
+  //        no getProjectStatus            → publishPending (worker reconciles) —
+  //        we never report an unconfirmed 202 as live.
   const { confirmAttempts = 1, confirmIntervalMs = 0 } = options;
   const canConfirm = typeof transport.getProjectStatus === 'function';
-  const published = [];
-  const publishFailed = [];
-  for (const projectId of projectIds) {
+  for (const projectId of publishable) {
     try {
       // eslint-disable-next-line no-await-in-loop
       await transport.publishProject(semrushWorkspaceId, projectId);
     } catch (e) {
-      log?.error?.('finalizeSerenityProjects: publish failed', {
-        brandId,
-        projectId,
-        error: e.message,
-      });
-      publishFailed.push({ projectId, error: e.message });
+      if (isPublishQuotaExhausted(e)) {
+        log?.error?.(
+          'finalizeSerenityProjects: publish rejected — workspace has no ai.projects quota '
+          + '(PERMANENT, alert; not retried)',
+          { brandId, projectId, code: ERROR_CODES.PUBLISH_QUOTA_EXHAUSTED },
+        );
+        publishFailed.push({
+          projectId,
+          error: 'publish rejected: workspace has no ai.projects quota',
+          code: ERROR_CODES.PUBLISH_QUOTA_EXHAUSTED,
+          permanent: true,
+        });
+      } else {
+        log?.error?.('finalizeSerenityProjects: publish failed', {
+          brandId,
+          projectId,
+          error: e.message,
+        });
+        publishFailed.push({ projectId, error: e.message });
+      }
       // eslint-disable-next-line no-continue
       continue;
     }
 
     if (!canConfirm) {
-      published.push(projectId);
+      // Accepted (202) but we have no way to confirm it went live → pending.
+      publishPending.push({ projectId, status: null });
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -198,7 +304,9 @@ export async function finalizeSerenityProjects(
       intervalMs: confirmIntervalMs,
       log,
     });
-    if (confirm.outcome === PUBLISH_OUTCOME.FAILED) {
+    if (confirm.outcome === PUBLISH_OUTCOME.PUBLISHED) {
+      published.push(projectId);
+    } else if (confirm.outcome === PUBLISH_OUTCOME.FAILED) {
       log?.error?.('finalizeSerenityProjects: publish reported failed by upstream', {
         brandId,
         projectId,
@@ -211,23 +319,12 @@ export async function finalizeSerenityProjects(
         publishStatus: confirm.status,
       });
     } else {
-      // published (confirmed live) or pending (accepted, worker reconciles).
-      published.push(projectId);
+      // PENDING — accepted, but not confirmed live within budget (still
+      // draft/publishing, or status unreadable). The worker reconcile resolves
+      // it; until then it is explicitly NOT reported as live.
+      publishPending.push({ projectId, status: confirm.status });
     }
   }
 
-  log?.info?.('finalizeSerenityProjects: complete', {
-    brandId,
-    promptsCreated: prompts.created.length,
-    promptsFailed: prompts.failed.length,
-    promptsSkipped: prompts.skipped.length,
-    modelSlices: models.length,
-    modelSlicesFailed: models.filter((m) => m.status !== 200).length,
-    published: published.length,
-    publishFailed: publishFailed.length,
-  });
-
-  return {
-    prompts, models, published, publishFailed,
-  };
+  return result();
 }

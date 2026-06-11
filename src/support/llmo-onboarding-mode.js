@@ -19,7 +19,6 @@ export const LLMO_SERENITY_FLAG = 'serenity';
 export const LLMO_ONBOARDING_MODE_V1 = 'v1';
 export const LLMO_ONBOARDING_MODE_V2 = 'v2';
 export const SERENITY_SITE_ALLOWLIST = 'SERENITY_SITE_ALLOWLIST';
-export const SERENITY_DEFER_PUBLISH = 'SERENITY_DEFER_PUBLISH';
 
 /**
  * Legacy env-var allowlist check (SERENITY_SITE_ALLOWLIST). Matches against both
@@ -117,26 +116,6 @@ export async function isSerenityOnboardingEnabled(organizationId, imsOrgId, cont
     );
   }
   return inAllowlist;
-}
-
-/**
- * LLMO-5492: gate for deferring the Semrush project publish out of the
- * onboarding create path. When OFF (default) the fan-out keeps today's
- * behavior — handleCreateMarket publishes each project at create time. When
- * ON, the fan-out provisions projects as drafts and the publish is deferred to
- * the finalize step (push prompts + set models + publish once), which runs
- * when DRS prompt-generation completes.
- *
- * TRANSITIONAL — default OFF so projects never sit unpublished while the
- * finalize trigger (audit-worker/DRS, a separate repo) is still being wired.
- * Flip ON per environment once that trigger is live; remove the flag once
- * publish-after-populate is the only path.
- *
- * @param {object} env - Environment variables object
- * @returns {boolean}
- */
-export function isSerenityDeferPublishEnabled(env) {
-  return String(env?.[SERENITY_DEFER_PUBLISH] ?? '').trim().toLowerCase() === 'true';
 }
 
 /**

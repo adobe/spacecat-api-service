@@ -15,9 +15,10 @@ import { iso31661Alpha2ToNumeric } from 'iso-3166';
 import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { ERROR_CODES, isUpstreamGone } from '../errors.js';
+import { ERROR_CODES, isUpstreamGone, isPublishQuotaExhausted } from '../errors.js';
 import { SerenityTransportError } from '../rest-transport.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
+import { readPublishStatus, PUBLISH_STATUS } from './publish-status.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 const MAX_MODEL_IDS = 50;
@@ -417,6 +418,28 @@ export async function handleCreateMarket(
     try {
       await transport.publishProject(semrushWorkspaceId, semrushProjectId);
     } catch (e) {
+      // Zero-quota publish rejection (405 + text/html): a PERMANENT
+      // resource-allocation failure. Do NOT run the best-effort delete here —
+      // delete-then-retry would loop create→405→delete forever against a
+      // workspace that simply needs an `ai.projects` allocation. Leave the
+      // draft in place (an operator reconciles after fixing quota) and surface
+      // the failure loudly so it alerts instead of masquerading as a transient
+      // Semrush outage. (errors.js isPublishQuotaExhausted / serenity-docs §9.)
+      if (isPublishQuotaExhausted(e)) {
+        log?.error?.(
+          'handleCreateMarket: publish rejected — workspace has no ai.projects quota '
+          + '(PERMANENT, alert; not retried). Draft project left in place for reconcile.',
+          {
+            brandId,
+            semrushWorkspaceId,
+            semrushProjectId,
+            geoTargetId: location.geoTargetId,
+            languageCode,
+            code: ERROR_CODES.PUBLISH_QUOTA_EXHAUSTED,
+          },
+        );
+        throw e;
+      }
       // Best-effort upstream cleanup so the documented retry contract holds.
       // Without this, every retry generates a fresh `defaultMarketName` (random
       // hex suffix) and the upstream `createProject` body has no idempotency
@@ -925,7 +948,18 @@ export async function handleUpdateModels(
   semrushWorkspaceId,
   body,
   log,
+  options = {},
 ) {
+  // Semrush mutations (add/remove model) land in DRAFT until a publish. For a
+  // project that is already LIVE, that means a model change is invisible to
+  // consumers until something republishes it — the bug this option fixes. So
+  // after a successful change we republish IFF the project is currently live.
+  // A draft/publishing project is left untouched (publishing it here would push
+  // a half-configured project live prematurely; its single authoritative
+  // publish belongs to the finalize step). The onboarding finalize step passes
+  // `{ publish: false }` to keep that contract; the standalone PUT /serenity/models
+  // defaults to true so an operator's edit to a live slice takes effect.
+  const { publish = true } = options;
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -1023,6 +1057,35 @@ export async function handleUpdateModels(
     }
   }
 
+  // Republish a LIVE project so the model change actually goes live. Best-effort:
+  // the upstream mutations already succeeded, so a republish failure must not
+  // fail the request — the change is persisted as an unpublished draft edit
+  // (publish_status → live_with_unpublished_updates) and a later publish (or the
+  // worker reconcile) will surface it. Log loudly so it's diagnosable.
+  let republished = false;
+  if (publish) {
+    try {
+      const project = await transport.getProjectStatus(semrushWorkspaceId, projectId);
+      const status = readPublishStatus(project);
+      const isLive = status === PUBLISH_STATUS.LIVE
+        || status === PUBLISH_STATUS.LIVE_WITH_UNPUBLISHED_UPDATES;
+      if (isLive) {
+        await transport.publishProject(semrushWorkspaceId, projectId);
+        republished = true;
+      }
+    } catch (e) {
+      log?.error?.('handleUpdateModels: model change applied but republish failed; '
+        + 'change persists as an unpublished draft edit until the next publish', {
+        brandId,
+        semrushWorkspaceId,
+        projectId,
+        geoTargetId,
+        languageCode,
+        error: e.message,
+      });
+    }
+  }
+
   // Return the refreshed model list
   const updated = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
   const items = updated.map(assignmentToItem).filter(Boolean);
@@ -1033,6 +1096,7 @@ export async function handleUpdateModels(
     languageCode,
     added: toAdd.length,
     removed: toRemoveAssignmentIds.length,
+    republished,
   });
   return { items };
 }
