@@ -482,6 +482,7 @@ export async function upsertBrand({
   brand,
   postgrestClient,
   updatedBy = 'system',
+  log = console,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -524,9 +525,20 @@ export async function upsertBrand({
     updated_by: updatedBy,
   };
 
-  // Set base site ID if provided.
-  if (hasText(brand.baseSiteId)) {
+  // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
+  // when the brand has no site_id yet — re-onboarding/re-upserting an existing
+  // brand by name must NOT re-point its primary site (LLMO-5556: this silently
+  // overwrote mongodb.com -> learn.mongodb.com and merck.com -> keytruda.com).
+  if (hasText(brand.baseSiteId) && !hasText(existing?.site_id)) {
     row.site_id = brand.baseSiteId;
+  } else if (
+    hasText(brand.baseSiteId)
+    && hasText(existing?.site_id)
+    && existing.site_id !== brand.baseSiteId
+  ) {
+    log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
+      + `(org ${organizationId}) — primary site is immutable `
+      + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
   }
 
   const { data: upserted, error } = await postgrestClient

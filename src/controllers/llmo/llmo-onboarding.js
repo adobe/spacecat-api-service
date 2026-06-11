@@ -1375,20 +1375,40 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
       // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
       // and would fail the exact-match lookup against the sites table.
+      // LLMO-5556: a second site onboarded under an existing brand name must not
+      // re-point that brand's primary site, nor clobber its URLs/aliases via the
+      // full-replace syncs inside upsertBrand. Detect the collision and skip the
+      // initial-brand write — the brand already exists so DRS sync still resolves
+      // it; a human then decides whether the new site is a sub-brand or a URL.
       try {
-        await upsertBrand({
-          organizationId: organization.getId(),
-          brand: {
-            name: brandName.trim(),
-            status: 'active',
-            baseSiteId: site.getId(),
-            urls: [{ value: baseURL, type: 'base' }],
-            brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
-          },
-          postgrestClient,
-          updatedBy: 'llmo-onboarding',
-        });
-        log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
+        const { data: existingBrand } = await postgrestClient
+          .from('brands')
+          .select('id, site_id')
+          .eq('organization_id', organization.getId())
+          .eq('name', brandName.trim())
+          .maybeSingle();
+
+        if (existingBrand?.site_id && existingBrand.site_id !== site.getId()) {
+          log.warn(`Skipping initial brand write: brand "${brandName.trim()}" `
+            + `(org ${organization.getId()}) already exists with a different primary site `
+            + `(existing=${existingBrand.site_id}, onboarding=${site.getId()}). `
+            + `Add ${baseURL} as a brand URL or onboard under a distinct brand name.`);
+        } else {
+          await upsertBrand({
+            organizationId: organization.getId(),
+            brand: {
+              name: brandName.trim(),
+              status: 'active',
+              baseSiteId: site.getId(),
+              urls: [{ value: baseURL, type: 'base' }],
+              brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
+            },
+            postgrestClient,
+            updatedBy: 'llmo-onboarding',
+            log,
+          });
+          log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
+        }
       } catch (brandError) {
         log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
       }
