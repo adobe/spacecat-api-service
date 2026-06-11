@@ -11,9 +11,9 @@
  */
 
 /* c8 ignore start */
+import { toJson } from '@bufbuild/protobuf';
 import { MetaResponseSchema } from '@quazar/ai-seo-ts/ai-cr/messages_pb.js';
 import { responseFromGrpcError } from '../../../grpc-utils.js';
-import { messageToJson } from '../../../proto-json.js';
 
 const WORLDWIDE_COUNTRY = 'WORLDWIDE';
 const META_TO_JSON = {
@@ -102,7 +102,7 @@ function computeWorldwideMeta(countries) {
 export async function handleMeta(_sp, clients) {
   try {
     const raw = await clients.crMetaClient.meta({});
-    const metaJson = messageToJson(MetaResponseSchema, raw, META_TO_JSON);
+    const metaJson = toJson(MetaResponseSchema, raw, META_TO_JSON);
     const countries = Array.isArray(metaJson.countries)
       ? metaJson.countries.map(sortCountryDates)
       : [];
