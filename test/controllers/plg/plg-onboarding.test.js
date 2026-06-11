@@ -3468,7 +3468,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const context = buildContext({ domain: TEST_DOMAIN });
       context.env = {
         ...context.env,
-        SLACK_DELIVERY_TYPE_ALERT_CHANNEL_ID: 'C_ALERT',
+        SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C_ALERT',
         SLACK_BOT_TOKEN: 'xoxb-test',
       };
 
@@ -3590,7 +3590,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const context = buildContext({ domain: TEST_DOMAIN });
       context.env = {
         ...context.env,
-        SLACK_DELIVERY_TYPE_ALERT_CHANNEL_ID: 'C_ALERT',
+        SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C_ALERT',
         SLACK_BOT_TOKEN: 'xoxb-test',
       };
 

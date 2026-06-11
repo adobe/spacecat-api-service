@@ -654,7 +654,7 @@ export async function performAsoPlgOnboarding({
         && detectedDeliveryType !== existingDeliveryType
       ) {
         log.warn(`Delivery type mismatch for site ${site.getId()} (${baseURL}): stored=${existingDeliveryType} detected=${detectedDeliveryType}`);
-        const channelId = env.SLACK_DELIVERY_TYPE_ALERT_CHANNEL_ID;
+        const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
         const token = env.SLACK_BOT_TOKEN;
         /* c8 ignore next */
         if (channelId && token) {
