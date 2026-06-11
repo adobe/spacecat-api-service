@@ -1381,14 +1381,21 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       // initial-brand write — the brand already exists so DRS sync still resolves
       // it; a human then decides whether the new site is a sub-brand or a URL.
       try {
-        const { data: existingBrand } = await postgrestClient
+        const { data: existingBrand, error: lookupError } = await postgrestClient
           .from('brands')
           .select('id, site_id')
           .eq('organization_id', organization.getId())
           .eq('name', brandName.trim())
           .maybeSingle();
 
-        if (existingBrand?.site_id && existingBrand.site_id !== site.getId()) {
+        if (lookupError) {
+          // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a
+          // query failure rather than throwing, so without this check a transient
+          // failure would fall through to upsertBrand and could re-point an
+          // existing brand's primary site. Skip the write as a precaution.
+          log.warn(`Skipping initial brand write: failed to look up existing brand "${brandName.trim()}" `
+            + `(org ${organization.getId()}): ${lookupError.message}`);
+        } else if (existingBrand?.site_id && existingBrand.site_id !== site.getId()) {
           log.warn(`Skipping initial brand write: brand "${brandName.trim()}" `
             + `(org ${organization.getId()}) already exists with a different primary site `
             + `(existing=${existingBrand.site_id}, onboarding=${site.getId()}). `

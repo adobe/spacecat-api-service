@@ -497,12 +497,21 @@ export async function upsertBrand({
   // Check if the brand already exists with a base site set.
   // This prevents silently downgrading an active brand to pending when a caller
   // re-upserts by name without passing baseSiteId.
-  const { data: existing } = await postgrestClient
+  const { data: existing, error: existingError } = await postgrestClient
     .from('brands')
     .select('site_id')
     .eq('organization_id', organizationId)
     .eq('name', brand.name)
     .maybeSingle();
+
+  // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a query
+  // failure instead of throwing. If we ignored the error, `existing` would be
+  // null and the immutability guard below would treat the brand as new — letting
+  // a transient failure overwrite an existing primary site. Surface the error
+  // instead so the caller (and SQS retry) handles it rather than guessing.
+  if (existingError) {
+    throw new Error(`Failed to look up existing brand "${brand.name}": ${existingError.message}`);
+  }
 
   // A brand cannot be active without a base site ID — but respect persisted state
   // on the update path (the DB row may already have site_id set).

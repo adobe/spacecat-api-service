@@ -513,7 +513,10 @@ describe('brands-storage', () => {
 
     it('throws when brands upsert fails', async () => {
       const postgrestClient = createTableMockClient({
-        brands: { data: null, error: { message: 'upsert failed' } },
+        brands: [
+          { data: null, error: null }, // existing lookup OK (no brand)
+          { data: null, error: { message: 'upsert failed' } }, // upsert fails
+        ],
       });
 
       await expect(upsertBrand({
@@ -525,7 +528,10 @@ describe('brands-storage', () => {
 
     it('throws 409 when baseSiteId violates unique constraint on upsert', async () => {
       const postgrestClient = createTableMockClient({
-        brands: { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
+        brands: [
+          { data: null, error: null }, // existing lookup OK (no brand)
+          { data: null, error: { code: '23505', message: 'brands_base_site_unique' } }, // upsert 409
+        ],
       });
 
       const err = await upsertBrand({
@@ -639,6 +645,22 @@ describe('brands-storage', () => {
       });
 
       expect(log.warn).to.not.have.been.called;
+    });
+
+    it('fails closed by throwing when the existing-brand lookup errors (LLMO-5556)', async () => {
+      // PostgREST returns { data: null, error } instead of throwing — without the
+      // guard this would let a transient failure overwrite an existing site_id.
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: null, error: { message: 'connection reset' } }, // existing lookup fails
+        ],
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'some-site' },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to look up existing brand "Test": connection reset');
     });
 
     it('successfully upserts a minimal brand with no aliases, competitors, or urls', async () => {

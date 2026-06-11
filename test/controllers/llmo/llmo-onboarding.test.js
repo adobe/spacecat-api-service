@@ -1814,6 +1814,217 @@ describe('LLMO Onboarding Functions', () => {
       );
     });
 
+    it('fails closed and skips the brand write when the existing-brand lookup errors (LLMO-5556)', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      // Brand lookup returns a PostgREST error (does not throw).
+      const brandsMaybeSingle = sinon.stub().resolves({
+        data: null,
+        error: { message: 'connection reset' },
+      });
+      const brandsEq2 = sinon.stub().returns({ maybeSingle: brandsMaybeSingle });
+      const brandsEq1 = sinon.stub().returns({ eq: brandsEq2 });
+      const brandsSelect = sinon.stub().returns({ eq: brandsEq1 });
+      mockDataAccess.services.postgrestClient.from.withArgs('brands').returns({
+        select: brandsSelect,
+      });
+
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await onboardWithMocks(
+        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+        context,
+      );
+
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(mockUpsertBrand).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        'failed to look up existing brand',
+      );
+    });
+
+    it('writes the initial brand when an existing same-name brand has no primary site yet', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      // Existing brand exists by name but has no primary site (site_id null) —
+      // the write should proceed so the upsert sets it.
+      const brandsMaybeSingle = sinon.stub().resolves({
+        data: { id: 'existing-brand-1', site_id: null },
+        error: null,
+      });
+      const brandsEq2 = sinon.stub().returns({ maybeSingle: brandsMaybeSingle });
+      const brandsEq1 = sinon.stub().returns({ eq: brandsEq2 });
+      const brandsSelect = sinon.stub().returns({ eq: brandsEq1 });
+      mockDataAccess.services.postgrestClient.from.withArgs('brands').returns({
+        select: brandsSelect,
+      });
+
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await onboardWithMocks(
+        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+        context,
+      );
+
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(mockUpsertBrand).to.have.been.calledOnce;
+      expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
+    });
+
     it('should include detectedCdn in result when CDN is detected', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
