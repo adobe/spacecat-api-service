@@ -158,10 +158,12 @@ async function resolveLanguageId(transport, languageTag, log) {
 /**
  * GET /serenity/markets — list a brand's (geoTargetId, languageCode) slices.
  *
- * Pure DB read: the row's existence IS the contract that the market is
- * active for this brand. We do not enrich with upstream metadata — name
- * and publish_status would require an O(workspace-size) `listWorkspaceProjects`
- * call per request, and the consumer (project-elmo-ui) reads neither.
+ * Pure DB read: the row's existence is the contract that the slice is
+ * configured for this brand (publish state is not implied — a row may be a
+ * provisioned draft). We do not enrich with upstream metadata — name and
+ * publish_status would require an O(workspace-size) `listWorkspaceProjects`
+ * call per request, and the consumer being built alongside this API
+ * (project-elmo-ui) reads neither.
  *
  * Each row also carries the derived ISO alpha-2 `market` (translated from
  * `geoTargetId` via the local locations table, no upstream call) so consumers
