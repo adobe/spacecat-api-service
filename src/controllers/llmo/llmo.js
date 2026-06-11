@@ -1862,7 +1862,7 @@ function LlmoController(ctx) {
       try {
         return new URL(`https://${urlString}`).pathname.replace(/\/$/, '') || '/';
       } catch {
-        return '/';
+        return null;
       }
     }
   }
@@ -1871,7 +1871,10 @@ function LlmoController(ctx) {
     const prodDomain = getDomain(prodBaseURL);
     const prodPath = getPathname(prodBaseURL);
     return urlList.every(
-      (stageURL) => getDomain(stageURL) === prodDomain && getPathname(stageURL) === prodPath,
+      (stageURL) => {
+        const stagePath = getPathname(stageURL);
+        return stagePath !== null && getDomain(stageURL) === prodDomain && stagePath === prodPath;
+      },
     );
   }
 

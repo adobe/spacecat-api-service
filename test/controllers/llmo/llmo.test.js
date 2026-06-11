@@ -6274,7 +6274,14 @@ describe('LlmoController', () => {
       it('does not reject when site baseURL has a trailing slash only', async () => {
         mockSite.getBaseURL = sinon.stub().returns('https://example.com/');
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
-        expect(result.status).to.not.equal(400);
+        expect(JSON.stringify(await result.json())).to.not.include('subpath sites');
+        expect(callCdnRoutingApiStub).to.have.been.called;
+      });
+
+      it('does not fire subpath guard when site baseURL is malformed, falls through to probe', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('http://[');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(JSON.stringify(await result.json())).to.not.include('subpath sites');
         expect(callCdnRoutingApiStub).to.have.been.called;
       });
 
