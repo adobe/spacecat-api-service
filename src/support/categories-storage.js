@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-import crypto from 'node:crypto';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 // Zero-width / BOM characters that pass `trim()` but render invisible. Strip
@@ -46,8 +45,16 @@ function conflictError(message, cause) {
 }
 
 function mapDbCategoryToV2(row) {
+  // `id` is the UUID primary key (`categories.id`). It is the sole public
+  // identifier the v2 API exposes and the value clients send back on the
+  // CRUD path params and the `?categoryId=` prompt filter. The legacy TEXT
+  // business key (`categories.category_id`) is being retired (LLMO-5515): it
+  // could hold a UUID-shaped slug for multibyte names, which the prompt-filter
+  // resolver misread as a real UUID and silently dropped the filter, returning
+  // every prompt for the brand. `uuid` is kept as an alias of `id` for any
+  // consumer still reading it; both now carry the same UUID.
   return {
-    id: row.category_id,
+    id: row.id,
     uuid: row.id,
     name: row.name,
     status: row.status || 'active',
@@ -194,7 +201,7 @@ async function resolveExistingCategory(
     // reading individual rows. LLMO-4370 #13.
     log?.warn?.('Blocked origin downgrade human->ai on category', {
       organization_id: organizationId,
-      category_id: existing.category_id,
+      category_uuid: existing.id,
       attempted_origin: category.origin,
       current_origin: existing.origin,
     });
@@ -224,18 +231,17 @@ async function resolveExistingCategory(
  *
  * If a non-deleted category with the same name already exists for the
  * organization, its non-key fields are refreshed (origin/status/updated_by)
- * and the existing row is returned — the stable `category_id` slug is
- * preserved so foreign-key references remain valid.
+ * and the existing row is returned — its UUID primary key (`categories.id`)
+ * is stable so foreign-key references remain valid.
  *
  * Rationale: clients (notably DRS) re-post the same canonical categories
- * on every sync run with a potentially drifted slug. Without name-level
- * idempotency, every such re-post trips `uq_category_name_per_org` and
- * surfaces as a 409 — thousands per day of false-positive ERROR logs.
- * See LLMO-4370.
+ * on every sync run. Without name-level idempotency, every such re-post
+ * trips `uq_category_name_per_org` and surfaces as a 409 — thousands per day
+ * of false-positive ERROR logs. See LLMO-4370.
  *
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
- * @param {object} params.category - Category data { name, id?, origin?, status? }
+ * @param {object} params.category - Category data { name, origin?, status? }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} [params.updatedBy] - User performing the operation
  * @param {object} [params.log] - Logger for operator signals (downgrade blocks)
@@ -272,43 +278,13 @@ export async function createCategory({
     );
   }
 
-  // Derive a slug from the canonical name when none supplied, trimming
-  // leading/trailing dashes so "   !!  " and Unicode-only names don't
-  // produce a degenerate bare '-'. The client-supplied slug is trusted
-  // verbatim.
-  let derivedSlug;
-  if (category.id) {
-    derivedSlug = category.id;
-  } else {
-    derivedSlug = canonicalName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    // Names with no ASCII alphanumerics (e.g. CJK "カテゴリ") and
-    // punctuation-only names slugify to empty. Fall back to a synthetic
-    // UUID slug rather than failing — mirrors the DB column default
-    // (gen_random_uuid()::text). Idempotency keys on `name` (lookup above)
-    // and every FK targets categories.id (the UUID PK), not this text slug,
-    // so a synthetic category_id is safe and stable across re-posts. The
-    // same name re-resolves to the existing row and never regenerates.
-    // LLMO-5473.
-    if (!derivedSlug) {
-      derivedSlug = crypto.randomUUID();
-      // `category_id` is now polymorphic (human-readable slug OR synthetic
-      // UUID). Emit a structured signal so operators can quantify the
-      // fallback rate and find affected rows in Coralogix — otherwise the
-      // UUID slugs are indistinguishable from client-supplied ones.
-      log?.warn?.('Category name slugifies to empty; generated synthetic UUID slug', {
-        organization_id: organizationId,
-        category_id: derivedSlug,
-        name: canonicalName,
-      });
-    }
-  }
-
+  // The UUID primary key (`categories.id`) is the only identifier we manage.
+  // We no longer derive or persist the legacy `category_id` slug (LLMO-5515):
+  // the column defaults to `gen_random_uuid()::text` in the DB and is unused
+  // by the application layer. A slug derived from a multibyte name could be
+  // empty or UUID-shaped — the latter is exactly what broke the prompt filter.
   const row = {
     organization_id: organizationId,
-    category_id: derivedSlug,
     name: canonicalName,
     origin: category.origin || 'human',
     status: category.status || 'active',
@@ -346,11 +322,11 @@ export async function createCategory({
           );
         }
       } else {
-        // Any other unique-constraint violation (e.g. slug collision via
-        // uq_category_per_org when the client ships a drifted `id` that
-        // maps to a different name already occupying that slug) surfaces as
-        // a typed 409 echoing the actual constraint — mirrors the topics
-        // pattern so callers don't have to mine 500 bodies. LLMO-4370 #5/#6.
+        // Any other unique-constraint violation surfaces as a typed 409
+        // echoing the actual constraint — mirrors the topics pattern so
+        // callers don't have to mine 500 bodies. LLMO-4370 #5/#6. (The legacy
+        // `uq_category_per_org` slug constraint is no longer reachable from
+        // here now that `category_id` is left to its random DB default.)
         throw conflictError(
           `Category conflicts with ${constraint} for this organization`,
           error,
@@ -363,11 +339,11 @@ export async function createCategory({
 }
 
 /**
- * Updates a category by its business key (category_id).
+ * Updates a category by its UUID primary key (categories.id).
  *
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
- * @param {string} params.categoryId - category_id business key
+ * @param {string} params.categoryId - categories.id UUID
  * @param {object} params.updates - Partial category data
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} [params.updatedBy] - User performing the operation
@@ -395,7 +371,7 @@ export async function updateCategory({
     .from('categories')
     .update(patch)
     .eq('organization_id', organizationId)
-    .eq('category_id', categoryId)
+    .eq('id', categoryId)
     .select()
     .maybeSingle();
 
@@ -423,7 +399,7 @@ export async function updateCategory({
  *
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
- * @param {string} params.categoryId - category_id business key
+ * @param {string} params.categoryId - categories.id UUID
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} [params.updatedBy] - User performing the operation
  * @returns {Promise<boolean>} True if deleted, false if not found
@@ -439,7 +415,7 @@ export async function deleteCategory({
     .from('categories')
     .update({ status: 'deleted', updated_by: updatedBy })
     .eq('organization_id', organizationId)
-    .eq('category_id', categoryId)
+    .eq('id', categoryId)
     .select('id')
     .maybeSingle();
 
