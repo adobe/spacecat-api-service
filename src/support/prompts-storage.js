@@ -143,26 +143,32 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
 }
 
 /**
- * Resolves category business key or UUID to categories.id (uuid).
- * When categoryId is a UUID it is looked up by primary key scoped to the
- * organization (consistent with resolveBrandUuid) — this validates org
- * ownership rather than blindly trusting the caller-supplied UUID.
- * When categoryId is a business key it is looked up by category_id as before.
+ * Resolves a category UUID to categories.id (uuid), validating that the row
+ * belongs to the organization. The v2 API exposes only the UUID primary key
+ * (`categories.id`) as the category identifier, so the input must be a UUID.
+ *
+ * Returns null for anything that is not a valid UUID or does not resolve to a
+ * row in the org. Callers that filter by category MUST treat null as "no
+ * match" (return empty), never as "no filter" — the legacy dual-path
+ * (UUID-or-business-key) silently dropped the filter when a UUID-shaped
+ * business key failed to resolve, returning every prompt for the brand
+ * (LLMO-5515).
  *
  * @param {string} organizationId - SpaceCat organization UUID
- * @param {string} categoryId - Business key or UUID
+ * @param {string} categoryId - categories.id UUID
  * @param {object} postgrestClient - PostgREST client
  * @returns {Promise<string|null>} categories.id (uuid) or null
  */
 export async function resolveCategoryUuid(organizationId, categoryId, postgrestClient) {
-  if (!hasText(categoryId) || !postgrestClient?.from) {
+  if (!hasText(categoryId) || !isValidUUID(categoryId) || !postgrestClient?.from) {
     return null;
   }
-  const query = postgrestClient.from('categories').select('id').eq('organization_id', organizationId);
-  const { data, error } = await (isValidUUID(categoryId)
-    ? query.eq('id', categoryId)
-    : query.eq('category_id', categoryId)
-  ).maybeSingle();
+  const { data, error } = await postgrestClient
+    .from('categories')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('id', categoryId)
+    .maybeSingle();
   return !error && data?.id ? data.id : null;
 }
 
@@ -223,7 +229,9 @@ async function buildLookupMaps(organizationId, postgrestClient) {
  * Ensures that all referenced categories and topics exist in their respective
  * tables. Creates any missing ones (by name) and updates the lookup maps in place.
  * Map keys are normalized (lowercase + trim) for case-insensitive matching.
- * The name is also used as the business key (category_id / topic_id) for new entries.
+ * New categories dedup on (organization_id, name) — the legacy `category_id`
+ * business key is no longer set and falls to its random DB default (LLMO-5515).
+ * New topics still set the `topic_id` business key from the name.
  */
 // eslint-disable-next-line max-len
 async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy) {
@@ -248,13 +256,12 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
         .upsert(
           missingCatNames.map((name) => ({
             organization_id: organizationId,
-            category_id: name,
             name,
             origin: 'human',
             status: 'active',
             updated_by: updatedBy,
           })),
-          { onConflict: 'organization_id,category_id' },
+          { onConflict: 'organization_id,name' },
         )
         .select('id,name')
         .then(({ data, error }) => {
@@ -365,8 +372,8 @@ function mapRowToPrompt(row) {
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
  * @param {string} [params.brandId] - Filter by brand (uuid or config id)
- * @param {string} [params.categoryId] - Filter by category business key
- * @param {string} [params.topicId] - Filter by topic business key
+ * @param {string} [params.categoryId] - Filter by category UUID (categories.id)
+ * @param {string} [params.topicId] - Filter by topic business key or UUID
  * @param {string} [params.status] - Filter by status (active, pending, deleted)
  * @param {string} [params.search] - Free-text search across prompt text, name,
  * topic name, category name
@@ -415,15 +422,29 @@ export async function listPrompts({
   const pageNum = Math.max(1, Number(page) || 1);
   const offset = (pageNum - 1) * limitNum;
 
+  // Resolve category/topic filters up front and FAIL CLOSED: when a filter is
+  // requested but does not resolve to a row in this org, return an empty page
+  // rather than dropping the filter and returning every prompt for the brand.
+  // Mirrors the brandUuid guard above. The unfiltered-leak this prevents was
+  // LLMO-5515 (a UUID-shaped category business key that resolved to no row).
+  const emptyPage = {
+    items: [], total: 0, limit: limitNum, page: pageNum,
+  };
+
   let categoryUuid = null;
+  if (hasText(categoryId)) {
+    categoryUuid = await resolveCategoryUuid(organizationId, categoryId, postgrestClient);
+    if (!categoryUuid) {
+      return emptyPage;
+    }
+  }
+
   let topicUuid = null;
-  if (hasText(categoryId) || hasText(topicId)) {
-    categoryUuid = hasText(categoryId)
-      ? await resolveCategoryUuid(organizationId, categoryId, postgrestClient)
-      : null;
-    topicUuid = hasText(topicId)
-      ? await resolveTopicUuid(organizationId, topicId, postgrestClient)
-      : null;
+  if (hasText(topicId)) {
+    topicUuid = await resolveTopicUuid(organizationId, topicId, postgrestClient);
+    if (!topicUuid) {
+      return emptyPage;
+    }
   }
 
   const buildSelect = (includeIntent) => `
@@ -443,7 +464,7 @@ export async function listPrompts({
     updated_at,
     updated_by,
     brands(id,name),
-    categories(id,category_id,name,origin),
+    categories(id,name,origin),
     topics(id,topic_id,name)
   `;
 
@@ -566,7 +587,7 @@ export async function getPromptById({
       updated_at,
       updated_by,
       brands(id,name),
-      categories(id,category_id,name,origin),
+      categories(id,name,origin),
       topics(id,topic_id,name)
     `)
     .eq('organization_id', organizationId)

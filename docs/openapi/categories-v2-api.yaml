@@ -67,7 +67,7 @@ v2-categories-for-org:
         downgraded from `human` to `ai`), returns `200 OK` with the
         updated row.
       - **Soft-deleted row matched** — resurrected: status flipped to
-        `active`, stable `id` (slug) preserved, returns `201 Created`.
+        `active`, stable `id` (UUID) preserved, returns `201 Created`.
 
       Clients discriminating creation from idempotent update should inspect
       the HTTP status, not the response body (identical in both cases).
@@ -88,10 +88,9 @@ v2-categories-for-org:
     responses:
       '200':
         description: |
-          Existing category returned (idempotent update or no-op).
-          The `id` (slug) of the returned row is authoritative — it may
-          differ from a client-supplied `id` if the stored row was created
-          with a different slug.
+          Existing category returned (idempotent update or no-op). The `id`
+          (UUID) of the returned row is the server-assigned primary key and
+          is authoritative.
         content:
           application/json:
             schema:
@@ -118,9 +117,7 @@ v2-categories-for-org:
              deleted) between our lookup and our update — message
              `Category was concurrently modified; please retry`.
           2. A unique-constraint other than `uq_category_name_per_org` was
-             tripped on insert (e.g. `uq_category_per_org` when the
-             client-supplied slug collides with an unrelated existing
-             row). Message echoes the actual constraint name.
+             tripped on insert. Message echoes the actual constraint name.
           Treated as an idempotent retry signal by DRS-class clients;
           logged at WARN (not ERROR) server-side.
       '500':
@@ -141,10 +138,11 @@ v2-category-for-org:
     - name: categoryId
       in: path
       required: true
-      description: Category business key (category_id slug)
+      description: Category UUID (categories.id)
       schema:
         type: string
-        example: 'baseurl-discovery-research'
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
   patch:
     tags:
       - customer-config

@@ -18,6 +18,7 @@ import {
   CAP_SITE_CREATE,
   CAP_SITE_READ_ALL,
   CAP_SUGGESTION_WRITE,
+  CAP_TRIAL_USER_READ,
 } from './capability-constants.js';
 
 /**
@@ -138,9 +139,8 @@ export const INTERNAL_ROUTES = [
   'PATCH /plg/records/:plgOnboardingId',
   'DELETE /plg/records/:plgOnboardingId',
 
-  // Tier-specific - user activities (POST only), trial users, user details: end-user/admin flows
+  // Tier-specific - user activities (POST only), user details: end-user/admin flows
   'POST /sites/:siteId/user-activities',
-  'GET /organizations/:organizationId/trial-users',
   'GET /admin/users/:userId',
   'GET /organizations/:organizationId/userDetails/:externalUserId',
   'POST /organizations/:organizationId/userDetails',
@@ -382,8 +382,8 @@ const routeRequiredCapabilities = {
   'PATCH /sites/:siteId/:auditType': 'audit:write',
   'GET /sites/:siteId/latest-audit/:auditType': 'audit:read',
   'GET /sites/:siteId/experiments': 'experiment:read',
-  'GET /sites/:siteId/geo-experiments': 'geoExperiment:read',
-  'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'geoExperiment:read', // detail includes prompts
+  'GET /sites/:siteId/geo-experiments': 'site:read',
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'site:read', // detail includes prompts
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
@@ -622,6 +622,9 @@ const routeRequiredCapabilities = {
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
+
+  // Trial Users
+  'GET /organizations/:organizationId/trial-users': CAP_TRIAL_USER_READ,
 
   // Entitlements
   'GET /organizations/:organizationId/entitlements': 'entitlement:read',
