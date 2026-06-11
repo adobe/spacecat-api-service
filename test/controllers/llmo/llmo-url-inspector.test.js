@@ -2193,6 +2193,32 @@ describe('URL Inspector Semrush BP integration', () => {
       expect(response.status).to.equal(200);
       expect(body.stats.totalCitations).to.equal(77);
     });
+
+    it('re-throws 503 config errors without falling back', async () => {
+      const configError = Object.assign(new Error('missing element id'), { status: 503 });
+      queryBpCitationsByUrlStub.rejects(configError);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [{ week: null, value: 10 }], error: null });
+
+      const handler = Handlers.createUrlInspectorStatsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      await expect(handler(context)).to.be.rejectedWith('missing element id');
+    });
+
+    it('passes hostname (not full URL) as domain to queryBpCitationsByUrl', async () => {
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID }, { siteId: 'https://www.example.com' });
+      rpcStub.resolves({ data: [{ week: null, value: 0 }], error: null });
+
+      const handler = Handlers.createUrlInspectorStatsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      await handler(context);
+
+      const callArgs = queryBpCitationsByUrlStub.firstCall.args[5];
+      expect(callArgs.domain).to.equal('www.example.com');
+      expect(callArgs.urlFragment).to.equal('https://www.example.com');
+    });
   });
 
   describe('createUrlInspectorOwnedUrlsHandler — Semrush path', () => {
@@ -2276,7 +2302,54 @@ describe('URL Inspector Semrush BP integration', () => {
 
       expect(response.status).to.equal(200);
       expect(body.urls[0].citations).to.equal(5);
-      expect(context.log.error).to.have.been.calledWithMatch(/Semrush BP error/);
+      expect(context.log.warn).to.have.been.calledWithMatch(/Semrush BP error/);
+    });
+
+    it('preserves successful rows when one URL Semrush call fails', async () => {
+      queryBpCitationsByUrlStub.onFirstCall().resolves({
+        citations: 99, promptsCited: 3, prompts: [],
+      });
+      queryBpCitationsByUrlStub.onSecondCall().rejects(new Error('partial fail'));
+      const row1 = { ...ownedRow(), url: 'https://example.com/page1', citations: 1 };
+      const row2 = { ...ownedRow(), url: 'https://example.com/page2', citations: 2 };
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [row1, row2], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].citations).to.equal(99);
+      expect(body.urls[1].citations).to.equal(2);
+    });
+
+    it('re-throws 503 config errors in owned-urls', async () => {
+      const configError = Object.assign(new Error('missing element id'), { status: 503 });
+      queryBpCitationsByUrlStub.rejects(configError);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [ownedRow()], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      await expect(handler(context)).to.be.rejectedWith('missing element id');
+    });
+
+    it('passes hostname (not full URL) as domain in per-URL query', async () => {
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [ownedRow()], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      await handler(context);
+
+      const callArgs = queryBpCitationsByUrlStub.firstCall.args[5];
+      expect(callArgs.domain).to.equal('example.com');
+      expect(callArgs.urlFragment).to.equal('https://example.com/page');
     });
   });
 
@@ -2339,6 +2412,31 @@ describe('URL Inspector Semrush BP integration', () => {
       expect(response.status).to.equal(200);
       expect(body.prompts[0].prompt).to.equal('fallback prompt');
       expect(context.log.error).to.have.been.calledWithMatch(/Semrush BP error/);
+    });
+
+    it('re-throws 503 config errors in url-prompts', async () => {
+      const configError = Object.assign(new Error('missing element id'), { status: 503 });
+      queryBpCitationsByUrlStub.rejects(configError);
+      const { context } = createSemrushContext({ brandId: BRAND_ID });
+
+      const handler = Handlers.createUrlInspectorUrlPromptsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const ctxWithUrl = { ...context, data: { siteId: SITE_ID, urlId: 'https://example.com/page' } };
+      await expect(handler(ctxWithUrl)).to.be.rejectedWith('missing element id');
+    });
+
+    it('passes hostname as domain for url-prompts when urlId is a URL', async () => {
+      const { context } = createSemrushContext({ brandId: BRAND_ID });
+
+      const handler = Handlers.createUrlInspectorUrlPromptsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const ctxWithUrl = { ...context, data: { siteId: SITE_ID, urlId: 'https://example.com/page' } };
+      await handler(ctxWithUrl);
+
+      const callArgs = queryBpCitationsByUrlStub.firstCall.args[5];
+      expect(callArgs.domain).to.equal('example.com');
     });
   });
 });

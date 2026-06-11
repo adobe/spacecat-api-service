@@ -214,6 +214,12 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
       // non-citation KPIs (totalPrompts, uniqueUrls) stay from Mysticat.
       const semrushWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
       if (semrushWorkspaceId && filterByBrandId) {
+        let siteDomain;
+        try {
+          siteDomain = new URL(params.siteId).hostname;
+        } catch {
+          siteDomain = params.siteId;
+        }
         try {
           const imsToken = ctx?.pathInfo?.headers?.authorization?.replace(/^Bearer\s+/i, '');
           const transport = createSerenityTransport({ env: ctx.env, imsToken });
@@ -225,7 +231,7 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
             ctx.env,
             {
               urlFragment: params.siteId,
-              domain: params.siteId,
+              domain: siteDomain,
               startDate: rpcParams.p_start_date,
               endDate: rpcParams.p_end_date,
             },
@@ -235,6 +241,9 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
             stats.totalPromptsCited = bpResult.promptsCited;
           }
         } catch (e) {
+          if (e?.status === 503) {
+            throw e;
+          }
           ctx.log.error(`URL Inspector stats Semrush BP error: ${e?.message || e}`);
           // Fall through: return Mysticat data rather than surfacing a 500
         }
@@ -364,11 +373,17 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
       // per URL with data from the BP reporting API.
       const semrushWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
       if (semrushWorkspaceId && filterByBrandId && urlsFromMysticat.length > 0) {
-        try {
-          const imsToken = ctx?.pathInfo?.headers?.authorization?.replace(/^Bearer\s+/i, '');
-          const transport = createSerenityTransport({ env: ctx.env, imsToken });
-          const urlsWithSemrush = await Promise.all(
-            urlsFromMysticat.map(async (urlRow) => {
+        const imsToken = ctx?.pathInfo?.headers?.authorization?.replace(/^Bearer\s+/i, '');
+        const transport = createSerenityTransport({ env: ctx.env, imsToken });
+        urlsFromMysticat = await Promise.all(
+          urlsFromMysticat.map(async (urlRow) => {
+            let urlDomain;
+            try {
+              urlDomain = new URL(urlRow.url).hostname;
+            } catch {
+              urlDomain = urlRow.url;
+            }
+            try {
               const bpResult = await queryBpCitationsByUrl(
                 transport,
                 ctx.dataAccess,
@@ -377,7 +392,7 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
                 ctx.env,
                 {
                   urlFragment: urlRow.url,
-                  domain: urlRow.url,
+                  domain: urlDomain,
                   startDate: rpcParams.p_start_date,
                   endDate: rpcParams.p_end_date,
                 },
@@ -390,13 +405,15 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
                 citations: bpResult.citations,
                 promptsCited: bpResult.promptsCited,
               };
-            }),
-          );
-          urlsFromMysticat = urlsWithSemrush;
-        } catch (e) {
-          ctx.log.error(`URL Inspector owned URLs Semrush BP error: ${e?.message || e}`);
-          // Fall through: return Mysticat data rather than surfacing a 500
-        }
+            } catch (e) {
+              if (e?.status === 503) {
+                throw e;
+              }
+              ctx.log.warn(`URL Inspector owned URLs Semrush BP error for ${urlRow.url}: ${e?.message || e}`);
+              return urlRow;
+            }
+          }),
+        );
       }
 
       return cachedOk({ urls: urlsFromMysticat, totalCount });
@@ -709,6 +726,12 @@ export function createUrlInspectorUrlPromptsHandler(
         try {
           const imsToken = ctx?.pathInfo?.headers?.authorization?.replace(/^Bearer\s+/i, '');
           const transport = createSerenityTransport({ env: ctx.env, imsToken });
+          let urlDomain;
+          try {
+            urlDomain = new URL(urlId).hostname;
+          } catch {
+            urlDomain = urlId;
+          }
           const bpResult = await queryBpCitationsByUrl(
             transport,
             ctx.dataAccess,
@@ -717,7 +740,7 @@ export function createUrlInspectorUrlPromptsHandler(
             ctx.env,
             {
               urlFragment: urlId,
-              domain: urlId,
+              domain: urlDomain,
               startDate,
               endDate,
             },
@@ -726,6 +749,9 @@ export function createUrlInspectorUrlPromptsHandler(
             return cachedOk({ prompts: bpResult.prompts });
           }
         } catch (e) {
+          if (e?.status === 503) {
+            throw e;
+          }
           ctx.log.error(`URL Inspector URL prompts Semrush BP error: ${e?.message || e}`);
           // Fall through to Mysticat path
         }
