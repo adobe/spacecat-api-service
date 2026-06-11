@@ -2381,6 +2381,20 @@ describe('URL Inspector Semrush BP integration', () => {
       expect(callArgs.domain).to.equal('example.com');
       expect(callArgs.urlFragment).to.equal('https://example.com/page');
     });
+
+    it('falls back to raw url when URL parse fails in owned-urls', async () => {
+      const badUrlRow = { ...ownedRow(), url: 'not-a-valid-url' };
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [badUrlRow], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      await handler(context);
+
+      const callArgs = queryBpCitationsByUrlStub.firstCall.args[5];
+      expect(callArgs.domain).to.equal('not-a-valid-url');
+    });
   });
 
   describe('createUrlInspectorUrlPromptsHandler — Semrush path', () => {
