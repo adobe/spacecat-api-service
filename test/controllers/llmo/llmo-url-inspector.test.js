@@ -2208,6 +2208,21 @@ describe('URL Inspector Semrush BP integration', () => {
       expect(body.stats.totalCitations).to.equal(10);
       expect(context.log.error).to.have.been.calledWithMatch(/Semrush BP error/);
     });
+
+    it('returns Mysticat stats unchanged when queryBpCitationsByUrl returns null', async () => {
+      queryBpCitationsByUrlStub.resolves(null);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [{ week: null, value: 77 }], error: null });
+
+      const handler = Handlers.createUrlInspectorStatsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.stats.totalCitations).to.equal(77);
+    });
   });
 
   describe('createUrlInspectorOwnedUrlsHandler — Semrush path', () => {
@@ -2260,6 +2275,22 @@ describe('URL Inspector Semrush BP integration', () => {
       expect(response.status).to.equal(200);
       expect(body.urls[0].citations).to.equal(5);
       expect(queryBpCitationsByUrlStub).to.not.have.been.called;
+    });
+
+    it('returns original urlRow unchanged when queryBpCitationsByUrl returns null', async () => {
+      queryBpCitationsByUrlStub.resolves(null);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [ownedRow()], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].citations).to.equal(5);
+      expect(queryBpCitationsByUrlStub).to.have.been.calledOnce;
     });
 
     it('falls back gracefully on Semrush error', async () => {
