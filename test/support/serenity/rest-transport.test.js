@@ -665,6 +665,18 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('queryBrandPresenceResults', () => {
+    it('POSTs render_data to the BP elements endpoint and returns raw JSON', async () => {
+      const renderData = { project_id: 'proj-1', filters: {} };
+      fetchStub.resolves(fetchOk({ data: { rows: [{ prompt: 'hello' }] } }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.queryBrandPresenceResults(WORKSPACE_ID, 'elem-42', renderData);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.equal(
+
   describe('getBrandTopics', () => {
     it('GETs /v1/workspaces/{ws}/brand-topics with domain + country query', async () => {
       fetchStub.resolves(fetchOk([
@@ -884,6 +896,19 @@ describe('Semrush REST transport', () => {
         expect(params.get('domain')).to.equal('');
         expect(params.get('country')).to.equal('');
       });
+=======
+        `https://adobe-hackathon.semrush.com/apis/v4-raw/external-api/v1/workspaces/${WORKSPACE_ID}/products/ai/elements/elem-42`,
+      );
+      expect(JSON.parse(init.body)).to.deep.equal({ render_data: renderData });
+      expect(result.data.rows[0].prompt).to.equal('hello');
+    });
+
+    it('throws SerenityTransportError on upstream 4xx', async () => {
+      fetchStub.resolves(fetchFail(403, { message: 'forbidden' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.queryBrandPresenceResults(WORKSPACE_ID, 'elem-42', {});
+      await expect(promise).to.be.rejectedWith(SerenityTransportError);
     });
   });
 });
