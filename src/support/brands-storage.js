@@ -25,7 +25,7 @@ const BRAND_SELECT = [
   'competitors(name, url, regions)',
   'brand_sites(site_id, paths, type, sites(base_url))',
   'brand_urls(url)',
-  'brand_to_semrush_projects(geo_target_id, language_code)',
+  'brand_to_semrush_projects(semrush_location_id, language)',
 ].join(', ');
 
 /**
@@ -147,9 +147,9 @@ function mapDbBrandToV2(row) {
     // Semrush markets provisioned for this brand — one entry per (market, language)
     // slice in brand_to_semrush_projects. Empty for non-cohort brands.
     markets: (row.brand_to_semrush_projects || []).reduce((acc, p) => {
-      const market = marketFromGeoTargetId(p.geo_target_id);
+      const market = marketFromGeoTargetId(p.semrush_location_id);
       if (market) {
-        acc.push({ market, language: p.language_code });
+        acc.push({ market, language: p.language });
       }
       return acc;
     }, []),
