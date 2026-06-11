@@ -1401,6 +1401,9 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
             + `(existing=${existingBrand.site_id}, onboarding=${site.getId()}). `
             + `Add ${baseURL} as a brand URL or onboard under a distinct brand name.`);
         } else {
+          // No collision: proceed with upsert (new brand, existing brand with a
+          // null primary site, or a re-onboard of the same site). upsertBrand's
+          // own guard keeps an already-set site_id immutable on the last case.
           await upsertBrand({
             organizationId: organization.getId(),
             brand: {
