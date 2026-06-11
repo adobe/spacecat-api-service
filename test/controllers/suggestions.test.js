@@ -7057,6 +7057,30 @@ describe('Suggestions Controller', () => {
         expect(body.suggestions[0].message).to.include('outside the scope');
       });
 
+      it('rejects a suggestion whose URL path shares a prefix but is a different subpath', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const prefixCollisionSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://example.com/kingston/page',
+            recommendedAction: 'New Heading Title',
+            prompts: [{ prompt: 'kingston prompt', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([prefixCollisionSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].message).to.include('outside the scope');
+      });
+
       it('accepts a regular suggestion whose URL is within the subpath site scope', async () => {
         site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
         const inScopeSugg = {

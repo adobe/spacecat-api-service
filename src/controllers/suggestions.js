@@ -1810,14 +1810,16 @@ function SuggestionsController(ctx, sqs, env) {
         if (!isNonEmptyArray(patterns)) {
           return true;
         }
-        return patterns.every((p) => p.startsWith(siteBasePath));
+        const scopePrefix = `${siteBasePath}/`;
+        return patterns.every((p) => p === siteBasePath || p.startsWith(scopePrefix));
       }
       const url = getSuggestionUrl(data, opportunity);
       if (!url) {
         return true;
       }
       try {
-        return new URL(url).pathname.startsWith(siteBasePath);
+        const { pathname } = new URL(url);
+        return pathname === siteBasePath || pathname.startsWith(`${siteBasePath}/`);
       } catch {
         return true;
       }
