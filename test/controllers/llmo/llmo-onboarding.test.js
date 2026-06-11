@@ -15,7 +15,6 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { testDetermineOverrideBaseURL } from './test-helpers.js';
-import { SERENITY_SITE_ALLOWLIST } from '../../../src/support/llmo-onboarding-mode.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 
 use(sinonChai);
@@ -1406,10 +1405,9 @@ describe('LLMO Onboarding Functions', () => {
       // and upsert (enabling brandalf during v2 onboarding)
       const maybeSingle = sinon.stub().resolves({ data: null, error: null });
       const eqFlag = sinon.stub().returns({ maybeSingle });
-      // LLMO-5493: the serenity cohort gate now reads its own `serenity` feature_flags
-      // row (DB-authoritative). Return null for that flag so these tests fall through to
-      // the SERENITY_SITE_ALLOWLIST env path they were written against; brandalf/
-      // brandalf_migration reads are unaffected.
+      // LLMO-5493: the serenity cohort gate reads its own `serenity` feature_flags
+      // row (DB-only). Return null for that flag so the cohort gate is off for this
+      // test; brandalf/brandalf_migration reads are unaffected.
       eqFlag.withArgs('flag_name', 'serenity').returns({
         maybeSingle: sinon.stub().resolves({ data: null, error: null }),
       });
@@ -1632,10 +1630,9 @@ describe('LLMO Onboarding Functions', () => {
       // Feature flag postgrest mock
       const maybeSingle = sinon.stub().resolves({ data: null, error: null });
       const eqFlag = sinon.stub().returns({ maybeSingle });
-      // LLMO-5493: the serenity cohort gate now reads its own `serenity` feature_flags
-      // row (DB-authoritative). Return null for that flag so these tests fall through to
-      // the SERENITY_SITE_ALLOWLIST env path they were written against; brandalf/
-      // brandalf_migration reads are unaffected.
+      // LLMO-5493: the serenity cohort gate reads its own `serenity` feature_flags
+      // row (DB-only). Return null for that flag so the cohort gate is off for this
+      // test; brandalf/brandalf_migration reads are unaffected.
       eqFlag.withArgs('flag_name', 'serenity').returns({
         maybeSingle: sinon.stub().resolves({ data: null, error: null }),
       });
@@ -1742,10 +1739,9 @@ describe('LLMO Onboarding Functions', () => {
 
       const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const eqFlag = sinon.stub().returns({ maybeSingle });
-      // LLMO-5493: the serenity cohort gate now reads its own `serenity` feature_flags
-      // row (DB-authoritative). Return null for that flag so these tests fall through to
-      // the SERENITY_SITE_ALLOWLIST env path they were written against; brandalf/
-      // brandalf_migration reads are unaffected.
+      // LLMO-5493: the serenity cohort gate reads its own `serenity` feature_flags
+      // row (DB-only). Return null for that flag so the cohort gate is off for this
+      // test; brandalf/brandalf_migration reads are unaffected.
       eqFlag.withArgs('flag_name', 'serenity').returns({
         maybeSingle: sinon.stub().resolves({ data: null, error: null }),
       });
@@ -1841,10 +1837,9 @@ describe('LLMO Onboarding Functions', () => {
 
       const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const eqFlag = sinon.stub().returns({ maybeSingle });
-      // LLMO-5493: the serenity cohort gate now reads its own `serenity` feature_flags
-      // row (DB-authoritative). Return null for that flag so these tests fall through to
-      // the SERENITY_SITE_ALLOWLIST env path they were written against; brandalf/
-      // brandalf_migration reads are unaffected.
+      // LLMO-5493: the serenity cohort gate reads its own `serenity` feature_flags
+      // row (DB-only). Return null for that flag so the cohort gate is off for this
+      // test; brandalf/brandalf_migration reads are unaffected.
       eqFlag.withArgs('flag_name', 'serenity').returns({
         maybeSingle: sinon.stub().resolves({ data: null, error: null }),
       });
@@ -1939,10 +1934,9 @@ describe('LLMO Onboarding Functions', () => {
 
       const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const eqFlag = sinon.stub().returns({ maybeSingle });
-      // LLMO-5493: the serenity cohort gate now reads its own `serenity` feature_flags
-      // row (DB-authoritative). Return null for that flag so these tests fall through to
-      // the SERENITY_SITE_ALLOWLIST env path they were written against; brandalf/
-      // brandalf_migration reads are unaffected.
+      // LLMO-5493: the serenity cohort gate reads its own `serenity` feature_flags
+      // row (DB-only). Return null for that flag so the cohort gate is off for this
+      // test; brandalf/brandalf_migration reads are unaffected.
       eqFlag.withArgs('flag_name', 'serenity').returns({
         maybeSingle: sinon.stub().resolves({ data: null, error: null }),
       });
@@ -3460,7 +3454,7 @@ describe('LLMO Onboarding Functions', () => {
       // Restore setTimeout
     });
 
-    it('should log serenity provisioning when org is in SERENITY_SITE_ALLOWLIST (by SpaceCat org ID)', async () => {
+    it('should log serenity provisioning when the org has the serenity feature flag (by SpaceCat org ID)', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org-serenity-cohort'),
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
@@ -3489,12 +3483,11 @@ describe('LLMO Onboarding Functions', () => {
 
       const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const eqFlag = sinon.stub().returns({ maybeSingle });
-      // LLMO-5493: the serenity cohort gate now reads its own `serenity` feature_flags
-      // row (DB-authoritative). Return null for that flag so these tests fall through to
-      // the SERENITY_SITE_ALLOWLIST env path they were written against; brandalf/
-      // brandalf_migration reads are unaffected.
+      // LLMO-5493: the serenity cohort gate reads its own `serenity` feature_flags
+      // row (DB-only). Return true for that flag so the cohort gate is on for this
+      // test; brandalf/brandalf_migration reads are unaffected.
       eqFlag.withArgs('flag_name', 'serenity').returns({
-        maybeSingle: sinon.stub().resolves({ data: null, error: null }),
+        maybeSingle: sinon.stub().resolves({ data: { flag_value: true }, error: null }),
       });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
@@ -3539,13 +3532,13 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: { ...mockEnv, [SERENITY_SITE_ALLOWLIST]: 'org-serenity-cohort,org-other' },
+        env: { ...mockEnv },
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
       const result = await performLlmoOnboardingWithMocks({ domain: 'example.com', brandName: 'Test Brand', imsOrgId: 'ABC123@AdobeOrg' }, context);
 
-      // Cohort org detected (SpaceCat UUID allowlist path) but no markets were
+      // Cohort org detected (serenity DB flag) but no markets were
       // supplied → fan-out is skipped and result.serenity is absent (not empty arrays).
       expect(result).to.not.have.property('serenity');
       expect(mockLog.info).to.not.have.been.calledWith(
@@ -3581,12 +3574,11 @@ describe('LLMO Onboarding Functions', () => {
 
       const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const eqFlag = sinon.stub().returns({ maybeSingle });
-      // LLMO-5493: the serenity cohort gate now reads its own `serenity` feature_flags
-      // row (DB-authoritative). Return null for that flag so these tests fall through to
-      // the SERENITY_SITE_ALLOWLIST env path they were written against; brandalf/
-      // brandalf_migration reads are unaffected.
+      // LLMO-5493: the serenity cohort gate reads its own `serenity` feature_flags
+      // row (DB-only). Return true for that flag so the cohort gate is on for this
+      // test; brandalf/brandalf_migration reads are unaffected.
       eqFlag.withArgs('flag_name', 'serenity').returns({
-        maybeSingle: sinon.stub().resolves({ data: null, error: null }),
+        maybeSingle: sinon.stub().resolves({ data: { flag_value: true }, error: null }),
       });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
@@ -3653,7 +3645,7 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: { ...mockEnv, [SERENITY_SITE_ALLOWLIST]: 'org-serenity-cohort' },
+        env: { ...mockEnv },
         sqs: { sendMessage: sinon.stub().resolves() },
         // IMS bearer required to forward to the Semrush gateway.
         attributes: { authInfo: { getType: () => 'ims' } },
@@ -3705,7 +3697,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(completeCall.args[1].totalDurationMs).to.be.a('number').and.to.be.at.least(0);
     });
 
-    it('warns and skips provisioning when an allowlisted org resolves to v1 (LLMO-5007)', async () => {
+    it('warns and skips provisioning when a cohort org resolves to v1 (LLMO-5007)', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org-serenity-cohort'),
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
@@ -3733,6 +3725,27 @@ describe('LLMO Onboarding Functions', () => {
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
+      // LLMO-5493: serenity cohort on via the per-org `serenity` DB feature flag
+      // (the shared beforeEach default returns null for all flags → cohort off).
+      const serenityOnEqFlag = sinon.stub().returns({
+        maybeSingle: sinon.stub().resolves({ data: null, error: null }),
+      });
+      serenityOnEqFlag.withArgs('flag_name', 'serenity').returns({
+        maybeSingle: sinon.stub().resolves({ data: { flag_value: true }, error: null }),
+      });
+      const serenityOnSelect = sinon.stub().returns({
+        eq: sinon.stub().returns({
+          eq: sinon.stub().returns({ eq: serenityOnEqFlag }),
+        }),
+      });
+      const serenityOnUpsert = sinon.stub().returns({
+        select: sinon.stub().returns({
+          single: sinon.stub().resolves({ data: { flag_value: true }, error: null }),
+        }),
+      });
+      mockDataAccess.services.postgrestClient.from
+        .withArgs('feature_flags')
+        .returns({ select: serenityOnSelect, upsert: serenityOnUpsert });
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
       mockDataAccess.Site.create.resolves(mockSite);
@@ -3768,10 +3781,9 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        // Allowlisted (serenity on) but the global kill switch forces v1.
+        // Serenity cohort on (DB flag) but the global kill switch forces v1.
         env: {
           ...mockEnv,
-          [SERENITY_SITE_ALLOWLIST]: 'org-serenity-cohort',
           LLMO_ONBOARDING_DEFAULT_VERSION: 'v1',
         },
         sqs: { sendMessage: sinon.stub().resolves() },
@@ -3794,7 +3806,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(result.serenity).to.be.undefined;
     }).timeout(10000);
 
-    it('should fail fast with a 404 when an allowlisted org has no Semrush workspace bound (LLMO-5203)', async () => {
+    it('should fail fast with a 404 when a cohort org has no Semrush workspace bound (LLMO-5203)', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org-serenity-cohort'),
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
@@ -3802,6 +3814,27 @@ describe('LLMO Onboarding Functions', () => {
         getSemrushWorkspaceId: sinon.stub().returns(null),
       };
 
+      // LLMO-5493: serenity cohort on via the per-org `serenity` DB feature flag
+      // (the shared beforeEach default returns null for all flags → cohort off).
+      const serenityOnEqFlag = sinon.stub().returns({
+        maybeSingle: sinon.stub().resolves({ data: null, error: null }),
+      });
+      serenityOnEqFlag.withArgs('flag_name', 'serenity').returns({
+        maybeSingle: sinon.stub().resolves({ data: { flag_value: true }, error: null }),
+      });
+      const serenityOnSelect = sinon.stub().returns({
+        eq: sinon.stub().returns({
+          eq: sinon.stub().returns({ eq: serenityOnEqFlag }),
+        }),
+      });
+      const serenityOnUpsert = sinon.stub().returns({
+        select: sinon.stub().returns({
+          single: sinon.stub().resolves({ data: { flag_value: true }, error: null }),
+        }),
+      });
+      mockDataAccess.services.postgrestClient.from
+        .withArgs('feature_flags')
+        .returns({ select: serenityOnSelect, upsert: serenityOnUpsert });
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
       mockDataAccess.Site.create.resolves({ getId: sinon.stub().returns('site123') });
@@ -3836,7 +3869,7 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: { ...mockEnv, [SERENITY_SITE_ALLOWLIST]: 'org-serenity-cohort' },
+        env: { ...mockEnv },
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
@@ -3873,6 +3906,27 @@ describe('LLMO Onboarding Functions', () => {
         getSemrushWorkspaceId: sinon.stub().returns(null),
       };
 
+      // LLMO-5493: serenity cohort on via the per-org `serenity` DB feature flag
+      // (the shared beforeEach default returns null for all flags → cohort off).
+      const serenityOnEqFlag = sinon.stub().returns({
+        maybeSingle: sinon.stub().resolves({ data: null, error: null }),
+      });
+      serenityOnEqFlag.withArgs('flag_name', 'serenity').returns({
+        maybeSingle: sinon.stub().resolves({ data: { flag_value: true }, error: null }),
+      });
+      const serenityOnSelect = sinon.stub().returns({
+        eq: sinon.stub().returns({
+          eq: sinon.stub().returns({ eq: serenityOnEqFlag }),
+        }),
+      });
+      const serenityOnUpsert = sinon.stub().returns({
+        select: sinon.stub().returns({
+          single: sinon.stub().resolves({ data: { flag_value: true }, error: null }),
+        }),
+      });
+      mockDataAccess.services.postgrestClient.from
+        .withArgs('feature_flags')
+        .returns({ select: serenityOnSelect, upsert: serenityOnUpsert });
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
       mockDataAccess.Site.create.resolves({ getId: sinon.stub().returns('site123') });
@@ -3907,7 +3961,7 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: { ...mockEnv, [SERENITY_SITE_ALLOWLIST]: 'org-serenity-cohort' },
+        env: { ...mockEnv },
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
@@ -3927,7 +3981,7 @@ describe('LLMO Onboarding Functions', () => {
       }));
     });
 
-    it('should skip serenity provisioning when org is not in SERENITY_SITE_ALLOWLIST', async () => {
+    it('should skip serenity provisioning when the org lacks the serenity feature flag', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org-regular'),
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
@@ -3954,10 +4008,9 @@ describe('LLMO Onboarding Functions', () => {
 
       const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const eqFlag = sinon.stub().returns({ maybeSingle });
-      // LLMO-5493: the serenity cohort gate now reads its own `serenity` feature_flags
-      // row (DB-authoritative). Return null for that flag so these tests fall through to
-      // the SERENITY_SITE_ALLOWLIST env path they were written against; brandalf/
-      // brandalf_migration reads are unaffected.
+      // LLMO-5493: the serenity cohort gate reads its own `serenity` feature_flags
+      // row (DB-only). Return null for that flag so the cohort gate is off for this
+      // test; brandalf/brandalf_migration reads are unaffected.
       eqFlag.withArgs('flag_name', 'serenity').returns({
         maybeSingle: sinon.stub().resolves({ data: null, error: null }),
       });
@@ -4004,7 +4057,7 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: { ...mockEnv, [SERENITY_SITE_ALLOWLIST]: 'org-other' },
+        env: { ...mockEnv },
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 

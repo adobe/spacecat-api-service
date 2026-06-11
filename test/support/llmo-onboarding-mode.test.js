@@ -17,9 +17,7 @@ import sinonChai from 'sinon-chai';
 
 import {
   LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT,
-  SERENITY_SITE_ALLOWLIST,
   hasPreBrandalfSites,
-  isInSerenityAllowlist,
   isSerenityOnboardingEnabled,
   readBrandalfFlagOverride,
   readBrandalfMigrationFlagOverride,
@@ -675,61 +673,6 @@ describe('llmo-onboarding-mode', () => {
     });
   });
 
-  describe('isInSerenityAllowlist (legacy env fallback)', () => {
-    it('returns false when SERENITY_SITE_ALLOWLIST is not set', () => {
-      expect(isInSerenityAllowlist('org-1', 'ims-1', {})).to.be.false;
-      expect(isInSerenityAllowlist('org-1', 'ims-1', { [SERENITY_SITE_ALLOWLIST]: '' })).to.be.false;
-    });
-
-    it('returns true when SpaceCat org ID is in the allowlist', () => {
-      const env = { [SERENITY_SITE_ALLOWLIST]: 'org-1,org-2' };
-      expect(isInSerenityAllowlist('org-1', 'other-ims', env)).to.be.true;
-    });
-
-    it('returns true when IMS org ID is in the allowlist', () => {
-      const env = { [SERENITY_SITE_ALLOWLIST]: 'ABC123@AdobeOrg' };
-      expect(isInSerenityAllowlist('other-org', 'ABC123@AdobeOrg', env)).to.be.true;
-    });
-
-    it('matches IMS org ID case-insensitively', () => {
-      const env = { [SERENITY_SITE_ALLOWLIST]: 'ABC123@AdobeOrg' };
-      expect(isInSerenityAllowlist('other-org', 'abc123@adobeorg', env)).to.be.true;
-    });
-
-    it('returns false when neither org ID matches the allowlist', () => {
-      const env = { [SERENITY_SITE_ALLOWLIST]: 'org-x,org-y' };
-      expect(isInSerenityAllowlist('org-1', 'ims-1', env)).to.be.false;
-    });
-
-    it('trims whitespace around allowlist entries', () => {
-      const env = { [SERENITY_SITE_ALLOWLIST]: ' org-1 , org-2 ' };
-      expect(isInSerenityAllowlist('org-1', 'ims-1', env)).to.be.true;
-    });
-
-    it('returns false when env is undefined', () => {
-      expect(isInSerenityAllowlist('org-1', 'ims-1', undefined)).to.be.false;
-    });
-
-    it('returns false when env is null', () => {
-      expect(isInSerenityAllowlist('org-1', 'ims-1', null)).to.be.false;
-    });
-
-    it('returns false when imsOrgId is null (no spurious match)', () => {
-      const env = { [SERENITY_SITE_ALLOWLIST]: 'org-1' };
-      expect(isInSerenityAllowlist('org-other', null, env)).to.be.false;
-    });
-
-    it('returns false when imsOrgId is undefined', () => {
-      const env = { [SERENITY_SITE_ALLOWLIST]: 'org-1' };
-      expect(isInSerenityAllowlist('org-other', undefined, env)).to.be.false;
-    });
-
-    it('returns false when allowlist contains only empty entries (e.g. ",,,,")', () => {
-      const env = { [SERENITY_SITE_ALLOWLIST]: ',,,,' };
-      expect(isInSerenityAllowlist('org-1', 'ims-1', env)).to.be.false;
-    });
-  });
-
   describe('readSerenityFlagOverride', () => {
     it('reads the serenity flag from feature_flags', async () => {
       const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
@@ -758,49 +701,31 @@ describe('llmo-onboarding-mode', () => {
     });
   });
 
-  describe('isSerenityOnboardingEnabled (DB flag is authoritative, env fallback)', () => {
+  describe('isSerenityOnboardingEnabled (DB flag only)', () => {
     it('returns true when the serenity DB flag is true', async () => {
       const ctx = makeContext({ brandalfValue: true });
-      expect(await isSerenityOnboardingEnabled('org-1', 'ims-1', ctx)).to.be.true;
+      expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.true;
     });
 
-    it('returns false when the serenity DB flag is false, even if env allowlists the org', async () => {
-      const ctx = makeContext({
-        brandalfValue: false,
-        env: { [SERENITY_SITE_ALLOWLIST]: 'org-1' },
-      });
-      expect(await isSerenityOnboardingEnabled('org-1', 'ims-1', ctx)).to.be.false;
+    it('returns false when the serenity DB flag is false', async () => {
+      const ctx = makeContext({ brandalfValue: false });
+      expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.false;
     });
 
-    it('falls back to the env allowlist when no DB row exists (null) and logs a deprecation', async () => {
-      const ctx = makeContext({
-        brandalfValue: null,
-        env: { [SERENITY_SITE_ALLOWLIST]: 'org-1' },
-      });
-      expect(await isSerenityOnboardingEnabled('org-1', 'ims-1', ctx)).to.be.true;
-      expect(ctx.log.warn).to.have.been.calledWithMatch(/deprecated\s+SERENITY_SITE_ALLOWLIST/);
+    it('returns false when no DB row exists (null)', async () => {
+      const ctx = makeContext({ brandalfValue: null });
+      expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.false;
     });
 
-    it('returns false when no DB row exists and env does not allowlist the org', async () => {
-      const ctx = makeContext({
-        brandalfValue: null,
-        env: { [SERENITY_SITE_ALLOWLIST]: 'org-x' },
-      });
-      expect(await isSerenityOnboardingEnabled('org-1', 'ims-1', ctx)).to.be.false;
-    });
-
-    it('falls back to the env allowlist when there is no postgrest client at all', async () => {
+    it('returns false when there is no postgrest client at all', async () => {
       // brandalfValue undefined → makeContext attaches no postgrestClient.
-      const ctx = makeContext({ env: { [SERENITY_SITE_ALLOWLIST]: 'org-1' } });
-      expect(await isSerenityOnboardingEnabled('org-1', 'ims-1', ctx)).to.be.true;
+      const ctx = makeContext({});
+      expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.false;
     });
 
-    it('falls back to the env allowlist and logs when the DB read throws', async () => {
-      const ctx = makeContext({
-        brandalfValue: 'throw',
-        env: { [SERENITY_SITE_ALLOWLIST]: 'org-1' },
-      });
-      expect(await isSerenityOnboardingEnabled('org-1', 'ims-1', ctx)).to.be.true;
+    it('returns false and logs when the DB read throws', async () => {
+      const ctx = makeContext({ brandalfValue: 'throw' });
+      expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.false;
       expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to read serenity flag/);
     });
   });

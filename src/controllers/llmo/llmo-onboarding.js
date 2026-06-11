@@ -1550,7 +1550,6 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // reused there to avoid evaluating the cohort gate twice.
     const serenityEnabled = await isSerenityOnboardingEnabled(
       organization.getId(),
-      imsOrgId,
       context,
     );
     if (serenityEnabled) {

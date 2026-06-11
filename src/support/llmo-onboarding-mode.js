@@ -18,33 +18,6 @@ export const LLMO_BRANDALF_MIGRATION_FLAG = 'brandalf_migration';
 export const LLMO_SERENITY_FLAG = 'serenity';
 export const LLMO_ONBOARDING_MODE_V1 = 'v1';
 export const LLMO_ONBOARDING_MODE_V2 = 'v2';
-export const SERENITY_SITE_ALLOWLIST = 'SERENITY_SITE_ALLOWLIST';
-
-/**
- * Legacy env-var allowlist check (SERENITY_SITE_ALLOWLIST). Matches against both
- * the SpaceCat org ID and the IMS org ID.
- *
- * DEPRECATED — retained only as the transitional fallback for orgs that do not
- * yet have a `serenity` row in the feature_flags table (see
- * isSerenityOnboardingEnabled). Remove once every cohort org has a DB row.
- *
- * @param {string} organizationId - SpaceCat org ID
- * @param {string} imsOrgId - IMS org ID
- * @param {object} env - Environment variables object
- * @returns {boolean}
- */
-export function isInSerenityAllowlist(organizationId, imsOrgId, env) {
-  const allowlist = env?.[SERENITY_SITE_ALLOWLIST];
-  if (!allowlist) {
-    return false;
-  }
-  const allowed = allowlist.split(',').map((s) => s.trim()).filter(Boolean);
-  // SpaceCat org IDs are UUIDs (case-stable). IMS org IDs are validated with /i upstream
-  // so normalize both sides for the IMS arm to avoid silent mismatches.
-  const imsLower = imsOrgId?.toLowerCase();
-  return allowed.includes(organizationId)
-    || allowed.some((entry) => entry.toLowerCase() === imsLower);
-}
 
 /**
  * Reads the per-org `serenity` cohort flag from the feature_flags table
@@ -73,49 +46,27 @@ export async function readSerenityFlagOverride(organizationId, postgrestClient) 
  *
  * Membership is the per-org `serenity` flag in the feature_flags table (product
  * LLMO), seedable at runtime via PUT /organizations/:id/feature-flags/LLMO/serenity
- * — no deploy needed.
- *
- * TRANSITIONAL dual-read (LLMO-5493): the DB flag is authoritative. When no row
- * exists for the org (read returns null), the legacy SERENITY_SITE_ALLOWLIST env
- * var is still honored so the prototype cohort keeps working during the migration
- * window. An explicit `false` in the DB always wins over the env arm. Remove the
- * env fallback (and isInSerenityAllowlist / SERENITY_SITE_ALLOWLIST) once every
- * cohort org has a DB row.
+ * — no deploy needed. A missing row (read returns null) means not in the cohort;
+ * only an explicit `true` opts the org in.
  *
  * @param {string} organizationId - SpaceCat org ID
- * @param {string} imsOrgId - IMS org ID
- * @param {object} context - Request context (env + dataAccess.services.postgrestClient + log)
+ * @param {object} context - Request context (dataAccess.services.postgrestClient + log)
  * @returns {Promise<boolean>}
  */
-export async function isSerenityOnboardingEnabled(organizationId, imsOrgId, context) {
+export async function isSerenityOnboardingEnabled(organizationId, context) {
   const postgrestClient = context?.dataAccess?.services?.postgrestClient;
   const log = context?.log;
 
-  let flag = null;
   try {
-    flag = await readSerenityFlagOverride(organizationId, postgrestClient);
+    const flag = await readSerenityFlagOverride(organizationId, postgrestClient);
+    return flag === true;
   } catch (err) {
     log?.warn?.(
       `Failed to read serenity flag for org ${organizationId}: ${err.message} `
-      + '— falling back to SERENITY_SITE_ALLOWLIST env',
+      + '— treating as not in the cohort',
     );
+    return false;
   }
-
-  // DB row present → authoritative (true or false).
-  if (flag !== null) {
-    return flag === true;
-  }
-
-  // No DB row → transitional fallback to the legacy env allowlist.
-  const inAllowlist = isInSerenityAllowlist(organizationId, imsOrgId, context?.env);
-  if (inAllowlist) {
-    log?.warn?.(
-      `Serenity cohort: org ${organizationId} matched the deprecated `
-      + 'SERENITY_SITE_ALLOWLIST env var (no feature_flags row). Seed a `serenity` '
-      + 'DB flag via PUT /organizations/:id/feature-flags/LLMO/serenity to migrate.',
-    );
-  }
-  return inAllowlist;
 }
 
 /**

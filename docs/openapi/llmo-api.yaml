@@ -1099,8 +1099,9 @@ llmo-onboard:
                   Each entry maps to one Semrush project created during onboarding.
                   Format validation (count cap, ISO codes, BCP-47 language tags) applies to all callers —
                   an invalid entry returns 400 regardless of cohort membership.
-                  Semrush provisioning only runs for orgs in the `SERENITY_SITE_ALLOWLIST` cohort;
-                  a valid `markets` array from a non-cohort org is accepted (200) but not provisioned.
+                  Semrush provisioning only runs for orgs in the Semrush cohort (the per-org
+                  `serenity` LLMO feature flag); a valid `markets` array from a non-cohort org
+                  is accepted (200) but not provisioned.
                   If absent and `region` is present, a single `{ market: region, languageCode: "en" }`
                   entry is synthesized for backward compatibility.
                 items:
@@ -1290,7 +1291,7 @@ llmo-onboard:
           The body carries the same onboarding fields as the 200 response (message,
           domain, brandName, imsOrgId, organizationId, siteId, status, …) in addition
           to the `requested`/`succeeded`/`failed` arrays below. Only cohort
-          (`SERENITY_SITE_ALLOWLIST`) onboardings can return 207; all others return 200.
+          (per-org `serenity` LLMO feature flag) onboardings can return 207; all others return 200.
         content:
           application/json:
             schema:
@@ -1339,7 +1340,7 @@ llmo-onboard:
         $ref: './responses.yaml#/403'
       '404':
         description: |
-          The org is in the Semrush cohort (`SERENITY_SITE_ALLOWLIST`) but has no
+          The org is in the Semrush cohort (per-org `serenity` LLMO feature flag) but has no
           Semrush workspace bound. An operator must run
           `PATCH /organizations/:spaceCatId` with `{ semrushWorkspaceId: ... }`
           before retrying onboarding. No Adobe-side state is created in this case.
