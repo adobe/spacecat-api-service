@@ -1,3 +1,10 @@
+# [1.569.0](https://github.com/adobe/spacecat-api-service/compare/v1.568.1...v1.569.0) (2026-06-11)
+
+
+### Features
+
+* add CJA referral traffic source and document referral-traffic API ([#2592](https://github.com/adobe/spacecat-api-service/issues/2592)) ([0437b76](https://github.com/adobe/spacecat-api-service/commit/0437b766b0be48b64676a87fa368ab9a76463cf9))
+
 ## [1.568.1](https://github.com/adobe/spacecat-api-service/compare/v1.568.0...v1.568.1) (2026-06-11)
 
 
