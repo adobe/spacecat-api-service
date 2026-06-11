@@ -1788,6 +1788,41 @@ function SuggestionsController(ctx, sqs, env) {
     const pathSuggestions = [];
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
+
+    // Returns false when a suggestion's URL or allowedRegexPatterns fall outside the
+    // site's registered base path (e.g. a suggestion for /wolves on a /kings subpath site).
+    // Root-level sites (pathname === '/') pass all suggestions through.
+    const isSuggestionInScope = (suggestion) => {
+      const siteBaseURL = site.getBaseURL();
+      let siteBasePath;
+      try {
+        siteBasePath = new URL(siteBaseURL).pathname;
+      } catch {
+        return true;
+      }
+      if (!siteBasePath || siteBasePath === '/') {
+        return true;
+      }
+
+      const data = suggestion.getData();
+      if (isDomainWideSuggestion(suggestion) || isPathSuggestion(suggestion)) {
+        const patterns = data?.allowedRegexPatterns;
+        if (!isNonEmptyArray(patterns)) {
+          return true;
+        }
+        return patterns.every((p) => p.startsWith(siteBasePath));
+      }
+      const url = getSuggestionUrl(data, opportunity);
+      if (!url) {
+        return true;
+      }
+      try {
+        return new URL(url).pathname.startsWith(siteBasePath);
+      } catch {
+        return true;
+      }
+    };
+
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
@@ -1799,6 +1834,14 @@ function SuggestionsController(ctx, sqs, env) {
           index,
           message: 'Suggestion not found',
           statusCode: 404,
+        });
+      } else if (!isSuggestionInScope(suggestion)) {
+        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} URL is outside site scope`);
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion URL is outside the scope of the site base URL',
+          statusCode: 400,
         });
       } else if (isDomainWideSuggestion(suggestion)) {
         context.log.info(`[edge-deploy] ${suggestionId} → DOMAIN-WIDE`);

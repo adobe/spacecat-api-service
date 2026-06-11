@@ -7032,6 +7032,102 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.failed).to.equal(1);
     });
 
+    describe('subpath scope guard', () => {
+      it('rejects a regular suggestion whose URL is outside the subpath site scope', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const outOfScopeSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://example.com/wolves/page',
+            recommendedAction: 'New Heading Title',
+            prompts: [{ prompt: 'wolves prompt', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([outOfScopeSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].message).to.include('outside the scope');
+      });
+
+      it('accepts a regular suggestion whose URL is within the subpath site scope', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const inScopeSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://example.com/kings/home',
+            recommendedAction: 'New Heading Title',
+            prompts: [{ prompt: 'kings prompt', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([inScopeSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        // passes scope guard — further processing may succeed or fail for other reasons
+        const body = await response.json();
+        expect(body.suggestions[0]?.message).to.not.include('outside the scope');
+      });
+
+      it('rejects a domain-wide suggestion whose allowedRegexPatterns point to a different subpath', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const wrongPatternSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://example.com',
+            isDomainWide: true,
+            allowedRegexPatterns: ['/wolves/*'],
+            prompts: [{ prompt: 'wolves prompt', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([wrongPatternSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].message).to.include('outside the scope');
+      });
+
+      it('passes all suggestions through for a root-level site', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com');
+        const anyUrlSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://example.com/any/path',
+            recommendedAction: 'New Heading Title',
+            prompts: [{ prompt: 'any prompt', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([anyUrlSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        const body = await response.json();
+        expect(body.suggestions[0]?.message).to.not.include('outside the scope');
+      });
+    });
+
     it('returns 207 with failure when GeoExperiment data access is missing', async () => {
       const controllerWithoutGeoExperiment = SuggestionsController({
         dataAccess: {
