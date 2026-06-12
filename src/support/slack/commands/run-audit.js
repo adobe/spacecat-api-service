@@ -28,6 +28,7 @@ const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
 const PRERENDER = 'prerender';
 const PRERENDER_AI = 'prerender-ai';
+const PRERENDER_BATCH_SIZE = 320;
 const ALL_AUDITS = [
   'apex',
   'cwv',
@@ -240,8 +241,26 @@ function RunAuditCommand(context) {
         return;
       }
 
-      await triggerAuditForSite(site, auditType, auditData, slackContext, context, { urls });
-      await say(`:white_check_mark: ${auditType} audit queued for ${urls.length} URLs.`);
+      const batchCount = Math.ceil(urls.length / PRERENDER_BATCH_SIZE);
+
+      for (let i = 0; i < batchCount; i += 1) {
+        const start = i * PRERENDER_BATCH_SIZE;
+        const batchUrls = urls.slice(start, start + PRERENDER_BATCH_SIZE);
+        // eslint-disable-next-line no-await-in-loop
+        await triggerAuditForSite(
+          site,
+          auditType,
+          auditData,
+          slackContext,
+          context,
+          { urls: batchUrls },
+        );
+        log.info(`[run-audit] ${baseURL}: queued batch ${i + 1}/${batchCount}`
+          + ` (${batchUrls.length} URLs, ${auditType})`);
+      }
+
+      const batchMsg = batchCount > 1 ? ` in ${batchCount} batches` : '';
+      await say(`:white_check_mark: ${auditType} audit queued for ${urls.length} URLs${batchMsg}.`);
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
       await postErrorMessage(say, error);

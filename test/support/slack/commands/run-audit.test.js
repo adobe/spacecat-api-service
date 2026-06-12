@@ -230,6 +230,33 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 2 URLs.');
     });
 
+    it('splits large prerender CSV into batches of 320', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO']));
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      // Generate 500 valid URLs → should produce 2 batches (320 + 180)
+      const urls = Array.from({ length: 500 }, (_, i) => `https://valid.site/page-${i + 1}`);
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, urls.join('\n'));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledTwice;
+      // First batch: 320 URLs
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.have.length(320);
+      // Second batch: 180 URLs
+      expect(sqsStub.sendMessage.secondCall.args[1].auditContext.urls).to.have.length(180);
+      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 500 URLs in 2 batches.');
+    });
+
     it('warns when a prerender CSV has no valid URLs', async () => {
       slackContext.files = [
         {
