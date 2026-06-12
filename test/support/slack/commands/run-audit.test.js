@@ -843,6 +843,16 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
     });
 
+    it('shows site-not-found for suggestion-based mode when site does not exist', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['unknownsite.com', 'audit:prerender', 'mode:full'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(':x: No site found with base URL \'https://unknownsite.com\'.');
+    });
+
     it('does not include mode in audit data', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
