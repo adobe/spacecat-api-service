@@ -1288,15 +1288,46 @@ llmo-onboard:
           provisioning steps failed. Successfully created projects are not rolled back.
           Re-invoking with the same `markets[]` is safe (already-created slices are skipped).
 
-          The body carries the same onboarding fields as the 200 response (message,
-          domain, brandName, imsOrgId, organizationId, siteId, status, …) in addition
-          to the `requested`/`succeeded`/`failed` arrays below. Only cohort
-          (per-org `serenity` LLMO feature flag) onboardings can return 207; all others return 200.
+          The body carries all standard 200 onboarding fields (message, domain, brandName,
+          imsOrgId, organizationId, siteId, status, createdAt, detectedCdn, region) plus
+          the `requested`/`succeeded`/`failed` arrays. Only cohort orgs (per-org `serenity`
+          LLMO feature flag) can return 207; all others return 200.
         content:
           application/json:
             schema:
               type: object
+              description: |
+                Identical to the 200 response body with the addition of
+                `requested`, `succeeded`, and `failed` arrays.
+              required:
+                - message
+                - domain
+                - brandName
+                - imsOrgId
+                - status
+                - requested
+                - succeeded
+                - failed
               properties:
+                message:
+                  type: string
+                domain:
+                  type: string
+                brandName:
+                  type: string
+                imsOrgId:
+                  type: string
+                organizationId:
+                  type: string
+                siteId:
+                  type: string
+                status:
+                  type: string
+                createdAt:
+                  type: string
+                  format: date-time
+                region:
+                  type: string
                 requested:
                   type: array
                   items:
