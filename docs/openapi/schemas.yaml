@@ -9463,6 +9463,19 @@ AiVisibilitySemrushCountry:
     - VN
     - WORLDWIDE
 
+AiVisibilitySemrushDate:
+  type: object
+  description: Date message from ai-seo-ts common/types_pb
+  properties:
+    day:
+      type: integer
+    month:
+      type: integer
+    year:
+      type: integer
+  required: [day, month, year]
+  additionalProperties: true
+
 AiVisibilitySemrushTopicIntent:
   type: string
   description: TOPIC_INTENT from ai-seo-ts common/types_pb
@@ -9523,6 +9536,102 @@ AiVisibilitySemrushTopicIntentEntry:
     weight:
       type: integer
       description: Intent weight within the distribution (0–100 scale per Semrush)
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByLLMEntry:
+  type: object
+  description: |
+    One row from Semrush `StatsByLLMResponse.LLMEntry` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    mentions:
+      description: Prompt responses mentioning the target brand
+      oneOf:
+        - type: string
+        - type: integer
+    audience:
+      description: Estimated audience for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    citations:
+      description: Citations for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    ownedSources:
+      description: Citations from the brand domain
+      oneOf:
+        - type: string
+        - type: integer
+    aiVisibility:
+      type: integer
+      description: AI Visibility score for the brand
+    isoDate:
+      type: string
+      description: Normalized ISO date (`YYYY-MM` or `YYYY-MM-DD`)
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByLLMResponse:
+  type: object
+  description: |
+    Brand statistics by LLM from `GET /llmo/ai-visibility/v1/brand/stats-by-llm`.
+    Native Semrush v2 `StatsByLLMResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    target:
+      $ref: '#/AiVisibilitySemrushBrand'
+    llm:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandStatsByLLMEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByCountryEntry:
+  type: object
+  description: |
+    One row from Semrush `StatsByCountryResponse.ByCountry` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    country:
+      description: Market for the grouped statistics
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+    mentions:
+      description: Prompt responses mentioning the target brand
+      oneOf:
+        - type: string
+        - type: integer
+    audience:
+      description: Estimated audience for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    ownedSources:
+      description: Citations from the brand domain
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByCountryResponse:
+  type: object
+  description: |
+    Brand statistics by country from `GET /llmo/ai-visibility/v1/brand/stats-by-country`.
+    Native Semrush v2 `StatsByCountryResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    byCountry:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandStatsByCountryEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
 AiVisibilityV1TopicBrandTopicRow:
@@ -9850,6 +9959,40 @@ AiVisibilityV1PromptPromptResponse:
       type: array
       items:
         $ref: '#/AiVisibilitySemrushSource'
+  additionalProperties: true
+
+AiVisibilityV1MetaCountry:
+  type: object
+  description: Country entry from Semrush `cr.v1 Meta/Meta` protobuf JSON.
+  properties:
+    country:
+      $ref: '#/AiVisibilitySemrushCountry'
+    daily:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushDate'
+    monthly:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushDate'
+    is_coming_soon:
+      type: boolean
+  required: [country, daily, monthly, is_coming_soon]
+  additionalProperties: true
+
+AiVisibilityV1Meta:
+  type: object
+  description: |
+    Metadata from Semrush `cr.v1 Meta/Meta` with an appended computed `WORLDWIDE`
+    country entry when Semrush does not already return one.
+  properties:
+    countries:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1MetaCountry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [countries]
   additionalProperties: true
 
 AiVisibilityV1PromptBrandPromptsResponse:

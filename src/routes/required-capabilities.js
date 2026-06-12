@@ -617,6 +617,9 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'report:read',
+  'GET /llmo/ai-visibility/v1/meta/meta': 'report:read',
 
   // User Activities
   'GET /sites/:siteId/user-activities': 'trialUser:read',
