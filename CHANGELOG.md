@@ -1,3 +1,15 @@
+# [1.570.0](https://github.com/adobe/spacecat-api-service/compare/v1.569.0...v1.570.0) (2026-06-12)
+
+
+### Bug Fixes
+
+* **consent-banner:** gate POST /consent-banner on scrapeJob:write ([#2597](https://github.com/adobe/spacecat-api-service/issues/2597)) ([8e559e4](https://github.com/adobe/spacecat-api-service/commit/8e559e4b212a57834abaf8d077a04d991fb272a4))
+
+
+### Features
+
+* expose GET /sites/:siteId/agentic-traffic/has-data to S2S consumers ([#2596](https://github.com/adobe/spacecat-api-service/issues/2596)) ([88d8bc8](https://github.com/adobe/spacecat-api-service/commit/88d8bc805715d3aac36dbc9789655d4136bdaebb))
+
 # [1.569.0](https://github.com/adobe/spacecat-api-service/compare/v1.568.1...v1.569.0) (2026-06-11)
 
 
