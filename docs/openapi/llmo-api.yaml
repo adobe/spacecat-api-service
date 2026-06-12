@@ -971,7 +971,8 @@ llmo-config:
       Retrieves the LLMO (Large Language Model Optimizer) configuration for a specific site.
       This endpoint retrieves the configuration directly from S3 storage. The configuration
       includes entities (categories, topics, aiTopics), brand aliases, and competitor information.
-      Categories may include optional URLs for content matching.
+      Categories may include optional URLs for content matching. The configuration may also include
+      optional claims guidance fields, each limited to 4000 characters.
 
       If a version parameter is provided, the specific version of the configuration will be
       retrieved. If the version does not exist, a 404 error will be returned. If no version
@@ -997,6 +998,23 @@ llmo-config:
               required:
                 - config
                 - version
+            examples:
+              config-with-claims:
+                summary: LLMO configuration with claims guidance
+                value:
+                  config:
+                    entities: { }
+                    categories: { }
+                    topics: { }
+                    aiTopics: { }
+                    brands:
+                      aliases: [ ]
+                    competitors:
+                      competitors: [ ]
+                    claims:
+                      brandContext: "Treat Firefly as part of the Adobe product family."
+                      sentimentGuidance: "Claims about setup friction should be classified as unfavorable."
+                  version: "abc123def456"
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -1019,6 +1037,8 @@ llmo-config:
 
       Categories can optionally include URLs that can be either exact URLs or URL prefixes
       (ending with /*) to match against specific content areas.
+      Optional claims guidance fields are accepted under `claims` and each field is limited
+      to 4000 characters.
     operationId: postLlmoConfig
     requestBody:
       required: true
@@ -1026,6 +1046,21 @@ llmo-config:
         application/json:
           schema:
             $ref: './schemas.yaml#/LlmoConfig'
+          examples:
+            config-with-claims:
+              summary: LLMO configuration with claims guidance
+              value:
+                entities: { }
+                categories: { }
+                topics: { }
+                aiTopics: { }
+                brands:
+                  aliases: [ ]
+                competitors:
+                  competitors: [ ]
+                claims:
+                  brandContext: "Treat Firefly as part of the Adobe product family."
+                  sentimentGuidance: "Claims about setup friction should be classified as unfavorable."
     responses:
       '200':
         description: LLMO configuration updated successfully

@@ -1961,6 +1961,23 @@ describe('LlmoController', () => {
       expect(writeConfigStub).to.not.have.been.called;
     });
 
+    it('should return bad request when claims guidance exceeds schema limit', async () => {
+      llmoConfigSchemaStub.safeParse.returns({
+        success: false,
+        error: {
+          message: 'String must contain at most 4000 character(s)',
+          issues: [{ path: ['claims', 'brandContext'], code: 'too_big' }],
+        },
+      });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+      const responseBody = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(responseBody.message).to.include('Invalid LLMO config');
+      expect(writeConfigStub).to.not.have.been.called;
+    });
+
     it('should return bad request when s3 client is missing', async () => {
       delete mockContext.s3;
 
@@ -2063,6 +2080,41 @@ describe('LlmoController', () => {
           .and(sinon.match(/2 deleted prompts \(2 modified\)/))
           .and(sinon.match(/2 category URLs/)),
       );
+    });
+
+    it('should log claims guidance changes without logging guidance text', async () => {
+      const configWithClaims = {
+        ...llmoConfig.defaultConfig(),
+        claims: {
+          brandContext: 'Sensitive brand context text',
+          sentimentGuidance: 'Sensitive sentiment guidance text',
+        },
+      };
+      mockContext.data = configWithClaims;
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithClaims });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 0, modified: 0 },
+          topics: { total: 0, modified: 0 },
+          aiTopics: { total: 0, modified: 0 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          ignoredPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 0 },
+          claims: { modified: true },
+        },
+      }));
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const infoMessages = mockLog.info.getCalls().map((call) => String(call.args[0]));
+      expect(infoMessages.some((message) => message.includes('claims guidance modified'))).to.be.true;
+      expect(infoMessages.some((message) => message.includes('Sensitive brand context text'))).to.be.false;
+      expect(infoMessages.some((message) => message.includes('Sensitive sentiment guidance text'))).to.be.false;
     });
 
     it('should use "system" as userId when sub is missing from profile', async () => {
