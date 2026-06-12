@@ -1,3 +1,10 @@
+# [1.571.0](https://github.com/adobe/spacecat-api-service/compare/v1.570.0...v1.571.0) (2026-06-12)
+
+
+### Features
+
+* **slack:** add prerender modes (full/ai-only) and CSV batching to run-audit command ([#2598](https://github.com/adobe/spacecat-api-service/issues/2598)) ([a057e87](https://github.com/adobe/spacecat-api-service/commit/a057e87d6db58e00c91a3fc70a21b36d506234bf))
+
 # [1.570.0](https://github.com/adobe/spacecat-api-service/compare/v1.569.0...v1.570.0) (2026-06-12)
 
 
