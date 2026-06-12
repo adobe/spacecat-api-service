@@ -1,3 +1,10 @@
+# [1.572.0](https://github.com/adobe/spacecat-api-service/compare/v1.571.1...v1.572.0) (2026-06-12)
+
+
+### Features
+
+* ai visibility brand data ([#2577](https://github.com/adobe/spacecat-api-service/issues/2577)) ([1099575](https://github.com/adobe/spacecat-api-service/commit/109957510b357137be74555d6b85aba196f97559))
+
 ## [1.571.1](https://github.com/adobe/spacecat-api-service/compare/v1.571.0...v1.571.1) (2026-06-12)
 
 
