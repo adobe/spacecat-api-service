@@ -84,7 +84,7 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
-      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender audits: `mode:full` fetches NEW/FIXED suggestions and runs a full prerender audit; `mode:ai-only` does the same but triggers AI-only content generation. CSV uploads are batched at 320 URLs.');
+      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` fetches NEW/FIXED suggestions and runs a full prerender audit; `mode:ai-only` does the same but passes ai-only to the worker. CSV uploads are batched at 320 URLs.');
     });
   });
 
@@ -741,11 +741,11 @@ describe('RunAuditCommand', () => {
     beforeEach(() => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'siteId' });
       dataAccessStub.Configuration.findLatest.resolves(
-        createDefaultConfigurationMock(['prerender', 'prerender-ai'], ['LLMO']),
+        createDefaultConfigurationMock('prerender', ['LLMO']),
       );
     });
 
-    it('mode:full fetches NEW/FIXED suggestions and triggers prerender audit', async () => {
+    it('mode:all fetches NEW/FIXED suggestions and triggers prerender audit', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
           makeSuggestion('https://site.com/page-1', 'NEW'),
@@ -755,15 +755,16 @@ describe('RunAuditCommand', () => {
       ]);
 
       const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:full'], slackContext);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
 
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
       expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
-      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      const { urls, mode } = sqsStub.sendMessage.firstCall.args[1].auditContext;
       expect(urls).to.deep.equal(['https://site.com/page-1', 'https://site.com/page-2']);
+      expect(mode).to.be.undefined;
     });
 
-    it('mode:ai-only fetches NEW/FIXED suggestions and triggers prerender-ai audit', async () => {
+    it('mode:ai-only fetches suggestions and passes mode in auditContext', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
           makeSuggestion('https://site.com/page-1', 'NEW'),
@@ -775,7 +776,8 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only'], slackContext);
 
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender-ai' });
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.equal('ai-only');
     });
 
     it('deduplicates URLs across multiple prerender opportunities', async () => {
@@ -790,7 +792,7 @@ describe('RunAuditCommand', () => {
       ]);
 
       const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:full'], slackContext);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
 
       const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
       expect(urls).to.have.length(2);
@@ -809,7 +811,7 @@ describe('RunAuditCommand', () => {
       ]);
 
       const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:full'], slackContext);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
 
       const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
       expect(urls).to.deep.equal(['https://site.com/page-1']);
@@ -823,7 +825,7 @@ describe('RunAuditCommand', () => {
       ]);
 
       const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:full'], slackContext);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
 
       expect(sqsStub.sendMessage).to.not.have.been.called;
       expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
@@ -837,7 +839,7 @@ describe('RunAuditCommand', () => {
       ]);
 
       const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:full'], slackContext);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
 
       expect(sqsStub.sendMessage).to.not.have.been.called;
       expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
@@ -847,13 +849,13 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(null);
 
       const command = RunAuditCommand(context);
-      await command.handleExecution(['unknownsite.com', 'audit:prerender', 'mode:full'], slackContext);
+      await command.handleExecution(['unknownsite.com', 'audit:prerender', 'mode:all'], slackContext);
 
       expect(sqsStub.sendMessage).to.not.have.been.called;
       expect(slackContext.say).to.have.been.calledWith(':x: No site found with base URL \'https://unknownsite.com\'.');
     });
 
-    it('does not include mode in audit data', async () => {
+    it('does not include mode in audit data payload', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
           makeSuggestion('https://site.com/page-1', 'NEW'),
@@ -869,7 +871,7 @@ describe('RunAuditCommand', () => {
       expect(parsedData).to.not.have.property('mode');
     });
 
-    it('keeps audit type as prerender when no mode is provided', async () => {
+    it('runs normal prerender when no mode is provided', async () => {
       const command = RunAuditCommand(context);
 
       await command.handleExecution(['validsite.com', 'audit:prerender'], slackContext);
@@ -878,7 +880,7 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
     });
 
-    it('allows prerender-ai CSV run with mode:ai-only and attached file', async () => {
+    it('CSV with mode:ai-only passes mode in auditContext', async () => {
       slackContext.files = [
         {
           name: 'urls.csv',
@@ -892,27 +894,57 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only'], slackContext);
 
-      expect(slackContext.say).to.have.been.calledWithMatch(/Triggering prerender-ai audit for site/);
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender-ai' });
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.equal('ai-only');
+    });
+
+    it('CSV without mode does not include mode in auditContext', async () => {
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.be.undefined;
     });
 
     it('sends batch-wise Slack messages for suggestion-based mode', async () => {
-      // Generate 500 suggestions → 2 batches (320 + 180)
       const suggestions = Array.from({ length: 500 }, (_, i) => makeSuggestion(`https://site.com/page-${i + 1}`, i % 2 === 0 ? 'NEW' : 'FIXED'));
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', suggestions),
       ]);
 
       const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:full'], slackContext);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
 
       expect(sqsStub.sendMessage).to.have.been.calledTwice;
       expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.have.length(320);
       expect(sqsStub.sendMessage.secondCall.args[1].auditContext.urls).to.have.length(180);
-      // Batch-wise Slack messages (after the initial triggering + fetching messages)
       expect(slackContext.say).to.have.been.calledWithMatch(/320 URLs \(batch 1\/2\)/);
       expect(slackContext.say).to.have.been.calledWithMatch(/180 URLs \(batch 2\/2\)/);
+    });
+
+    it('sends batch-wise Slack messages with mode label for ai-only', async () => {
+      const suggestions = Array.from({ length: 500 }, (_, i) => makeSuggestion(`https://site.com/page-${i + 1}`, i % 2 === 0 ? 'NEW' : 'FIXED'));
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', suggestions),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledTwice;
+      expect(slackContext.say).to.have.been.calledWithMatch(/320 URLs \(batch 1\/2\) \[ai-only\]/);
+      expect(slackContext.say).to.have.been.calledWithMatch(/180 URLs \(batch 2\/2\) \[ai-only\]/);
     });
   });
 

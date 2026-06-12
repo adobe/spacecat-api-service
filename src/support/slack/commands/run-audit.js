@@ -31,9 +31,8 @@ import { triggerAuditForSite } from '../../utils.js';
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
 const PRERENDER = 'prerender';
-const PRERENDER_AI = 'prerender-ai';
 const PRERENDER_BATCH_SIZE = 320;
-const PRERENDER_MODES = { FULL: 'full', AI_ONLY: 'ai-only' };
+const PRERENDER_MODES = { ALL: 'all', AI_ONLY: 'ai-only' };
 const PRERENDER_SUGGESTION_STATUSES = ['NEW', 'FIXED'];
 const ALL_AUDITS = [
   'apex',
@@ -104,9 +103,9 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender audits: `mode:full` fetches NEW/FIXED suggestions and runs a full prerender audit; `mode:ai-only` does the same but triggers AI-only content generation. CSV uploads are batched at 320 URLs.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` fetches NEW/FIXED suggestions and runs a full prerender audit; `mode:ai-only` does the same but passes ai-only to the worker. CSV uploads are batched at 320 URLs.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:full|ai-only] [key:value ...]`,
+    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only] [key:value ...]`,
   });
 
   const { dataAccess, log } = context;
@@ -235,7 +234,7 @@ function RunAuditCommand(context) {
     }
   };
 
-  const runPrerenderAuditForUrls = async (baseURL, auditType, auditData, urls, slackContext) => {
+  const runPrerenderAuditForUrls = async (baseURL, auditData, urls, slackContext, mode) => {
     const { say } = slackContext;
 
     try {
@@ -247,14 +246,14 @@ function RunAuditCommand(context) {
         return;
       }
 
-      if (!configuration.isHandlerEnabledForSite(auditType, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
+      if (!configuration.isHandlerEnabledForSite(PRERENDER, site)) {
+        await say(`:x: Will not audit site '${baseURL}' because audits of type '${PRERENDER}' are disabled for this site.`);
         return;
       }
 
-      const handler = configuration.getHandlers()?.[auditType];
+      const handler = configuration.getHandlers()?.[PRERENDER];
       if (!isNonEmptyArray(handler?.productCodes)) {
-        await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${auditType}'.`);
+        await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${PRERENDER}'.`);
         return;
       }
 
@@ -279,6 +278,7 @@ function RunAuditCommand(context) {
       const batchCount = Math.ceil(
         urls.length / PRERENDER_BATCH_SIZE,
       );
+      const auditContext = { ...(mode ? { mode } : {}) };
 
       for (let i = 0; i < batchCount; i += 1) {
         const start = i * PRERENDER_BATCH_SIZE;
@@ -286,22 +286,23 @@ function RunAuditCommand(context) {
         // eslint-disable-next-line no-await-in-loop
         await triggerAuditForSite(
           site,
-          auditType,
+          PRERENDER,
           auditData,
           slackContext,
           context,
-          { urls: batch },
+          { ...auditContext, urls: batch },
         );
 
         const batchLabel = batchCount > 1
           ? ` (batch ${i + 1}/${batchCount})`
           : '';
+        const modeLabel = mode ? ` [${mode}]` : '';
         // eslint-disable-next-line no-await-in-loop
-        await say(`:white_check_mark: ${auditType} audit queued`
-          + ` for ${batch.length} URLs${batchLabel}.`);
+        await say(`:white_check_mark: ${PRERENDER} audit queued`
+          + ` for ${batch.length} URLs${batchLabel}${modeLabel}.`);
       }
     } catch (error) {
-      log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
+      log.error(`Error running ${PRERENDER} audit for site ${baseURL}`, error);
       await postErrorMessage(say, error);
     }
   };
@@ -358,25 +359,18 @@ function RunAuditCommand(context) {
         return;
       }
 
-      let auditType = auditTypeInputArg || LHS_MOBILE;
+      const auditType = auditTypeInputArg || LHS_MOBILE;
       const prerenderMode = keywords.mode;
 
-      // Resolve prerender mode
-      if (auditType === PRERENDER && prerenderMode === PRERENDER_MODES.AI_ONLY) {
-        auditType = PRERENDER_AI;
-      }
-
-      const isPrerenderMode = auditType === PRERENDER
-        && prerenderMode === PRERENDER_MODES.FULL;
-      const isPrerenderAiMode = auditType === PRERENDER_AI;
+      const hasPrerenderMode = auditType === PRERENDER
+        && (prerenderMode === PRERENDER_MODES.ALL
+          || prerenderMode === PRERENDER_MODES.AI_ONLY);
       const isPrerenderCsvRun = hasValidBaseURL
-        && hasFiles
-        && (auditType === PRERENDER || isPrerenderAiMode);
+        && hasFiles && auditType === PRERENDER;
 
-      // mode:full or mode:ai-only without CSV → fetch URLs from suggestions
+      // mode:all or mode:ai-only without CSV → fetch URLs from suggestions
       const isSuggestionRun = hasValidBaseURL
-        && !hasFiles
-        && (isPrerenderMode || isPrerenderAiMode);
+        && !hasFiles && hasPrerenderMode;
 
       if (hasValidBaseURL && hasFiles && !isPrerenderCsvRun) {
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
@@ -385,7 +379,7 @@ function RunAuditCommand(context) {
 
       if (isSuggestionRun) {
         const modeLabel = prerenderMode === PRERENDER_MODES.AI_ONLY
-          ? 'AI-only' : 'full';
+          ? 'AI-only' : 'all';
         await say(`:hourglass_flowing_sand: Fetching ${modeLabel}`
           + ` prerender suggestions for ${baseURL}…`);
 
@@ -406,24 +400,23 @@ function RunAuditCommand(context) {
           return;
         }
 
-        await say(`:adobe-run: Triggering ${auditType} audit`
+        const mode = prerenderMode === PRERENDER_MODES.AI_ONLY
+          ? PRERENDER_MODES.AI_ONLY : undefined;
+        await say(`:adobe-run: Triggering ${PRERENDER} audit`
           + ` for ${baseURL} with ${urls.length} URLs`
           + ` (${modeLabel} mode).`);
-        await runPrerenderAuditForUrls(
-          baseURL,
-          auditType,
-          auditDataInputArg,
-          urls,
-          slackContext,
-        );
+        await runPrerenderAuditForUrls(baseURL, auditDataInputArg, urls, slackContext, mode);
       } else if (isPrerenderCsvRun) {
         const urls = await parsePrerenderUrlsFromCsv(files, botToken, say);
         if (!urls) {
           return;
         }
 
-        await say(`:adobe-run: Triggering ${auditType} audit for site ${baseURL} with ${urls.length} URLs.`);
-        await runPrerenderAuditForUrls(baseURL, auditType, auditDataInputArg, urls, slackContext);
+        const mode = prerenderMode === PRERENDER_MODES.AI_ONLY
+          ? PRERENDER_MODES.AI_ONLY : undefined;
+        await say(`:adobe-run: Triggering ${PRERENDER} audit`
+          + ` for site ${baseURL} with ${urls.length} URLs.`);
+        await runPrerenderAuditForUrls(baseURL, auditDataInputArg, urls, slackContext, mode);
       } else if (hasFiles) {
         const [, auditTypeInput, auditData] = ['', baseURLInputArg, auditTypeInputArg];
         const csvAuditType = auditTypeInput || LHS_MOBILE;
