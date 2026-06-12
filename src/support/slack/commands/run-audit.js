@@ -10,7 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-import { isNonEmptyArray, isNonEmptyObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import {
+  isNonEmptyArray,
+  isNonEmptyObject,
+  isValidUrl,
+} from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import BaseCommand from './base.js';
@@ -27,6 +31,13 @@ import { triggerAuditForSite } from '../../utils.js';
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
 const PRERENDER = 'prerender';
+const PRERENDER_BATCH_SIZE = 320;
+const PRERENDER_MODES = {
+  ALL: 'all',
+  AI_ONLY: 'ai-only',
+  AI_ONLY_CURRENT: 'ai-only-current',
+};
+const PRERENDER_SUGGESTION_STATUSES = ['NEW', 'FIXED'];
 const ALL_AUDITS = [
   'apex',
   'cwv',
@@ -96,13 +107,24 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. Use `product-metatags` for Product Detail Page (PDP) analysis of commerce sites.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed). CSV uploads are batched at 320 URLs.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [key:value ...]`,
+    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only|ai-only-current] [key:value ...]`,
   });
 
   const { dataAccess, log } = context;
-  const { Configuration, Site } = dataAccess;
+  const { Configuration, Site, Opportunity } = dataAccess;
+
+  const buildEffectiveData = (baseData, mode) => {
+    if (mode !== PRERENDER_MODES.AI_ONLY
+      && mode !== PRERENDER_MODES.AI_ONLY_CURRENT) {
+      return baseData;
+    }
+    return JSON.stringify({
+      ...(baseData ? JSON.parse(baseData) : {}),
+      mode: PRERENDER_MODES.AI_ONLY,
+    });
+  };
 
   const parsePrerenderUrlsFromCsv = async (files, botToken, say) => {
     if (files.length > 1) {
@@ -127,6 +149,73 @@ function RunAuditCommand(context) {
     }
 
     return urls;
+  };
+
+  /**
+   * Fetches unique URLs from prerender suggestions with NEW or FIXED status.
+   * @param {string} siteId - The site ID.
+   * @returns {Promise<string[]>} Deduplicated URLs.
+   */
+  const fetchPrerenderSuggestionUrls = async (siteId) => {
+    const opportunities = await Opportunity.allBySiteId(siteId);
+    const prerenderOpps = opportunities.filter(
+      (opp) => opp.getType() === PRERENDER,
+    );
+
+    const urls = new Set();
+    for (const opp of prerenderOpps) {
+      // eslint-disable-next-line no-await-in-loop
+      const suggestions = await opp.getSuggestions();
+      suggestions
+        .filter((s) => PRERENDER_SUGGESTION_STATUSES
+          .includes(s.getStatus()))
+        .forEach((s) => {
+          const url = s.getData()?.url;
+          if (url && isValidUrl(url) && !url.includes('*')) {
+            urls.add(url);
+          }
+        });
+    }
+
+    return [...urls];
+  };
+
+  /**
+   * Fetches unique URLs from prerender suggestions matching the "current" tab:
+   * status NEW, not coveredByDomainWide, not edgeDeployed, not coveredByPattern.
+   * @param {string} siteId - The site ID.
+   * @returns {Promise<string[]>} Deduplicated URLs.
+   */
+  const fetchCurrentPrerenderSuggestionUrls = async (siteId) => {
+    const opportunities = await Opportunity.allBySiteId(siteId);
+    const prerenderOpps = opportunities.filter(
+      (opp) => opp.getType() === PRERENDER,
+    );
+
+    const urls = new Set();
+    for (const opp of prerenderOpps) {
+      // eslint-disable-next-line no-await-in-loop
+      const suggestions = await opp.getSuggestions();
+      suggestions
+        .filter((s) => {
+          if (s.getStatus() !== 'NEW') {
+            return false;
+          }
+          const d = s.getData();
+          if (!d?.url || d.url.includes('*')) {
+            return false;
+          }
+          if (d.coveredByDomainWide || d.edgeDeployed || d.coveredByPattern) {
+            return false;
+          }
+          return isValidUrl(d.url);
+        })
+        .forEach((s) => {
+          urls.add(s.getData().url);
+        });
+    }
+
+    return [...urls];
   };
 
   /**
@@ -239,8 +328,30 @@ function RunAuditCommand(context) {
         return;
       }
 
-      await triggerAuditForSite(site, auditType, auditData, slackContext, context, { urls });
-      await say(`:white_check_mark: ${auditType} audit queued for ${urls.length} URLs.`);
+      const batchCount = Math.ceil(
+        urls.length / PRERENDER_BATCH_SIZE,
+      );
+
+      for (let i = 0; i < batchCount; i += 1) {
+        const start = i * PRERENDER_BATCH_SIZE;
+        const batch = urls.slice(start, start + PRERENDER_BATCH_SIZE);
+        // eslint-disable-next-line no-await-in-loop
+        await triggerAuditForSite(
+          site,
+          auditType,
+          auditData,
+          slackContext,
+          context,
+          { urls: batch },
+        );
+
+        const batchLabel = batchCount > 1
+          ? ` (batch ${i + 1}/${batchCount})`
+          : '';
+        // eslint-disable-next-line no-await-in-loop
+        await say(`:white_check_mark: ${auditType} audit queued`
+          + ` for ${batch.length} URLs${batchLabel}.`);
+      }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
       await postErrorMessage(say, error);
@@ -275,9 +386,10 @@ function RunAuditCommand(context) {
         [baseURLInputArg] = positionalArgs;
         auditTypeInputArg = keywords.audit;
 
-        // Build audit data from remaining keywords (excluding 'audit')
+        // Build audit data from remaining keywords (excluding 'audit' and 'mode')
         const auditDataKeywords = { ...keywords };
         delete auditDataKeywords.audit;
+        delete auditDataKeywords.mode;
 
         auditDataInputArg = Object.keys(auditDataKeywords).length > 0
           ? JSON.stringify(auditDataKeywords)
@@ -299,21 +411,70 @@ function RunAuditCommand(context) {
       }
 
       const auditType = auditTypeInputArg || LHS_MOBILE;
-      const isPrerenderCsvRun = hasValidBaseURL && hasFiles && auditType === PRERENDER;
+      const prerenderMode = keywords.mode;
+
+      const hasPrerenderMode = auditType === PRERENDER
+        && (prerenderMode === PRERENDER_MODES.ALL
+          || prerenderMode === PRERENDER_MODES.AI_ONLY
+          || prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT);
+      const isPrerenderCsvRun = hasValidBaseURL
+        && hasFiles && auditType === PRERENDER;
+
+      // mode:all or mode:ai-only without CSV → fetch URLs from suggestions
+      const isSuggestionRun = hasValidBaseURL
+        && !hasFiles && hasPrerenderMode;
 
       if (hasValidBaseURL && hasFiles && !isPrerenderCsvRun) {
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
         return;
       }
 
-      if (isPrerenderCsvRun) {
+      if (isSuggestionRun) {
+        const MODE_LABELS = {
+          [PRERENDER_MODES.ALL]: 'all',
+          [PRERENDER_MODES.AI_ONLY]: 'AI-only',
+          [PRERENDER_MODES.AI_ONLY_CURRENT]: 'AI-only-current',
+        };
+        const modeLabel = MODE_LABELS[prerenderMode];
+        await say(`:hourglass_flowing_sand: Fetching ${modeLabel}`
+          + ` prerender suggestions for ${baseURL}…`);
+
+        const site = await Site.findByBaseURL(baseURL);
+        if (!isNonEmptyObject(site)) {
+          await postSiteNotFoundMessage(say, baseURL);
+          return;
+        }
+
+        const isCurrentMode = prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT;
+        const urls = isCurrentMode
+          ? await fetchCurrentPrerenderSuggestionUrls(site.getId())
+          : await fetchPrerenderSuggestionUrls(site.getId());
+
+        if (urls.length === 0) {
+          const hint = isCurrentMode
+            ? 'matching current-tab filters'
+            : 'with status NEW or FIXED';
+          await say(':white_check_mark: No active suggestions'
+            + ` ${hint} for *${baseURL}*`
+            + ' — nothing to audit.');
+          return;
+        }
+
+        const effectiveData = buildEffectiveData(auditDataInputArg, prerenderMode);
+        await say(`:adobe-run: Triggering ${PRERENDER} audit`
+          + ` for ${baseURL} with ${urls.length} URLs`
+          + ` (${modeLabel} mode).`);
+        await runPrerenderAuditForUrls(baseURL, PRERENDER, effectiveData, urls, slackContext);
+      } else if (isPrerenderCsvRun) {
         const urls = await parsePrerenderUrlsFromCsv(files, botToken, say);
         if (!urls) {
           return;
         }
 
-        await say(`:adobe-run: Triggering ${auditType} audit for site ${baseURL} with ${urls.length} URLs.`);
-        await runPrerenderAuditForUrls(baseURL, auditType, auditDataInputArg, urls, slackContext);
+        const effectiveData = buildEffectiveData(auditDataInputArg, prerenderMode);
+        await say(`:adobe-run: Triggering ${PRERENDER} audit`
+          + ` for site ${baseURL} with ${urls.length} URLs.`);
+        await runPrerenderAuditForUrls(baseURL, PRERENDER, effectiveData, urls, slackContext);
       } else if (hasFiles) {
         const [, auditTypeInput, auditData] = ['', baseURLInputArg, auditTypeInputArg];
         const csvAuditType = auditTypeInput || LHS_MOBILE;
