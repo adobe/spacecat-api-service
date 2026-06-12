@@ -278,7 +278,11 @@ function RunAuditCommand(context) {
       const batchCount = Math.ceil(
         urls.length / PRERENDER_BATCH_SIZE,
       );
-      const auditContext = { ...(mode ? { mode } : {}) };
+      // Pass mode in the data field (SQS message.data) so the worker
+      // can read it via getModeFromData(data). URLs go in auditContext.
+      const effectiveData = mode
+        ? JSON.stringify({ ...(auditData ? JSON.parse(auditData) : {}), mode })
+        : auditData;
 
       for (let i = 0; i < batchCount; i += 1) {
         const start = i * PRERENDER_BATCH_SIZE;
@@ -287,10 +291,10 @@ function RunAuditCommand(context) {
         await triggerAuditForSite(
           site,
           PRERENDER,
-          auditData,
+          effectiveData,
           slackContext,
           context,
-          { ...auditContext, urls: batch },
+          { urls: batch },
         );
 
         const batchLabel = batchCount > 1

@@ -764,7 +764,7 @@ describe('RunAuditCommand', () => {
       expect(mode).to.be.undefined;
     });
 
-    it('mode:ai-only fetches suggestions and passes mode in auditContext', async () => {
+    it('mode:ai-only fetches suggestions and passes mode in data field', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
           makeSuggestion('https://site.com/page-1', 'NEW'),
@@ -777,7 +777,9 @@ describe('RunAuditCommand', () => {
 
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
       expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
-      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.equal('ai-only');
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only');
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.be.undefined;
     });
 
     it('deduplicates URLs across multiple prerender opportunities', async () => {
@@ -855,7 +857,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say).to.have.been.calledWith(':x: No site found with base URL \'https://unknownsite.com\'.');
     });
 
-    it('does not include mode in audit data payload', async () => {
+    it('merges mode into data field alongside other keyword args', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
           makeSuggestion('https://site.com/page-1', 'NEW'),
@@ -865,10 +867,9 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only', 'source:test'], slackContext);
 
-      const auditData = sqsStub.sendMessage.firstCall.args[1].data;
-      const parsedData = JSON.parse(auditData);
-      expect(parsedData).to.deep.equal({ source: 'test' });
-      expect(parsedData).to.not.have.property('mode');
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only');
+      expect(msgData.source).to.equal('test');
     });
 
     it('runs normal prerender when no mode is provided', async () => {
@@ -880,7 +881,7 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
     });
 
-    it('CSV with mode:ai-only passes mode in auditContext', async () => {
+    it('CSV with mode:ai-only passes mode in data field', async () => {
       slackContext.files = [
         {
           name: 'urls.csv',
@@ -896,10 +897,12 @@ describe('RunAuditCommand', () => {
 
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
       expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
-      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.equal('ai-only');
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only');
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.be.undefined;
     });
 
-    it('CSV without mode does not include mode in auditContext', async () => {
+    it('CSV without mode does not include mode in data', async () => {
       slackContext.files = [
         {
           name: 'urls.csv',
@@ -914,7 +917,7 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['site.com', 'audit:prerender'], slackContext);
 
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.be.undefined;
+      expect(sqsStub.sendMessage.firstCall.args[1].data).to.be.undefined;
     });
 
     it('sends batch-wise Slack messages for suggestion-based mode', async () => {
