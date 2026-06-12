@@ -38,6 +38,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { SiteDto } from '../dto/site.js';
+import { SiteIdentityDto } from '../dto/site-identity.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
@@ -645,6 +646,60 @@ function SitesController(ctx, log, env) {
     return ok(SiteDto.toJSON(site));
   };
 
+  /**
+   * Gets the minimal routing identity for a single site: its id, owning org ids
+   * (internal `organizationId` + `imsOrgId`), baseURL, and deliveryType.
+   *
+   * This is a readAll-class route, not a tenant-scoped one. It exists so a platform
+   * S2S consumer that only holds a site UUID can resolve the site's `imsOrgId` and mint
+   * a customer-scoped token - the `site -> organization` join it cannot perform without
+   * already being scoped. Access mirrors `GET /sites` (admin bypass + `site:readAll`),
+   * NOT `hasAccess(site)`. It exposes strictly less than the bulk `GET /sites` a
+   * `site:readAll` holder can already enumerate. See `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Site identity response.
+   */
+  const getIdentity = async (context) => {
+    const requestId = context?.invocation?.id || 'unknown';
+    // Read-only admin and full admin both bypass the S2S capability check;
+    // S2S consumers must hold site:readAll. See READALL_CAPABILITY_DESIGN.md.
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied GET /sites/:siteId/identity - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Forbidden: admin access or site:readAll capability required');
+    }
+
+    const siteId = context.params?.siteId;
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    // Resolve imsOrgId via the site -> organization join (the entire value-add of this
+    // route). A site without an organization, an orphaned organizationId, or an org
+    // without an imsOrgId all yield imsOrgId: null with a 200 - the site identity still
+    // exists; it is up to the consumer to treat null as "cannot scope".
+    const organizationId = site.getOrganizationId();
+    const organization = organizationId ? await Organization.findById(organizationId) : null;
+    const imsOrgId = organization ? organization.getImsOrgId() : null;
+
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /sites/:siteId/identity granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} siteId=${siteId} requestId=${requestId}`);
+    } else if (isAdmin) {
+      // This is a cross-tenant readAll-class route; log admin access for auditability too.
+      log.info(`[acl] GET /sites/:siteId/identity granted via admin bypass siteId=${siteId} requestId=${requestId}`);
+    }
+
+    return ok(SiteIdentityDto.toJSON(site, imsOrgId));
+  };
+
   const getBrandProfile = async (context) => {
     const siteId = context.params?.siteId;
 
@@ -786,6 +841,16 @@ function SitesController(ctx, log, env) {
       return forbidden('Updating organization ID is not allowed');
     }
 
+    // A projectId references a project record that is itself scoped to an
+    // organizationId. Allowing ad-hoc projectId patches here lets a site point
+    // at a project in a different org, which hides the site from the org's site
+    // picker (SITES-46200). Re-parenting must go through controlled flows
+    // (e.g. PATCH /projects/:projectId), so reject it here like organizationId.
+    if (hasText(requestBody.projectId)
+      && requestBody.projectId !== site.getProjectId()) {
+      return forbidden('Updating project ID is not allowed');
+    }
+
     if (requestBody.name !== site.getName()) {
       site.setName(requestBody.name);
       updates = true;
@@ -886,11 +951,6 @@ function SitesController(ctx, log, env) {
     }
 
     // Handle localization fields
-    if (requestBody.projectId !== site.getProjectId() && isValidUUID(requestBody.projectId)) {
-      site.setProjectId(requestBody.projectId);
-      updates = true;
-    }
-
     if (isBoolean(requestBody.isPrimaryLocale)
         && requestBody.isPrimaryLocale !== site.getIsPrimaryLocale()) {
       site.setIsPrimaryLocale(requestBody.isPrimaryLocale);
@@ -1720,6 +1780,7 @@ function SitesController(ctx, log, env) {
     getByBaseURL,
     getAllByDeliveryType,
     getByID,
+    getIdentity,
     removeSite,
     updateSite,
     updateCdnLogsConfig,

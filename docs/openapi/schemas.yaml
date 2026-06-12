@@ -704,6 +704,38 @@ Site:
         outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
+SiteIdentity:
+  type: object
+  description: |
+    The minimal routing identity for a single site, returned by
+    `GET /sites/{siteId}/identity`. Exposes only what a platform `site:readAll` consumer
+    needs to resolve a site's owning organization and mint a customer-scoped token.
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    organizationId:
+      description: The ID of the organization this site belongs to, or null if unresolved
+      oneOf:
+        - $ref: '#/Id'
+        - type: 'null'
+    imsOrgId:
+      description: The Adobe IMS organization ID of the owning organization, or null if unresolved
+      oneOf:
+        - $ref: '#/ImsOrganizationId'
+        - type: 'null'
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+    deliveryType:
+      description: The type of the delivery this site is using
+      $ref: '#/DeliveryType'
+  example:
+    siteId: '7511d4b9-1234-4abc-8def-0123456789ab'
+    organizationId: '160da889-5678-4cde-9f01-23456789abcd'
+    imsOrgId: '8C6043F15F43B6390A49401A@AdobeOrg'
+    baseURL: 'https://example.com'
+    deliveryType: 'aem_edge'
 SiteWithLatestAudit:
   allOf:
     - $ref: '#/Site'
@@ -6246,7 +6278,8 @@ V2Prompt:
       description: Regions where this prompt is applicable
     categoryId:
       type: string
-      description: Category business key
+      format: uuid
+      description: Category UUID (categories.id)
     topicId:
       type: string
       description: Topic business key
@@ -6293,14 +6326,17 @@ V2Prompt:
       properties:
         id:
           type: string
+          format: uuid
           description: |
-            Currently the UUID PK (categories.id) for backward compat —
-            aligning this to the category_id business key is a deferred
-            breaking change. Use `uuid` for FK linkage today.
+            UUID primary key (categories.id). The sole category identifier
+            (the legacy category_id business key was retired — LLMO-5515).
+            `id` and `uuid` carry the same value; either works for FK linkage.
         uuid:
           type: string
           format: uuid
-          description: UUID primary key (categories.id)
+          description: |
+            UUID primary key (categories.id). Alias of `id`, kept for
+            backward compatibility.
         name:
           type: string
         origin:
@@ -7493,12 +7529,16 @@ V2Category:
   properties:
     id:
       type: string
-      description: Category business key (category_id slug). Stable once assigned.
-      example: 'baseurl-discovery-research'
+      format: uuid
+      description: |
+        UUID primary key (categories.id) — the sole category identifier.
+        Use this value on the CRUD path params and the `?categoryId=` prompt
+        filter. The legacy category_id business key was retired (LLMO-5515).
+      example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
     uuid:
       type: string
       format: uuid
-      description: UUID primary key (categories.id)
+      description: UUID primary key (categories.id). Alias of `id`.
     name:
       type: string
       description: |
@@ -7541,12 +7581,6 @@ V2CategoryInput:
   required:
     - name
   properties:
-    id:
-      type: string
-      description: |
-        Client-supplied slug. Used only when inserting a brand-new row; for
-        existing rows the stored `id` is preserved (FK stability).
-      example: 'discovery-research'
     name:
       type: string
       description: Human-readable category name. Canonicalized on write.
@@ -10603,3 +10637,491 @@ UserCapabilitiesResponse:
         items:
           type: string
           enum: [jwt, 'state:user', 'state:org']
+# ── Referral Traffic PG schemas ───────────────────────────────────────────────
+
+ReferralTrafficSource:
+  type: string
+  enum: [optel, cdn, adobe_analytics, ga4, cja]
+  default: optel
+  description: "Referral traffic data source. Unrecognised values are silently coerced to `optel` (the default) — the server does not reject out-of-enum values."
+
+ReferralTrafficBusinessImpactSource:
+  type: string
+  enum: [adobe_analytics, ga4, cja]
+  default: adobe_analytics
+  description: "Business-impact data source. Unlike the generic referral-traffic endpoints, an unrecognised or non-business-impact source (optel/cdn) returns HTTP 400."
+
+ReferralTrafficHasData:
+  type: object
+  description: Whether the site has referral traffic data and which sources are available
+  properties:
+    hasData:
+      type: boolean
+      example: true
+    availableSources:
+      type: array
+      description: Available sources in priority order; items are `optel` or `cdn` only (optel first)
+      items:
+        type: string
+        enum: [optel, cdn]
+      example: ['optel', 'cdn']
+  required:
+    - hasData
+    - availableSources
+
+ReferralTrafficFilterDimensions:
+  type: object
+  description: Distinct referral traffic filter values for the selected site and date range
+  properties:
+    platforms:
+      type: array
+      items:
+        type: string
+      example: ['ChatGPT', 'Perplexity']
+    regions:
+      type: array
+      items:
+        type: string
+      example: ['US', 'DE']
+    devices:
+      type: array
+      items:
+        type: string
+      example: ['desktop', 'mobile']
+    pageIntents:
+      type: array
+      items:
+        type: string
+      example: ['informational', 'transactional']
+    availableSources:
+      type: array
+      items:
+        type: string
+      example: ['optel', 'cdn']
+  required:
+    - platforms
+    - regions
+    - devices
+    - pageIntents
+    - availableSources
+
+ReferralTrafficKpis:
+  type: object
+  description: Aggregated KPI metrics for a site's referral traffic
+  properties:
+    totalPageviews:
+      type: number
+      example: 12450
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for cdn / adobe_analytics / cja; meaningful for optel / ga4
+      example: 42.1
+    consentRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for cdn / adobe_analytics / cja; meaningful for optel / ga4
+      example: 88.0
+  required:
+    - totalPageviews
+    - bounceRate
+    - consentRate
+
+ReferralTrafficTrendRow:
+  type: object
+  description: Referral traffic metrics for a single day
+  properties:
+    date:
+      type: string
+      format: date
+      example: '2026-03-02'
+    pageviews:
+      type: number
+      example: 600
+    entries:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 540
+    revenue:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Non-null only for adobe_analytics / ga4 / cja sources
+      example: 1250.5
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 41.0
+    consentRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 87.0
+    avgSessionDuration:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 132.4
+    pagesPerVisit:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 2.3
+    orders:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Non-null only for adobe_analytics / ga4 / cja sources
+      example: 18
+    conversionRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Non-null only for adobe_analytics / ga4 / cja sources
+      example: 3.1
+  required:
+    - date
+    - pageviews
+
+ReferralTrafficTrend:
+  type: object
+  description: Referral traffic KPI time series ordered by date ascending
+  properties:
+    trend:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficTrendRow'
+  required:
+    - trend
+
+ReferralTrafficByPlatformRow:
+  type: object
+  properties:
+    platform:
+      type: string
+      example: 'ChatGPT'
+    pageviews:
+      type: number
+      example: 4200
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 39.5
+    channels:
+      type: array
+      items:
+        type: string
+      example: ['referral', 'organic']
+    visits:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 3800
+    avgTimeOnSite:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 142.0
+    revenue:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 980.0
+    visitors:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 3100
+    orders:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 12
+  required:
+    - platform
+    - pageviews
+    - channels
+
+ReferralTrafficByPlatform:
+  type: object
+  description: Referral traffic grouped by platform, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByPlatformRow'
+  required:
+    - rows
+
+ReferralTrafficByRegionRow:
+  type: object
+  properties:
+    region:
+      type: string
+      example: 'US'
+    pageviews:
+      type: number
+      example: 3200
+  required:
+    - region
+    - pageviews
+
+ReferralTrafficByRegion:
+  type: object
+  description: Referral traffic grouped by region, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByRegionRow'
+  required:
+    - rows
+
+ReferralTrafficByPageIntentRow:
+  type: object
+  properties:
+    pageIntent:
+      type: string
+      example: 'informational'
+    pageviews:
+      type: number
+      example: 2100
+  required:
+    - pageIntent
+    - pageviews
+
+ReferralTrafficByPageIntent:
+  type: object
+  description: Referral traffic grouped by page intent, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByPageIntentRow'
+  required:
+    - rows
+
+ReferralTrafficByUrlRow:
+  type: object
+  properties:
+    urlPath:
+      type: string
+      example: '/blog/my-post'
+    host:
+      type: string
+      example: 'www.adobe.com'
+    pageviews:
+      type: number
+      example: 1500
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 38.0
+    consentRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 86.0
+    pageIntent:
+      oneOf:
+        - type: string
+        - type: 'null'
+      example: 'informational'
+    entries:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 1320
+    exits:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 980
+    avgTimeOnSite:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 128.5
+    revenue:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 540.0
+  required:
+    - urlPath
+    - host
+    - pageviews
+
+ReferralTrafficByUrl:
+  type: object
+  description: Paginated per-URL referral traffic performance analysis
+  properties:
+    totalCount:
+      type: number
+      description: Total number of URLs matching the filters (across all pages)
+      example: 1240
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByUrlRow'
+      description: URLs for the requested page
+  required:
+    - totalCount
+    - rows
+
+ReferralTrafficUrlTrendRow:
+  type: object
+  properties:
+    weekStart:
+      type: string
+      format: date
+      example: '2026-03-02'
+    pageviews:
+      type: number
+      example: 320
+  required:
+    - weekStart
+    - pageviews
+
+ReferralTrafficUrlTrend:
+  type: object
+  description: Weekly pageview trend for a single URL
+  properties:
+    trend:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficUrlTrendRow'
+  required:
+    - trend
+
+ReferralTrafficByDeviceRow:
+  type: object
+  properties:
+    device:
+      type: string
+      example: 'desktop'
+    pageviews:
+      type: number
+      example: 5400
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for cdn / adobe_analytics / cja sources
+      example: 40.0
+  required:
+    - device
+    - pageviews
+
+ReferralTrafficByDevice:
+  type: object
+  description: Referral traffic grouped by device, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByDeviceRow'
+  required:
+    - rows
+
+ReferralTrafficBusinessImpact:
+  type: object
+  description: Aggregated business impact metrics; only available for adobe_analytics / ga4 / cja sources
+  properties:
+    source:
+      type: string
+      enum: [adobe_analytics, ga4, cja]
+      example: 'adobe_analytics'
+    totalPageviews:
+      type: number
+      example: 12450
+    metrics:
+      type: object
+      properties:
+        visits:
+          type: number
+          example: 9800
+        bounceRate:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 41.0
+        entries:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 8900
+        avgSessionDuration:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 135.0
+        pagesPerVisit:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 2.4
+        conversionRate:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 3.0
+        orders:
+          type: number
+          example: 120
+        revenue:
+          type: number
+          example: 15400.0
+      required:
+        - visits
+        - orders
+        - revenue
+  required:
+    - source
+    - totalPageviews
+    - metrics
+
+ReferralTrafficWeekEntry:
+  type: object
+  description: An ISO week for which the site has referral traffic data
+  properties:
+    week:
+      type: string
+      description: ISO week label (YYYY-WNN)
+      example: '2026-W10'
+    startDate:
+      oneOf:
+        - type: string
+          format: date
+        - type: 'null'
+      example: '2026-03-02'
+    endDate:
+      oneOf:
+        - type: string
+          format: date
+        - type: 'null'
+      example: '2026-03-08'
+  required:
+    - week
+
+ReferralTrafficWeeks:
+  type: object
+  description: Available ISO weeks for the site's referral traffic data
+  properties:
+    weeks:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficWeekEntry'
+  required:
+    - weeks

@@ -124,7 +124,7 @@ export default (context) => {
         ? auditTypeOrProfileInput.toLowerCase() : null;
 
       if (isEnableAudit) {
-        await say(`${ERROR_MESSAGE_PREFIX}The \`audit enable\` command is deprecated. Use one-off \`run audit\` from Slack without enabling the site. To disable audits, use \`audit disable\`.`);
+        await say(`${ERROR_MESSAGE_PREFIX}The \`audit enable\` command is deprecated. Use one-off \`run audit\` from Slack without enabling the site. To enable Preflight, use \`ensure preflight <site>\`. To disable audits, use \`audit disable\`.`);
         return;
       }
 
