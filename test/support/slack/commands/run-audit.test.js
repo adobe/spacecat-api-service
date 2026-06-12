@@ -83,7 +83,7 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
-      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. Use `product-metatags` for Product Detail Page (PDP) analysis of commerce sites.');
+      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. Use `product-metatags` for Product Detail Page (PDP) analysis of commerce sites. For prerender audits, use `mode:ai-only` to run AI-only content generation without a full scrape.');
     });
   });
 
@@ -694,6 +694,63 @@ describe('RunAuditCommand', () => {
         'date-start': '2025-09-07',
         source: 'test-source',
       });
+    });
+  });
+
+  describe('Prerender AI-Only Mode', () => {
+    beforeEach(() => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'siteId' });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock(['prerender', 'prerender-ai'], ['LLMO']));
+    });
+
+    it('switches audit type to prerender-ai when mode:ai-only is provided', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:prerender', 'mode:ai-only'], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering prerender-ai audit for https://validsite.com');
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender-ai' });
+    });
+
+    it('does not include mode in audit data when mode:ai-only is consumed', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:prerender', 'mode:ai-only', 'source:test'], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering prerender-ai audit for https://validsite.com');
+      const auditData = sqsStub.sendMessage.firstCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.equal({ source: 'test' });
+      expect(parsedData).to.not.have.property('mode');
+    });
+
+    it('keeps audit type as prerender when no mode is provided', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:prerender'], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering prerender audit for https://validsite.com');
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
+    });
+
+    it('allows prerender-ai CSV run with mode:ai-only and attached file', async () => {
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1\nhttps://valid.site/page-2');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only'], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering prerender-ai audit for site https://site.com with 2 URLs.');
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender-ai' });
     });
   });
 

@@ -27,6 +27,7 @@ import { triggerAuditForSite } from '../../utils.js';
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
 const PRERENDER = 'prerender';
+const PRERENDER_AI = 'prerender-ai';
 const ALL_AUDITS = [
   'apex',
   'cwv',
@@ -96,9 +97,9 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. Use `product-metatags` for Product Detail Page (PDP) analysis of commerce sites.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. Use `product-metatags` for Product Detail Page (PDP) analysis of commerce sites. For prerender audits, use `mode:ai-only` to run AI-only content generation without a full scrape.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [key:value ...]`,
+    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:ai-only] [key:value ...]`,
   });
 
   const { dataAccess, log } = context;
@@ -275,9 +276,10 @@ function RunAuditCommand(context) {
         [baseURLInputArg] = positionalArgs;
         auditTypeInputArg = keywords.audit;
 
-        // Build audit data from remaining keywords (excluding 'audit')
+        // Build audit data from remaining keywords (excluding 'audit' and 'mode')
         const auditDataKeywords = { ...keywords };
         delete auditDataKeywords.audit;
+        delete auditDataKeywords.mode;
 
         auditDataInputArg = Object.keys(auditDataKeywords).length > 0
           ? JSON.stringify(auditDataKeywords)
@@ -298,8 +300,16 @@ function RunAuditCommand(context) {
         return;
       }
 
-      const auditType = auditTypeInputArg || LHS_MOBILE;
-      const isPrerenderCsvRun = hasValidBaseURL && hasFiles && auditType === PRERENDER;
+      let auditType = auditTypeInputArg || LHS_MOBILE;
+
+      // Resolve prerender mode: mode:ai-only switches audit type to prerender-ai
+      if (auditType === PRERENDER && keywords.mode === 'ai-only') {
+        auditType = PRERENDER_AI;
+      }
+
+      const isPrerenderCsvRun = hasValidBaseURL
+        && hasFiles
+        && (auditType === PRERENDER || auditType === PRERENDER_AI);
 
       if (hasValidBaseURL && hasFiles && !isPrerenderCsvRun) {
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
