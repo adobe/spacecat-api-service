@@ -1,3 +1,43 @@
+# [1.570.0](https://github.com/adobe/spacecat-api-service/compare/v1.569.0...v1.570.0) (2026-06-12)
+
+
+### Bug Fixes
+
+* **consent-banner:** gate POST /consent-banner on scrapeJob:write ([#2597](https://github.com/adobe/spacecat-api-service/issues/2597)) ([8e559e4](https://github.com/adobe/spacecat-api-service/commit/8e559e4b212a57834abaf8d077a04d991fb272a4))
+
+
+### Features
+
+* expose GET /sites/:siteId/agentic-traffic/has-data to S2S consumers ([#2596](https://github.com/adobe/spacecat-api-service/issues/2596)) ([88d8bc8](https://github.com/adobe/spacecat-api-service/commit/88d8bc805715d3aac36dbc9789655d4136bdaebb))
+
+# [1.569.0](https://github.com/adobe/spacecat-api-service/compare/v1.568.1...v1.569.0) (2026-06-11)
+
+
+### Features
+
+* add CJA referral traffic source and document referral-traffic API ([#2592](https://github.com/adobe/spacecat-api-service/issues/2592)) ([0437b76](https://github.com/adobe/spacecat-api-service/commit/0437b766b0be48b64676a87fa368ab9a76463cf9))
+
+## [1.568.1](https://github.com/adobe/spacecat-api-service/compare/v1.568.0...v1.568.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* update plg onboarding existing delivery type ([#2526](https://github.com/adobe/spacecat-api-service/issues/2526)) ([b1b90ac](https://github.com/adobe/spacecat-api-service/commit/b1b90ac6143403cafe480f1a4096b4992bd6cfc9))
+
+# [1.568.0](https://github.com/adobe/spacecat-api-service/compare/v1.567.0...v1.568.0) (2026-06-11)
+
+
+### Features
+
+* expose GET /organizations/:organizationId/trial-users to S2S consumers via trialUser:read capability ([#2589](https://github.com/adobe/spacecat-api-service/issues/2589)) ([27b443b](https://github.com/adobe/spacecat-api-service/commit/27b443b811c4b16662e28257bde146aa651aec1c))
+
+# [1.567.0](https://github.com/adobe/spacecat-api-service/compare/v1.566.2...v1.567.0) (2026-06-10)
+
+
+### Features
+
+* **rum:** align updateRumConfig with rumConfigRefresh candidate fallback logic ([#2549](https://github.com/adobe/spacecat-api-service/issues/2549)) ([4673670](https://github.com/adobe/spacecat-api-service/commit/467367025c366bd8e51c67588521e457d17cb518))
+
 ## [1.566.2](https://github.com/adobe/spacecat-api-service/compare/v1.566.1...v1.566.2) (2026-06-10)
 
 

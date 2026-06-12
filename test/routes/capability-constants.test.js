@@ -88,6 +88,7 @@ describe('capability-constants drift coverage', () => {
       join(projectRoot, 'src/controllers/organizations.js'),
       join(projectRoot, 'src/controllers/suggestions.js'),
       join(projectRoot, 'src/controllers/configuration.js'),
+      join(projectRoot, 'src/controllers/trial-users.js'),
     ];
     const controllerSource = controllerFiles
       .map((file) => readFileSync(file, 'utf8'))

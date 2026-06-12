@@ -18,6 +18,7 @@ import {
   CAP_SITE_CREATE,
   CAP_SITE_READ_ALL,
   CAP_SUGGESTION_WRITE,
+  CAP_TRIAL_USER_READ,
 } from './capability-constants.js';
 
 /**
@@ -99,7 +100,6 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/filter-dimensions',
   'GET /sites/:siteId/agentic-traffic/weeks',
   'GET /sites/:siteId/agentic-traffic/movers',
-  'GET /sites/:siteId/agentic-traffic/has-data',
   'POST /sites/:siteId/agentic-traffic/urls/export',
   'GET /sites/:siteId/agentic-traffic/urls/export/:exportId',
 
@@ -138,9 +138,8 @@ export const INTERNAL_ROUTES = [
   'PATCH /plg/records/:plgOnboardingId',
   'DELETE /plg/records/:plgOnboardingId',
 
-  // Tier-specific - user activities (POST only), trial users, user details: end-user/admin flows
+  // Tier-specific - user activities (POST only), user details: end-user/admin flows
   'POST /sites/:siteId/user-activities',
-  'GET /organizations/:organizationId/trial-users',
   'GET /admin/users/:userId',
   'GET /organizations/:organizationId/userDetails/:externalUserId',
   'POST /organizations/:organizationId/userDetails',
@@ -222,8 +221,10 @@ const routeRequiredCapabilities = {
   // Audits
   'GET /audits/latest/:auditType': 'audit:read',
 
-  // Consent Banner
-  'POST /consent-banner': 'organization:write',
+  // Consent Banner — POST is a screenshot *scrape* trigger, so it's gated like
+  // the sibling `/tools/scrape/jobs` POST (scrapeJob:write) rather than
+  // organization:write, letting S2S scrape consumers (e.g. Mystique) trigger it.
+  'POST /consent-banner': 'scrapeJob:write',
   'GET /consent-banner/:jobId': 'organization:read',
 
   // Configuration
@@ -368,6 +369,9 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/url-store': 'site:write',
   'PATCH /sites/:siteId/url-store': 'site:write',
   'POST /sites/:siteId/url-store/delete': 'site:write',
+
+  // Agentic traffic
+  'GET /sites/:siteId/agentic-traffic/has-data': 'site:read',
 
   // Agentic URL classification rules
   'GET /sites/:siteId/agentic-categories': 'site:read',
@@ -619,6 +623,9 @@ const routeRequiredCapabilities = {
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
+
+  // Trial Users
+  'GET /organizations/:organizationId/trial-users': CAP_TRIAL_USER_READ,
 
   // Entitlements
   'GET /organizations/:organizationId/entitlements': 'entitlement:read',
