@@ -230,10 +230,10 @@ async function getSpaceCatSessionToken(imsAccessToken, imsOrgId) {
 Use the session token for subsequent SpaceCat API calls:
 
 ```javascript
-// Example: Get all sites
-async function getSites(sessionToken) {
+// Example: Get a specific site by ID
+async function getSite(sessionToken, siteId) {
   const response = await axios.get(
-    'https://spacecat.experiencecloud.live/api/ci/sites',
+    `https://spacecat.experiencecloud.live/api/ci/sites/${siteId}`,
     {
       headers: {
         'Authorization': `Bearer ${sessionToken}`,
