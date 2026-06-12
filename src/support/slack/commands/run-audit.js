@@ -115,6 +115,17 @@ function RunAuditCommand(context) {
   const { dataAccess, log } = context;
   const { Configuration, Site, Opportunity } = dataAccess;
 
+  const buildEffectiveData = (baseData, mode) => {
+    if (mode !== PRERENDER_MODES.AI_ONLY
+      && mode !== PRERENDER_MODES.AI_ONLY_CURRENT) {
+      return baseData;
+    }
+    return JSON.stringify({
+      ...(baseData ? JSON.parse(baseData) : {}),
+      mode: PRERENDER_MODES.AI_ONLY,
+    });
+  };
+
   const parsePrerenderUrlsFromCsv = async (files, botToken, say) => {
     if (files.length > 1) {
       await say(':warning: Please provide only one CSV file.');
@@ -449,15 +460,7 @@ function RunAuditCommand(context) {
           return;
         }
 
-        // ai-only and ai-only-current both send mode:ai-only to the worker
-        const isAiOnly = prerenderMode === PRERENDER_MODES.AI_ONLY
-          || isCurrentMode;
-        const effectiveData = isAiOnly
-          ? JSON.stringify({
-            ...(auditDataInputArg ? JSON.parse(auditDataInputArg) : {}),
-            mode: PRERENDER_MODES.AI_ONLY,
-          })
-          : auditDataInputArg;
+        const effectiveData = buildEffectiveData(auditDataInputArg, prerenderMode);
         await say(`:adobe-run: Triggering ${PRERENDER} audit`
           + ` for ${baseURL} with ${urls.length} URLs`
           + ` (${modeLabel} mode).`);
@@ -468,14 +471,7 @@ function RunAuditCommand(context) {
           return;
         }
 
-        const csvIsAiOnly = prerenderMode === PRERENDER_MODES.AI_ONLY
-          || prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT;
-        const effectiveData = csvIsAiOnly
-          ? JSON.stringify({
-            ...(auditDataInputArg ? JSON.parse(auditDataInputArg) : {}),
-            mode: PRERENDER_MODES.AI_ONLY,
-          })
-          : auditDataInputArg;
+        const effectiveData = buildEffectiveData(auditDataInputArg, prerenderMode);
         await say(`:adobe-run: Triggering ${PRERENDER} audit`
           + ` for site ${baseURL} with ${urls.length} URLs.`);
         await runPrerenderAuditForUrls(baseURL, PRERENDER, effectiveData, urls, slackContext);

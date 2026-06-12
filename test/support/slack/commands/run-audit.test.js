@@ -957,6 +957,23 @@ describe('RunAuditCommand', () => {
       expect(msgData.mode).to.equal('ai-only');
     });
 
+    it('mode:ai-only-current filters out wildcard and null URLs', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/valid', 'NEW'),
+          makeSuggestion('https://site.com/wildcard/*', 'NEW'),
+          makeSuggestion(null, 'NEW'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-current'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.deep.equal(['https://site.com/valid']);
+    });
+
     it('mode:ai-only-current reports nothing when all suggestions are filtered out', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
