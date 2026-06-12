@@ -1,3 +1,10 @@
+## [1.571.1](https://github.com/adobe/spacecat-api-service/compare/v1.571.0...v1.571.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* edge-deploy API increase createschedule api timeout ([#2599](https://github.com/adobe/spacecat-api-service/issues/2599)) ([7edd7b6](https://github.com/adobe/spacecat-api-service/commit/7edd7b6aa205c42ece3909000fd66f053632c72c))
+
 # [1.571.0](https://github.com/adobe/spacecat-api-service/compare/v1.570.0...v1.571.0) (2026-06-12)
 
 
