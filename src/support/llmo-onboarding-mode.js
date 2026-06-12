@@ -61,7 +61,9 @@ export async function isSerenityOnboardingEnabled(organizationId, context) {
     const flag = await readSerenityFlagOverride(organizationId, postgrestClient);
     return flag === true;
   } catch (err) {
-    log?.warn?.(
+    // Use error for unexpected throws (e.g. programming errors, not just missing rows)
+    // so they surface in monitoring rather than silently disabling the cohort path.
+    log?.error?.(
       `Failed to read serenity flag for org ${organizationId}: ${err.message} `
       + '— treating as not in the cohort',
     );

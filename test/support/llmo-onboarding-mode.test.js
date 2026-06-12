@@ -726,7 +726,7 @@ describe('llmo-onboarding-mode', () => {
     it('returns false and logs when the DB read throws', async () => {
       const ctx = makeContext({ brandalfValue: 'throw' });
       expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.false;
-      expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to read serenity flag/);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/Failed to read serenity flag/);
     });
   });
 });

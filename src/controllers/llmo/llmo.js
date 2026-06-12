@@ -97,6 +97,66 @@ const { llmoConfig: llmoConfigSchema } = schemas;
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
 const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 const ISO_ALPHA2_UPPER_REGEX = /^[A-Z]{2}$/;
+
+// Best-effort primary language per ISO-3166-1 alpha-2 country code.
+// Used when synthesizing markets[] from a legacy `region` field.
+// Mirrors the client-side getLanguageForMarket — both are heuristics.
+// Multilingual markets (CH/BE/CA) get one language; callers that need
+// precision should use markets[] directly instead of the legacy region field.
+const REGION_PRIMARY_LANGUAGE = {
+  US: 'en',
+  GB: 'en',
+  CA: 'en',
+  AU: 'en',
+  IE: 'en',
+  NZ: 'en',
+  SG: 'en',
+  ZA: 'en',
+  NG: 'en',
+  PH: 'en',
+  IN: 'en',
+  DE: 'de',
+  AT: 'de',
+  CH: 'de',
+  FR: 'fr',
+  LU: 'fr',
+  IT: 'it',
+  ES: 'es',
+  MX: 'es',
+  AR: 'es',
+  CL: 'es',
+  CO: 'es',
+  PE: 'es',
+  PT: 'pt',
+  BR: 'pt',
+  NL: 'nl',
+  BE: 'nl',
+  SE: 'sv',
+  NO: 'no',
+  DK: 'da',
+  FI: 'fi',
+  JP: 'ja',
+  KR: 'ko',
+  CN: 'zh',
+  HK: 'zh',
+  TW: 'zh',
+  RU: 'ru',
+  TR: 'tr',
+  PL: 'pl',
+  CZ: 'cs',
+  HU: 'hu',
+  RO: 'ro',
+  GR: 'el',
+  EG: 'ar',
+  SA: 'ar',
+  AE: 'ar',
+  IL: 'he',
+  TH: 'th',
+  MY: 'ms',
+  ID: 'id',
+  VN: 'vi',
+};
+const DEFAULT_REGION_LANGUAGE = 'en';
 // Upper bound on markets[] (LLMO-5204). The fan-out is sequential — one upstream
 // create+publish+DB write per tuple on a single synchronous request — so an
 // unbounded array would blow the Lambda timeout. 50 covers adobe.com's ~19
@@ -1016,7 +1076,10 @@ function LlmoController(ctx) {
         }
       } else if (region !== undefined) {
         log.debug(`LLMO onboarding: markets absent, synthesizing from region "${region}" for domain ${domain}`);
-        resolvedMarkets = [{ market: region, languageCode: 'en' }];
+        resolvedMarkets = [{
+          market: region,
+          languageCode: REGION_PRIMARY_LANGUAGE[region] ?? DEFAULT_REGION_LANGUAGE,
+        }];
       }
 
       let imsOrgId;

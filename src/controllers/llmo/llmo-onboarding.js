@@ -1469,7 +1469,8 @@ export async function reconcileSerenityProjects(context, { brandId, fanOut }) {
     rowBySlice.set(key, row);
   });
   const failureByTuple = new Map();
-  fanOut.failed.forEach((f) => failureByTuple.set(`${f.market}::${f.languageCode}`, f));
+  // Normalize to lowercase so the key matches rowBySlice (which uses getLanguageCode() from DB).
+  fanOut.failed.forEach((f) => failureByTuple.set(`${f.market}::${String(f.languageCode).toLowerCase()}`, f));
 
   const succeeded = [];
   const failed = [];

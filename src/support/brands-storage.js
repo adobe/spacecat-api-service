@@ -25,7 +25,7 @@ const BRAND_SELECT = [
   'competitors(name, url, regions)',
   'brand_sites(site_id, paths, type, sites(base_url))',
   'brand_urls(url)',
-  'brand_to_semrush_projects(semrush_location_id, language)',
+  'brand_to_semrush_projects(semrush_location_id, language_code)',
 ].join(', ');
 
 /**
@@ -149,7 +149,7 @@ function mapDbBrandToV2(row) {
     markets: (row.brand_to_semrush_projects || []).reduce((acc, p) => {
       const market = marketFromGeoTargetId(p.semrush_location_id);
       if (market) {
-        acc.push({ market, language: p.language });
+        acc.push({ market, languageCode: p.language_code });
       }
       return acc;
     }, []),

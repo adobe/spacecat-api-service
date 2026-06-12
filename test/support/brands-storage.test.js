@@ -202,8 +202,8 @@ describe('brands-storage', () => {
     it('exposes provisioned Semrush markets on the brand (LLMO-5007)', async () => {
       const dbRow = makeBrandRow({
         brand_to_semrush_projects: [
-          { semrush_location_id: 2840, language: 'en' }, // US
-          { semrush_location_id: 2276, language: 'de' }, // DE
+          { semrush_location_id: 2840, language_code: 'en' }, // US
+          { semrush_location_id: 2276, language_code: 'de' }, // DE
         ],
       });
 
@@ -212,16 +212,16 @@ describe('brands-storage', () => {
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].markets).to.deep.equal([
-        { market: 'US', language: 'en' },
-        { market: 'DE', language: 'de' },
+        { market: 'US', languageCode: 'en' },
+        { market: 'DE', languageCode: 'de' },
       ]);
     });
 
     it('omits Semrush markets with unknown geoTargetId from the brand (LLMO-5007)', async () => {
       const dbRow = makeBrandRow({
         brand_to_semrush_projects: [
-          { semrush_location_id: 9999999, language: 'en' }, // unknown
-          { semrush_location_id: 2840, language: 'en' }, // US — known
+          { semrush_location_id: 9999999, language_code: 'en' }, // unknown
+          { semrush_location_id: 2840, language_code: 'en' }, // US — known
         ],
       });
 
@@ -230,7 +230,7 @@ describe('brands-storage', () => {
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].markets).to.deep.equal([
-        { market: 'US', language: 'en' },
+        { market: 'US', languageCode: 'en' },
       ]);
     });
 
