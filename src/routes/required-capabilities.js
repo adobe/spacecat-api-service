@@ -100,7 +100,6 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/filter-dimensions',
   'GET /sites/:siteId/agentic-traffic/weeks',
   'GET /sites/:siteId/agentic-traffic/movers',
-  'GET /sites/:siteId/agentic-traffic/has-data',
   'POST /sites/:siteId/agentic-traffic/urls/export',
   'GET /sites/:siteId/agentic-traffic/urls/export/:exportId',
 
@@ -368,6 +367,9 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/url-store': 'site:write',
   'PATCH /sites/:siteId/url-store': 'site:write',
   'POST /sites/:siteId/url-store/delete': 'site:write',
+
+  // Agentic traffic
+  'GET /sites/:siteId/agentic-traffic/has-data': 'site:read',
 
   // Agentic URL classification rules
   'GET /sites/:siteId/agentic-categories': 'site:read',
