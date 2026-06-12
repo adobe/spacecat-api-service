@@ -32,7 +32,11 @@ const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
 const PRERENDER = 'prerender';
 const PRERENDER_BATCH_SIZE = 320;
-const PRERENDER_MODES = { ALL: 'all', AI_ONLY: 'ai-only' };
+const PRERENDER_MODES = {
+  ALL: 'all',
+  AI_ONLY: 'ai-only',
+  AI_ONLY_CURRENT: 'ai-only-current',
+};
 const PRERENDER_SUGGESTION_STATUSES = ['NEW', 'FIXED'];
 const ALL_AUDITS = [
   'apex',
@@ -103,9 +107,9 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` fetches NEW/FIXED suggestions and runs a full prerender audit; `mode:ai-only` does the same but passes ai-only to the worker. CSV uploads are batched at 320 URLs.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed). CSV uploads are batched at 320 URLs.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only] [key:value ...]`,
+    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only|ai-only-current] [key:value ...]`,
   });
 
   const { dataAccess, log } = context;
@@ -159,6 +163,44 @@ function RunAuditCommand(context) {
           if (url && isValidUrl(url) && !url.includes('*')) {
             urls.add(url);
           }
+        });
+    }
+
+    return [...urls];
+  };
+
+  /**
+   * Fetches unique URLs from prerender suggestions matching the "current" tab:
+   * status NEW, not coveredByDomainWide, not edgeDeployed, not coveredByPattern.
+   * @param {string} siteId - The site ID.
+   * @returns {Promise<string[]>} Deduplicated URLs.
+   */
+  const fetchCurrentPrerenderSuggestionUrls = async (siteId) => {
+    const opportunities = await Opportunity.allBySiteId(siteId);
+    const prerenderOpps = opportunities.filter(
+      (opp) => opp.getType() === PRERENDER,
+    );
+
+    const urls = new Set();
+    for (const opp of prerenderOpps) {
+      // eslint-disable-next-line no-await-in-loop
+      const suggestions = await opp.getSuggestions();
+      suggestions
+        .filter((s) => {
+          if (s.getStatus() !== 'NEW') {
+            return false;
+          }
+          const d = s.getData();
+          if (!d?.url || d.url.includes('*')) {
+            return false;
+          }
+          if (d.coveredByDomainWide || d.edgeDeployed || d.coveredByPattern) {
+            return false;
+          }
+          return isValidUrl(d.url);
+        })
+        .forEach((s) => {
+          urls.add(s.getData().url);
         });
     }
 
@@ -362,7 +404,8 @@ function RunAuditCommand(context) {
 
       const hasPrerenderMode = auditType === PRERENDER
         && (prerenderMode === PRERENDER_MODES.ALL
-          || prerenderMode === PRERENDER_MODES.AI_ONLY);
+          || prerenderMode === PRERENDER_MODES.AI_ONLY
+          || prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT);
       const isPrerenderCsvRun = hasValidBaseURL
         && hasFiles && auditType === PRERENDER;
 
@@ -376,8 +419,12 @@ function RunAuditCommand(context) {
       }
 
       if (isSuggestionRun) {
-        const modeLabel = prerenderMode === PRERENDER_MODES.AI_ONLY
-          ? 'AI-only' : 'all';
+        const MODE_LABELS = {
+          [PRERENDER_MODES.ALL]: 'all',
+          [PRERENDER_MODES.AI_ONLY]: 'AI-only',
+          [PRERENDER_MODES.AI_ONLY_CURRENT]: 'AI-only-current',
+        };
+        const modeLabel = MODE_LABELS[prerenderMode];
         await say(`:hourglass_flowing_sand: Fetching ${modeLabel}`
           + ` prerender suggestions for ${baseURL}…`);
 
@@ -387,20 +434,25 @@ function RunAuditCommand(context) {
           return;
         }
 
-        const urls = await fetchPrerenderSuggestionUrls(
-          site.getId(),
-        );
+        const isCurrentMode = prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT;
+        const urls = isCurrentMode
+          ? await fetchCurrentPrerenderSuggestionUrls(site.getId())
+          : await fetchPrerenderSuggestionUrls(site.getId());
 
         if (urls.length === 0) {
+          const hint = isCurrentMode
+            ? 'matching current-tab filters'
+            : 'with status NEW or FIXED';
           await say(':white_check_mark: No active suggestions'
-            + ` with status NEW or FIXED for *${baseURL}*`
+            + ` ${hint} for *${baseURL}*`
             + ' — nothing to audit.');
           return;
         }
 
-        // Merge mode into the data field so the worker reads it
-        // via getModeFromData(data).
-        const effectiveData = prerenderMode === PRERENDER_MODES.AI_ONLY
+        // ai-only and ai-only-current both send mode:ai-only to the worker
+        const isAiOnly = prerenderMode === PRERENDER_MODES.AI_ONLY
+          || isCurrentMode;
+        const effectiveData = isAiOnly
           ? JSON.stringify({
             ...(auditDataInputArg ? JSON.parse(auditDataInputArg) : {}),
             mode: PRERENDER_MODES.AI_ONLY,
@@ -416,7 +468,9 @@ function RunAuditCommand(context) {
           return;
         }
 
-        const effectiveData = prerenderMode === PRERENDER_MODES.AI_ONLY
+        const csvIsAiOnly = prerenderMode === PRERENDER_MODES.AI_ONLY
+          || prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT;
+        const effectiveData = csvIsAiOnly
           ? JSON.stringify({
             ...(auditDataInputArg ? JSON.parse(auditDataInputArg) : {}),
             mode: PRERENDER_MODES.AI_ONLY,
