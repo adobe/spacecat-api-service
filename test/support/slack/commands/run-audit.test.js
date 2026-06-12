@@ -935,20 +935,6 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say).to.have.been.calledWithMatch(/320 URLs \(batch 1\/2\)/);
       expect(slackContext.say).to.have.been.calledWithMatch(/180 URLs \(batch 2\/2\)/);
     });
-
-    it('sends batch-wise Slack messages with mode label for ai-only', async () => {
-      const suggestions = Array.from({ length: 500 }, (_, i) => makeSuggestion(`https://site.com/page-${i + 1}`, i % 2 === 0 ? 'NEW' : 'FIXED'));
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', suggestions),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only'], slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledTwice;
-      expect(slackContext.say).to.have.been.calledWithMatch(/320 URLs \(batch 1\/2\) \[ai-only\]/);
-      expect(slackContext.say).to.have.been.calledWithMatch(/180 URLs \(batch 2\/2\) \[ai-only\]/);
-    });
   });
 
   describe('Entitlement Checks', () => {

@@ -234,7 +234,7 @@ function RunAuditCommand(context) {
     }
   };
 
-  const runPrerenderAuditForUrls = async (baseURL, auditData, urls, slackContext, mode) => {
+  const runPrerenderAuditForUrls = async (baseURL, auditType, auditData, urls, slackContext) => {
     const { say } = slackContext;
 
     try {
@@ -246,14 +246,14 @@ function RunAuditCommand(context) {
         return;
       }
 
-      if (!configuration.isHandlerEnabledForSite(PRERENDER, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${PRERENDER}' are disabled for this site.`);
+      if (!configuration.isHandlerEnabledForSite(auditType, site)) {
+        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
         return;
       }
 
-      const handler = configuration.getHandlers()?.[PRERENDER];
+      const handler = configuration.getHandlers()?.[auditType];
       if (!isNonEmptyArray(handler?.productCodes)) {
-        await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${PRERENDER}'.`);
+        await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${auditType}'.`);
         return;
       }
 
@@ -278,11 +278,6 @@ function RunAuditCommand(context) {
       const batchCount = Math.ceil(
         urls.length / PRERENDER_BATCH_SIZE,
       );
-      // Pass mode in the data field (SQS message.data) so the worker
-      // can read it via getModeFromData(data). URLs go in auditContext.
-      const effectiveData = mode
-        ? JSON.stringify({ ...(auditData ? JSON.parse(auditData) : {}), mode })
-        : auditData;
 
       for (let i = 0; i < batchCount; i += 1) {
         const start = i * PRERENDER_BATCH_SIZE;
@@ -290,8 +285,8 @@ function RunAuditCommand(context) {
         // eslint-disable-next-line no-await-in-loop
         await triggerAuditForSite(
           site,
-          PRERENDER,
-          effectiveData,
+          auditType,
+          auditData,
           slackContext,
           context,
           { urls: batch },
@@ -300,13 +295,12 @@ function RunAuditCommand(context) {
         const batchLabel = batchCount > 1
           ? ` (batch ${i + 1}/${batchCount})`
           : '';
-        const modeLabel = mode ? ` [${mode}]` : '';
         // eslint-disable-next-line no-await-in-loop
-        await say(`:white_check_mark: ${PRERENDER} audit queued`
-          + ` for ${batch.length} URLs${batchLabel}${modeLabel}.`);
+        await say(`:white_check_mark: ${auditType} audit queued`
+          + ` for ${batch.length} URLs${batchLabel}.`);
       }
     } catch (error) {
-      log.error(`Error running ${PRERENDER} audit for site ${baseURL}`, error);
+      log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
       await postErrorMessage(say, error);
     }
   };
@@ -404,23 +398,33 @@ function RunAuditCommand(context) {
           return;
         }
 
-        const mode = prerenderMode === PRERENDER_MODES.AI_ONLY
-          ? PRERENDER_MODES.AI_ONLY : undefined;
+        // Merge mode into the data field so the worker reads it
+        // via getModeFromData(data).
+        const effectiveData = prerenderMode === PRERENDER_MODES.AI_ONLY
+          ? JSON.stringify({
+            ...(auditDataInputArg ? JSON.parse(auditDataInputArg) : {}),
+            mode: PRERENDER_MODES.AI_ONLY,
+          })
+          : auditDataInputArg;
         await say(`:adobe-run: Triggering ${PRERENDER} audit`
           + ` for ${baseURL} with ${urls.length} URLs`
           + ` (${modeLabel} mode).`);
-        await runPrerenderAuditForUrls(baseURL, auditDataInputArg, urls, slackContext, mode);
+        await runPrerenderAuditForUrls(baseURL, PRERENDER, effectiveData, urls, slackContext);
       } else if (isPrerenderCsvRun) {
         const urls = await parsePrerenderUrlsFromCsv(files, botToken, say);
         if (!urls) {
           return;
         }
 
-        const mode = prerenderMode === PRERENDER_MODES.AI_ONLY
-          ? PRERENDER_MODES.AI_ONLY : undefined;
+        const effectiveData = prerenderMode === PRERENDER_MODES.AI_ONLY
+          ? JSON.stringify({
+            ...(auditDataInputArg ? JSON.parse(auditDataInputArg) : {}),
+            mode: PRERENDER_MODES.AI_ONLY,
+          })
+          : auditDataInputArg;
         await say(`:adobe-run: Triggering ${PRERENDER} audit`
           + ` for site ${baseURL} with ${urls.length} URLs.`);
-        await runPrerenderAuditForUrls(baseURL, auditDataInputArg, urls, slackContext, mode);
+        await runPrerenderAuditForUrls(baseURL, PRERENDER, effectiveData, urls, slackContext);
       } else if (hasFiles) {
         const [, auditTypeInput, auditData] = ['', baseURLInputArg, auditTypeInputArg];
         const csvAuditType = auditTypeInput || LHS_MOBILE;
