@@ -838,10 +838,10 @@ describe('URL Inspector Handlers', () => {
     });
 
     it('forwards every whitelisted referralSource verbatim', async () => {
-      // Pin the four known sources so a future contributor adding (or
+      // Pin the known sources so a future contributor adding (or
       // removing) one in the whitelist must update this assertion in lock-
       // step with the controller + the underlying RPC's CASE branches.
-      for (const source of ['optel', 'cdn', 'adobe_analytics', 'ga4']) {
+      for (const source of ['optel', 'cdn', 'adobe_analytics', 'ga4', 'cja']) {
         // eslint-disable-next-line no-await-in-loop
         const { context, rpcStub } = createContext(
           {},

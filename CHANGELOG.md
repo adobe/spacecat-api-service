@@ -1,3 +1,66 @@
+# [1.569.0](https://github.com/adobe/spacecat-api-service/compare/v1.568.1...v1.569.0) (2026-06-11)
+
+
+### Features
+
+* add CJA referral traffic source and document referral-traffic API ([#2592](https://github.com/adobe/spacecat-api-service/issues/2592)) ([0437b76](https://github.com/adobe/spacecat-api-service/commit/0437b766b0be48b64676a87fa368ab9a76463cf9))
+
+## [1.568.1](https://github.com/adobe/spacecat-api-service/compare/v1.568.0...v1.568.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* update plg onboarding existing delivery type ([#2526](https://github.com/adobe/spacecat-api-service/issues/2526)) ([b1b90ac](https://github.com/adobe/spacecat-api-service/commit/b1b90ac6143403cafe480f1a4096b4992bd6cfc9))
+
+# [1.568.0](https://github.com/adobe/spacecat-api-service/compare/v1.567.0...v1.568.0) (2026-06-11)
+
+
+### Features
+
+* expose GET /organizations/:organizationId/trial-users to S2S consumers via trialUser:read capability ([#2589](https://github.com/adobe/spacecat-api-service/issues/2589)) ([27b443b](https://github.com/adobe/spacecat-api-service/commit/27b443b811c4b16662e28257bde146aa651aec1c))
+
+# [1.567.0](https://github.com/adobe/spacecat-api-service/compare/v1.566.2...v1.567.0) (2026-06-10)
+
+
+### Features
+
+* **rum:** align updateRumConfig with rumConfigRefresh candidate fallback logic ([#2549](https://github.com/adobe/spacecat-api-service/issues/2549)) ([4673670](https://github.com/adobe/spacecat-api-service/commit/467367025c366bd8e51c67588521e457d17cb518))
+
+## [1.566.2](https://github.com/adobe/spacecat-api-service/compare/v1.566.1...v1.566.2) (2026-06-10)
+
+
+### Bug Fixes
+
+* get geo-experiment API s2s compatibility ([#2579](https://github.com/adobe/spacecat-api-service/issues/2579)) ([de64e9c](https://github.com/adobe/spacecat-api-service/commit/de64e9cab258593a1cf51e58299e15b7c71ae7ee))
+
+## [1.566.1](https://github.com/adobe/spacecat-api-service/compare/v1.566.0...v1.566.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **llmo:** retire categories.category_id business key; resolve prompt category filter by UUID (LLMO-5515) ([#2587](https://github.com/adobe/spacecat-api-service/issues/2587)) ([72ed9ae](https://github.com/adobe/spacecat-api-service/commit/72ed9aeaf3436227adb58750db08d912c9248e78))
+
+# [1.566.0](https://github.com/adobe/spacecat-api-service/compare/v1.565.0...v1.566.0) (2026-06-10)
+
+
+### Features
+
+* **s2s:** single-site identity endpoint to bootstrap customer-scoped tokens (GET /sites/:siteId/identity) ([#2586](https://github.com/adobe/spacecat-api-service/issues/2586)) ([c94a698](https://github.com/adobe/spacecat-api-service/commit/c94a698cc631566c665a8ec0048f8e9b5ed575fc)), closes [adobe/spacecat-api-service#2585](https://github.com/adobe/spacecat-api-service/issues/2585)
+
+# [1.565.0](https://github.com/adobe/spacecat-api-service/compare/v1.564.1...v1.565.0) (2026-06-10)
+
+
+### Features
+
+* **prompts:** classify intent on write for human-added prompts ([#2565](https://github.com/adobe/spacecat-api-service/issues/2565)) ([479170b](https://github.com/adobe/spacecat-api-service/commit/479170b7e0aa636941a382b06861f4f438d4a204)), closes [#2562](https://github.com/adobe/spacecat-api-service/issues/2562) [#2562](https://github.com/adobe/spacecat-api-service/issues/2562)
+
+## [1.564.1](https://github.com/adobe/spacecat-api-service/compare/v1.564.0...v1.564.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* generate fallback slug for all-multibyte category names | LLMO-5473 ([#2578](https://github.com/adobe/spacecat-api-service/issues/2578)) ([c98468c](https://github.com/adobe/spacecat-api-service/commit/c98468ce857eff4986ed8bebf96fb1b5fb420953))
+
 # [1.564.0](https://github.com/adobe/spacecat-api-service/compare/v1.563.1...v1.564.0) (2026-06-09)
 
 

@@ -232,6 +232,8 @@ paths:
     $ref: './site-metrics-api.yaml#/site-metrics-latest'
   /sites/{siteId}:
     $ref: './site-api.yaml#/site'
+  /sites/{siteId}/identity:
+    $ref: './site-api.yaml#/site-identity'
   /sites/{siteId}/audits:
     $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/audits/{auditType}:
@@ -532,6 +534,31 @@ paths:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
   /sites/{siteId}/agentic-traffic/movers:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  # Referral Traffic PG
+  /sites/{siteId}/referral-traffic/has-data:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-has-data'
+  /sites/{siteId}/referral-traffic/filter-dimensions:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-filter-dimensions'
+  /sites/{siteId}/referral-traffic/kpis:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-kpis'
+  /sites/{siteId}/referral-traffic/trend:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-trend'
+  /sites/{siteId}/referral-traffic/by-platform:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-platform'
+  /sites/{siteId}/referral-traffic/by-region:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-region'
+  /sites/{siteId}/referral-traffic/by-page-intent:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-page-intent'
+  /sites/{siteId}/referral-traffic/by-url:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-url'
+  /sites/{siteId}/referral-traffic/by-url-trend:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-url-trend'
+  /sites/{siteId}/referral-traffic/by-device:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-device'
+  /sites/{siteId}/referral-traffic/business-impact:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-business-impact'
+  /sites/{siteId}/referral-traffic/weeks:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-weeks'
   /org/{spaceCatId}/brands/{brandId}/fanout-report:
     $ref: './fanout-report-api.yaml#/fanout-report'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/filter-dimensions:
