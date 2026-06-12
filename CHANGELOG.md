@@ -1,3 +1,10 @@
+# [1.573.0](https://github.com/adobe/spacecat-api-service/compare/v1.572.0...v1.573.0) (2026-06-12)
+
+
+### Features
+
+* enable money-pages audit in paid onboarding profile ([#2601](https://github.com/adobe/spacecat-api-service/issues/2601)) ([b9cc4dd](https://github.com/adobe/spacecat-api-service/commit/b9cc4dd152a08f94bd9541e0369279a1ad8e1ae9))
+
 # [1.572.0](https://github.com/adobe/spacecat-api-service/compare/v1.571.1...v1.572.0) (2026-06-12)
 
 
