@@ -36,6 +36,7 @@ const PRERENDER_MODES = {
   ALL: 'all',
   AI_ONLY: 'ai-only',
   AI_ONLY_CURRENT: 'ai-only-current',
+  AI_ONLY_MISSING: 'ai-only-missing',
 };
 const PRERENDER_SUGGESTION_STATUSES = ['NEW', 'FIXED'];
 const ALL_AUDITS = [
@@ -107,7 +108,7 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed). CSV uploads are batched at 320 URLs.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for current-tab suggestions missing an AI summary. CSV uploads are batched at 320 URLs.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only|ai-only-current] [key:value ...]`,
   });
@@ -117,7 +118,8 @@ function RunAuditCommand(context) {
 
   const buildEffectiveData = (baseData, mode) => {
     if (mode !== PRERENDER_MODES.AI_ONLY
-      && mode !== PRERENDER_MODES.AI_ONLY_CURRENT) {
+      && mode !== PRERENDER_MODES.AI_ONLY_CURRENT
+      && mode !== PRERENDER_MODES.AI_ONLY_MISSING) {
       return baseData;
     }
     return JSON.stringify({
@@ -206,6 +208,49 @@ function RunAuditCommand(context) {
             return false;
           }
           if (d.coveredByDomainWide || d.edgeDeployed || d.coveredByPattern) {
+            return false;
+          }
+          return isValidUrl(d.url);
+        })
+        .forEach((s) => {
+          urls.add(s.getData().url);
+        });
+    }
+
+    return [...urls];
+  };
+
+  /**
+   * Fetches unique URLs from prerender suggestions matching the "current" tab
+   * that are also missing an AI-generated prerendered HTML summary.
+   * Filters: status NEW, not coveredByDomainWide, not edgeDeployed, not
+   * coveredByPattern, and prerenderedHtmlKey is absent.
+   * @param {string} siteId - The site ID.
+   * @returns {Promise<string[]>} Deduplicated URLs.
+   */
+  const fetchMissingAiPrerenderSuggestionUrls = async (siteId) => {
+    const opportunities = await Opportunity.allBySiteId(siteId);
+    const prerenderOpps = opportunities.filter(
+      (opp) => opp.getType() === PRERENDER,
+    );
+
+    const urls = new Set();
+    for (const opp of prerenderOpps) {
+      // eslint-disable-next-line no-await-in-loop
+      const suggestions = await opp.getSuggestions();
+      suggestions
+        .filter((s) => {
+          if (s.getStatus() !== 'NEW') {
+            return false;
+          }
+          const d = s.getData();
+          if (!d?.url || d.url.includes('*')) {
+            return false;
+          }
+          if (d.coveredByDomainWide || d.edgeDeployed || d.coveredByPattern) {
+            return false;
+          }
+          if (d.prerenderedHtmlKey) {
             return false;
           }
           return isValidUrl(d.url);
@@ -416,7 +461,8 @@ function RunAuditCommand(context) {
       const hasPrerenderMode = auditType === PRERENDER
         && (prerenderMode === PRERENDER_MODES.ALL
           || prerenderMode === PRERENDER_MODES.AI_ONLY
-          || prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT);
+          || prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT
+          || prerenderMode === PRERENDER_MODES.AI_ONLY_MISSING);
       const isPrerenderCsvRun = hasValidBaseURL
         && hasFiles && auditType === PRERENDER;
 
@@ -434,6 +480,13 @@ function RunAuditCommand(context) {
           [PRERENDER_MODES.ALL]: 'all',
           [PRERENDER_MODES.AI_ONLY]: 'AI-only',
           [PRERENDER_MODES.AI_ONLY_CURRENT]: 'AI-only-current',
+          [PRERENDER_MODES.AI_ONLY_MISSING]: 'AI-only-missing',
+        };
+        const MODE_HINTS = {
+          [PRERENDER_MODES.ALL]: 'with status NEW or FIXED',
+          [PRERENDER_MODES.AI_ONLY]: 'with status NEW or FIXED',
+          [PRERENDER_MODES.AI_ONLY_CURRENT]: 'matching current-tab filters',
+          [PRERENDER_MODES.AI_ONLY_MISSING]: 'matching current-tab filters with missing AI summary',
         };
         const modeLabel = MODE_LABELS[prerenderMode];
         await say(`:hourglass_flowing_sand: Fetching ${modeLabel}`
@@ -445,15 +498,17 @@ function RunAuditCommand(context) {
           return;
         }
 
-        const isCurrentMode = prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT;
-        const urls = isCurrentMode
-          ? await fetchCurrentPrerenderSuggestionUrls(site.getId())
-          : await fetchPrerenderSuggestionUrls(site.getId());
+        let urls;
+        if (prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT) {
+          urls = await fetchCurrentPrerenderSuggestionUrls(site.getId());
+        } else if (prerenderMode === PRERENDER_MODES.AI_ONLY_MISSING) {
+          urls = await fetchMissingAiPrerenderSuggestionUrls(site.getId());
+        } else {
+          urls = await fetchPrerenderSuggestionUrls(site.getId());
+        }
 
         if (urls.length === 0) {
-          const hint = isCurrentMode
-            ? 'matching current-tab filters'
-            : 'with status NEW or FIXED';
+          const hint = MODE_HINTS[prerenderMode];
           await say(':white_check_mark: No active suggestions'
             + ` ${hint} for *${baseURL}*`
             + ' — nothing to audit.');
