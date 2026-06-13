@@ -989,11 +989,11 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
     });
 
-    it('mode:ai-only-missing fetches current-tab suggestions missing a prerenderedHtmlKey', async () => {
+    it('mode:ai-only-missing fetches current-tab suggestions missing an aiSummary', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
           makeSuggestion('https://site.com/no-summary', 'NEW'),
-          makeSuggestion('https://site.com/has-summary', 'NEW', { prerenderedHtmlKey: 's3://bucket/key' }),
+          makeSuggestion('https://site.com/has-summary', 'NEW', { aiSummary: 'some AI text' }),
           makeSuggestion('https://site.com/covered', 'NEW', { coveredByDomainWide: true }),
           makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
           makeSuggestion('https://site.com/pattern', 'NEW', { coveredByPattern: true }),
@@ -1028,11 +1028,11 @@ describe('RunAuditCommand', () => {
       expect(urls).to.deep.equal(['https://site.com/valid']);
     });
 
-    it('mode:ai-only-missing reports nothing when all current-tab suggestions already have a summary', async () => {
+    it('mode:ai-only-missing reports nothing when all current-tab suggestions already have an aiSummary', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'NEW', { prerenderedHtmlKey: 's3://bucket/key-1' }),
-          makeSuggestion('https://site.com/page-2', 'NEW', { prerenderedHtmlKey: 's3://bucket/key-2' }),
+          makeSuggestion('https://site.com/page-1', 'NEW', { aiSummary: 'summary for page 1' }),
+          makeSuggestion('https://site.com/page-2', 'NEW', { aiSummary: 'summary for page 2' }),
         ]),
       ]);
 

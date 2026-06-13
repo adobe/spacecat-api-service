@@ -222,9 +222,9 @@ function RunAuditCommand(context) {
 
   /**
    * Fetches unique URLs from prerender suggestions matching the "current" tab
-   * that are also missing an AI-generated prerendered HTML summary.
+   * that are also missing an AI summary.
    * Filters: status NEW, not coveredByDomainWide, not edgeDeployed, not
-   * coveredByPattern, and prerenderedHtmlKey is absent.
+   * coveredByPattern, and aiSummary is absent or empty.
    * @param {string} siteId - The site ID.
    * @returns {Promise<string[]>} Deduplicated URLs.
    */
@@ -250,7 +250,7 @@ function RunAuditCommand(context) {
           if (d.coveredByDomainWide || d.edgeDeployed || d.coveredByPattern) {
             return false;
           }
-          if (d.prerenderedHtmlKey) {
+          if (d.aiSummary) {
             return false;
           }
           return isValidUrl(d.url);
