@@ -1028,6 +1028,22 @@ describe('RunAuditCommand', () => {
       expect(urls).to.deep.equal(['https://site.com/valid']);
     });
 
+    it('mode:ai-only-missing treats empty-string aiSummary as missing', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/empty-summary', 'NEW', { aiSummary: '' }),
+          makeSuggestion('https://site.com/has-summary', 'NEW', { aiSummary: 'some AI text' }),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.deep.equal(['https://site.com/empty-summary']);
+    });
+
     it('mode:ai-only-missing reports nothing when all current-tab suggestions already have an aiSummary', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [

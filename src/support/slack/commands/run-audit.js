@@ -110,7 +110,7 @@ function RunAuditCommand(context) {
     name: 'Run Audit',
     description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for current-tab suggestions missing an AI summary. CSV uploads are batched at 320 URLs.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only|ai-only-current] [key:value ...]`,
+    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only|ai-only-current|ai-only-missing] [key:value ...]`,
   });
 
   const { dataAccess, log } = context;
@@ -183,6 +183,27 @@ function RunAuditCommand(context) {
   };
 
   /**
+   * Returns true when a suggestion belongs to the "current" tab:
+   * status NEW, valid non-wildcard URL, not coveredByDomainWide,
+   * not edgeDeployed, not coveredByPattern.
+   * @param {object} s - A suggestion object.
+   * @returns {boolean}
+   */
+  const isCurrentTabSuggestion = (s) => {
+    if (s.getStatus() !== 'NEW') {
+      return false;
+    }
+    const d = s.getData();
+    if (!d?.url || d.url.includes('*')) {
+      return false;
+    }
+    if (d.coveredByDomainWide || d.edgeDeployed || d.coveredByPattern) {
+      return false;
+    }
+    return isValidUrl(d.url);
+  };
+
+  /**
    * Fetches unique URLs from prerender suggestions matching the "current" tab:
    * status NEW, not coveredByDomainWide, not edgeDeployed, not coveredByPattern.
    * @param {string} siteId - The site ID.
@@ -199,19 +220,7 @@ function RunAuditCommand(context) {
       // eslint-disable-next-line no-await-in-loop
       const suggestions = await opp.getSuggestions();
       suggestions
-        .filter((s) => {
-          if (s.getStatus() !== 'NEW') {
-            return false;
-          }
-          const d = s.getData();
-          if (!d?.url || d.url.includes('*')) {
-            return false;
-          }
-          if (d.coveredByDomainWide || d.edgeDeployed || d.coveredByPattern) {
-            return false;
-          }
-          return isValidUrl(d.url);
-        })
+        .filter(isCurrentTabSuggestion)
         .forEach((s) => {
           urls.add(s.getData().url);
         });
@@ -221,10 +230,8 @@ function RunAuditCommand(context) {
   };
 
   /**
-   * Fetches unique URLs from prerender suggestions matching the "current" tab
-   * that are also missing an AI summary.
-   * Filters: status NEW, not coveredByDomainWide, not edgeDeployed, not
-   * coveredByPattern, and aiSummary is absent or empty.
+   * Fetches unique URLs from current-tab prerender suggestions that are also
+   * missing an AI summary (aiSummary is absent or empty).
    * @param {string} siteId - The site ID.
    * @returns {Promise<string[]>} Deduplicated URLs.
    */
@@ -239,22 +246,7 @@ function RunAuditCommand(context) {
       // eslint-disable-next-line no-await-in-loop
       const suggestions = await opp.getSuggestions();
       suggestions
-        .filter((s) => {
-          if (s.getStatus() !== 'NEW') {
-            return false;
-          }
-          const d = s.getData();
-          if (!d?.url || d.url.includes('*')) {
-            return false;
-          }
-          if (d.coveredByDomainWide || d.edgeDeployed || d.coveredByPattern) {
-            return false;
-          }
-          if (d.aiSummary) {
-            return false;
-          }
-          return isValidUrl(d.url);
-        })
+        .filter((s) => isCurrentTabSuggestion(s) && !s.getData().aiSummary)
         .forEach((s) => {
           urls.add(s.getData().url);
         });
