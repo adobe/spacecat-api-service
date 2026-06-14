@@ -7147,6 +7147,8 @@ describe('Suggestions Controller', () => {
         getData: () => ({
           url: 'https://example.com/page1',
           prompts: [{ prompt: 'What is page1?', regions: ['US'] }],
+          aiSummary: 'Page 1 content summary',
+          valuable: true,
         }),
         getKpiDeltas: () => ({}),
         getCreatedAt: () => '2025-01-15T10:00:00Z',

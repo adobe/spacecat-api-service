@@ -1907,24 +1907,30 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('Missing required environment variables');
         }
         const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
-        let promptSources;
-        if (domainWideSuggestions.length > 0) {
-          const newStatus = SuggestionModel.STATUSES.NEW;
-          const allNew = await Suggestion.allByOpportunityIdAndStatus(opportunityId, newStatus);
-          const top15ByContentGainRatio = [...allNew]
-            .filter((s) => s.getData()?.isDomainWide !== true)
-            .sort((a, b) => (b.getData()?.contentGainRatio || 0)
-              - (a.getData()?.contentGainRatio || 0))
-            .slice(0, 15);
-          promptSources = top15ByContentGainRatio
-            .sort((a, b) => (b.getData()?.agenticTraffic || 0) - (a.getData()?.agenticTraffic || 0))
-            .slice(0, 10);
-        } else {
-          promptSources = validSuggestions;
-        }
         const domainWideSuggestionIds = new Set(
           domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
         );
+        let promptSources;
+        if (domainWideSuggestions.length > 0) {
+          promptSources = [...allSuggestions]
+            .filter((s) => {
+              const data = s.getData() || {};
+              return !domainWideSuggestionIds.has(s.getId())
+                && !data.edgeDeployed
+                && data.aiSummary
+                && data.valuable === true;
+            })
+            .sort((a, b) => {
+              const aScore = (a.getData()?.agenticTraffic || 0)
+                * (a.getData()?.contentGainRatio || 0);
+              const bScore = (b.getData()?.agenticTraffic || 0)
+                * (b.getData()?.contentGainRatio || 0);
+              return bScore - aScore;
+            })
+            .slice(0, 100);
+        } else {
+          promptSources = validSuggestions;
+        }
         urls = promptSources
           .filter((s) => !domainWideSuggestionIds.has(s.getId()))
           .map((s) => s.getData()?.url)
