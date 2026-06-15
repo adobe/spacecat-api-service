@@ -715,6 +715,7 @@ export default function getRouteHandlers(
     'DELETE /state/access-mappings/:id': stateAccessMappingsController.revokeMapping,
     'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
     'GET /user/capabilities/:resourceId': stateAccessMappingsController.getUserCapabilities,
+    'GET /organizations/:organizationId/permission/audit-logs': stateAccessMappingsController.getAuditLogs,
 
     // AI Visibility (Semrush gRPC)
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': aiVisibilityController.getV1PromptBrandPromptsExport,

@@ -16,6 +16,7 @@ import sinon from 'sinon';
 import {
   listFacsAccessMappings,
   listFacsAccessMappingHistory,
+  listFacsAccessMappingAuditEvents,
   createFacsAccessMappings,
   revokeFacsAccessMappingById,
   updateFacsAccessMappingCapabilities,
@@ -33,6 +34,7 @@ function fakeQueryBuilder(result) {
     is: sinon.stub().returnsThis(),
     in: sinon.stub().returnsThis(),
     gte: sinon.stub().returnsThis(),
+    lte: sinon.stub().returnsThis(),
     order: sinon.stub().returnsThis(),
     limit: sinon.stub().returnsThis(),
     upsert: sinon.stub().returnsThis(),
@@ -61,6 +63,7 @@ function fakePostgrestClient({ readResult, insertResults, rpcResult } = {}) {
         is: readBuilder.is,
         in: readBuilder.in,
         gte: readBuilder.gte,
+        lte: readBuilder.lte,
         order: readBuilder.order,
         limit: readBuilder.limit,
         insert: (row) => {
@@ -222,6 +225,62 @@ describe('state-access-mapping-utils helpers', () => {
       const client = fakePostgrestClient({ readResult: { data: null, error: null } });
       const out = await listFacsAccessMappingHistory(client, { imsOrgId: 'org-1', product: 'LLMO' });
       expect(out).to.deep.equal([]);
+    });
+  });
+
+  describe('listFacsAccessMappingAuditEvents', () => {
+    it('throws when imsOrgId is missing', async () => {
+      const client = fakePostgrestClient();
+      try {
+        await listFacsAccessMappingAuditEvents(client, { product: 'LLMO' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('listFacsAccessMappingAuditEvents: imsOrgId is required');
+      }
+    });
+
+    it('throws when product is missing', async () => {
+      const client = fakePostgrestClient();
+      try {
+        await listFacsAccessMappingAuditEvents(client, { imsOrgId: 'org-1' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('listFacsAccessMappingAuditEvents: product is required');
+      }
+    });
+
+    it('queries the audit-events table and returns rows', async () => {
+      const rows = [{ id: 'e1', operation: 'create', outcome: 'allow' }];
+      const client = fakePostgrestClient({ readResult: { data: rows, error: null } });
+      const out = await listFacsAccessMappingAuditEvents(client, {
+        imsOrgId: 'org-1',
+        product: 'LLMO',
+        operation: 'create',
+        outcome: 'allow',
+        resourceType: 'brand',
+        resourceId: 'b1',
+        actorId: 'a@AdobeID',
+        since: 's',
+        until: 'u',
+      });
+      expect(out).to.deep.equal(rows);
+      expect(client.fromCalls).to.include('facs_access_mapping_audit_events');
+    });
+
+    it('returns [] when PostgREST resolves data: null', async () => {
+      const client = fakePostgrestClient({ readResult: { data: null, error: null } });
+      const out = await listFacsAccessMappingAuditEvents(client, { imsOrgId: 'org-1', product: 'LLMO' });
+      expect(out).to.deep.equal([]);
+    });
+
+    it('throws with a meaningful message when PostgREST returns an error', async () => {
+      const client = fakePostgrestClient({ readResult: { data: null, error: { message: 'boom' } } });
+      try {
+        await listFacsAccessMappingAuditEvents(client, { imsOrgId: 'org-1', product: 'LLMO' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('listFacsAccessMappingAuditEvents failed: boom');
+      }
     });
   });
 

@@ -567,6 +567,7 @@ const routeFacsCapabilities = {
       'POST /state/access-mappings': 'llmo/can_manage_users',
       'PATCH /state/access-mappings/:id': 'llmo/can_manage_users',
       'DELETE /state/access-mappings/:id': 'llmo/can_manage_users',
+      'GET /organizations/:organizationId/permission/audit-logs': 'llmo/can_manage_users',
       'GET /product/capabilities': 'llmo/can_view',
       'GET /user/capabilities/:resourceId': 'llmo/can_view',
 
@@ -863,6 +864,7 @@ const routeFacsCapabilities = {
       'POST /state/access-mappings': 'aso/can_manage_users',
       'PATCH /state/access-mappings/:id': 'aso/can_manage_users',
       'DELETE /state/access-mappings/:id': 'aso/can_manage_users',
+      'GET /organizations/:organizationId/permission/audit-logs': 'aso/can_manage_users',
 
       // ---- View (read-only) ----------------------------------------------
       // Site reads

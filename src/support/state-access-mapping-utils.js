@@ -177,6 +177,71 @@ export async function listFacsAccessMappingHistory(postgrestClient, filters = {}
 }
 
 /**
+ * Lists rows from the append-only `facs_access_mapping_audit_events` operation
+ * log, scoped to the caller's org + product. Backs
+ * `GET /organizations/:organizationId/permission/audit-logs`. Ordered by
+ * `created_at DESC`; all filters optional.
+ *
+ * @param {object} postgrestClient
+ * @param {object} filters
+ * @param {string} filters.imsOrgId      - REQUIRED — the tenant-isolation key.
+ * @param {string} filters.product       - REQUIRED. Uppercase product code.
+ * @param {string} [filters.operation]   - 'create' | 'update_capabilities' | 'revoke'
+ * @param {string} [filters.outcome]     - 'allow' | 'deny' | 'error'
+ * @param {string} [filters.resourceType]
+ * @param {string} [filters.resourceId]
+ * @param {string} [filters.actorId]
+ * @param {string} [filters.mappingId]
+ * @param {string} [filters.since]       - ISO timestamp; `created_at >= since`.
+ * @param {string} [filters.until]       - ISO timestamp; `created_at <= until`.
+ * @param {number} [filters.limit=50]    - Default 50; hard cap 500.
+ * @returns {Promise<object[]>}
+ */
+export async function listFacsAccessMappingAuditEvents(postgrestClient, filters = {}) {
+  const {
+    imsOrgId, product, operation, outcome,
+    resourceType, resourceId, actorId, mappingId, since, until, limit,
+  } = filters;
+  if (!imsOrgId) {
+    throw new Error('listFacsAccessMappingAuditEvents: imsOrgId is required');
+  }
+  if (!product) {
+    throw new Error('listFacsAccessMappingAuditEvents: product is required');
+  }
+  let query = postgrestClient
+    .from('facs_access_mapping_audit_events')
+    .select('*')
+    .eq('ims_org_id', imsOrgId)
+    .eq('product', product)
+    .order('created_at', { ascending: false })
+    .limit(clampLimit(limit));
+  const eqFilters = {
+    operation,
+    outcome,
+    resource_type: resourceType,
+    resource_id: resourceId,
+    actor_id: actorId,
+    mapping_id: mappingId,
+  };
+  for (const [column, value] of Object.entries(eqFilters)) {
+    if (value) {
+      query = query.eq(column, value);
+    }
+  }
+  if (since) {
+    query = query.gte('created_at', since);
+  }
+  if (until) {
+    query = query.lte('created_at', until);
+  }
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(`listFacsAccessMappingAuditEvents failed: ${error.message}`);
+  }
+  return data ?? [];
+}
+
+/**
  * Bulk-inserts subject↔resource bindings for one resource within the
  * caller's org + product. Duplicates (matching the active-row partial
  * unique index `(subject_type, subject_id, resource_type, resource_id,

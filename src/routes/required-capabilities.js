@@ -212,6 +212,7 @@ export const INTERNAL_ROUTES = [
   'POST /state/access-mappings',
   'PATCH /state/access-mappings/:id',
   'DELETE /state/access-mappings/:id',
+  'GET /organizations/:organizationId/permission/audit-logs',
   'GET /product/capabilities',
   'GET /user/capabilities/:resourceId',
 ];

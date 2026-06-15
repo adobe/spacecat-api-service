@@ -27,6 +27,7 @@ import {
   createFacsAccessMappings,
   listFacsAccessMappings,
   listFacsAccessMappingHistory,
+  listFacsAccessMappingAuditEvents,
   requirePostgrestForFacsMappings,
   revokeFacsAccessMappingById,
   updateFacsAccessMappingCapabilities,
@@ -152,6 +153,37 @@ function toMappingDto(row) {
     createdAt: row.created_at ?? null,
     revokedAt: row.revoked_at ?? null,
     revokedBy: row.revoked_by ?? null,
+    revokeReason: row.revoke_reason ?? null,
+  };
+}
+
+/**
+ * Transforms a `facs_access_mapping_audit_events` row (snake_case) into the
+ * API response DTO (camelCase). Shape is intentionally flat so the admin UI
+ * can render whichever fields it needs.
+ */
+function toAuditEventDto(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    id: row.id,
+    createdAt: row.created_at ?? null,
+    requestId: row.request_id ?? null,
+    imsOrgId: row.ims_org_id,
+    actorId: row.actor_id,
+    operation: row.operation,
+    outcome: row.outcome,
+    denialReason: row.denial_reason ?? null,
+    statusCode: row.status_code ?? null,
+    errorMessage: row.error_message ?? null,
+    mappingId: row.mapping_id ?? null,
+    bindingSubjectType: row.binding_subject_type ?? null,
+    bindingSubjectId: row.binding_subject_id ?? null,
+    resourceType: row.resource_type ?? null,
+    resourceId: row.resource_id ?? null,
+    product: row.product ?? null,
+    grantedCapabilities: row.granted_capabilities ?? null,
     revokeReason: row.revoke_reason ?? null,
   };
 }
@@ -678,6 +710,95 @@ function StateAccessMappingsController(context) {
     });
   }
 
+  /**
+   * GET /organizations/:organizationId/permission/audit-logs — the FACS
+   * state-mapping operation log for the org, scoped to the caller's product
+   * (x-product). `organizationId` is the SpaceCat org UUID; its IMS org id is
+   * resolved server-side and used as the tenant-isolation key.
+   *
+   * Gating:
+   *   - The route carries no ReBAC resource, so facsWrapper defers when the
+   *     JWT lacks the capability — the controller therefore enforces the gate
+   *     itself: admin OR FACS-layer `<product>/can_manage_users`.
+   *   - Tenant isolation: a non-admin caller may only read their OWN org's
+   *     audit (the resolved org's IMS id must equal the caller's).
+   */
+  async function getAuditLogs(ctx) {
+    const pre = preamble(ctx);
+    if (pre.error) {
+      return pre.error;
+    }
+    const { product, imsOrgId } = pre;
+
+    const authInfo = ctx.attributes?.authInfo;
+    const isAdmin = !!authInfo?.isAdmin?.();
+    const manageCap = `${product.toLowerCase()}/can_manage_users`;
+    if (!isAdmin && !authInfo?.hasFacsPermission?.(manageCap)) {
+      return forbidden(`Requires ${manageCap}`);
+    }
+
+    const { organizationId } = ctx.params || {};
+    if (!hasText(organizationId) || !isValidUUID(organizationId)) {
+      return badRequest('organizationId must be a valid UUID');
+    }
+
+    let orgImsOrgId;
+    try {
+      const org = await ctx.dataAccess.Organization.findById(organizationId);
+      if (!org) {
+        return notFound('Organization not found');
+      }
+      orgImsOrgId = normalizeImsOrgId(org.getImsOrgId?.());
+    } catch (error) {
+      log.error(
+        { tag: 'state-access-mappings', err: error.message, organizationId },
+        'Failed to resolve organization for audit-logs',
+      );
+      return internalServerError('Failed to resolve organization');
+    }
+    if (!orgImsOrgId) {
+      return notFound('Organization has no IMS org');
+    }
+
+    // Tenant isolation: only an org's own members (or an admin) read its audit.
+    if (!isAdmin && orgImsOrgId !== imsOrgId) {
+      return forbidden('Cannot read audit logs for another organization');
+    }
+
+    const queryParams = getQueryParams(ctx);
+    const decoded = decodeCursor(queryParams.cursor);
+    const limit = clampLimit(queryParams.limit);
+    try {
+      const { postgrestClient } = ctx.dataAccess.services;
+      const allRows = await listFacsAccessMappingAuditEvents(postgrestClient, {
+        imsOrgId: orgImsOrgId,
+        product,
+        operation: queryParams.operation,
+        outcome: queryParams.outcome,
+        resourceType: queryParams.resourceType,
+        resourceId: queryParams.resourceId,
+        actorId: queryParams.actorId,
+        mappingId: queryParams.mappingId,
+        since: queryParams.since,
+        until: queryParams.until,
+        limit: limit + 1 + (decoded?.offset ?? 0),
+      });
+      const offset = decoded?.offset ?? 0;
+      const slice = allRows.slice(offset, offset + limit);
+      const hasMore = allRows.length > offset + limit;
+      return ok({
+        items: slice.map(toAuditEventDto),
+        cursor: hasMore ? encodeCursor(offset + limit) : null,
+      });
+    } catch (error) {
+      log.error(
+        { tag: 'state-access-mappings', err: error.message },
+        'Failed to list FACS audit logs',
+      );
+      return internalServerError('Failed to list audit logs');
+    }
+  }
+
   return {
     listMappings,
     listHistory,
@@ -686,6 +807,7 @@ function StateAccessMappingsController(context) {
     revokeMapping,
     getProductCapabilities,
     getUserCapabilities,
+    getAuditLogs,
   };
 }
 

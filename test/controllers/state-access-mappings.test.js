@@ -51,6 +51,8 @@ function makeContext({
   queryParams,
   postgrestClient = { from: () => {} },
   facsPermissions = [],
+  isAdmin = false,
+  organization,
 } = {}) {
   return {
     log: {
@@ -64,6 +66,8 @@ function makeContext({
         getTenantIds: () => (imsOrgId ? [imsOrgId] : []),
         getProfile: () => ({ sub: callerSub }),
         getFacsPermissions: () => facsPermissions,
+        hasFacsPermission: (cap) => facsPermissions.includes(cap),
+        isAdmin: () => isAdmin,
       },
     },
     data: body,
@@ -88,6 +92,9 @@ function makeContext({
     },
     dataAccess: {
       services: { postgrestClient },
+      Organization: {
+        findById: sinon.stub().resolves(organization ?? null),
+      },
     },
   };
 }
@@ -99,6 +106,7 @@ async function loadController(supportStubs = {}) {
     createFacsAccessMappings: sinon.stub().resolves({ created: [], skipped: [] }),
     revokeFacsAccessMappingById: sinon.stub().resolves(null),
     updateFacsAccessMappingCapabilities: sinon.stub().resolves(null),
+    listFacsAccessMappingAuditEvents: sinon.stub().resolves([]),
     requirePostgrestForFacsMappings: () => null,
     ...supportStubs,
   };
@@ -747,6 +755,153 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.capabilities).to.deep.equal([]);
+    });
+  });
+
+  describe('GET /organizations/:organizationId/permission/audit-logs (getAuditLogs)', () => {
+    const ORG_ID = '99999999-8888-4777-9666-555555555555';
+    const MANAGE = ['llmo/can_manage_users'];
+    const orgWithImsOrg = (imsOrg) => ({ getImsOrgId: () => imsOrg });
+
+    it('returns 403 when caller is not admin and lacks can_manage_users', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ pathParams: { organizationId: ORG_ID }, facsPermissions: [] });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('returns 400 for an invalid organizationId', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ pathParams: { organizationId: 'not-a-uuid' }, facsPermissions: MANAGE });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when the organization is not found', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        pathParams: { organizationId: ORG_ID }, facsPermissions: MANAGE, organization: null,
+      });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it("returns 403 when the org's IMS org differs from the caller's (cross-org)", async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        pathParams: { organizationId: ORG_ID },
+        facsPermissions: MANAGE,
+        organization: orgWithImsOrg('OTHER-ORG'),
+      });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('returns 200 with mapped audit events for the caller\'s own org', async () => {
+      const rows = [{
+        id: 'e1',
+        created_at: '2026-06-15T00:00:00Z',
+        request_id: 'r1',
+        ims_org_id: CALLER_ORG_CANONICAL,
+        actor_id: 'admin@AdobeID',
+        operation: 'create',
+        outcome: 'allow',
+        status_code: 201,
+        resource_type: 'brand',
+        resource_id: 'b1',
+        product: 'LLMO',
+        granted_capabilities: ['llmo/can_view'],
+      }];
+      const auditStub = sinon.stub().resolves(rows);
+      const { Controller, stubs } = await loadController({
+        listFacsAccessMappingAuditEvents: auditStub,
+      });
+      const ctx = makeContext({
+        pathParams: { organizationId: ORG_ID },
+        facsPermissions: MANAGE,
+        organization: orgWithImsOrg(CALLER_ORG_BARE),
+      });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.items).to.have.lengthOf(1);
+      expect(body.items[0]).to.include({
+        id: 'e1', actorId: 'admin@AdobeID', operation: 'create', outcome: 'allow',
+      });
+      // Queried with the RESOLVED org's IMS id (not the path UUID) + product.
+      const args = stubs.listFacsAccessMappingAuditEvents.firstCall.args[1];
+      expect(args).to.include({ imsOrgId: CALLER_ORG_CANONICAL, product: 'LLMO' });
+    });
+
+    it('admin may read another org\'s audit (tenant check bypassed)', async () => {
+      const { Controller } = await loadController({
+        listFacsAccessMappingAuditEvents: sinon.stub().resolves([]),
+      });
+      const ctx = makeContext({
+        pathParams: { organizationId: ORG_ID },
+        isAdmin: true,
+        facsPermissions: [],
+        organization: orgWithImsOrg('OTHER-ORG'),
+      });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('returns 500 when the organization lookup throws', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ pathParams: { organizationId: ORG_ID }, facsPermissions: MANAGE });
+      ctx.dataAccess.Organization.findById = sinon.stub().rejects(new Error('db down'));
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(500);
+    });
+
+    it('returns 404 when the organization has no IMS org', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        pathParams: { organizationId: ORG_ID },
+        facsPermissions: MANAGE,
+        organization: orgWithImsOrg(null),
+      });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 500 when the audit query throws', async () => {
+      const { Controller } = await loadController({
+        listFacsAccessMappingAuditEvents: sinon.stub().rejects(new Error('boom')),
+      });
+      const ctx = makeContext({
+        pathParams: { organizationId: ORG_ID },
+        facsPermissions: MANAGE,
+        organization: orgWithImsOrg(CALLER_ORG_BARE),
+      });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(500);
+    });
+
+    it('returns a cursor when more rows are available than the page size', async () => {
+      const rows = [
+        {
+          id: 'e1', created_at: 't2', operation: 'create', outcome: 'allow',
+        },
+        {
+          id: 'e2', created_at: 't1', operation: 'revoke', outcome: 'allow',
+        },
+      ];
+      const { Controller } = await loadController({
+        listFacsAccessMappingAuditEvents: sinon.stub().resolves(rows),
+      });
+      const ctx = makeContext({
+        pathParams: { organizationId: ORG_ID },
+        facsPermissions: MANAGE,
+        organization: orgWithImsOrg(CALLER_ORG_BARE),
+        queryParams: { limit: '1' },
+      });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.items).to.have.lengthOf(1);
+      expect(body.cursor).to.not.equal(null);
     });
   });
 });

@@ -1163,6 +1163,7 @@ describe('getRouteHandlers', () => {
       'PATCH /state/access-mappings/:id',
       'DELETE /state/access-mappings/:id',
       'GET /user/capabilities/:resourceId',
+      'GET /organizations/:organizationId/permission/audit-logs',
       'GET /sites/:siteId/agentic-categories',
       'POST /sites/:siteId/agentic-categories',
       'PATCH /sites/:siteId/agentic-categories/:name',
