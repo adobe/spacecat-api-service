@@ -1041,5 +1041,22 @@ describe('AI Visibility – competitors handlers', () => {
       expect(order.by).to.equal(TOPICS_REQUEST_ORDER_BY_ENUM.MENTIONED_COMPETITORS);
       expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.DESC);
     });
+
+    it('falls back to DESC for an invalid sortDirection', async () => {
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&sortBy=VOLUME&sortDirection=BOGUS');
+      await handleCompetitorsGapTopics(sp, clients);
+      expect(clients.topicClient.gapTopics.firstCall.args[0].order.direction)
+        .to.equal(ORDER_DIRECTION_ENUM.DESC);
+    });
+
+    it('omits dimension_filter_ql for a whitespace-only searchQuery', async () => {
+      const sp = new URLSearchParams();
+      sp.set('domain', 'example.com');
+      sp.set('competitors', 'comp.com');
+      sp.set('searchQuery', '   ');
+      await handleCompetitorsGapTopics(sp, clients);
+      expect(clients.topicClient.gapTopics.firstCall.args[0]).to.not.have.property('dimensionFilterQl');
+      expect(clients.topicClient.gapTopicsTotals.firstCall.args[0]).to.not.have.property('dimensionFilterQl');
+    });
   });
 });
