@@ -587,7 +587,7 @@ function LlmoController(ctx) {
         `${stats.deletedPrompts.total} deleted prompts${stats.deletedPrompts.modified ? ` (${stats.deletedPrompts.modified} modified)` : ''}`,
         `${stats.ignoredPrompts.total} ignored prompts${stats.ignoredPrompts.modified ? ` (${stats.ignoredPrompts.modified} modified)` : ''}`,
         `${stats.categoryUrls.total} category URLs`,
-        ...(stats.claims?.modified ? ['claims guidance modified'] : []),
+        ...(stats.claims.modified ? ['claims guidance modified'] : []),
       ];
       const configSummary = summaryParts.join(', ');
 
