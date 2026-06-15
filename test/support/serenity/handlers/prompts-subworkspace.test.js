@@ -177,6 +177,18 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.failed[0].status).to.equal(500);
     });
 
+    it('defaults a statusless create failure to status 500', async () => {
+      const transport = makeTransport({
+        createTaggedPrompts: sinon.stub().rejects(new Error('no status')),
+      });
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+      expect(result.failed[0].status).to.equal(500);
+    });
+
     it('appends a publish failure to failed', async () => {
       const transport = makeTransport({
         publishProject: sinon.stub().rejects(new SerenityTransportError(502, 'publish down')),
@@ -328,6 +340,16 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.deleted).to.equal(0);
       expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(500);
+    });
+
+    it('defaults a statusless delete failure to status 500', async () => {
+      const transport = makeTransport({
+        deletePromptsByIds: sinon.stub().rejects(new Error('no status')),
+      });
+      const result = await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, log);
       expect(result.failed[0].status).to.equal(500);
     });
 

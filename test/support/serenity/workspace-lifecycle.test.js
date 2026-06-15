@@ -275,5 +275,16 @@ describe('workspace-lifecycle', () => {
       expect(transport.listProjects).to.not.have.been.called;
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });
+
+    it('refuses to decommission the org parent workspace (self-defending)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
+      });
+
+      await expect(decommissionBrandWorkspace(transport, PARENT_WS, log, PARENT_WS))
+        .to.be.rejectedWith(/must not be the organization parent workspace/);
+      expect(transport.deleteProject).to.not.have.been.called;
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
+    });
   });
 });

@@ -727,7 +727,7 @@ function SerenityController(context, log, env) {
       const brand = await loadBrand(ctx, auth.brandUuid);
       const subworkspaceId = brand.getSemrushWorkspaceId?.();
       if (hasText(subworkspaceId)) {
-        await decommissionBrandWorkspace(transport, subworkspaceId, log);
+        await decommissionBrandWorkspace(transport, subworkspaceId, log, auth.parentWorkspaceId);
         // Disconnect the brand from the now-emptied sub-workspace. The
         // sub-workspace is kept (never deleted); clearing the pointer is what
         // returns the brand to flat mode. Invalidate the resolver cache HERE —

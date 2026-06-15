@@ -642,6 +642,30 @@ describe('SerenityController', () => {
       expect(body.error).to.equal('internalServerError');
       expect(log.error).to.have.been.calledWithMatch('Serenity controller error');
     });
+
+    it('createMarket routes to the flat handler in flat mode', async () => {
+      handlers.handleCreateMarket.resolves({ status: 201, body: { brandId: BRAND } });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(201);
+      expect(handlers.handleCreateMarket).to.have.been.calledOnce;
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+    });
+
+    it('bulkDeletePrompts routes to the flat handler in flat mode', async () => {
+      handlers.handleBulkDeletePrompts.resolves({ deleted: 1, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.bulkDeletePrompts(fakeContext({
+        data: { prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleBulkDeletePrompts).to.have.been.calledOnce;
+      expect(handlers.handleBulkDeletePromptsSubworkspace).to.not.have.been.called;
+    });
   });
 
   describe('controller surface', () => {
@@ -871,6 +895,26 @@ describe('SerenityController', () => {
       expect(markets[1].status).to.equal(502);
       expect(markets[1].body.message).to.equal('Market activation failed');
       expect(brand.setStatus).to.have.been.calledWith('active');
+      expect(brand.save).to.have.been.called;
+    });
+
+    it('activate defaults a statusless throw to 502 in the per-market result', async () => {
+      handlers.handleCreateMarketSubworkspace.rejects(new Error('no status'));
+      const brand = makeBrandModel();
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: {
+          brandDomain: 'x.com',
+          brandNames: ['X'],
+          markets: [{ market: 'us', languageCode: 'en' }],
+        },
+      }));
+      // every market failed (no 201) -> 207 multi-status, brand stays pending.
+      expect(response.status).to.equal(207);
+      const { markets } = await readBody(response);
+      expect(markets[0].status).to.equal(502);
+      expect(brand.setStatus).to.not.have.been.called;
     });
 
     it('activate returns 200 for a mixed 201 + 409 batch and reports both markets', async () => {
@@ -910,7 +954,12 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
-      expect(decommissionStub).to.have.been.calledOnceWithExactly({ name: 'transport' }, 'subworkspace-ws-1', sinon.match.any);
+      expect(decommissionStub).to.have.been.calledOnceWithExactly(
+        { name: 'transport' },
+        'subworkspace-ws-1',
+        sinon.match.any,
+        WORKSPACE,
+      );
       // The pointer is cleared (disconnect) — never the workspace deleted.
       expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('pending');

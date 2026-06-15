@@ -1,5 +1,16 @@
 # Implementation Plan — Serenity Semrush Sub‑Workspace Provisioning (Phase 1, dual‑mode)
 
+> **Implementation deviations (post-review):** the following items described
+> below were **dropped during implementation as unwired/unused** and are NOT in
+> the shipped code: the `rest-transport.js` methods `removeWorkspaceMember` and
+> `getProject`, and the error predicates `isAllocationFailure`,
+> `isWorkspaceNotReady`, `isWorkspaceDrift` (+ their `ERROR_CODES`). Member
+> removal at decommission stays deferred (parent admins inherit access). A
+> hard invariant was **added** that is not in the original plan: a brand's
+> sub-workspace must never equal the org parent workspace (enforced at the
+> controller `authorize()` chokepoint and in `ensureSubworkspace` /
+> `decommissionBrandWorkspace`).
+
 **Status:** Plan · 2026-06-15
 **Implements:** `adobe/serenity-docs` PR #12 → `docs/discovery/brand-semrush-provisioning-v2-phase1-sync.md` (cited as *design §N*) and `…-v2-phase1-implementation.md`.
 **Scope decisions (confirmed with requester 2026-06-15):**

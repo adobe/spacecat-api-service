@@ -222,11 +222,22 @@ export async function ensureSubworkspace(
  * @param {object} transport
  * @param {string} subworkspaceId
  * @param {object} log
+ * @param {string} [parentWorkspaceId] - when provided, a self-defending guard:
+ *   refuse to empty/release the org's shared parent workspace even if a caller
+ *   ever reaches here without the controller's authorize() guard.
  */
-export async function decommissionBrandWorkspace(transport, subworkspaceId, log) {
+export async function decommissionBrandWorkspace(
+  transport,
+  subworkspaceId,
+  log,
+  parentWorkspaceId,
+) {
   if (!hasText(subworkspaceId)) {
     return;
   }
+  // Destructive primitive made self-defending: never delete projects from /
+  // release the allocation of the shared org parent workspace.
+  assertNotParent(subworkspaceId, parentWorkspaceId);
   const listing = await transport.listProjects(subworkspaceId);
   const projects = Array.isArray(listing?.items) ? listing.items : [];
   for (const project of projects) {

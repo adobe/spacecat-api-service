@@ -500,6 +500,13 @@ v2-serenity-activate:
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization, brand, or parent workspace not found.
+      '409':
+        description: >-
+          Misconfiguration: the brand's sub-workspace equals the organization
+          parent workspace. Refused to avoid acting on the shared parent pool.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -545,6 +552,14 @@ v2-serenity-deactivate:
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization or brand not found.
+      '409':
+        description: >-
+          Misconfiguration: the brand's sub-workspace equals the organization
+          parent workspace. Refused so decommission cannot empty the shared
+          parent pool.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '502':
         description: Upstream returned a non-2xx response.
         content:
