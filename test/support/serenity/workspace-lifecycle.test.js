@@ -286,5 +286,39 @@ describe('workspace-lifecycle', () => {
       expect(transport.deleteProject).to.not.have.been.called;
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });
+
+    it('refuses to decommission a workspace with active linked sub-workspaces', async () => {
+      const transport = makeTransport({
+        // family includes a no-id entry and the target itself (both ignored)
+        // plus one real child that must block the decommission.
+        listWorkspaceFamily: sinon.stub().resolves({
+          items: [{ id: SUB_WS }, {}, { id: 'child-1' }],
+        }),
+        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
+      });
+
+      const promise = decommissionBrandWorkspace(transport, SUB_WS, log, PARENT_WS);
+      await expect(promise).to.be.rejectedWith(/active linked sub-workspace/);
+      try {
+        await promise;
+      } catch (e) {
+        expect(e.status).to.equal(409);
+        expect(e.code).to.equal('linkedSubworkspaces');
+      }
+      expect(transport.deleteProject).to.not.have.been.called;
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
+    });
+
+    it('ignores the target own id in the family listing and proceeds', async () => {
+      const transport = makeTransport({
+        listWorkspaceFamily: sinon.stub().resolves({ items: [{ id: SUB_WS }] }),
+        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
+      });
+
+      await decommissionBrandWorkspace(transport, SUB_WS, log, PARENT_WS);
+
+      expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
+      expect(transport.transferWorkspaceResources).to.have.been.calledOnce;
+    });
   });
 });

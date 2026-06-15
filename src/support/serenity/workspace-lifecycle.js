@@ -207,7 +207,9 @@ export async function ensureSubworkspace(
 
 /**
  * Decommissions a brand's sub-workspace (design §6) — convergent and
- * idempotent. NEVER deletes the workspace; it is emptied and de-resourced:
+ * idempotent. NEVER deletes the workspace; it is emptied and de-resourced.
+ * Self-defending: refuses if the target is the org parent OR still has active
+ * linked (child) sub-workspaces. Steps:
  *   1. delete every project from the listing (404-as-success)
  *   2. release the ai allocation back to the parent pool
  *   3. (member removal is best-effort and currently deferred — parent admins
@@ -238,6 +240,28 @@ export async function decommissionBrandWorkspace(
   // Destructive primitive made self-defending: never delete projects from /
   // release the allocation of the shared org parent workspace.
   assertNotParent(subworkspaceId, parentWorkspaceId);
+
+  // Defense-in-depth: refuse to decommission a workspace that still has active
+  // linked (child / nested) sub-workspaces - releasing its allocation would pull
+  // the resource pool out from under its dependents. A brand sub-workspace is a
+  // leaf by design, so this is normally empty; any child means the target is
+  // acting as a parent and must not be emptied. Fail-closed: a family-listing
+  // error propagates and aborts the decommission rather than guessing.
+  // NOTE: the family endpoint is otherwise exercised only on the ORG parent; we
+  // conservatively exclude the target's own id and treat any other returned
+  // workspace as a blocking child (semantics not yet live-verified for a leaf).
+  const family = await transport.listWorkspaceFamily(subworkspaceId);
+  const children = (Array.isArray(family?.items) ? family.items : [])
+    .filter((w) => hasText(w?.id) && w.id !== subworkspaceId);
+  if (children.length > 0) {
+    const err = new ErrorWithStatusCode(
+      `Refusing to decommission ${subworkspaceId}: it has ${children.length} active linked sub-workspace(s)`,
+      409,
+    );
+    err.code = ERROR_CODES.LINKED_SUBWORKSPACES;
+    throw err;
+  }
+
   const listing = await transport.listProjects(subworkspaceId);
   const projects = Array.isArray(listing?.items) ? listing.items : [];
   for (const project of projects) {

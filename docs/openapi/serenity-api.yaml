@@ -554,9 +554,10 @@ v2-serenity-deactivate:
         description: Organization or brand not found.
       '409':
         description: >-
-          Misconfiguration: the brand's sub-workspace equals the organization
-          parent workspace. Refused so decommission cannot empty the shared
-          parent pool.
+          Refused to protect dependents: the brand's sub-workspace equals the
+          organization parent workspace, or it still has active linked (child)
+          sub-workspaces. Decommission would empty/release a shared or
+          depended-on pool, so it is blocked.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }

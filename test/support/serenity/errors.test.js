@@ -34,6 +34,7 @@ describe('serenity error classification', () => {
     it('exposes the serenity error tokens and is frozen', () => {
       expect(ERROR_CODES.MARKET_NOT_FOUND).to.equal('marketNotFound');
       expect(ERROR_CODES.AMBIGUOUS_WORKSPACE).to.equal('ambiguousWorkspace');
+      expect(ERROR_CODES.LINKED_SUBWORKSPACES).to.equal('linkedSubworkspaces');
       expect(Object.isFrozen(ERROR_CODES)).to.be.true;
     });
   });
