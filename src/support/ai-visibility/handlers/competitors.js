@@ -17,15 +17,41 @@ import { StatsResponseSchema } from '@quazar/ai-seo-ts/ai-cr/messages_pb.js';
 import { TOPICS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
 import { GAP_PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
 import { DOMAINS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
+import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   num, brandTarget, parseLimitOffset, resolveCountryForCompetitorsMetrics,
   optionalLlmFromQuery, engineToLlm, llmToEngine,
   restMarketFromSourceDomainCountryField,
   parseCompetitorDomainsList, parseGapKindEnumList,
-  aggregateGapPromptsTotalFromTotals,
+  aggregateGapPromptsTotalFromTotals, escapeQlString,
   LLM_ENUM, GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT,
 } from '../grpc-utils.js';
 import { messageToJson } from '../proto-json.js';
+
+/**
+ * Builds a dimension_filter_ql CONTAINS expression from the `searchQuery` query param.
+ * Returns '' when no search term is supplied (filter omitted entirely).
+ */
+function gapDimensionFilterQl(sp, dimension) {
+  const q = sp.get('searchQuery')?.trim();
+  if (!q) { return ''; }
+  return `${dimension} CONTAINS "${escapeQlString(q)}"`;
+}
+
+/**
+ * Resolves the gRPC `order` field from the `sortBy`/`sortDirection` query params.
+ * `sortBy` is matched (by name) against the given order-by enum; unknown/missing
+ * values fall back to `fallbackBy`. Direction defaults to DESC.
+ */
+function resolveGapOrder(sp, orderByEnum, fallbackBy) {
+  const byName = sp.get('sortBy')?.trim();
+  const byVal = byName ? orderByEnum[byName] : undefined;
+  const by = Number.isInteger(byVal) && byVal > 0 ? byVal : fallbackBy;
+  const dirName = sp.get('sortDirection')?.trim()?.toUpperCase();
+  const dirVal = dirName ? ORDER_DIRECTION_ENUM[dirName] : undefined;
+  const direction = Number.isInteger(dirVal) && dirVal > 0 ? dirVal : ORDER_DIRECTION_ENUM.DESC;
+  return { by, direction };
+}
 
 function mapCompetitorsStatsResponse(raw) {
   const json = messageToJson(StatsResponseSchema, raw);
@@ -112,20 +138,26 @@ export async function handleCompetitorsGapTopics(sp, clients) {
   const kinds = parseGapKindEnumList(sp);
   const llm = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const fetchLimit = Math.min(limit + 1, GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT);
+  const dimensionFilterQl = gapDimensionFilterQl(sp, 'topic');
   const body = {
     country,
     llm,
     target: brandTarget(domain),
     competitors: compDomains.map(brandTarget),
     kind: kinds,
-    order: { by: TOPICS_REQUEST_ORDER_BY_ENUM.MENTIONED_COMPETITORS },
+    order: resolveGapOrder(sp, TOPICS_REQUEST_ORDER_BY_ENUM, TOPICS_REQUEST_ORDER_BY_ENUM.MENTIONED_COMPETITORS),
     range: { limit: fetchLimit, offset },
+    ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
   };
   const explicit = sp.get('gapSnapshotDate')?.trim();
   const dm = explicit && /^(\d{4})-(\d{2})-(\d{1,2})$/.exec(explicit);
   if (dm) { body.date = { year: Number(dm[1]), month: Number(dm[2]), day: Number(dm[3]) }; }
   const totalsBody = {
-    country: body.country, llm: body.llm, target: body.target, competitors: body.competitors,
+    country: body.country,
+    llm: body.llm,
+    target: body.target,
+    competitors: body.competitors,
+    ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
   };
   if (body.date) { totalsBody.date = body.date; }
   const [gapOutcome, totalsOutcome] = await Promise.allSettled([
@@ -178,20 +210,26 @@ export async function handleCompetitorsGapSourceDomains(sp, clients) {
   const kinds = parseGapKindEnumList(sp);
   const llm = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const rangeLimit = Math.min(Math.max(1, limit), GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT);
+  const dimensionFilterQl = gapDimensionFilterQl(sp, 'domain');
   const listBody = {
     country,
     llm,
     target: brandTarget(domain),
     competitors: compDomains.map(brandTarget),
     kind: kinds,
-    order: { by: DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC },
+    order: resolveGapOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC),
     range: { limit: rangeLimit, offset },
+    ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
   };
   const explicit = sp.get('gapSnapshotDate')?.trim();
   const dm = explicit && /^(\d{4})-(\d{2})-(\d{1,2})$/.exec(explicit);
   if (dm) { listBody.date = { year: Number(dm[1]), month: Number(dm[2]), day: Number(dm[3]) }; }
   const totalsBody = {
-    country: listBody.country, llm: listBody.llm, target: listBody.target, competitors: listBody.competitors,
+    country: listBody.country,
+    llm: listBody.llm,
+    target: listBody.target,
+    competitors: listBody.competitors,
+    ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
   };
   if (listBody.date) { totalsBody.date = listBody.date; }
   const [listOutcome, totalsOutcome] = await Promise.allSettled([
@@ -283,20 +321,26 @@ export async function handleCompetitorsGapPrompts(sp, clients) {
   const kinds = parseGapKindEnumList(sp);
   const llm = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const fetchLimit = Math.min(limit + 1, GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT);
+  const dimensionFilterQl = gapDimensionFilterQl(sp, 'prompt');
   const body = {
     country,
     llm,
     target: brandTarget(domain),
     competitors: compDomains.map(brandTarget),
     kinds,
-    order: { by: GAP_PROMPTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT },
+    order: resolveGapOrder(sp, GAP_PROMPTS_REQUEST_ORDER_BY_ENUM, GAP_PROMPTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT),
     range: { limit: fetchLimit, offset },
+    ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
   };
   const explicit = sp.get('gapSnapshotDate')?.trim();
   const dm = explicit && /^(\d{4})-(\d{2})-(\d{1,2})$/.exec(explicit);
   if (dm) { body.date = { year: Number(dm[1]), month: Number(dm[2]), day: Number(dm[3]) }; }
   const totalsBody = {
-    country: body.country, llm: body.llm, target: body.target, competitors: body.competitors,
+    country: body.country,
+    llm: body.llm,
+    target: body.target,
+    competitors: body.competitors,
+    ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
   };
   if (body.date) { totalsBody.date = body.date; }
   const [gapOutcome, totalsOutcome] = await Promise.allSettled([
