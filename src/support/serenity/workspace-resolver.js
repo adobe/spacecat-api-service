@@ -97,7 +97,7 @@ export async function resolveWorkspaceId(ctx, spaceCatId) {
 
 /**
  * Brand-level cache, mirroring the org cache above. Keyed by brandId, it holds
- * the brand's OWN child-workspace id (or null when no child workspace is bound).
+ * the brand's OWN subworkspace id (or null when no subworkspace is bound).
  * The flat-mode parent is NOT cached here — it is resolved fresh via
  * resolveWorkspaceId (itself cached), so a parent change can never go stale
  * behind a brand entry.
@@ -122,7 +122,7 @@ function evictBrandIfNeeded() {
   }
 }
 
-async function resolveBrandChildWorkspaceId(ctx, brandId) {
+async function resolveBrandSubworkspaceId(ctx, brandId) {
   if (!hasText(brandId)) {
     return null;
   }
@@ -138,15 +138,15 @@ async function resolveBrandChildWorkspaceId(ctx, brandId) {
   }
 
   const brand = await Brand.findById(brandId);
-  const childWorkspaceId = (brand && typeof brand.getSemrushWorkspaceId === 'function')
+  const subworkspaceId = (brand && typeof brand.getSemrushWorkspaceId === 'function')
     ? (brand.getSemrushWorkspaceId() ?? null)
     : null;
 
   brandCache.delete(brandId);
   evictBrandIfNeeded();
-  const ttl = childWorkspaceId === null ? NEG_TTL_MS : CACHE_TTL_MS;
-  brandCache.set(brandId, { value: childWorkspaceId, expiresAt: now + ttl });
-  return childWorkspaceId;
+  const ttl = subworkspaceId === null ? NEG_TTL_MS : CACHE_TTL_MS;
+  brandCache.set(brandId, { value: subworkspaceId, expiresAt: now + ttl });
+  return subworkspaceId;
 }
 
 /**
@@ -154,8 +154,8 @@ async function resolveBrandChildWorkspaceId(ctx, brandId) {
  * which workspace a brand's serenity operations run against and which mode the
  * handlers branch on:
  *
- *   { mode: 'child', workspaceId: <brand child ws> }  // brands.semrush_workspace_id set
- *   { mode: 'flat',  workspaceId: <org parent ws> }   // no child workspace bound
+ *   { mode: 'subworkspace', workspaceId: <sub ws> }   // brands.semrush_workspace_id set
+ *   { mode: 'flat',         workspaceId: <parent ws> } // no subworkspace bound
  *
  * In flat mode `workspaceId` may be null (org has no parent workspace yet);
  * the controller maps that to 404, exactly as today.
@@ -163,12 +163,12 @@ async function resolveBrandChildWorkspaceId(ctx, brandId) {
  * @param {object} ctx - Request context (uses ctx.dataAccess.Brand + .Organization).
  * @param {string} spaceCatId - SpaceCat organization UUID (for the flat-mode parent).
  * @param {string} brandId - Brand UUID.
- * @returns {Promise<{mode: 'child'|'flat', workspaceId: string|null}>}
+ * @returns {Promise<{mode: 'subworkspace'|'flat', workspaceId: string|null}>}
  */
 export async function resolveBrandWorkspace(ctx, spaceCatId, brandId) {
-  const childWorkspaceId = await resolveBrandChildWorkspaceId(ctx, brandId);
-  if (hasText(childWorkspaceId)) {
-    return { mode: 'child', workspaceId: childWorkspaceId };
+  const subworkspaceId = await resolveBrandSubworkspaceId(ctx, brandId);
+  if (hasText(subworkspaceId)) {
+    return { mode: 'subworkspace', workspaceId: subworkspaceId };
   }
   const parentWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
   return { mode: 'flat', workspaceId: parentWorkspaceId };

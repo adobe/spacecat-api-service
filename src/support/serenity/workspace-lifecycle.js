@@ -50,15 +50,15 @@ async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, 
     await sleep(intervalMs);
   }
   throw new ErrorWithStatusCode(
-    `Child workspace ${workspaceId} did not settle to 'created' in time`,
+    `Subworkspace ${workspaceId} did not settle to 'created' in time`,
     504,
   );
 }
 
 /**
- * Ambiguous-create recovery (design §6): a timed-out createChildWorkspace is
+ * Ambiguous-create recovery (design §6): a timed-out createSubworkspace is
  * ambiguous (no idempotency key). List the parent's family, match the exact
- * title, and adopt a `created`, project-empty child. Multiple matches → fail
+ * title, and adopt a `created`, project-empty subworkspace. Multiple matches → fail
  * with an alert, never guess.
  */
 async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
@@ -67,24 +67,24 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
   const matches = items.filter((w) => w?.title === title);
   if (matches.length === 0) {
     throw new ErrorWithStatusCode(
-      `Ambiguous child-workspace create for '${title}' and no family match to adopt`,
+      `Ambiguous subworkspace create for '${title}' and no family match to adopt`,
       502,
     );
   }
   if (matches.length > 1) {
-    log?.error?.('ensureChildWorkspace: ambiguous create — multiple family matches, refusing to guess', {
+    log?.error?.('ensureSubworkspace: ambiguous create — multiple family matches, refusing to guess', {
       parentWorkspaceId,
       title,
       matchIds: matches.map((m) => m?.id),
     });
     const err = new ErrorWithStatusCode(
-      `Ambiguous child-workspace create for '${title}': multiple workspaces share the title`,
+      `Ambiguous subworkspace create for '${title}': multiple workspaces share the title`,
       409,
     );
     err.code = ERROR_CODES.AMBIGUOUS_WORKSPACE;
     throw err;
   }
-  log?.info?.('ensureChildWorkspace: adopted child workspace after ambiguous create', {
+  log?.info?.('ensureSubworkspace: adopted subworkspace after ambiguous create', {
     parentWorkspaceId,
     title,
     adoptedId: matches[0]?.id,
@@ -93,17 +93,17 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
 }
 
 /**
- * Guarantees the brand has a resourced child workspace and returns its id
+ * Guarantees the brand has a resourced subworkspace and returns its id
  * (design §6). Three cases:
  *   - column set        → re-grant an allocation onto the kept workspace
  *                         (handles the decommissioned case; a no-op-ish
  *                         re-grant on an already-resourced ws — the transfer
  *                         contract is Gate-A-pinned).
- *   - no column, create → create child → poll `created` → persist the column
+ *   - no column, create → create subworkspace → poll `created` → persist the column
  *                         AFTER it reads back created.
  *   - create timeout    → adopt from the parent family by exact title.
  *
- * Persisting the column flips the brand into child mode (resolveBrandWorkspace).
+ * Persisting the column flips the brand into subworkspace mode (resolveBrandWorkspace).
  *
  * @param {object} transport - serenity transport.
  * @param {object} brand - Brand model instance (dataAccess.Brand.findById).
@@ -111,9 +111,9 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
  * @param {number} marketCount - sizing input for the allocation.
  * @param {object} log
  * @param {object} [timing] - injectable poll timing for tests.
- * @returns {Promise<string>} the child workspace id.
+ * @returns {Promise<string>} the subworkspace id.
  */
-export async function ensureChildWorkspace(
+export async function ensureSubworkspace(
   transport,
   brand,
   parentWorkspaceId,
@@ -141,13 +141,13 @@ export async function ensureChildWorkspace(
   }
 
   if (!hasText(parentWorkspaceId)) {
-    throw new ErrorWithStatusCode('Cannot create a child workspace: organization has no parent workspace', 404);
+    throw new ErrorWithStatusCode('Cannot create a subworkspace: organization has no parent workspace', 404);
   }
 
   const title = brand.getName?.();
   let created;
   try {
-    created = await transport.createChildWorkspace(
+    created = await transport.createSubworkspace(
       parentWorkspaceId,
       title,
       resourceAllocation(marketCount),
@@ -163,22 +163,22 @@ export async function ensureChildWorkspace(
 
   const workspaceId = String(created?.id || '');
   if (!hasText(workspaceId)) {
-    throw new ErrorWithStatusCode('createChildWorkspace returned no workspace id', 502);
+    throw new ErrorWithStatusCode('createSubworkspace returned no workspace id', 502);
   }
 
   await pollUntilCreated(transport, workspaceId, poll);
 
-  // Persist AFTER the workspace reads back `created` — flips the brand to child mode.
+  // Persist AFTER the workspace reads back `created` — flips the brand to subworkspace mode.
   brand.setSemrushWorkspaceId(workspaceId);
   await brand.save();
-  // Invalidate the resolver's brand cache so the next request sees child mode
+  // Invalidate the resolver's brand cache so the next request sees subworkspace mode
   // without waiting out the negative TTL.
   clearBrandWorkspaceCache();
   return workspaceId;
 }
 
 /**
- * Decommissions a brand's child workspace (design §6) — convergent and
+ * Decommissions a brand's subworkspace (design §6) — convergent and
  * idempotent. NEVER deletes the workspace; it is emptied and de-resourced and
  * the `semrush_workspace_id` pointer is kept for reuse:
  *   1. delete every project from the listing (404-as-success)
@@ -188,14 +188,14 @@ export async function ensureChildWorkspace(
  *      a listMembers transport method not added in this phase)
  *
  * @param {object} transport
- * @param {string} childWorkspaceId
+ * @param {string} subworkspaceId
  * @param {object} log
  */
-export async function decommissionBrandWorkspace(transport, childWorkspaceId, log) {
-  if (!hasText(childWorkspaceId)) {
+export async function decommissionBrandWorkspace(transport, subworkspaceId, log) {
+  if (!hasText(subworkspaceId)) {
     return;
   }
-  const listing = await transport.listProjects(childWorkspaceId);
+  const listing = await transport.listProjects(subworkspaceId);
   const projects = Array.isArray(listing?.items) ? listing.items : [];
   for (const project of projects) {
     const projectId = project?.id;
@@ -205,7 +205,7 @@ export async function decommissionBrandWorkspace(transport, childWorkspaceId, lo
     }
     try {
       // eslint-disable-next-line no-await-in-loop
-      await transport.deleteProject(childWorkspaceId, projectId);
+      await transport.deleteProject(subworkspaceId, projectId);
     } catch (e) {
       if (!isUpstreamGone(e)) {
         throw e;
@@ -213,9 +213,9 @@ export async function decommissionBrandWorkspace(transport, childWorkspaceId, lo
     }
   }
   // Release allocation back to the parent pool (payload Gate-A-pinned).
-  await transport.transferWorkspaceResources(childWorkspaceId, RELEASE_ALLOCATION);
+  await transport.transferWorkspaceResources(subworkspaceId, RELEASE_ALLOCATION);
   log?.info?.('decommissionBrandWorkspace: emptied and released', {
-    childWorkspaceId,
+    subworkspaceId,
     deletedProjects: projects.length,
   });
 }

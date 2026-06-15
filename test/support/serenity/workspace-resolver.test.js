@@ -182,11 +182,11 @@ describe('resolveWorkspaceId', () => {
 });
 
 const BRAND_ID = 'brand-bbb-222';
-const CHILD_WS = 'child-ws-777';
+const SUB_WS = 'subworkspace-ws-777';
 
-function makeBrand(childWorkspaceId) {
+function makeBrand(subworkspaceId) {
   return {
-    getSemrushWorkspaceId: () => childWorkspaceId,
+    getSemrushWorkspaceId: () => subworkspaceId,
   };
 }
 
@@ -216,15 +216,15 @@ describe('resolveBrandWorkspace', () => {
     sandbox.restore();
   });
 
-  it('returns child mode with the brand child workspace when the column is set', async () => {
-    const brandFindById = sandbox.stub().resolves(makeBrand(CHILD_WS));
+  it('returns subworkspace mode with the brand subworkspace when the column is set', async () => {
+    const brandFindById = sandbox.stub().resolves(makeBrand(SUB_WS));
     const orgFindById = sandbox.stub().resolves(makeOrg('parent-ws'));
     const ctx = makeDualCtx({ brandFindById, orgFindById });
 
     const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
 
-    expect(res).to.deep.equal({ mode: 'child', workspaceId: CHILD_WS });
-    // Child mode never needs the org parent.
+    expect(res).to.deep.equal({ mode: 'subworkspace', workspaceId: SUB_WS });
+    // Subworkspace mode never needs the org parent.
     expect(orgFindById).to.not.have.been.called;
   });
 
@@ -258,9 +258,9 @@ describe('resolveBrandWorkspace', () => {
     expect(res).to.deep.equal({ mode: 'flat', workspaceId: 'parent-ws' });
   });
 
-  it('caches the child-workspace lookup over the positive TTL window', async () => {
+  it('caches the subworkspace lookup over the positive TTL window', async () => {
     clock = sinon.useFakeTimers({ now: 0, toFake: ['Date'] });
-    const brandFindById = sandbox.stub().resolves(makeBrand(CHILD_WS));
+    const brandFindById = sandbox.stub().resolves(makeBrand(SUB_WS));
     const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub() });
 
     await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
@@ -272,7 +272,7 @@ describe('resolveBrandWorkspace', () => {
 
   it('re-reads the brand after the positive TTL expires', async () => {
     clock = sinon.useFakeTimers({ now: 0, toFake: ['Date'] });
-    const brandFindById = sandbox.stub().resolves(makeBrand(CHILD_WS));
+    const brandFindById = sandbox.stub().resolves(makeBrand(SUB_WS));
     const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub() });
 
     await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
@@ -282,7 +282,7 @@ describe('resolveBrandWorkspace', () => {
     expect(brandFindById).to.have.been.calledTwice;
   });
 
-  it('uses the shorter negative TTL for a flat (no child workspace) brand', async () => {
+  it('uses the shorter negative TTL for a flat (no subworkspace) brand', async () => {
     clock = sinon.useFakeTimers({ now: 0, toFake: ['Date'] });
     const brandFindById = sandbox.stub().resolves(makeBrand(null));
     const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub().resolves(makeOrg('p')) });

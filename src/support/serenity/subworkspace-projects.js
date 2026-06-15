@@ -13,9 +13,9 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 /**
- * Shared helpers for the child path (serenity dual-mode). In child mode there
+ * Shared helpers for the subworkspace path (serenity dual-mode). In subworkspace mode there
  * is no BrandSemrushProject mapping: a brand's markets are enumerated live
- * from its child workspace (v1 default view) and a slice resolves to a project
+ * from its subworkspace (v1 default view) and a slice resolves to a project
  * by matching the project's echoed settings. Both the read handlers and the
  * write/prompt/model handlers route their slice→project resolution through
  * here so the listing/mapping rules live in exactly one place.
@@ -86,11 +86,11 @@ export function projectToSlice(project, brandId) {
 }
 
 /**
- * Lists a child workspace's projects (one v1 GET) and maps each to a slice.
+ * Lists a subworkspace's projects (one v1 GET) and maps each to a slice.
  * Projects whose slice cannot be resolved (no geo/lang) are dropped — they are
  * not addressable markets.
  */
-export async function listChildMarkets(transport, workspaceId, brandId) {
+export async function listMarkets(transport, workspaceId, brandId) {
   const listing = await transport.listProjects(workspaceId);
   const items = Array.isArray(listing?.items) ? listing.items : [];
   return items
@@ -98,21 +98,21 @@ export async function listChildMarkets(transport, workspaceId, brandId) {
     .filter((m) => m.geoTargetId !== null && m.languageCode !== null);
 }
 
-/** Slice key shared by the child-mode read and write handlers. */
+/** Slice key shared by the subworkspace-mode read and write handlers. */
 export function sliceKey(geoTargetId, languageCode) {
   const lang = hasText(languageCode) ? String(languageCode).toLowerCase() : '';
   return `${geoTargetId}:${lang}`;
 }
 
 /**
- * Lists a child workspace's projects ONCE and returns a `"geo:lang" → project`
- * Map, applying the same deterministic oldest-wins rule as resolveChildProject
+ * Lists a subworkspace's projects ONCE and returns a `"geo:lang" → project`
+ * Map, applying the same deterministic oldest-wins rule as resolveProject
  * when a slice has duplicate projects (design §7). Bulk write handlers (create
  * prompts, bulk-delete) use this to resolve every input's owning project from a
  * single upstream listing instead of one resolve per slice. Projects that don't
  * resolve to a (geo, lang) slice are skipped — they are not addressable markets.
  */
-export async function buildChildSliceProjectMap(transport, workspaceId, log) {
+export async function buildSliceProjectMap(transport, workspaceId, log) {
   const listing = await transport.listProjects(workspaceId);
   const items = Array.isArray(listing?.items) ? listing.items : [];
   const map = new Map();
@@ -132,7 +132,7 @@ export async function buildChildSliceProjectMap(transport, workspaceId, log) {
       // single-slice resolver). Alert so the drift is visible.
       const ordered = [prev, p].sort((a, b) => orderKey(a).localeCompare(orderKey(b)));
       map.set(key, ordered[0]);
-      log?.error?.('serenity child: duplicate projects on one slice — oldest wins', {
+      log?.error?.('serenity subworkspace: duplicate projects on one slice — oldest wins', {
         workspaceId,
         geoTargetId: geo,
         languageCode: lang,
@@ -150,7 +150,7 @@ export async function buildChildSliceProjectMap(transport, workspaceId, log) {
  * is logged. Returns the raw project (so callers get `id`, `publish_status`,
  * settings) or null when no project matches.
  */
-export async function resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log) {
+export async function resolveProject(transport, workspaceId, geoTargetId, languageCode, log) {
   const listing = await transport.listProjects(workspaceId);
   const items = Array.isArray(listing?.items) ? listing.items : [];
   const wantLang = hasText(languageCode) ? String(languageCode).toLowerCase() : null;
@@ -162,7 +162,7 @@ export async function resolveChildProject(transport, workspaceId, geoTargetId, l
   }
   if (matches.length > 1) {
     matches.sort((a, b) => orderKey(a).localeCompare(orderKey(b)));
-    log?.error?.('serenity child: duplicate projects on one slice — oldest wins', {
+    log?.error?.('serenity subworkspace: duplicate projects on one slice — oldest wins', {
       workspaceId,
       geoTargetId,
       languageCode: wantLang,

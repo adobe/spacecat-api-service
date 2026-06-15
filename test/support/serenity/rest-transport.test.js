@@ -530,25 +530,25 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  // ── Sub-workspace lifecycle (serenity dual-mode, child path) ──────────────
+  // ── Sub-workspace lifecycle (serenity dual-mode, subworkspace path) ──────────────
   const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
 
-  describe('createChildWorkspace', () => {
-    it('POSTs { title, resources } to /v2/workspaces/{parent}/child (no X-Upload-Receipt)', async () => {
-      fetchStub.resolves(fetchOk({ id: 'child-ws-1', status: 'not ready' }));
+  describe('createSubworkspace', () => {
+    it('POSTs { title, resources } to /v2/workspaces/{parent}/subworkspace (no X-Upload-Receipt)', async () => {
+      fetchStub.resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       const resources = { ai: { projects: 3, prompts: 1500 } };
-      const result = await transport.createChildWorkspace(PARENT_WS, 'Adobe Express', resources);
+      const result = await transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources);
 
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('POST');
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/child`,
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/subworkspace`,
       );
       expect(JSON.parse(init.body)).to.deep.equal({ title: 'Adobe Express', resources });
       expect(init.headers).to.not.have.property('X-Upload-Receipt');
-      expect(result.id).to.equal('child-ws-1');
+      expect(result.id).to.equal('subworkspace-ws-1');
     });
   });
 
@@ -570,7 +570,7 @@ describe('Semrush REST transport', () => {
 
   describe('listWorkspaceFamily', () => {
     it('GETs /v1/workspaces/{parent}/family', async () => {
-      fetchStub.resolves(fetchOk({ items: [{ id: 'child-ws-1', title: 'Adobe Express' }] }));
+      fetchStub.resolves(fetchOk({ items: [{ id: 'subworkspace-ws-1', title: 'Adobe Express' }] }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       const result = await transport.listWorkspaceFamily(PARENT_WS);
@@ -580,7 +580,7 @@ describe('Semrush REST transport', () => {
       expect(url).to.equal(
         `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${PARENT_WS}/family`,
       );
-      expect(result.items[0].id).to.equal('child-ws-1');
+      expect(result.items[0].id).to.equal('subworkspace-ws-1');
     });
   });
 

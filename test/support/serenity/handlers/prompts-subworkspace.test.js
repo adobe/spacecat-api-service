@@ -16,20 +16,20 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
 import {
-  handleListPromptsChild,
-  handleCreatePromptsChild,
-  handleUpdatePromptChild,
-  handleBulkDeletePromptsChild,
-} from '../../../../src/support/serenity/handlers/prompts-child.js';
+  handleListPromptsSubworkspace,
+  handleCreatePromptsSubworkspace,
+  handleUpdatePromptSubworkspace,
+  handleBulkDeletePromptsSubworkspace,
+} from '../../../../src/support/serenity/handlers/prompts-subworkspace.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
 
-const WS = 'child-ws-1';
+const WS = 'subworkspace-ws-1';
 const log = { info: () => {}, error: () => {}, warn: () => {} };
 
-// A child-workspace project for a (geo, lang) slice, in the v1 default shape:
+// A subworkspace project for a (geo, lang) slice, in the v1 default shape:
 // nested settings.ai.location.id / settings.ai.language.name, no created_at.
 function proj({ id = 'p-us-en', geo = 2840, lang = 'en' } = {}) {
   return {
@@ -51,17 +51,17 @@ function makeTransport(overrides = {}) {
   };
 }
 
-describe('prompts-child handlers', () => {
+describe('prompts-subworkspace handlers', () => {
   afterEach(() => sinon.restore());
 
-  describe('handleListPromptsChild', () => {
+  describe('handleListPromptsSubworkspace', () => {
     it('resolves the slice from the listing and maps prompts', async () => {
       const transport = makeTransport({
         listPromptsByTags: sinon.stub().resolves({
           items: [{ id: 'q1', name: 'a prompt', tags: [{ id: 't-1', name: 'Topic' }] }],
         }),
       });
-      const result = await handleListPromptsChild(
+      const result = await handleListPromptsSubworkspace(
         transport,
         WS,
         { geoTargetId: 2840, languageCode: 'en' },
@@ -80,7 +80,7 @@ describe('prompts-child handlers', () => {
 
     it('404s marketNotFound when the slice has no project', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [] }) });
-      const p = handleListPromptsChild(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      const p = handleListPromptsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
       await expect(p).to.be.rejected;
       try {
         await p;
@@ -92,15 +92,15 @@ describe('prompts-child handlers', () => {
     });
 
     it('400s on a missing slice key', async () => {
-      await expect(handleListPromptsChild(makeTransport(), WS, { languageCode: 'en' }, log))
+      await expect(handleListPromptsSubworkspace(makeTransport(), WS, { languageCode: 'en' }, log))
         .to.be.rejectedWith(/geoTargetId/);
     });
   });
 
-  describe('handleCreatePromptsChild', () => {
+  describe('handleCreatePromptsSubworkspace', () => {
     it('creates prompts on the resolved project and publishes once', async () => {
       const transport = makeTransport();
-      const result = await handleCreatePromptsChild(transport, WS, {
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
           text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
         }],
@@ -113,7 +113,7 @@ describe('prompts-child handlers', () => {
 
     it('skips inputs whose slice has no project (one listing, no per-input lookup)', async () => {
       const transport = makeTransport();
-      const result = await handleCreatePromptsChild(transport, WS, {
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
           text: 'p', tags: [], geoTargetId: 9999, languageCode: 'en',
         }],
@@ -125,15 +125,15 @@ describe('prompts-child handlers', () => {
     });
 
     it('400s on an empty prompts array', async () => {
-      await expect(handleCreatePromptsChild(makeTransport(), WS, { prompts: [] }, log))
+      await expect(handleCreatePromptsSubworkspace(makeTransport(), WS, { prompts: [] }, log))
         .to.be.rejectedWith(/non-empty/);
     });
   });
 
-  describe('handleUpdatePromptChild', () => {
+  describe('handleUpdatePromptSubworkspace', () => {
     it('replaces the prompt (delete-then-create) and publishes', async () => {
       const transport = makeTransport();
-      const result = await handleUpdatePromptChild(transport, WS, 'old-id', {
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
         text: 'new', tags: ['t'], geoTargetId: 2840, languageCode: 'en',
       }, log);
       expect(result.status).to.equal(200);
@@ -145,7 +145,7 @@ describe('prompts-child handlers', () => {
 
     it('404s marketNotFound when the slice has no project', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [] }) });
-      const result = await handleUpdatePromptChild(transport, WS, 'old-id', {
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
         text: 'new', tags: [], geoTargetId: 2840, languageCode: 'en',
       }, log);
       expect(result.status).to.equal(404);
@@ -156,7 +156,7 @@ describe('prompts-child handlers', () => {
       const transport = makeTransport({
         deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
       });
-      const result = await handleUpdatePromptChild(transport, WS, 'old-id', {
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
         text: 'new', tags: [], geoTargetId: 2840, languageCode: 'en',
       }, log);
       expect(result.status).to.equal(404);
@@ -165,7 +165,7 @@ describe('prompts-child handlers', () => {
     });
 
     it('400s when text or tags are missing', async () => {
-      const result = await handleUpdatePromptChild(
+      const result = await handleUpdatePromptSubworkspace(
         makeTransport(),
         WS,
         'old-id',
@@ -176,10 +176,10 @@ describe('prompts-child handlers', () => {
     });
   });
 
-  describe('handleBulkDeletePromptsChild', () => {
+  describe('handleBulkDeletePromptsSubworkspace', () => {
     it('batches deletes per resolved project and publishes affected', async () => {
       const transport = makeTransport();
-      const result = await handleBulkDeletePromptsChild(transport, WS, {
+      const result = await handleBulkDeletePromptsSubworkspace(transport, WS, {
         prompts: [
           { semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' },
           { semrushPromptId: 'q2', geoTargetId: 2840, languageCode: 'en' },
@@ -192,7 +192,7 @@ describe('prompts-child handlers', () => {
 
     it('fails targets whose slice has no project', async () => {
       const transport = makeTransport();
-      const result = await handleBulkDeletePromptsChild(transport, WS, {
+      const result = await handleBulkDeletePromptsSubworkspace(transport, WS, {
         prompts: [{ semrushPromptId: 'q1', geoTargetId: 9999, languageCode: 'en' }],
       }, log);
       expect(result.deleted).to.equal(0);
@@ -204,7 +204,7 @@ describe('prompts-child handlers', () => {
       const transport = makeTransport({
         deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
       });
-      const result = await handleBulkDeletePromptsChild(transport, WS, {
+      const result = await handleBulkDeletePromptsSubworkspace(transport, WS, {
         prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
       }, log);
       expect(result.deleted).to.equal(1);
@@ -212,7 +212,7 @@ describe('prompts-child handlers', () => {
     });
 
     it('400s on an empty prompts array', async () => {
-      await expect(handleBulkDeletePromptsChild(makeTransport(), WS, { prompts: [] }, log))
+      await expect(handleBulkDeletePromptsSubworkspace(makeTransport(), WS, { prompts: [] }, log))
         .to.be.rejectedWith(/non-empty/);
     });
   });

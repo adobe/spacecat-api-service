@@ -26,15 +26,15 @@ import {
   MAX_MODEL_IDS,
 } from './markets.js';
 import {
-  listChildMarkets, resolveChildProject, mapPublishStatus, projectToSlice,
-} from '../child-projects.js';
-import { ensureChildWorkspace } from '../workspace-lifecycle.js';
+  listMarkets, resolveProject, mapPublishStatus, projectToSlice,
+} from '../subworkspace-projects.js';
+import { ensureSubworkspace } from '../workspace-lifecycle.js';
 
 /**
- * Child-mode market handlers (serenity design §3/§5). The brand has its own
- * Semrush child workspace; markets are enumerated live (no BrandSemrushProject
+ * Subworkspace-mode market handlers (serenity design §3/§5). The brand has its own
+ * Semrush subworkspace; markets are enumerated live (no BrandSemrushProject
  * mapping). The controller dispatches here when resolveBrandWorkspace returns
- * mode === 'child'; the flat-mode handlers stay frozen and untouched.
+ * mode === 'subworkspace'; the flat-mode handlers stay frozen and untouched.
  */
 
 // "live" publish states — a slice that already has a published project (a real
@@ -50,17 +50,17 @@ function validateSlice(geoTargetId, languageCode) {
   }
 }
 
-/** GET /serenity/markets (child) — one live listing of the child workspace. */
-export async function handleListMarketsChild(transport, brandId, workspaceId) {
-  return { items: await listChildMarkets(transport, workspaceId, brandId) };
+/** GET /serenity/markets (subworkspace) — one live listing of the subworkspace. */
+export async function handleListMarketsSubworkspace(transport, brandId, workspaceId) {
+  return { items: await listMarkets(transport, workspaceId, brandId) };
 }
 
 /**
- * GET /serenity/markets/:geo/:lang (child) — resolve the slice from the live
+ * GET /serenity/markets/:geo/:lang (subworkspace) — resolve the slice from the live
  * listing; surface semrushProjectId + status + `initialized` (one extra
  * init_status read, detail only). 404 marketNotFound if no project matches.
  */
-export async function handleGetMarketChild(
+export async function handleGetMarketSubworkspace(
   transport,
   brandId,
   workspaceId,
@@ -70,7 +70,7 @@ export async function handleGetMarketChild(
 ) {
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
-  const project = await resolveChildProject(transport, workspaceId, Number(geoTargetId), lang, log);
+  const project = await resolveProject(transport, workspaceId, Number(geoTargetId), lang, log);
   if (!project) {
     const err = new ErrorWithStatusCode('No market for this brand and (geoTargetId, languageCode) slice', 404);
     err.code = ERROR_CODES.MARKET_NOT_FOUND;
@@ -82,7 +82,7 @@ export async function handleGetMarketChild(
     initialized = status?.initialized ?? null;
   } catch (e) {
     // AIO readiness is best-effort enrichment; never fail the detail read on it.
-    log?.info?.('handleGetMarketChild: init_status read failed (non-fatal)', {
+    log?.info?.('handleGetMarketSubworkspace: init_status read failed (non-fatal)', {
       brandId, workspaceId, projectId: project.id, error: e.message,
     });
   }
@@ -127,13 +127,19 @@ function validateCreateBody(body) {
 }
 
 /**
- * POST /serenity/markets (child, design flow 3) — ensure the child workspace
+ * POST /serenity/markets (subworkspace, design flow 3) — ensure the subworkspace
  * (lazy-create / re-grant), then create-or-adopt the slice's draft, publish
  * once, and confirm. No mapping write, no rollback: a leftover draft is a
  * resumable state, not an orphan (design §7). The duplicate-create race is
  * accepted (oldest-wins reads + alert).
  */
-export async function handleCreateMarketChild(transport, brand, parentWorkspaceId, body, log) {
+export async function handleCreateMarketSubworkspace(
+  transport,
+  brand,
+  parentWorkspaceId,
+  body,
+  log,
+) {
   const errors = validateCreateBody(body);
   if (errors.length > 0) {
     return { status: 400, body: { error: 'invalidRequest', message: errors.join('; ') } };
@@ -144,9 +150,9 @@ export async function handleCreateMarketChild(transport, brand, parentWorkspaceI
   }
   const languageCode = normalizeLanguageCode(body.languageCode);
 
-  const workspaceId = await ensureChildWorkspace(transport, brand, parentWorkspaceId, 1, log);
+  const workspaceId = await ensureSubworkspace(transport, brand, parentWorkspaceId, 1, log);
 
-  const existing = await resolveChildProject(
+  const existing = await resolveProject(
     transport,
     workspaceId,
     location.geoTargetId,
@@ -187,11 +193,11 @@ export async function handleCreateMarketChild(transport, brand, parentWorkspaceI
 }
 
 /**
- * DELETE /serenity/markets/:geo/:lang (child, design flow 4) — resolve from the
+ * DELETE /serenity/markets/:geo/:lang (subworkspace, design flow 4) — resolve from the
  * listing, delete the project (404-as-success). NO floor check: removing the
- * last market is allowed; the empty child workspace is kept.
+ * last market is allowed; the empty subworkspace is kept.
  */
-export async function handleDeleteMarketChild(
+export async function handleDeleteMarketSubworkspace(
   transport,
   workspaceId,
   geoTargetId,
@@ -200,7 +206,7 @@ export async function handleDeleteMarketChild(
 ) {
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
-  const project = await resolveChildProject(transport, workspaceId, Number(geoTargetId), lang, log);
+  const project = await resolveProject(transport, workspaceId, Number(geoTargetId), lang, log);
   if (!project) {
     return { status: 204 };
   }
@@ -215,12 +221,12 @@ export async function handleDeleteMarketChild(
 }
 
 /**
- * GET /serenity/tags (child) — unique tag names across the slice's prompts.
+ * GET /serenity/tags (subworkspace) — unique tag names across the slice's prompts.
  * Resolves the slice's project from the live listing, then reuses the shared
  * project-keyed tag aggregation (cache + pagination + truncation guard). A
  * missing slice returns an empty set, matching the flat-mode tags contract.
  */
-export async function handleListTagsChild(transport, workspaceId, query, log) {
+export async function handleListTagsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -229,7 +235,7 @@ export async function handleListTagsChild(transport, workspaceId, query, log) {
       400,
     );
   }
-  const project = await resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log);
+  const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
     return { items: [] };
   }
@@ -243,12 +249,12 @@ export async function handleListTagsChild(transport, workspaceId, query, log) {
 }
 
 /**
- * GET /serenity/models (child). No params → the (workspace-independent) global
+ * GET /serenity/models (subworkspace). No params → the (workspace-independent) global
  * catalog. With (geoTargetId, languageCode) → models on the slice's project,
  * resolved from the live listing. Partial params → 400. A missing slice returns
  * an empty set, matching the flat-mode models contract.
  */
-export async function handleListModelsChild(transport, workspaceId, query, log) {
+export async function handleListModelsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
 
@@ -261,7 +267,7 @@ export async function handleListModelsChild(transport, workspaceId, query, log) 
       400,
     );
   }
-  const project = await resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log);
+  const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
     return { items: [] };
   }
@@ -269,11 +275,11 @@ export async function handleListModelsChild(transport, workspaceId, query, log) 
 }
 
 /**
- * PUT /serenity/models (child) — replace the AI-model set for a slice. Resolves
+ * PUT /serenity/models (subworkspace) — replace the AI-model set for a slice. Resolves
  * the slice's project from the live listing (404 if absent), then reuses the
  * shared diff-based sync. Validation mirrors the flat-mode handler exactly.
  */
-export async function handleUpdateModelsChild(transport, workspaceId, body, log) {
+export async function handleUpdateModelsSubworkspace(transport, workspaceId, body, log) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -290,7 +296,7 @@ export async function handleUpdateModelsChild(transport, workspaceId, body, log)
     throw new ErrorWithStatusCode(`modelIds must not exceed ${MAX_MODEL_IDS} entries`, 400);
   }
 
-  const project = await resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log);
+  const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
     throw new ErrorWithStatusCode('Market not found for this brand', 404);
   }

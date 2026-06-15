@@ -35,7 +35,7 @@ export function isUpstreamGone(e) {
 
 /**
  * Permanent allocation failure on publish. Live-verified (workspace doc §5):
- * publishing a project in a child workspace whose `ai.projects` quota is zero
+ * publishing a project in a subworkspace whose `ai.projects` quota is zero
  * fails as a **bare nginx 405 with an HTML body** — a quota rejection in
  * disguise, NOT a normal "method not allowed". The fix is to grant the
  * workspace a non-zero ai allocation; never retry this as a transient.
@@ -53,10 +53,10 @@ export function isAllocationFailure(e) {
 
 /**
  * Transient "workspace still settling" signal. Live-verified (workspace doc
- * §4/§5): creating a project (or publishing) against a freshly created child
+ * §4/§5): creating a project (or publishing) against a freshly created subworkspace
  * workspace that is still `status: "not ready"` can 500; the workspace settles
  * to `created` within seconds. Callers apply this ONLY in the
- * create-then-poll context (ensureChildWorkspace) — a 500 elsewhere is a real
+ * create-then-poll context (ensureSubworkspace) — a 500 elsewhere is a real
  * server error and must propagate.
  */
 export function isWorkspaceNotReady(e) {
@@ -66,7 +66,7 @@ export function isWorkspaceNotReady(e) {
 /**
  * Out-of-band workspace deletion drift. Live-verified (workspace doc §4):
  * reads against a deleted workspace (or its former projects) return 403
- * "invalid access attempt", not 404. Our flows never delete child workspaces
+ * "invalid access attempt", not 404. Our flows never delete subworkspaces
  * (decommission keeps them — design §6), so a 403 on a brand's own workspace
  * means it was removed out-of-band: alert and repair the `semrush_workspace_id`
  * pointer rather than treating it as an expected state.
@@ -92,7 +92,7 @@ export function isWorkspaceDrift(e) {
  */
 export const ERROR_CODES = Object.freeze({
   MARKET_NOT_FOUND: 'marketNotFound',
-  // Child-workspace provisioning (serenity dual-mode, child path).
+  // Subworkspace provisioning (serenity dual-mode, subworkspace path).
   ALLOCATION_FAILURE: 'allocationFailure',
   WORKSPACE_NOT_READY: 'workspaceNotReady',
   WORKSPACE_DRIFT: 'workspaceDrift',

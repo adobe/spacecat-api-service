@@ -17,8 +17,8 @@ import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 
-// Exported (additively) so the child-mode handlers (prompts-child.js) share
-// the exact same limits — the only thing that differs between flat and child
+// Exported (additively) so the subworkspace-mode handlers (prompts-subworkspace.js) share
+// the exact same limits — the only thing that differs between flat and subworkspace
 // is slice→project resolution (DB row vs live listing), never the contract.
 export const DEFAULT_PAGE_LIMIT = 50;
 export const MAX_PAGE_LIMIT = 1000;

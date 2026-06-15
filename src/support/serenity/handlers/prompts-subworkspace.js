@@ -27,27 +27,27 @@ import {
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
 } from './prompts.js';
-import { resolveChildProject, buildChildSliceProjectMap, sliceKey } from '../child-projects.js';
+import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 
 /**
- * Child-mode prompt handlers (serenity dual-mode, child path). Behaviourally
+ * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
  * identical to the flat-mode prompt handlers EXCEPT for how a `(geoTargetId,
  * languageCode)` slice resolves to an upstream project: flat mode reads the
- * BrandSemrushProject mapping table, child resolves it from the brand's own
- * child workspace via the live `listProjects` listing. Everything downstream —
+ * BrandSemrushProject mapping table, subworkspace resolves it from the brand's own
+ * subworkspace via the live `listProjects` listing. Everything downstream —
  * the Semrush prompt calls, the publish-once contract, the per-project tag
  * cache invalidation, the bulk concurrency caps — is the shared, project-keyed
  * logic imported verbatim from prompts.js. The controller dispatches here when
- * resolveBrandWorkspace returns mode === 'child'.
+ * resolveBrandWorkspace returns mode === 'subworkspace'.
  */
 
 /**
- * GET /serenity/prompts (child) — list one slice's prompts. The slice resolves
+ * GET /serenity/prompts (subworkspace) — list one slice's prompts. The slice resolves
  * to a project via the live listing; a missing project is a hard 404
  * marketNotFound (same contract as the flat-mode single-slice list — "no such
  * slice" must not masquerade as "slice exists but empty").
  */
-export async function handleListPromptsChild(transport, workspaceId, query, log) {
+export async function handleListPromptsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -66,7 +66,7 @@ export async function handleListPromptsChild(transport, workspaceId, query, log)
     ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
     : [];
 
-  const project = await resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log);
+  const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
     const err = new ErrorWithStatusCode(
       'No market for this brand and (geoTargetId, languageCode) slice',
@@ -100,11 +100,11 @@ export async function handleListPromptsChild(transport, workspaceId, query, log)
 }
 
 /**
- * POST /serenity/prompts (child) — bulk create. Resolves every input's owning
- * project from ONE live listing (buildChildSliceProjectMap) instead of the DB
+ * POST /serenity/prompts (subworkspace) — bulk create. Resolves every input's owning
+ * project from ONE live listing (buildSliceProjectMap) instead of the DB
  * mapping, then reuses the shared per-slice create + publish-once fan-out.
  */
-export async function handleCreatePromptsChild(transport, workspaceId, body, log) {
+export async function handleCreatePromptsSubworkspace(transport, workspaceId, body, log) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
     throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
@@ -116,7 +116,7 @@ export async function handleCreatePromptsChild(transport, workspaceId, body, log
     );
   }
 
-  const projectsBySlice = await buildChildSliceProjectMap(transport, workspaceId, log);
+  const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const input = normalizePromptInput(raw);
@@ -197,11 +197,17 @@ export async function handleCreatePromptsChild(transport, workspaceId, body, log
 }
 
 /**
- * PATCH /serenity/prompts/:semrushPromptId (child) — replace. Resolves the
+ * PATCH /serenity/prompts/:semrushPromptId (subworkspace) — replace. Resolves the
  * slice's project from the live listing, then runs the shared DELETE-then-CREATE
  * (we never CREATE after a failed DELETE — that produced duplicate prompts).
  */
-export async function handleUpdatePromptChild(transport, workspaceId, semrushPromptId, body, log) {
+export async function handleUpdatePromptSubworkspace(
+  transport,
+  workspaceId,
+  semrushPromptId,
+  body,
+  log,
+) {
   if (!body || body.text === undefined || body.tags === undefined) {
     return {
       status: 400,
@@ -220,7 +226,7 @@ export async function handleUpdatePromptChild(transport, workspaceId, semrushPro
     };
   }
 
-  const project = await resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log);
+  const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
     return {
       status: 404,
@@ -249,7 +255,7 @@ export async function handleUpdatePromptChild(transport, workspaceId, semrushPro
         },
       };
     }
-    log?.error?.('handleUpdatePromptChild: deletePromptsByIds failed; aborting before create to avoid duplicate', {
+    log?.error?.('handleUpdatePromptSubworkspace: deletePromptsByIds failed; aborting before create to avoid duplicate', {
       projectId,
       semrushPromptId,
       error: e.message,
@@ -282,11 +288,11 @@ export async function handleUpdatePromptChild(transport, workspaceId, semrushPro
 }
 
 /**
- * POST /serenity/prompts/bulk-delete (child) — resolve each target's project
+ * POST /serenity/prompts/bulk-delete (subworkspace) — resolve each target's project
  * from ONE live listing, batch deletes per project, publish affected. Upstream
  * 404 == idempotent success.
  */
-export async function handleBulkDeletePromptsChild(transport, workspaceId, body, log) {
+export async function handleBulkDeletePromptsSubworkspace(transport, workspaceId, body, log) {
   const targets = Array.isArray(body?.prompts) ? body.prompts : [];
   if (targets.length === 0) {
     throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
@@ -298,7 +304,7 @@ export async function handleBulkDeletePromptsChild(transport, workspaceId, body,
     );
   }
 
-  const projectsBySlice = await buildChildSliceProjectMap(transport, workspaceId, log);
+  const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
 
   const byProject = new Map();
   const failed = [];
@@ -345,7 +351,7 @@ export async function handleBulkDeletePromptsChild(transport, workspaceId, body,
       if (isUpstreamGone(e)) {
         deleted += bucket.ids.length;
         projectsToPublish.add(pid);
-        log?.info?.('bulk-delete (child): upstream already-deleted (404 treated as success)', { ids: bucket.ids });
+        log?.info?.('bulk-delete (subworkspace): upstream already-deleted (404 treated as success)', { ids: bucket.ids });
         return;
       }
       bucket.targets.forEach((t) => {

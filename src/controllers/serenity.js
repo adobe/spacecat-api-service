@@ -34,20 +34,20 @@ import {
   handleUpdateModels,
 } from '../support/serenity/handlers/markets.js';
 import {
-  handleListMarketsChild,
-  handleGetMarketChild,
-  handleCreateMarketChild,
-  handleDeleteMarketChild,
-  handleListTagsChild,
-  handleListModelsChild,
-  handleUpdateModelsChild,
-} from '../support/serenity/handlers/markets-child.js';
+  handleListMarketsSubworkspace,
+  handleGetMarketSubworkspace,
+  handleCreateMarketSubworkspace,
+  handleDeleteMarketSubworkspace,
+  handleListTagsSubworkspace,
+  handleListModelsSubworkspace,
+  handleUpdateModelsSubworkspace,
+} from '../support/serenity/handlers/markets-subworkspace.js';
 import {
-  handleListPromptsChild,
-  handleCreatePromptsChild,
-  handleUpdatePromptChild,
-  handleBulkDeletePromptsChild,
-} from '../support/serenity/handlers/prompts-child.js';
+  handleListPromptsSubworkspace,
+  handleCreatePromptsSubworkspace,
+  handleUpdatePromptSubworkspace,
+  handleBulkDeletePromptsSubworkspace,
+} from '../support/serenity/handlers/prompts-subworkspace.js';
 import { decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
@@ -196,10 +196,10 @@ function SerenityController(context, log, env) {
    *
    * Returns either `{ error: Response }` or
    * `{ brandUuid, mode, workspaceId, parentWorkspaceId }`:
-   *   - `mode` is 'child' when brands.semrush_workspace_id is set, else 'flat'
-   *   - `workspaceId` is the workspace handlers call upstream (child ws in child
+   *   - `mode` is 'subworkspace' when brands.semrush_workspace_id is set, else 'flat'
+   *   - `workspaceId` is the workspace handlers call upstream (subworkspace ws in subworkspace
    *     mode, org parent in flat mode)
-   *   - `parentWorkspaceId` is the org parent (needed for child create/activate)
+   *   - `parentWorkspaceId` is the org parent (needed for subworkspace create/activate)
    */
   async function authorize(ctx) {
     const spaceCatId = ctx?.params?.spaceCatId;
@@ -254,7 +254,7 @@ function SerenityController(context, log, env) {
     return createSerenityTransport({ env: ctx.env || env, imsToken });
   }
 
-  /** Loads the Brand model instance (for child-mode write/lifecycle flows). */
+  /** Loads the Brand model instance (for subworkspace-mode write/lifecycle flows). */
   async function loadBrand(ctx, brandUuid) {
     const Brand = ctx?.dataAccess?.Brand;
     if (!Brand || typeof Brand.findById !== 'function') {
@@ -275,8 +275,8 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'child'
-        ? await handleListPromptsChild(transport, auth.workspaceId, parsedQuery(ctx), log)
+      const result = auth.mode === 'subworkspace'
+        ? await handleListPromptsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
         : await handleListPrompts(
           transport,
           ctx.dataAccess,
@@ -298,8 +298,8 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'child'
-        ? await handleCreatePromptsChild(transport, auth.workspaceId, ctx.data || {}, log)
+      const result = auth.mode === 'subworkspace'
+        ? await handleCreatePromptsSubworkspace(transport, auth.workspaceId, ctx.data || {}, log)
         : await handleCreatePrompts(
           transport,
           ctx.dataAccess,
@@ -326,8 +326,8 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'child'
-        ? await handleUpdatePromptChild(
+      const result = auth.mode === 'subworkspace'
+        ? await handleUpdatePromptSubworkspace(
           transport,
           auth.workspaceId,
           semrushPromptId,
@@ -357,8 +357,13 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'child'
-        ? await handleBulkDeletePromptsChild(transport, auth.workspaceId, ctx.data || {}, log)
+      const result = auth.mode === 'subworkspace'
+        ? await handleBulkDeletePromptsSubworkspace(
+          transport,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+        )
         : await handleBulkDeletePrompts(
           transport,
           ctx.dataAccess,
@@ -381,8 +386,8 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'child'
-        ? await handleListMarketsChild(transport, auth.brandUuid, auth.workspaceId)
+      const result = auth.mode === 'subworkspace'
+        ? await handleListMarketsSubworkspace(transport, auth.brandUuid, auth.workspaceId)
         : await handleListMarkets(
           transport,
           ctx.dataAccess,
@@ -399,7 +404,7 @@ function SerenityController(context, log, env) {
   const getMarket = async (ctx) => {
     try {
       // IMS bearer is required on the whole surface. Flat mode is a pure DB
-      // read (no upstream), but child mode reads the live listing, so the token
+      // read (no upstream), but subworkspace mode reads the live listing, so the token
       // is captured here and a transport built only when needed.
       const imsToken = requireImsBearer(ctx);
       const auth = await authorize(ctx);
@@ -411,8 +416,8 @@ function SerenityController(context, log, env) {
       // coerce '2840abc' → 2840 and silently resolve a different slice.
       const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
       const languageCode = pLang ? String(pLang).toLowerCase() : null;
-      const result = auth.mode === 'child'
-        ? await handleGetMarketChild(
+      const result = auth.mode === 'subworkspace'
+        ? await handleGetMarketSubworkspace(
           buildTransport(ctx, imsToken),
           auth.brandUuid,
           auth.workspaceId,
@@ -436,9 +441,9 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       let result;
-      if (auth.mode === 'child') {
+      if (auth.mode === 'subworkspace') {
         const brand = await loadBrand(ctx, auth.brandUuid);
-        result = await handleCreateMarketChild(
+        result = await handleCreateMarketSubworkspace(
           transport,
           brand,
           auth.parentWorkspaceId,
@@ -476,8 +481,14 @@ function SerenityController(context, log, env) {
       const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
       const languageCode = pLang ? String(pLang).toLowerCase() : null;
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'child'
-        ? await handleDeleteMarketChild(transport, auth.workspaceId, geoTargetId, languageCode, log)
+      const result = auth.mode === 'subworkspace'
+        ? await handleDeleteMarketSubworkspace(
+          transport,
+          auth.workspaceId,
+          geoTargetId,
+          languageCode,
+          log,
+        )
         : await handleDeleteMarket(
           transport,
           ctx.dataAccess,
@@ -501,8 +512,8 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'child'
-        ? await handleListTagsChild(transport, auth.workspaceId, parsedQuery(ctx), log)
+      const result = auth.mode === 'subworkspace'
+        ? await handleListTagsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
         : await handleListTags(
           transport,
           ctx.dataAccess,
@@ -525,8 +536,8 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'child'
-        ? await handleListModelsChild(transport, auth.workspaceId, parsedQuery(ctx), log)
+      const result = auth.mode === 'subworkspace'
+        ? await handleListModelsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
         : await handleListModels(
           transport,
           ctx.dataAccess,
@@ -548,8 +559,8 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'child'
-        ? await handleUpdateModelsChild(transport, auth.workspaceId, ctx.data || {}, log)
+      const result = auth.mode === 'subworkspace'
+        ? await handleUpdateModelsSubworkspace(transport, auth.workspaceId, ctx.data || {}, log)
         : await handleUpdateModels(
           transport,
           ctx.dataAccess,
@@ -565,8 +576,8 @@ function SerenityController(context, log, env) {
   };
 
   /**
-   * POST /serenity/activate — flips a brand into child mode (design flow 5):
-   * ensure the child workspace, then per caller-supplied market create a draft,
+   * POST /serenity/activate — flips a brand into subworkspace mode (design flow 5):
+   * ensure the subworkspace, then per caller-supplied market create a draft,
    * publish once, and confirm. Sets brands.status = 'active' once ≥1 market is
    * live. Body: { brandDomain, brandNames, brandDisplayName?, markets: [{ market,
    * languageCode }] }. Markets are supplied by the caller (reactivation
@@ -587,7 +598,7 @@ function SerenityController(context, log, env) {
       const transport = buildTransport(ctx, imsToken);
       const brand = await loadBrand(ctx, auth.brandUuid);
 
-      // ensureChildWorkspace (inside handleCreateMarketChild) is idempotent —
+      // ensureSubworkspace (inside handleCreateMarketSubworkspace) is idempotent —
       // the first market creates/re-grants the workspace; later markets re-grant
       // (a settle + transfer) onto the now-existing workspace.
       const results = [];
@@ -602,7 +613,7 @@ function SerenityController(context, log, env) {
           name: m.name,
         };
         // eslint-disable-next-line no-await-in-loop
-        const r = await handleCreateMarketChild(
+        const r = await handleCreateMarketSubworkspace(
           transport,
           brand,
           auth.parentWorkspaceId,
@@ -634,10 +645,10 @@ function SerenityController(context, log, env) {
   };
 
   /**
-   * POST /serenity/deactivate — decommissions the brand's child workspace
+   * POST /serenity/deactivate — decommissions the brand's subworkspace
    * (design flow 6): delete every project, release the allocation back to the
    * parent pool, keep the workspace and its semrush_workspace_id pointer. Sets
-   * brands.status = 'pending'. No-op (200) for a brand with no child workspace.
+   * brands.status = 'pending'. No-op (200) for a brand with no subworkspace.
    */
   const deactivate = async (ctx) => {
     try {
@@ -648,9 +659,9 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const brand = await loadBrand(ctx, auth.brandUuid);
-      const childWorkspaceId = brand.getSemrushWorkspaceId?.();
-      if (hasText(childWorkspaceId)) {
-        await decommissionBrandWorkspace(transport, childWorkspaceId, log);
+      const subworkspaceId = brand.getSemrushWorkspaceId?.();
+      if (hasText(subworkspaceId)) {
+        await decommissionBrandWorkspace(transport, subworkspaceId, log);
       }
       if (typeof brand.setStatus === 'function') {
         brand.setStatus('pending');

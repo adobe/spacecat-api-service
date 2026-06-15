@@ -14,7 +14,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../utils.js';
 
 const API_PREFIX = '/enterprise/projects/api';
-// Workspace lifecycle (create child / status / family / resources / members)
+// Workspace lifecycle (create subworkspace / status / family / resources / members)
 // is served by a DIFFERENT gateway service than project ops — the
 // "user-manager" API under /enterprise/users/api (verified live 2026-06-15
 // against the dev parent; the project prefix 404s these routes). Project ops
@@ -179,7 +179,7 @@ function aioPromptsPath(semrushWorkspaceId, projectId, suffix) {
 export function createSerenityTransport({ env, imsToken }) {
   const root = baseUrl(env);
 
-  // Fail-closed guard for the destructive workspace delete. Deleting a child
+  // Fail-closed guard for the destructive workspace delete. Deleting a
   // sub-workspace must be IMPOSSIBLE in every deployed environment
   // (dev/stage/prod) — production decommission empties and releases a
   // workspace but never deletes it (design §6); upstream deprovisioning is
@@ -318,7 +318,7 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     // ─────────────────────────────────────────────────────────────────────
-    // Sub-workspace lifecycle (serenity dual-mode, child path).
+    // Sub-workspace lifecycle (serenity dual-mode, subworkspace path).
     //
     // These are thin URL+verb wrappers, deliberately colocated with the
     // project ops so the later swap to the typed sub-workspace-API client is
@@ -328,20 +328,20 @@ export function createSerenityTransport({ env, imsToken }) {
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * POST /v2/workspaces/{parent}/child — create a brand's child workspace.
+     * POST /v2/workspaces/{parent}/subworkspace — create a brand's subworkspace.
      * v2 takes NO `X-Upload-Receipt` header (v1-only); tier/products inherit
      * from the parent. `resources.ai` must be non-zero — a zero-`ai.projects`
-     * child fails publish as a bare nginx 405 (workspace doc §5). The new
+     * subworkspace fails publish as a bare nginx 405 (workspace doc §5). The new
      * workspace settles `not ready → created` in seconds; poll
      * getWorkspaceStatus before creating projects against it.
      */
-    async createChildWorkspace(parentWorkspaceId, title, resources) {
-      const url = `${root}${USERS_API_PREFIX}/v2/workspaces/${enc(parentWorkspaceId)}/child`;
+    async createSubworkspace(parentWorkspaceId, title, resources) {
+      const url = `${root}${USERS_API_PREFIX}/v2/workspaces/${enc(parentWorkspaceId)}/subworkspace`;
       return request('POST', url, imsToken, { title, resources });
     },
 
     /**
-     * GET /v1/workspaces/{ws}/status — poll until `created` after a child
+     * GET /v1/workspaces/{ws}/status — poll until `created` after a subworkspace
      * create (creating projects against `not ready` can 500).
      */
     async getWorkspaceStatus(workspaceId) {
@@ -350,10 +350,10 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * GET /v1/workspaces/{parent}/family — list the parent's children/
-     * grandchildren. Used for ambiguous-create recovery: on a timed-out
-     * create, match the exact title and adopt a `created`, project-empty
-     * child (design §6).
+     * GET /v1/workspaces/{parent}/family — list the parent's sub-workspaces
+     * (and nested sub-workspaces). Used for ambiguous-create recovery: on a
+     * timed-out create, match the exact title and adopt a `created`,
+     * project-empty sub-workspace (design §6).
      */
     async listWorkspaceFamily(parentWorkspaceId) {
       const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(parentWorkspaceId)}/family`;
@@ -362,7 +362,7 @@ export function createSerenityTransport({ env, imsToken }) {
 
     /**
      * POST /v1/workspaces/{ws}/resources/transfer — grant an allocation onto a
-     * child (activation / re-grant) and release it back to the parent pool
+     * subworkspace (activation / re-grant) and release it back to the parent pool
      * (decommission). A public user-token endpoint (workspace doc §5/§7). The
      * exact payload shape is pinned by the Gate-A live smoke.
      */
@@ -386,8 +386,9 @@ export function createSerenityTransport({ env, imsToken }) {
      * DELETE /v1/workspaces/{ws} — TEST CLEANUP ONLY, and fail-closed: throws
      * unless SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which
      * no deployed environment (dev/stage/prod) does. Production flows NEVER
-     * delete child workspaces (decommission keeps them — design §6); workspace
-     * deprovisioning at offboarding is Semrush CS's act. Kept here so the
+     * delete sub-workspaces (decommission empties and disconnects them but
+     * never deletes — design §6); workspace deprovisioning at offboarding is
+     * Semrush CS's act. Kept here so the
      * net-zero live smoke can tidy up after itself. Delete cascades over the
      * workspace's projects; subsequent reads return 403 (workspace doc §4).
      */
@@ -407,7 +408,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * GET /v1/workspaces/{ws}/projects?type=ai — the v1 DEFAULT view, the only
      * draft-faithful listing (workspace doc §6/§10 V1). The `type=ai` query is
      * REQUIRED (verified live 2026-06-15: omitting it 500s; the v2 list 400s
-     * with "type query parameter is required"). Child mode enumerates a brand's
+     * with "type query parameter is required"). Subworkspace mode enumerates a brand's
      * markets from this; never the v2 list for draft settings (v2 returns a
      * live-view shape with `brand_names: null` for drafts).
      */

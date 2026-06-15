@@ -18,17 +18,17 @@ import sinonChai from 'sinon-chai';
 import {
   mapPublishStatus,
   projectToSlice,
-  listChildMarkets,
-  resolveChildProject,
-  buildChildSliceProjectMap,
+  listMarkets,
+  resolveProject,
+  buildSliceProjectMap,
   sliceKey,
-} from '../../../src/support/serenity/child-projects.js';
+} from '../../../src/support/serenity/subworkspace-projects.js';
 
 use(chaiAsPromised);
 use(sinonChai);
 
 const BRAND = 'brand-1';
-const WS = 'child-ws-1';
+const WS = 'subworkspace-ws-1';
 
 function project({
   id = 'p1', location = 2276, language = 'de', publishStatus = 'live',
@@ -51,7 +51,7 @@ function project({
   };
 }
 
-describe('child-projects', () => {
+describe('subworkspace-projects', () => {
   const log = { error: sinon.spy() };
   afterEach(() => sinon.restore());
 
@@ -101,7 +101,7 @@ describe('child-projects', () => {
     });
   });
 
-  describe('listChildMarkets', () => {
+  describe('listMarkets', () => {
     it('maps each listed project and drops slices with no geo/lang', async () => {
       const transport = {
         listProjects: sinon.stub().resolves({
@@ -113,7 +113,7 @@ describe('child-projects', () => {
         }),
       };
 
-      const result = await listChildMarkets(transport, WS, BRAND);
+      const result = await listMarkets(transport, WS, BRAND);
 
       expect(result).to.have.length(2);
       expect(result.map((m) => m.semrushProjectId)).to.deep.equal(['a', 'b']);
@@ -122,16 +122,16 @@ describe('child-projects', () => {
 
     it('returns an empty array for an empty/absent listing', async () => {
       const transport = { listProjects: sinon.stub().resolves(null) };
-      expect(await listChildMarkets(transport, WS, BRAND)).to.deep.equal([]);
+      expect(await listMarkets(transport, WS, BRAND)).to.deep.equal([]);
     });
   });
 
-  describe('resolveChildProject', () => {
+  describe('resolveProject', () => {
     it('returns the matching project for a slice', async () => {
       const transport = {
         listProjects: sinon.stub().resolves({ items: [project({ id: 'match' })] }),
       };
-      const p = await resolveChildProject(transport, WS, 2276, 'de', log);
+      const p = await resolveProject(transport, WS, 2276, 'de', log);
       expect(p.id).to.equal('match');
     });
 
@@ -139,7 +139,7 @@ describe('child-projects', () => {
       const transport = {
         listProjects: sinon.stub().resolves({ items: [project({ location: 2840, language: 'en' })] }),
       };
-      expect(await resolveChildProject(transport, WS, 2276, 'de', log)).to.equal(null);
+      expect(await resolveProject(transport, WS, 2276, 'de', log)).to.equal(null);
     });
 
     it('picks the oldest created_at and alerts on a duplicate slice', async () => {
@@ -152,7 +152,7 @@ describe('child-projects', () => {
           ],
         }),
       };
-      const p = await resolveChildProject(transport, WS, 2276, 'de', { error: alert });
+      const p = await resolveProject(transport, WS, 2276, 'de', { error: alert });
       expect(p.id).to.equal('older');
       expect(alert).to.have.been.calledOnce;
     });
@@ -169,7 +169,7 @@ describe('child-projects', () => {
           items: [mk('newer', '2026-06-10T00:00:00Z'), mk('older', '2026-06-01T00:00:00Z')],
         }),
       };
-      const p = await resolveChildProject(transport, WS, 2276, 'de', { error: sinon.spy() });
+      const p = await resolveProject(transport, WS, 2276, 'de', { error: sinon.spy() });
       expect(p.id).to.equal('older');
     });
   });
@@ -183,7 +183,7 @@ describe('child-projects', () => {
     });
   });
 
-  describe('buildChildSliceProjectMap', () => {
+  describe('buildSliceProjectMap', () => {
     it('maps each (geo, lang) slice to its project from one listing', async () => {
       const transport = {
         listProjects: sinon.stub().resolves({
@@ -193,7 +193,7 @@ describe('child-projects', () => {
           ],
         }),
       };
-      const map = await buildChildSliceProjectMap(transport, WS, log);
+      const map = await buildSliceProjectMap(transport, WS, log);
       expect(transport.listProjects).to.have.been.calledOnce;
       expect(map.get('2840:en').id).to.equal('us');
       expect(map.get('2276:de').id).to.equal('de');
@@ -205,7 +205,7 @@ describe('child-projects', () => {
           items: [project({ id: 'bad', location: null, language: null })],
         }),
       };
-      const map = await buildChildSliceProjectMap(transport, WS, log);
+      const map = await buildSliceProjectMap(transport, WS, log);
       expect(map.size).to.equal(0);
     });
 
@@ -223,7 +223,7 @@ describe('child-projects', () => {
           ],
         }),
       };
-      const map = await buildChildSliceProjectMap(transport, WS, { error: alert });
+      const map = await buildSliceProjectMap(transport, WS, { error: alert });
       expect(map.get('2840:en').id).to.equal('older');
       expect(alert).to.have.been.calledOnce;
     });

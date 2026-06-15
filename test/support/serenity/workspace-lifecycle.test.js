@@ -16,7 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
 import {
-  ensureChildWorkspace,
+  ensureSubworkspace,
   decommissionBrandWorkspace,
   resourceAllocation,
   RELEASE_ALLOCATION,
@@ -28,13 +28,13 @@ use(chaiAsPromised);
 use(sinonChai);
 
 const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
-const CHILD_WS = 'child-ws-1';
+const SUB_WS = 'subworkspace-ws-1';
 const NOOP_TIMING = { intervalMs: 0, sleep: () => Promise.resolve() };
 const log = { info: () => {}, error: () => {}, warn: () => {} };
 
 function makeTransport(overrides = {}) {
   return {
-    createChildWorkspace: sinon.stub().resolves({ id: CHILD_WS, status: 'not ready' }),
+    createSubworkspace: sinon.stub().resolves({ id: SUB_WS, status: 'not ready' }),
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
     listWorkspaceFamily: sinon.stub().resolves({ items: [] }),
     transferWorkspaceResources: sinon.stub().resolves(null),
@@ -70,17 +70,17 @@ describe('workspace-lifecycle', () => {
     });
   });
 
-  describe('ensureChildWorkspace', () => {
+  describe('ensureSubworkspace', () => {
     it('re-grants an allocation when the brand already has a (kept) workspace', async () => {
       const transport = makeTransport();
-      const brand = makeBrand({ workspaceId: CHILD_WS });
+      const brand = makeBrand({ workspaceId: SUB_WS });
 
-      const result = await ensureChildWorkspace(transport, brand, PARENT_WS, 2, log, NOOP_TIMING);
+      const result = await ensureSubworkspace(transport, brand, PARENT_WS, 2, log, NOOP_TIMING);
 
-      expect(result).to.equal(CHILD_WS);
+      expect(result).to.equal(SUB_WS);
       expect(transport.transferWorkspaceResources)
-        .to.have.been.calledOnceWithExactly(CHILD_WS, resourceAllocation(2));
-      expect(transport.createChildWorkspace).to.not.have.been.called;
+        .to.have.been.calledOnceWithExactly(SUB_WS, resourceAllocation(2));
+      expect(transport.createSubworkspace).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
     });
 
@@ -91,26 +91,26 @@ describe('workspace-lifecycle', () => {
         .onSecondCall().resolves({ status: 'created' });
       const brand = makeBrand();
 
-      const result = await ensureChildWorkspace(transport, brand, PARENT_WS, 2, log, NOOP_TIMING);
+      const result = await ensureSubworkspace(transport, brand, PARENT_WS, 2, log, NOOP_TIMING);
 
-      expect(result).to.equal(CHILD_WS);
-      expect(transport.createChildWorkspace)
+      expect(result).to.equal(SUB_WS);
+      expect(transport.createSubworkspace)
         .to.have.been.calledOnceWithExactly(PARENT_WS, 'Adobe Express', resourceAllocation(2));
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly(CHILD_WS);
+      expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(brand.save).to.have.been.calledOnce;
     });
 
     it('adopts a unique family match after a create timeout (504)', async () => {
       const transport = makeTransport({
-        createChildWorkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
         listWorkspaceFamily: sinon.stub().resolves({
           items: [{ id: 'adopted-ws', title: 'Adobe Express' }],
         }),
       });
       const brand = makeBrand();
 
-      const result = await ensureChildWorkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+      const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
 
       expect(result).to.equal('adopted-ws');
       expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('adopted-ws');
@@ -118,7 +118,7 @@ describe('workspace-lifecycle', () => {
 
     it('fails with an ambiguousWorkspace alert on multiple family matches', async () => {
       const transport = makeTransport({
-        createChildWorkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
         listWorkspaceFamily: sinon.stub().resolves({
           items: [
             { id: 'ws-a', title: 'Adobe Express' },
@@ -128,7 +128,7 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      const promise = ensureChildWorkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+      const promise = ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
       await expect(promise).to.be.rejected;
       try {
         await promise;
@@ -141,22 +141,22 @@ describe('workspace-lifecycle', () => {
 
     it('throws when an ambiguous create has no family match to adopt', async () => {
       const transport = makeTransport({
-        createChildWorkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
         listWorkspaceFamily: sinon.stub().resolves({ items: [] }),
       });
       const brand = makeBrand();
 
-      await expect(ensureChildWorkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
         .to.be.rejectedWith(/no family match to adopt/);
     });
 
     it('re-throws a non-timeout create error', async () => {
       const transport = makeTransport({
-        createChildWorkspace: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
       const brand = makeBrand();
 
-      await expect(ensureChildWorkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
         .to.be.rejectedWith(SerenityTransportError);
     });
 
@@ -164,17 +164,17 @@ describe('workspace-lifecycle', () => {
       const transport = makeTransport();
       const brand = makeBrand();
 
-      await expect(ensureChildWorkspace(transport, brand, '', 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, '', 1, log, NOOP_TIMING))
         .to.be.rejectedWith(/has no parent workspace/);
     });
 
     it('502s when create returns no id', async () => {
       const transport = makeTransport({
-        createChildWorkspace: sinon.stub().resolves({ id: '' }),
+        createSubworkspace: sinon.stub().resolves({ id: '' }),
       });
       const brand = makeBrand();
 
-      await expect(ensureChildWorkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
         .to.be.rejectedWith(/returned no workspace id/);
     });
 
@@ -184,7 +184,7 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      await expect(ensureChildWorkspace(transport, brand, PARENT_WS, 1, log, { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() })).to.be.rejectedWith(/did not settle to 'created'/);
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() })).to.be.rejectedWith(/did not settle to 'created'/);
     });
   });
 
@@ -194,12 +194,12 @@ describe('workspace-lifecycle', () => {
         listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }, { id: 'p2' }] }),
       });
 
-      await decommissionBrandWorkspace(transport, CHILD_WS, log);
+      await decommissionBrandWorkspace(transport, SUB_WS, log);
 
-      expect(transport.deleteProject).to.have.been.calledWith(CHILD_WS, 'p1');
-      expect(transport.deleteProject).to.have.been.calledWith(CHILD_WS, 'p2');
+      expect(transport.deleteProject).to.have.been.calledWith(SUB_WS, 'p1');
+      expect(transport.deleteProject).to.have.been.calledWith(SUB_WS, 'p2');
       expect(transport.transferWorkspaceResources)
-        .to.have.been.calledOnceWithExactly(CHILD_WS, RELEASE_ALLOCATION);
+        .to.have.been.calledOnceWithExactly(SUB_WS, RELEASE_ALLOCATION);
     });
 
     it('treats an upstream 404 on delete as success (convergent)', async () => {
@@ -208,7 +208,7 @@ describe('workspace-lifecycle', () => {
         deleteProject: sinon.stub().rejects(new SerenityTransportError(404, 'not found')),
       });
 
-      await decommissionBrandWorkspace(transport, CHILD_WS, log);
+      await decommissionBrandWorkspace(transport, SUB_WS, log);
 
       expect(transport.transferWorkspaceResources).to.have.been.calledOnce;
     });
@@ -219,7 +219,7 @@ describe('workspace-lifecycle', () => {
         deleteProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
 
-      await expect(decommissionBrandWorkspace(transport, CHILD_WS, log))
+      await expect(decommissionBrandWorkspace(transport, SUB_WS, log))
         .to.be.rejectedWith(SerenityTransportError);
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });
@@ -229,9 +229,9 @@ describe('workspace-lifecycle', () => {
         listProjects: sinon.stub().resolves({ items: [{ id: '' }, {}, { id: 'p1' }] }),
       });
 
-      await decommissionBrandWorkspace(transport, CHILD_WS, log);
+      await decommissionBrandWorkspace(transport, SUB_WS, log);
 
-      expect(transport.deleteProject).to.have.been.calledOnceWithExactly(CHILD_WS, 'p1');
+      expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
     });
 
     it('is a no-op for a blank workspace id', async () => {

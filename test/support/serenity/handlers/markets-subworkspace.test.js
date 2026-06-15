@@ -16,14 +16,14 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
 import {
-  handleListMarketsChild,
-  handleGetMarketChild,
-  handleCreateMarketChild,
-  handleDeleteMarketChild,
-  handleListTagsChild,
-  handleListModelsChild,
-  handleUpdateModelsChild,
-} from '../../../../src/support/serenity/handlers/markets-child.js';
+  handleListMarketsSubworkspace,
+  handleGetMarketSubworkspace,
+  handleCreateMarketSubworkspace,
+  handleDeleteMarketSubworkspace,
+  handleListTagsSubworkspace,
+  handleListModelsSubworkspace,
+  handleUpdateModelsSubworkspace,
+} from '../../../../src/support/serenity/handlers/markets-subworkspace.js';
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 
@@ -31,7 +31,7 @@ use(chaiAsPromised);
 use(sinonChai);
 
 const BRAND = 'brand-1';
-const WS = 'child-ws-1';
+const WS = 'subworkspace-ws-1';
 const PARENT = 'parent-ws';
 const log = { info: () => {}, error: () => {}, warn: () => {} };
 
@@ -80,16 +80,16 @@ const createBody = {
   market: 'us', languageCode: 'en', brandDomain: 'example.com', brandNames: ['B'], brandDisplayName: 'B',
 };
 
-describe('markets-child handlers', () => {
+describe('markets-subworkspace handlers', () => {
   afterEach(() => {
     sinon.restore();
     clearTagCache();
   });
 
-  describe('handleListMarketsChild', () => {
+  describe('handleListMarketsSubworkspace', () => {
     it('maps the live listing to slice DTOs', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
-      const result = await handleListMarketsChild(transport, BRAND, WS);
+      const result = await handleListMarketsSubworkspace(transport, BRAND, WS);
       expect(result.items).to.have.length(1);
       expect(result.items[0]).to.include({
         brandId: BRAND, geoTargetId: 2840, languageCode: 'en', status: 'live',
@@ -97,15 +97,15 @@ describe('markets-child handlers', () => {
     });
 
     it('returns an empty list for an empty workspace', async () => {
-      const result = await handleListMarketsChild(makeTransport(), BRAND, WS);
+      const result = await handleListMarketsSubworkspace(makeTransport(), BRAND, WS);
       expect(result.items).to.deep.equal([]);
     });
   });
 
-  describe('handleGetMarketChild', () => {
+  describe('handleGetMarketSubworkspace', () => {
     it('returns the resolved slice + initialized', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
-      const result = await handleGetMarketChild(transport, BRAND, WS, 2840, 'en', log);
+      const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log);
       expect(result).to.include({
         geoTargetId: 2840, languageCode: 'en', semrushProjectId: 'p1', initialized: true,
       });
@@ -116,13 +116,13 @@ describe('markets-child handlers', () => {
         listProjects: sinon.stub().resolves({ items: [proj()] }),
         getInitStatus: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
-      const result = await handleGetMarketChild(transport, BRAND, WS, 2840, 'en', log);
+      const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log);
       expect(result.initialized).to.equal(null);
     });
 
     it('404s marketNotFound when no slice matches', async () => {
       const transport = makeTransport();
-      const p = handleGetMarketChild(transport, BRAND, WS, 2840, 'en', log);
+      const p = handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log);
       await expect(p).to.be.rejected;
       try {
         await p;
@@ -133,16 +133,16 @@ describe('markets-child handlers', () => {
     });
 
     it('400s on an invalid slice', async () => {
-      await expect(handleGetMarketChild(makeTransport(), BRAND, WS, -1, 'en', log))
+      await expect(handleGetMarketSubworkspace(makeTransport(), BRAND, WS, -1, 'en', log))
         .to.be.rejectedWith(/geoTargetId/);
     });
   });
 
-  describe('handleCreateMarketChild', () => {
+  describe('handleCreateMarketSubworkspace', () => {
     it('ensures the workspace, creates a draft, publishes, returns 201 (no DB write)', async () => {
       const transport = makeTransport();
       const brand = makeBrand();
-      const res = await handleCreateMarketChild(transport, brand, PARENT, createBody, log);
+      const res = await handleCreateMarketSubworkspace(transport, brand, PARENT, createBody, log);
       expect(res.status).to.equal(201);
       expect(res.body).to.deep.equal({ brandId: BRAND, geoTargetId: 2840, languageCode: 'en' });
       expect(transport.createProject).to.have.been.calledOnce;
@@ -151,47 +151,65 @@ describe('markets-child handlers', () => {
 
     it('409s when a LIVE project already exists for the slice', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj({ status: 'live' })] }) });
-      const res = await handleCreateMarketChild(transport, makeBrand(), PARENT, createBody, log);
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+      );
       expect(res.status).to.equal(409);
       expect(transport.createProject).to.not.have.been.called;
     });
 
     it('adopts a leftover DRAFT and resumes (publish, no new create)', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj({ id: 'draft-1', status: 'draft' })] }) });
-      const res = await handleCreateMarketChild(transport, makeBrand(), PARENT, createBody, log);
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+      );
       expect(res.status).to.equal(201);
       expect(transport.createProject).to.not.have.been.called;
       expect(transport.publishProject).to.have.been.calledWith(WS, 'draft-1');
     });
 
     it('400s on an invalid body', async () => {
-      const res = await handleCreateMarketChild(makeTransport(), makeBrand(), PARENT, { market: 'us' }, log);
+      const res = await handleCreateMarketSubworkspace(makeTransport(), makeBrand(), PARENT, { market: 'us' }, log);
       expect(res.status).to.equal(400);
     });
 
     it('400s on an unknown market', async () => {
-      const res = await handleCreateMarketChild(makeTransport(), makeBrand(), PARENT, { ...createBody, market: 'zz' }, log);
+      const res = await handleCreateMarketSubworkspace(makeTransport(), makeBrand(), PARENT, { ...createBody, market: 'zz' }, log);
       expect(res.status).to.equal(400);
       expect(res.body.error).to.equal('unknownMarket');
     });
 
     it('502s when createProject returns no id', async () => {
       const transport = makeTransport({ createProject: sinon.stub().resolves({ id: '' }) });
-      const res = await handleCreateMarketChild(transport, makeBrand(), PARENT, createBody, log);
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+      );
       expect(res.status).to.equal(502);
     });
   });
 
-  describe('handleDeleteMarketChild', () => {
+  describe('handleDeleteMarketSubworkspace', () => {
     it('deletes the resolved project and returns 204', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj({ id: 'gone-me' })] }) });
-      const res = await handleDeleteMarketChild(transport, WS, 2840, 'en', log);
+      const res = await handleDeleteMarketSubworkspace(transport, WS, 2840, 'en', log);
       expect(res.status).to.equal(204);
       expect(transport.deleteProject).to.have.been.calledWith(WS, 'gone-me');
     });
 
     it('is idempotent (204) when no slice matches', async () => {
-      const res = await handleDeleteMarketChild(makeTransport(), WS, 2840, 'en', log);
+      const res = await handleDeleteMarketSubworkspace(makeTransport(), WS, 2840, 'en', log);
       expect(res.status).to.equal(204);
     });
 
@@ -200,7 +218,7 @@ describe('markets-child handlers', () => {
         listProjects: sinon.stub().resolves({ items: [proj()] }),
         deleteProject: sinon.stub().rejects(new SerenityTransportError(404, 'not found')),
       });
-      const res = await handleDeleteMarketChild(transport, WS, 2840, 'en', log);
+      const res = await handleDeleteMarketSubworkspace(transport, WS, 2840, 'en', log);
       expect(res.status).to.equal(204);
     });
 
@@ -209,11 +227,11 @@ describe('markets-child handlers', () => {
         listProjects: sinon.stub().resolves({ items: [proj()] }),
         deleteProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
-      await expect(handleDeleteMarketChild(transport, WS, 2840, 'en', log)).to.be.rejectedWith(SerenityTransportError);
+      await expect(handleDeleteMarketSubworkspace(transport, WS, 2840, 'en', log)).to.be.rejectedWith(SerenityTransportError);
     });
   });
 
-  describe('handleListTagsChild', () => {
+  describe('handleListTagsSubworkspace', () => {
     it('aggregates unique tag names across the slice prompts', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
@@ -224,7 +242,7 @@ describe('markets-child handlers', () => {
           ],
         }),
       });
-      const result = await handleListTagsChild(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
       expect(result.items).to.deep.equal([
         { id: 't-1', name: 'Topic A' },
         { id: 't-2', name: 'Topic B' },
@@ -234,25 +252,25 @@ describe('markets-child handlers', () => {
 
     it('returns an empty set when no slice matches (no upstream prompt call)', async () => {
       const transport = makeTransport();
-      const result = await handleListTagsChild(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
       expect(result.items).to.deep.equal([]);
       expect(transport.listPromptsByTags).to.not.have.been.called;
     });
 
     it('400s on a missing slice key', async () => {
-      await expect(handleListTagsChild(makeTransport(), WS, { languageCode: 'en' }, log))
+      await expect(handleListTagsSubworkspace(makeTransport(), WS, { languageCode: 'en' }, log))
         .to.be.rejectedWith(/geoTargetId/);
     });
   });
 
-  describe('handleListModelsChild', () => {
+  describe('handleListModelsSubworkspace', () => {
     it('returns the global catalog when called without a slice', async () => {
       const transport = makeTransport({
         listGlobalAiModels: sinon.stub().resolves({
           items: [{ id: 'm1', key: 'gpt-4o', name: 'GPT-4o' }],
         }),
       });
-      const result = await handleListModelsChild(transport, WS, {}, log);
+      const result = await handleListModelsSubworkspace(transport, WS, {}, log);
       expect(result.items).to.deep.equal([{
         id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: null,
       }]);
@@ -267,7 +285,7 @@ describe('markets-child handlers', () => {
           items: [{ id: 'assign-1', model: { id: 'm1', key: 'gpt-4o', name: 'GPT-4o' } }],
         }),
       });
-      const result = await handleListModelsChild(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      const result = await handleListModelsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
       expect(result.items).to.deep.equal([{
         id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: null,
       }]);
@@ -276,17 +294,17 @@ describe('markets-child handlers', () => {
 
     it('returns an empty set when the slice has no project', async () => {
       const transport = makeTransport();
-      const result = await handleListModelsChild(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      const result = await handleListModelsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
       expect(result.items).to.deep.equal([]);
     });
 
     it('400s on partial params (geo without lang)', async () => {
-      await expect(handleListModelsChild(makeTransport(), WS, { geoTargetId: 2840 }, log))
+      await expect(handleListModelsSubworkspace(makeTransport(), WS, { geoTargetId: 2840 }, log))
         .to.be.rejectedWith(/Provide both/);
     });
   });
 
-  describe('handleUpdateModelsChild', () => {
+  describe('handleUpdateModelsSubworkspace', () => {
     it('adds the missing model and returns the refreshed list', async () => {
       const listAiModels = sinon.stub();
       listAiModels.onFirstCall().resolves({ items: [] });
@@ -297,7 +315,7 @@ describe('markets-child handlers', () => {
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-mod' })] }),
         listAiModels,
       });
-      const result = await handleUpdateModelsChild(
+      const result = await handleUpdateModelsSubworkspace(
         transport,
         WS,
         { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
@@ -312,7 +330,7 @@ describe('markets-child handlers', () => {
 
     it('404s when the slice has no project', async () => {
       const transport = makeTransport();
-      await expect(handleUpdateModelsChild(
+      await expect(handleUpdateModelsSubworkspace(
         transport,
         WS,
         { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
@@ -321,7 +339,7 @@ describe('markets-child handlers', () => {
     });
 
     it('400s on invalid modelIds', async () => {
-      await expect(handleUpdateModelsChild(
+      await expect(handleUpdateModelsSubworkspace(
         makeTransport(),
         WS,
         { geoTargetId: 2840, languageCode: 'en', modelIds: 'nope' },

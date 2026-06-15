@@ -124,7 +124,7 @@ export default function serenityTests(getHttpClient) {
     });
 
     // ── Dual-mode (sub-workspace) routes — same route-gate + IMS-only contract ──
-    // The child-workspace dispatch + activate/deactivate handler behaviour needs
+    // The subworkspace dispatch + activate/deactivate handler behaviour needs
     // an IMS token AND the live Semrush gateway, so (like the rest of this suite)
     // it is covered by the unit + contract suites and the live through-api e2e.
     // Here we only lock that the NEW routes are registered and enforce the same

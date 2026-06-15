@@ -37,7 +37,7 @@ function makeBrandModel(overrides = {}) {
   return {
     getId: () => BRAND,
     getName: () => 'Test Brand',
-    getSemrushWorkspaceId: () => 'child-ws-1',
+    getSemrushWorkspaceId: () => 'subworkspace-ws-1',
     setSemrushWorkspaceId: sinon.stub(),
     setStatus: sinon.stub(),
     save: sinon.stub().resolves(),
@@ -99,17 +99,17 @@ describe('SerenityController', () => {
     handleListTags: sinon.stub(),
     handleListModels: sinon.stub(),
     handleUpdateModels: sinon.stub(),
-    handleListMarketsChild: sinon.stub(),
-    handleGetMarketChild: sinon.stub(),
-    handleCreateMarketChild: sinon.stub(),
-    handleDeleteMarketChild: sinon.stub(),
-    handleListTagsChild: sinon.stub(),
-    handleListModelsChild: sinon.stub(),
-    handleUpdateModelsChild: sinon.stub(),
-    handleListPromptsChild: sinon.stub(),
-    handleCreatePromptsChild: sinon.stub(),
-    handleUpdatePromptChild: sinon.stub(),
-    handleBulkDeletePromptsChild: sinon.stub(),
+    handleListMarketsSubworkspace: sinon.stub(),
+    handleGetMarketSubworkspace: sinon.stub(),
+    handleCreateMarketSubworkspace: sinon.stub(),
+    handleDeleteMarketSubworkspace: sinon.stub(),
+    handleListTagsSubworkspace: sinon.stub(),
+    handleListModelsSubworkspace: sinon.stub(),
+    handleUpdateModelsSubworkspace: sinon.stub(),
+    handleListPromptsSubworkspace: sinon.stub(),
+    handleCreatePromptsSubworkspace: sinon.stub(),
+    handleUpdatePromptSubworkspace: sinon.stub(),
+    handleBulkDeletePromptsSubworkspace: sinon.stub(),
   };
   let decommissionStub;
   let resolveWorkspaceIdStub;
@@ -124,7 +124,7 @@ describe('SerenityController', () => {
     Object.values(handlers).forEach((s) => s.reset());
     resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE);
     // Default: flat mode — existing assertions (handlers called with
-    // WORKSPACE) hold unchanged. Child-mode tests override this stub.
+    // WORKSPACE) hold unchanged. Subworkspace-mode tests override this stub.
     resolveBrandWorkspaceStub = sinon.stub().resolves({ mode: 'flat', workspaceId: WORKSPACE });
     decommissionStub = sinon.stub().resolves();
     createTransportStub = sinon.stub().returns({ name: 'transport' });
@@ -169,20 +169,20 @@ describe('SerenityController', () => {
         handleListModels: handlers.handleListModels,
         handleUpdateModels: handlers.handleUpdateModels,
       },
-      '../../src/support/serenity/handlers/markets-child.js': {
-        handleListMarketsChild: handlers.handleListMarketsChild,
-        handleGetMarketChild: handlers.handleGetMarketChild,
-        handleCreateMarketChild: handlers.handleCreateMarketChild,
-        handleDeleteMarketChild: handlers.handleDeleteMarketChild,
-        handleListTagsChild: handlers.handleListTagsChild,
-        handleListModelsChild: handlers.handleListModelsChild,
-        handleUpdateModelsChild: handlers.handleUpdateModelsChild,
+      '../../src/support/serenity/handlers/markets-subworkspace.js': {
+        handleListMarketsSubworkspace: handlers.handleListMarketsSubworkspace,
+        handleGetMarketSubworkspace: handlers.handleGetMarketSubworkspace,
+        handleCreateMarketSubworkspace: handlers.handleCreateMarketSubworkspace,
+        handleDeleteMarketSubworkspace: handlers.handleDeleteMarketSubworkspace,
+        handleListTagsSubworkspace: handlers.handleListTagsSubworkspace,
+        handleListModelsSubworkspace: handlers.handleListModelsSubworkspace,
+        handleUpdateModelsSubworkspace: handlers.handleUpdateModelsSubworkspace,
       },
-      '../../src/support/serenity/handlers/prompts-child.js': {
-        handleListPromptsChild: handlers.handleListPromptsChild,
-        handleCreatePromptsChild: handlers.handleCreatePromptsChild,
-        handleUpdatePromptChild: handlers.handleUpdatePromptChild,
-        handleBulkDeletePromptsChild: handlers.handleBulkDeletePromptsChild,
+      '../../src/support/serenity/handlers/prompts-subworkspace.js': {
+        handleListPromptsSubworkspace: handlers.handleListPromptsSubworkspace,
+        handleCreatePromptsSubworkspace: handlers.handleCreatePromptsSubworkspace,
+        handleUpdatePromptSubworkspace: handlers.handleUpdatePromptSubworkspace,
+        handleBulkDeletePromptsSubworkspace: handlers.handleBulkDeletePromptsSubworkspace,
       },
       '../../src/support/serenity/workspace-lifecycle.js': {
         decommissionBrandWorkspace: decommissionStub,
@@ -656,13 +656,13 @@ describe('SerenityController', () => {
     });
   });
 
-  describe('dual-mode dispatch (child)', () => {
+  describe('dual-mode dispatch (subworkspace)', () => {
     beforeEach(() => {
-      resolveBrandWorkspaceStub.resolves({ mode: 'child', workspaceId: 'child-ws-1' });
+      resolveBrandWorkspaceStub.resolves({ mode: 'subworkspace', workspaceId: 'subworkspace-ws-1' });
     });
 
-    it('listMarkets routes to the child handler in child mode', async () => {
-      handlers.handleListMarketsChild.resolves({
+    it('listMarkets routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleListMarketsSubworkspace.resolves({
         items: [{
           brandId: BRAND, geoTargetId: 2840, languageCode: 'en', status: 'live',
         }],
@@ -670,23 +670,23 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listMarkets(fakeContext());
       expect(response.status).to.equal(200);
-      expect(handlers.handleListMarketsChild).to.have.been.calledOnceWithExactly({ name: 'transport' }, BRAND, 'child-ws-1');
+      expect(handlers.handleListMarketsSubworkspace).to.have.been.calledOnceWithExactly({ name: 'transport' }, BRAND, 'subworkspace-ws-1');
       expect(handlers.handleListMarkets).to.not.have.been.called;
     });
 
-    it('getMarket routes to the child handler in child mode', async () => {
-      handlers.handleGetMarketChild.resolves({
+    it('getMarket routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleGetMarketSubworkspace.resolves({
         brandId: BRAND, geoTargetId: 2840, languageCode: 'en', initialized: true,
       });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.getMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'EN' } }));
       expect(response.status).to.equal(200);
-      expect(handlers.handleGetMarketChild).to.have.been.calledOnce;
+      expect(handlers.handleGetMarketSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleGetMarket).to.not.have.been.called;
     });
 
-    it('createMarket routes to the child handler with the brand + parent workspace', async () => {
-      handlers.handleCreateMarketChild.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+    it('createMarket routes to the subworkspace handler with the brand + parent workspace', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.createMarket(fakeContext({
         data: {
@@ -694,42 +694,42 @@ describe('SerenityController', () => {
         },
       }));
       expect(response.status).to.equal(201);
-      expect(handlers.handleCreateMarketChild).to.have.been.calledOnce;
-      const { args } = handlers.handleCreateMarketChild.firstCall;
+      expect(handlers.handleCreateMarketSubworkspace).to.have.been.calledOnce;
+      const { args } = handlers.handleCreateMarketSubworkspace.firstCall;
       expect(args[2]).to.equal(WORKSPACE); // parentWorkspaceId
     });
 
-    it('deleteMarket routes to the child handler in child mode', async () => {
-      handlers.handleDeleteMarketChild.resolves({ status: 204 });
+    it('deleteMarket routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleDeleteMarketSubworkspace.resolves({ status: 204 });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deleteMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } }));
       expect(response.status).to.equal(204);
-      expect(handlers.handleDeleteMarketChild).to.have.been.calledOnce;
+      expect(handlers.handleDeleteMarketSubworkspace).to.have.been.calledOnce;
     });
 
-    it('listPrompts routes to the child handler with the child workspace', async () => {
-      handlers.handleListPromptsChild.resolves({
+    it('listPrompts routes to the subworkspace handler with the subworkspace', async () => {
+      handlers.handleListPromptsSubworkspace.resolves({
         items: [], total: 0, page: 1, limit: 50,
       });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listPrompts(fakeContext());
       expect(response.status).to.equal(200);
-      expect(handlers.handleListPromptsChild).to.have.been.calledOnce;
-      expect(handlers.handleListPromptsChild.firstCall.args[1]).to.equal('child-ws-1');
+      expect(handlers.handleListPromptsSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleListPromptsSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
       expect(handlers.handleListPrompts).to.not.have.been.called;
     });
 
-    it('createPrompts routes to the child handler in child mode', async () => {
-      handlers.handleCreatePromptsChild.resolves({ created: [], skipped: [], failed: [] });
+    it('createPrompts routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleCreatePromptsSubworkspace.resolves({ created: [], skipped: [], failed: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.createPrompts(fakeContext({ data: { prompts: [] } }));
       expect(response.status).to.equal(200);
-      expect(handlers.handleCreatePromptsChild).to.have.been.calledOnce;
+      expect(handlers.handleCreatePromptsSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleCreatePrompts).to.not.have.been.called;
     });
 
-    it('updatePrompt routes to the child handler in child mode', async () => {
-      handlers.handleUpdatePromptChild.resolves({ status: 200, body: { semrushPromptId: 'p2' } });
+    it('updatePrompt routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleUpdatePromptSubworkspace.resolves({ status: 200, body: { semrushPromptId: 'p2' } });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.updatePrompt(fakeContext({
         params: { semrushPromptId: 'p1' },
@@ -738,50 +738,50 @@ describe('SerenityController', () => {
         },
       }));
       expect(response.status).to.equal(200);
-      expect(handlers.handleUpdatePromptChild).to.have.been.calledOnce;
+      expect(handlers.handleUpdatePromptSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleUpdatePrompt).to.not.have.been.called;
     });
 
-    it('bulkDeletePrompts routes to the child handler in child mode', async () => {
-      handlers.handleBulkDeletePromptsChild.resolves({ deleted: 0, failed: [] });
+    it('bulkDeletePrompts routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleBulkDeletePromptsSubworkspace.resolves({ deleted: 0, failed: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.bulkDeletePrompts(fakeContext({ data: { prompts: [] } }));
       expect(response.status).to.equal(200);
-      expect(handlers.handleBulkDeletePromptsChild).to.have.been.calledOnce;
+      expect(handlers.handleBulkDeletePromptsSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleBulkDeletePrompts).to.not.have.been.called;
     });
 
-    it('listTags routes to the child handler in child mode', async () => {
-      handlers.handleListTagsChild.resolves({ items: [] });
+    it('listTags routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleListTagsSubworkspace.resolves({ items: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listTags(fakeContext());
       expect(response.status).to.equal(200);
-      expect(handlers.handleListTagsChild).to.have.been.calledOnce;
-      expect(handlers.handleListTagsChild.firstCall.args[1]).to.equal('child-ws-1');
+      expect(handlers.handleListTagsSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleListTagsSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
       expect(handlers.handleListTags).to.not.have.been.called;
     });
 
-    it('listModels routes to the child handler in child mode', async () => {
-      handlers.handleListModelsChild.resolves({ items: [] });
+    it('listModels routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleListModelsSubworkspace.resolves({ items: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listModels(fakeContext());
       expect(response.status).to.equal(200);
-      expect(handlers.handleListModelsChild).to.have.been.calledOnce;
+      expect(handlers.handleListModelsSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleListModels).to.not.have.been.called;
     });
 
-    it('updateModels routes to the child handler in child mode', async () => {
-      handlers.handleUpdateModelsChild.resolves({ items: [] });
+    it('updateModels routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleUpdateModelsSubworkspace.resolves({ items: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.updateModels(fakeContext({
         data: { geoTargetId: 2840, languageCode: 'en', modelIds: [] },
       }));
       expect(response.status).to.equal(200);
-      expect(handlers.handleUpdateModelsChild).to.have.been.calledOnce;
+      expect(handlers.handleUpdateModelsSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleUpdateModels).to.not.have.been.called;
     });
 
-    it('returns 500 when the brand model cannot be loaded for a child write', async () => {
+    it('returns 500 when the brand model cannot be loaded for a subworkspace write', async () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({
         data: {
@@ -796,7 +796,7 @@ describe('SerenityController', () => {
 
   describe('activate / deactivate', () => {
     it('activate creates each market and sets the brand active', async () => {
-      handlers.handleCreateMarketChild.resolves({ status: 201, body: {} });
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const brand = makeBrandModel();
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
@@ -804,7 +804,7 @@ describe('SerenityController', () => {
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
       }));
       expect(response.status).to.equal(200);
-      expect(handlers.handleCreateMarketChild).to.have.been.calledTwice;
+      expect(handlers.handleCreateMarketSubworkspace).to.have.been.calledTwice;
       expect(brand.setStatus).to.have.been.calledWith('active');
       expect(brand.save).to.have.been.called;
     });
@@ -816,7 +816,7 @@ describe('SerenityController', () => {
     });
 
     it('activate returns 207 and stays pending when every market fails', async () => {
-      handlers.handleCreateMarketChild.resolves({ status: 409, body: {} });
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 409, body: {} });
       const brand = makeBrandModel();
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
@@ -827,16 +827,16 @@ describe('SerenityController', () => {
       expect(brand.setStatus).to.not.have.been.called;
     });
 
-    it('deactivate decommissions the child workspace and sets the brand pending', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'child-ws-1' });
+    it('deactivate decommissions the subworkspace and sets the brand pending', async () => {
+      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
-      expect(decommissionStub).to.have.been.calledOnceWithExactly({ name: 'transport' }, 'child-ws-1', sinon.match.any);
+      expect(decommissionStub).to.have.been.calledOnceWithExactly({ name: 'transport' }, 'subworkspace-ws-1', sinon.match.any);
       expect(brand.setStatus).to.have.been.calledWith('pending');
     });
 
-    it('deactivate is a no-op decommission for a brand with no child workspace', async () => {
+    it('deactivate is a no-op decommission for a brand with no subworkspace', async () => {
       const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));

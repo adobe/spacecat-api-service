@@ -69,7 +69,7 @@ describe('serenity error classification', () => {
   });
 
   describe('ERROR_CODES', () => {
-    it('exposes the child-workspace provisioning tokens and is frozen', () => {
+    it('exposes the sub-workspace provisioning tokens and is frozen', () => {
       expect(ERROR_CODES.ALLOCATION_FAILURE).to.equal('allocationFailure');
       expect(ERROR_CODES.WORKSPACE_NOT_READY).to.equal('workspaceNotReady');
       expect(ERROR_CODES.WORKSPACE_DRIFT).to.equal('workspaceDrift');

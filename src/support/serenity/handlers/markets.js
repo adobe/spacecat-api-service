@@ -594,7 +594,7 @@ function evictTagCacheIfNeeded() {
 /* c8 ignore stop */
 
 /**
- * Project-keyed tag aggregation core, shared by the flat and child tag
+ * Project-keyed tag aggregation core, shared by the flat and subworkspace tag
  * handlers (serenity dual-mode). The ONLY thing that differs between modes is
  * how the slice resolves to a `projectId` (DB row vs live listing); the cache,
  * pagination, truncation guard, and sort are identical, so they live here once.
@@ -767,7 +767,7 @@ function assignmentToItem(it) {
 }
 
 /**
- * Global AI-model catalog (no project). Shared by the flat and child models
+ * Global AI-model catalog (no project). Shared by the flat and subworkspace models
  * handlers — the no-params path is workspace-independent, so both modes return
  * the identical catalog. Swallows only 404/405 (endpoint not available); auth
  * and server errors propagate.
@@ -814,7 +814,7 @@ export async function listGlobalModelCatalog(transport) {
 }
 
 /**
- * Models configured on one upstream project. Shared by the flat and child
+ * Models configured on one upstream project. Shared by the flat and subworkspace
  * slice-models handlers (the only difference upstream is which projectId the
  * slice resolved to).
  */
@@ -860,7 +860,7 @@ export async function handleListModels(
 }
 
 /**
- * Project-keyed diff-based model sync, shared by the flat and child model
+ * Project-keyed diff-based model sync, shared by the flat and subworkspace model
  * update handlers. Removes models absent from `modelIds`, adds models present
  * but unassigned, leaves already-assigned models untouched. The only thing that
  * differs between modes is how the slice resolved to `projectId`. `logCtx` is
@@ -940,7 +940,7 @@ export async function syncModelsForProject(
   // the draft layer (like prompts); without a publish the new set never reaches
   // the live project. This is the one deliberate exception to the "flat
   // handlers frozen" rule — the flat-mode PUT /models never published, a latent
-  // bug — and living in the shared core it fixes flat AND child in one place.
+  // bug — and living in the shared core it fixes flat AND subworkspace in one place.
   // Only reached when something actually changed (the no-op path returned above).
   await transport.publishProject(semrushWorkspaceId, projectId);
 

@@ -223,9 +223,9 @@ const FIXTURES = {
   activateSerenityBrand: {
     expectedStatus: 200,
     controllerMethod: 'activate',
-    // activate orchestrates per-market child creates; stubbing the child
+    // activate orchestrates per-market subworkspace creates; stubbing the subworkspace
     // market handler is enough to drive the documented 200 (≥1 live) shape.
-    handlerName: 'handleCreateMarketChild',
+    handlerName: 'handleCreateMarketSubworkspace',
     handlerResult: {
       status: 201,
       body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
@@ -298,7 +298,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleListTags: sinon.stub(),
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
-        handleCreateMarketChild: sinon.stub(),
+        handleCreateMarketSubworkspace: sinon.stub(),
         decommissionBrandWorkspace: sinon.stub(),
       };
       handlerStubs[fx.handlerName].resolves(fx.handlerResult);
@@ -335,20 +335,20 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleListModels: handlerStubs.handleListModels,
             handleUpdateModels: handlerStubs.handleUpdateModels,
           },
-          '../../src/support/serenity/handlers/markets-child.js': {
-            handleListMarketsChild: sinon.stub(),
-            handleGetMarketChild: sinon.stub(),
-            handleCreateMarketChild: handlerStubs.handleCreateMarketChild,
-            handleDeleteMarketChild: sinon.stub(),
-            handleListTagsChild: sinon.stub(),
-            handleListModelsChild: sinon.stub(),
-            handleUpdateModelsChild: sinon.stub(),
+          '../../src/support/serenity/handlers/markets-subworkspace.js': {
+            handleListMarketsSubworkspace: sinon.stub(),
+            handleGetMarketSubworkspace: sinon.stub(),
+            handleCreateMarketSubworkspace: handlerStubs.handleCreateMarketSubworkspace,
+            handleDeleteMarketSubworkspace: sinon.stub(),
+            handleListTagsSubworkspace: sinon.stub(),
+            handleListModelsSubworkspace: sinon.stub(),
+            handleUpdateModelsSubworkspace: sinon.stub(),
           },
-          '../../src/support/serenity/handlers/prompts-child.js': {
-            handleListPromptsChild: sinon.stub(),
-            handleCreatePromptsChild: sinon.stub(),
-            handleUpdatePromptChild: sinon.stub(),
-            handleBulkDeletePromptsChild: sinon.stub(),
+          '../../src/support/serenity/handlers/prompts-subworkspace.js': {
+            handleListPromptsSubworkspace: sinon.stub(),
+            handleCreatePromptsSubworkspace: sinon.stub(),
+            handleUpdatePromptSubworkspace: sinon.stub(),
+            handleBulkDeletePromptsSubworkspace: sinon.stub(),
           },
           '../../src/support/serenity/workspace-lifecycle.js': {
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
