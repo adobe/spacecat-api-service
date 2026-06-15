@@ -20,7 +20,11 @@ import {
   handleGetMarketChild,
   handleCreateMarketChild,
   handleDeleteMarketChild,
+  handleListTagsChild,
+  handleListModelsChild,
+  handleUpdateModelsChild,
 } from '../../../../src/support/serenity/handlers/markets-child.js';
+import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
@@ -52,6 +56,11 @@ function makeTransport(overrides = {}) {
     listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
     transferWorkspaceResources: sinon.stub().resolves(null),
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
+    listPromptsByTags: sinon.stub().resolves({ items: [] }),
+    listAiModels: sinon.stub().resolves({ items: [] }),
+    listGlobalAiModels: sinon.stub().resolves({ items: [] }),
+    addAiModel: sinon.stub().resolves(null),
+    deleteAiModelsByIds: sinon.stub().resolves(null),
     ...overrides,
   };
 }
@@ -72,7 +81,10 @@ const createBody = {
 };
 
 describe('markets-child handlers', () => {
-  afterEach(() => sinon.restore());
+  afterEach(() => {
+    sinon.restore();
+    clearTagCache();
+  });
 
   describe('handleListMarketsChild', () => {
     it('maps the live listing to slice DTOs', async () => {
@@ -198,6 +210,122 @@ describe('markets-child handlers', () => {
         deleteProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
       await expect(handleDeleteMarketChild(transport, WS, 2840, 'en', log)).to.be.rejectedWith(SerenityTransportError);
+    });
+  });
+
+  describe('handleListTagsChild', () => {
+    it('aggregates unique tag names across the slice prompts', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({
+          items: [
+            { id: 'q1', tags: [{ id: 't-1', name: 'Topic A' }] },
+            { id: 'q2', tags: [{ id: 't-1', name: 'Topic A' }, { id: 't-2', name: 'Topic B' }] },
+          ],
+        }),
+      });
+      const result = await handleListTagsChild(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([
+        { id: 't-1', name: 'Topic A' },
+        { id: 't-2', name: 'Topic B' },
+      ]);
+      expect(transport.listPromptsByTags).to.have.been.calledWith(WS, 'p-tag');
+    });
+
+    it('returns an empty set when no slice matches (no upstream prompt call)', async () => {
+      const transport = makeTransport();
+      const result = await handleListTagsChild(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([]);
+      expect(transport.listPromptsByTags).to.not.have.been.called;
+    });
+
+    it('400s on a missing slice key', async () => {
+      await expect(handleListTagsChild(makeTransport(), WS, { languageCode: 'en' }, log))
+        .to.be.rejectedWith(/geoTargetId/);
+    });
+  });
+
+  describe('handleListModelsChild', () => {
+    it('returns the global catalog when called without a slice', async () => {
+      const transport = makeTransport({
+        listGlobalAiModels: sinon.stub().resolves({
+          items: [{ id: 'm1', key: 'gpt-4o', name: 'GPT-4o' }],
+        }),
+      });
+      const result = await handleListModelsChild(transport, WS, {}, log);
+      expect(result.items).to.deep.equal([{
+        id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: null,
+      }]);
+      expect(transport.listGlobalAiModels).to.have.been.called;
+      expect(transport.listAiModels).to.not.have.been.called;
+    });
+
+    it('returns the slice models when called with geo+lang', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-mod' })] }),
+        listAiModels: sinon.stub().resolves({
+          items: [{ id: 'assign-1', model: { id: 'm1', key: 'gpt-4o', name: 'GPT-4o' } }],
+        }),
+      });
+      const result = await handleListModelsChild(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{
+        id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: null,
+      }]);
+      expect(transport.listAiModels).to.have.been.calledWith(WS, 'p-mod');
+    });
+
+    it('returns an empty set when the slice has no project', async () => {
+      const transport = makeTransport();
+      const result = await handleListModelsChild(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([]);
+    });
+
+    it('400s on partial params (geo without lang)', async () => {
+      await expect(handleListModelsChild(makeTransport(), WS, { geoTargetId: 2840 }, log))
+        .to.be.rejectedWith(/Provide both/);
+    });
+  });
+
+  describe('handleUpdateModelsChild', () => {
+    it('adds the missing model and returns the refreshed list', async () => {
+      const listAiModels = sinon.stub();
+      listAiModels.onFirstCall().resolves({ items: [] });
+      listAiModels.onSecondCall().resolves({
+        items: [{ id: 'assign-1', model: { id: 'm1', key: 'gpt-4o', name: 'GPT-4o' } }],
+      });
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-mod' })] }),
+        listAiModels,
+      });
+      const result = await handleUpdateModelsChild(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
+        log,
+      );
+      expect(transport.addAiModel).to.have.been.calledWith(WS, 'p-mod', 'm1');
+      expect(result.items).to.deep.equal([{
+        id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: null,
+      }]);
+    });
+
+    it('404s when the slice has no project', async () => {
+      const transport = makeTransport();
+      await expect(handleUpdateModelsChild(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
+        log,
+      )).to.be.rejectedWith(/Market not found/);
+    });
+
+    it('400s on invalid modelIds', async () => {
+      await expect(handleUpdateModelsChild(
+        makeTransport(),
+        WS,
+        { geoTargetId: 2840, languageCode: 'en', modelIds: 'nope' },
+        log,
+      )).to.be.rejectedWith(/modelIds/);
     });
   });
 });

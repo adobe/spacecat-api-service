@@ -20,6 +20,8 @@ import {
   projectToSlice,
   listChildMarkets,
   resolveChildProject,
+  buildChildSliceProjectMap,
+  sliceKey,
 } from '../../../src/support/serenity/child-projects.js';
 
 use(chaiAsPromised);
@@ -169,6 +171,61 @@ describe('child-projects', () => {
       };
       const p = await resolveChildProject(transport, WS, 2276, 'de', { error: sinon.spy() });
       expect(p.id).to.equal('older');
+    });
+  });
+
+  describe('sliceKey', () => {
+    it('lowercases the language and joins on a colon', () => {
+      expect(sliceKey(2840, 'EN')).to.equal('2840:en');
+    });
+    it('renders a missing language as an empty subkey', () => {
+      expect(sliceKey(2840, null)).to.equal('2840:');
+    });
+  });
+
+  describe('buildChildSliceProjectMap', () => {
+    it('maps each (geo, lang) slice to its project from one listing', async () => {
+      const transport = {
+        listProjects: sinon.stub().resolves({
+          items: [
+            project({ id: 'us', location: 2840, language: 'en' }),
+            project({ id: 'de', location: 2276, language: 'de' }),
+          ],
+        }),
+      };
+      const map = await buildChildSliceProjectMap(transport, WS, log);
+      expect(transport.listProjects).to.have.been.calledOnce;
+      expect(map.get('2840:en').id).to.equal('us');
+      expect(map.get('2276:de').id).to.equal('de');
+    });
+
+    it('drops projects that do not resolve to a slice', async () => {
+      const transport = {
+        listProjects: sinon.stub().resolves({
+          items: [project({ id: 'bad', location: null, language: null })],
+        }),
+      };
+      const map = await buildChildSliceProjectMap(transport, WS, log);
+      expect(map.size).to.equal(0);
+    });
+
+    it('keeps the oldest on a duplicate slice and alerts', async () => {
+      const alert = sinon.spy();
+      const transport = {
+        listProjects: sinon.stub().resolves({
+          items: [
+            project({
+              id: 'newer', location: 2840, language: 'en', createdAt: '2026-06-05T00:00:00Z',
+            }),
+            project({
+              id: 'older', location: 2840, language: 'en', createdAt: '2026-06-01T00:00:00Z',
+            }),
+          ],
+        }),
+      };
+      const map = await buildChildSliceProjectMap(transport, WS, { error: alert });
+      expect(map.get('2840:en').id).to.equal('older');
+      expect(alert).to.have.been.calledOnce;
     });
   });
 });

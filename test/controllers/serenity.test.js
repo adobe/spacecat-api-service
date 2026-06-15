@@ -103,6 +103,13 @@ describe('SerenityController', () => {
     handleGetMarketChild: sinon.stub(),
     handleCreateMarketChild: sinon.stub(),
     handleDeleteMarketChild: sinon.stub(),
+    handleListTagsChild: sinon.stub(),
+    handleListModelsChild: sinon.stub(),
+    handleUpdateModelsChild: sinon.stub(),
+    handleListPromptsChild: sinon.stub(),
+    handleCreatePromptsChild: sinon.stub(),
+    handleUpdatePromptChild: sinon.stub(),
+    handleBulkDeletePromptsChild: sinon.stub(),
   };
   let decommissionStub;
   let resolveWorkspaceIdStub;
@@ -167,6 +174,15 @@ describe('SerenityController', () => {
         handleGetMarketChild: handlers.handleGetMarketChild,
         handleCreateMarketChild: handlers.handleCreateMarketChild,
         handleDeleteMarketChild: handlers.handleDeleteMarketChild,
+        handleListTagsChild: handlers.handleListTagsChild,
+        handleListModelsChild: handlers.handleListModelsChild,
+        handleUpdateModelsChild: handlers.handleUpdateModelsChild,
+      },
+      '../../src/support/serenity/handlers/prompts-child.js': {
+        handleListPromptsChild: handlers.handleListPromptsChild,
+        handleCreatePromptsChild: handlers.handleCreatePromptsChild,
+        handleUpdatePromptChild: handlers.handleUpdatePromptChild,
+        handleBulkDeletePromptsChild: handlers.handleBulkDeletePromptsChild,
       },
       '../../src/support/serenity/workspace-lifecycle.js': {
         decommissionBrandWorkspace: decommissionStub,
@@ -691,13 +707,78 @@ describe('SerenityController', () => {
       expect(handlers.handleDeleteMarketChild).to.have.been.calledOnce;
     });
 
-    it('501s prompts/tags/models for child-mode brands', async () => {
+    it('listPrompts routes to the child handler with the child workspace', async () => {
+      handlers.handleListPromptsChild.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
-      for (const method of ['listPrompts', 'createPrompts', 'bulkDeletePrompts', 'listTags', 'listModels', 'updateModels']) {
-        // eslint-disable-next-line no-await-in-loop
-        const response = await controller[method](fakeContext({ data: {} }));
-        expect(response.status, method).to.equal(501);
-      }
+      const response = await controller.listPrompts(fakeContext());
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListPromptsChild).to.have.been.calledOnce;
+      expect(handlers.handleListPromptsChild.firstCall.args[1]).to.equal('child-ws-1');
+      expect(handlers.handleListPrompts).to.not.have.been.called;
+    });
+
+    it('createPrompts routes to the child handler in child mode', async () => {
+      handlers.handleCreatePromptsChild.resolves({ created: [], skipped: [], failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createPrompts(fakeContext({ data: { prompts: [] } }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePromptsChild).to.have.been.calledOnce;
+      expect(handlers.handleCreatePrompts).to.not.have.been.called;
+    });
+
+    it('updatePrompt routes to the child handler in child mode', async () => {
+      handlers.handleUpdatePromptChild.resolves({ status: 200, body: { semrushPromptId: 'p2' } });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updatePrompt(fakeContext({
+        params: { semrushPromptId: 'p1' },
+        data: {
+          text: 't', tags: [], geoTargetId: 2840, languageCode: 'en',
+        },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdatePromptChild).to.have.been.calledOnce;
+      expect(handlers.handleUpdatePrompt).to.not.have.been.called;
+    });
+
+    it('bulkDeletePrompts routes to the child handler in child mode', async () => {
+      handlers.handleBulkDeletePromptsChild.resolves({ deleted: 0, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.bulkDeletePrompts(fakeContext({ data: { prompts: [] } }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleBulkDeletePromptsChild).to.have.been.calledOnce;
+      expect(handlers.handleBulkDeletePrompts).to.not.have.been.called;
+    });
+
+    it('listTags routes to the child handler in child mode', async () => {
+      handlers.handleListTagsChild.resolves({ items: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listTags(fakeContext());
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListTagsChild).to.have.been.calledOnce;
+      expect(handlers.handleListTagsChild.firstCall.args[1]).to.equal('child-ws-1');
+      expect(handlers.handleListTags).to.not.have.been.called;
+    });
+
+    it('listModels routes to the child handler in child mode', async () => {
+      handlers.handleListModelsChild.resolves({ items: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listModels(fakeContext());
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListModelsChild).to.have.been.calledOnce;
+      expect(handlers.handleListModels).to.not.have.been.called;
+    });
+
+    it('updateModels routes to the child handler in child mode', async () => {
+      handlers.handleUpdateModelsChild.resolves({ items: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateModels(fakeContext({
+        data: { geoTargetId: 2840, languageCode: 'en', modelIds: [] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdateModelsChild).to.have.been.calledOnce;
+      expect(handlers.handleUpdateModels).to.not.have.been.called;
     });
 
     it('returns 500 when the brand model cannot be loaded for a child write', async () => {

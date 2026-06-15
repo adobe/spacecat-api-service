@@ -46,13 +46,13 @@ export function mapPublishStatus(publishStatus) {
   }
 }
 
-function geoOf(project) {
+export function geoOf(project) {
   const raw = project?.settings?.ai?.location?.id;
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
-function langOf(project) {
+export function langOf(project) {
   const lang = project?.settings?.ai?.language?.name;
   return hasText(lang) ? String(lang).toLowerCase() : null;
 }
@@ -96,6 +96,51 @@ export async function listChildMarkets(transport, workspaceId, brandId) {
   return items
     .map((p) => projectToSlice(p, brandId))
     .filter((m) => m.geoTargetId !== null && m.languageCode !== null);
+}
+
+/** Slice key shared by the child-mode read and write handlers. */
+export function sliceKey(geoTargetId, languageCode) {
+  const lang = hasText(languageCode) ? String(languageCode).toLowerCase() : '';
+  return `${geoTargetId}:${lang}`;
+}
+
+/**
+ * Lists a child workspace's projects ONCE and returns a `"geo:lang" → project`
+ * Map, applying the same deterministic oldest-wins rule as resolveChildProject
+ * when a slice has duplicate projects (design §7). Bulk write handlers (create
+ * prompts, bulk-delete) use this to resolve every input's owning project from a
+ * single upstream listing instead of one resolve per slice. Projects that don't
+ * resolve to a (geo, lang) slice are skipped — they are not addressable markets.
+ */
+export async function buildChildSliceProjectMap(transport, workspaceId, log) {
+  const listing = await transport.listProjects(workspaceId);
+  const items = Array.isArray(listing?.items) ? listing.items : [];
+  const map = new Map();
+  for (const p of items) {
+    const geo = geoOf(p);
+    const lang = langOf(p);
+    if (geo === null || lang === null) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    const key = sliceKey(geo, lang);
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, p);
+    } else {
+      // Duplicate slice: oldest wins, deterministically (same rule as the
+      // single-slice resolver). Alert so the drift is visible.
+      const ordered = [prev, p].sort((a, b) => orderKey(a).localeCompare(orderKey(b)));
+      map.set(key, ordered[0]);
+      log?.error?.('serenity child: duplicate projects on one slice — oldest wins', {
+        workspaceId,
+        geoTargetId: geo,
+        languageCode: lang,
+        projectIds: [prev?.id, p?.id],
+      });
+    }
+  }
+  return map;
 }
 
 /**

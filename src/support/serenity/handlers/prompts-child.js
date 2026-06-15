@@ -1,0 +1,378 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { hasText } from '@adobe/spacecat-shared-utils';
+
+import { ErrorWithStatusCode } from '../../utils.js';
+import { ERROR_CODES, isUpstreamGone } from '../errors.js';
+import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
+import { invalidateTagCacheForProject } from './markets.js';
+import {
+  buildPromptDto,
+  normalizePromptInput,
+  mapLimit,
+  publishAffected,
+  DEFAULT_PAGE_LIMIT,
+  MAX_PAGE_LIMIT,
+  MAX_TAG_IDS,
+  BULK_CREATE_CONCURRENCY,
+  BULK_PROMPTS_MAX_ITEMS,
+} from './prompts.js';
+import { resolveChildProject, buildChildSliceProjectMap, sliceKey } from '../child-projects.js';
+
+/**
+ * Child-mode prompt handlers (serenity dual-mode, child path). Behaviourally
+ * identical to the legacy prompt handlers EXCEPT for how a `(geoTargetId,
+ * languageCode)` slice resolves to an upstream project: legacy reads the
+ * BrandSemrushProject mapping table, child resolves it from the brand's own
+ * child workspace via the live `listProjects` listing. Everything downstream —
+ * the Semrush prompt calls, the publish-once contract, the per-project tag
+ * cache invalidation, the bulk concurrency caps — is the shared, project-keyed
+ * logic imported verbatim from prompts.js. The controller dispatches here when
+ * resolveBrandWorkspace returns mode === 'child'.
+ */
+
+/**
+ * GET /serenity/prompts (child) — list one slice's prompts. The slice resolves
+ * to a project via the live listing; a missing project is a hard 404
+ * marketNotFound (same contract as the legacy single-slice list — "no such
+ * slice" must not masquerade as "slice exists but empty").
+ */
+export async function handleListPromptsChild(transport, workspaceId, query, log) {
+  const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
+  const languageCode = normalizeLanguageCode(query?.languageCode);
+  if (geoTargetId === null || languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
+      400,
+    );
+  }
+
+  const page = Number.isInteger(query?.page) && query.page > 0 ? query.page : 1;
+  const requestedLimit = Number.isInteger(query?.limit) && query.limit > 0
+    ? query.limit : DEFAULT_PAGE_LIMIT;
+  const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
+  const search = hasText(query?.search) ? String(query.search).trim() : undefined;
+  const tagIds = Array.isArray(query?.tagIds)
+    ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
+    : [];
+
+  const project = await resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log);
+  if (!project) {
+    const err = new ErrorWithStatusCode(
+      'No market for this brand and (geoTargetId, languageCode) slice',
+      404,
+    );
+    err.code = ERROR_CODES.MARKET_NOT_FOUND;
+    throw err;
+  }
+
+  const resp = await transport.listPromptsByTags(workspaceId, project.id, {
+    tag_ids: tagIds,
+    page,
+    limit,
+    search,
+  });
+  const items = Array.isArray(resp?.items) ? resp.items : [];
+  let total;
+  if (items.length < limit) {
+    total = (page - 1) * limit + items.length;
+  } else {
+    total = Number.isFinite(resp?.total) ? resp.total : items.length;
+  }
+  return {
+    items: items
+      .map((item) => buildPromptDto(geoTargetId, languageCode, item))
+      .filter(Boolean),
+    total,
+    page,
+    limit,
+  };
+}
+
+/**
+ * POST /serenity/prompts (child) — bulk create. Resolves every input's owning
+ * project from ONE live listing (buildChildSliceProjectMap) instead of the DB
+ * mapping, then reuses the shared per-slice create + publish-once fan-out.
+ */
+export async function handleCreatePromptsChild(transport, workspaceId, body, log) {
+  const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
+  if (inputs.length === 0) {
+    throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
+  }
+  if (inputs.length > BULK_PROMPTS_MAX_ITEMS) {
+    throw new ErrorWithStatusCode(
+      `prompts array exceeds maxItems=${BULK_PROMPTS_MAX_ITEMS}`,
+      400,
+    );
+  }
+
+  const projectsBySlice = await buildChildSliceProjectMap(transport, workspaceId, log);
+
+  const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
+    const input = normalizePromptInput(raw);
+    if (!input) {
+      return {
+        skipped: {
+          text: String(raw?.text || ''),
+          reason: 'text, languageCode, and geoTargetId are required',
+        },
+      };
+    }
+    const project = projectsBySlice.get(sliceKey(input.geoTargetId, input.languageCode));
+    if (!project) {
+      return {
+        skipped: {
+          text: input.text,
+          reason: `No market for slice (${input.geoTargetId}, ${input.languageCode})`,
+        },
+      };
+    }
+    const projectId = String(project.id);
+    try {
+      const resp = await transport.createTaggedPrompts(
+        workspaceId,
+        projectId,
+        { [input.text]: input.tags },
+      );
+      const semrushPromptId = Array.isArray(resp?.ids) && resp.ids.length > 0
+        ? String(resp.ids[0]) : '';
+      return {
+        created: {
+          semrushPromptId,
+          geoTargetId: input.geoTargetId,
+          languageCode: input.languageCode,
+          text: input.text,
+          tags: input.tags,
+        },
+        affectedProjectId: projectId,
+      };
+    } catch (e) {
+      return {
+        failed: {
+          text: input.text,
+          geoTargetId: input.geoTargetId,
+          languageCode: input.languageCode,
+          status: e.status || 500,
+          message: e.message,
+        },
+      };
+    }
+  });
+
+  const created = [];
+  const skipped = [];
+  const failed = [];
+  const affectedProjectIds = [];
+  for (const r of results) {
+    if (r.created) {
+      created.push(r.created);
+      affectedProjectIds.push(r.affectedProjectId);
+    } else if (r.skipped) {
+      skipped.push(r.skipped);
+    } else if (r.failed) {
+      failed.push(r.failed);
+    }
+  }
+
+  for (const pid of new Set(affectedProjectIds)) {
+    invalidateTagCacheForProject(workspaceId, pid);
+  }
+
+  const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);
+  for (const e of publishErrors) {
+    failed.push({ text: '', status: 502, message: `publish: ${e.message}` });
+  }
+
+  return { created, skipped, failed };
+}
+
+/**
+ * PATCH /serenity/prompts/:semrushPromptId (child) — replace. Resolves the
+ * slice's project from the live listing, then runs the shared DELETE-then-CREATE
+ * (we never CREATE after a failed DELETE — that produced duplicate prompts).
+ */
+export async function handleUpdatePromptChild(transport, workspaceId, semrushPromptId, body, log) {
+  if (!body || body.text === undefined || body.tags === undefined) {
+    return {
+      status: 400,
+      body: { error: 'missingFields', message: 'PATCH body must include both text and tags' },
+    };
+  }
+  const geoTargetId = normalizeGeoTargetId(Number(body.geoTargetId));
+  const languageCode = normalizeLanguageCode(body.languageCode);
+  if (geoTargetId === null || languageCode === null) {
+    return {
+      status: 400,
+      body: {
+        error: 'invalidRequest',
+        message: 'PATCH body must include geoTargetId (integer) and languageCode (BCP-47 primary subtag)',
+      },
+    };
+  }
+
+  const project = await resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log);
+  if (!project) {
+    return {
+      status: 404,
+      body: {
+        error: 'marketNotFound',
+        message: 'No market for this brand and (geoTargetId, languageCode) slice',
+      },
+    };
+  }
+  const projectId = String(project.id);
+
+  const nextText = String(body.text);
+  const nextTags = Array.isArray(body.tags)
+    ? body.tags.map((t) => String(t || '').trim()).filter(Boolean)
+    : [];
+
+  try {
+    await transport.deletePromptsByIds(workspaceId, projectId, [semrushPromptId]);
+  } catch (e) {
+    if (isUpstreamGone(e)) {
+      return {
+        status: 404,
+        body: {
+          error: 'promptNotFound',
+          message: 'No upstream prompt matches the supplied semrushPromptId in this slice',
+        },
+      };
+    }
+    log?.error?.('handleUpdatePromptChild: deletePromptsByIds failed; aborting before create to avoid duplicate', {
+      projectId,
+      semrushPromptId,
+      error: e.message,
+    });
+    throw e;
+  }
+
+  const resp = await transport.createTaggedPrompts(
+    workspaceId,
+    projectId,
+    { [nextText]: nextTags },
+  );
+  const newSemrushPromptId = Array.isArray(resp?.ids) && resp.ids.length > 0
+    ? String(resp.ids[0]) : '';
+
+  invalidateTagCacheForProject(workspaceId, projectId);
+
+  await publishAffected(transport, workspaceId, [projectId], log);
+
+  return {
+    status: 200,
+    body: {
+      semrushPromptId: newSemrushPromptId,
+      geoTargetId,
+      languageCode,
+      text: nextText,
+      tags: nextTags,
+    },
+  };
+}
+
+/**
+ * POST /serenity/prompts/bulk-delete (child) — resolve each target's project
+ * from ONE live listing, batch deletes per project, publish affected. Upstream
+ * 404 == idempotent success.
+ */
+export async function handleBulkDeletePromptsChild(transport, workspaceId, body, log) {
+  const targets = Array.isArray(body?.prompts) ? body.prompts : [];
+  if (targets.length === 0) {
+    throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
+  }
+  if (targets.length > BULK_PROMPTS_MAX_ITEMS) {
+    throw new ErrorWithStatusCode(
+      `prompts array exceeds maxItems=${BULK_PROMPTS_MAX_ITEMS}`,
+      400,
+    );
+  }
+
+  const projectsBySlice = await buildChildSliceProjectMap(transport, workspaceId, log);
+
+  const byProject = new Map();
+  const failed = [];
+  targets.forEach((t) => {
+    const sid = String(t?.semrushPromptId || '');
+    const geoTargetId = normalizeGeoTargetId(Number(t?.geoTargetId));
+    const languageCode = normalizeLanguageCode(t?.languageCode);
+    if (!sid || geoTargetId === null || languageCode === null) {
+      failed.push({
+        semrushPromptId: sid,
+        geoTargetId,
+        languageCode,
+        message: 'Missing semrushPromptId, geoTargetId, or languageCode',
+      });
+      return;
+    }
+    const project = projectsBySlice.get(sliceKey(geoTargetId, languageCode));
+    if (!project) {
+      failed.push({
+        semrushPromptId: sid,
+        geoTargetId,
+        languageCode,
+        message: `No market for slice (${geoTargetId}, ${languageCode})`,
+      });
+      return;
+    }
+    const pid = String(project.id);
+    if (!byProject.has(pid)) {
+      byProject.set(pid, { ids: [], targets: [] });
+    }
+    const bucket = byProject.get(pid);
+    bucket.ids.push(sid);
+    bucket.targets.push({ semrushPromptId: sid, geoTargetId, languageCode });
+  });
+
+  let deleted = 0;
+  const projectsToPublish = new Set();
+  await Promise.all(Array.from(byProject.entries()).map(async ([pid, bucket]) => {
+    try {
+      await transport.deletePromptsByIds(workspaceId, pid, bucket.ids);
+      deleted += bucket.ids.length;
+      projectsToPublish.add(pid);
+    } catch (e) {
+      if (isUpstreamGone(e)) {
+        deleted += bucket.ids.length;
+        projectsToPublish.add(pid);
+        log?.info?.('bulk-delete (child): upstream already-deleted (404 treated as success)', { ids: bucket.ids });
+        return;
+      }
+      bucket.targets.forEach((t) => {
+        failed.push({
+          semrushPromptId: t.semrushPromptId,
+          geoTargetId: t.geoTargetId,
+          languageCode: t.languageCode,
+          status: e.status || 500,
+          message: e.message,
+        });
+      });
+    }
+  }));
+
+  for (const pid of projectsToPublish) {
+    invalidateTagCacheForProject(workspaceId, pid);
+  }
+
+  const publishErrors = await publishAffected(
+    transport,
+    workspaceId,
+    Array.from(projectsToPublish),
+    log,
+  );
+  publishErrors.forEach((e) => {
+    failed.push({ semrushPromptId: '', status: 502, message: `publish: ${e.message}` });
+  });
+
+  return { deleted, failed };
+}

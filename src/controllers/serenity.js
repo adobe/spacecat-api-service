@@ -38,7 +38,16 @@ import {
   handleGetMarketChild,
   handleCreateMarketChild,
   handleDeleteMarketChild,
+  handleListTagsChild,
+  handleListModelsChild,
+  handleUpdateModelsChild,
 } from '../support/serenity/handlers/markets-child.js';
+import {
+  handleListPromptsChild,
+  handleCreatePromptsChild,
+  handleUpdatePromptChild,
+  handleBulkDeletePromptsChild,
+} from '../support/serenity/handlers/prompts-child.js';
 import { decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
@@ -258,19 +267,6 @@ function SerenityController(context, log, env) {
     return brand;
   }
 
-  // Prompts/tags/models child-mode resolution (resolve the project from the
-  // live listing instead of BrandSemrushProject) is the documented follow-up
-  // within this epic; until it lands, these surfaces 501 for child-mode brands
-  // rather than silently reading an empty legacy mapping. The legacy path is
-  // unchanged.
-  const childNotImplemented = (surface) => createResponse(
-    {
-      error: 'notImplemented',
-      message: `${surface} is not yet available for child-workspace brands`,
-    },
-    501,
-  );
-
   const listPrompts = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
@@ -279,16 +275,15 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      if (auth.mode === 'child') {
-        return childNotImplemented('prompts');
-      }
-      const result = await handleListPrompts(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.workspaceId,
-        parsedQuery(ctx),
-      );
+      const result = auth.mode === 'child'
+        ? await handleListPromptsChild(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : await handleListPrompts(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          parsedQuery(ctx),
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -303,17 +298,16 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      if (auth.mode === 'child') {
-        return childNotImplemented('prompts');
-      }
-      const result = await handleCreatePrompts(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.workspaceId,
-        ctx.data || {},
-        log,
-      );
+      const result = auth.mode === 'child'
+        ? await handleCreatePromptsChild(transport, auth.workspaceId, ctx.data || {}, log)
+        : await handleCreatePrompts(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -332,18 +326,23 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      if (auth.mode === 'child') {
-        return childNotImplemented('prompts');
-      }
-      const result = await handleUpdatePrompt(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.workspaceId,
-        semrushPromptId,
-        ctx.data || {},
-        log,
-      );
+      const result = auth.mode === 'child'
+        ? await handleUpdatePromptChild(
+          transport,
+          auth.workspaceId,
+          semrushPromptId,
+          ctx.data || {},
+          log,
+        )
+        : await handleUpdatePrompt(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          semrushPromptId,
+          ctx.data || {},
+          log,
+        );
       return createResponse(result.body, result.status);
     } catch (e) {
       return mapError(e, log);
@@ -358,17 +357,16 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      if (auth.mode === 'child') {
-        return childNotImplemented('prompts');
-      }
-      const result = await handleBulkDeletePrompts(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.workspaceId,
-        ctx.data || {},
-        log,
-      );
+      const result = auth.mode === 'child'
+        ? await handleBulkDeletePromptsChild(transport, auth.workspaceId, ctx.data || {}, log)
+        : await handleBulkDeletePrompts(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -503,17 +501,16 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      if (auth.mode === 'child') {
-        return childNotImplemented('tags');
-      }
-      const result = await handleListTags(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.workspaceId,
-        parsedQuery(ctx),
-        log,
-      );
+      const result = auth.mode === 'child'
+        ? await handleListTagsChild(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : await handleListTags(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          parsedQuery(ctx),
+          log,
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -528,16 +525,15 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      if (auth.mode === 'child') {
-        return childNotImplemented('models');
-      }
-      const result = await handleListModels(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.workspaceId,
-        parsedQuery(ctx),
-      );
+      const result = auth.mode === 'child'
+        ? await handleListModelsChild(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : await handleListModels(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          parsedQuery(ctx),
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -552,17 +548,16 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      if (auth.mode === 'child') {
-        return childNotImplemented('models');
-      }
-      const result = await handleUpdateModels(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.workspaceId,
-        ctx.data || {},
-        log,
-      );
+      const result = auth.mode === 'child'
+        ? await handleUpdateModelsChild(transport, auth.workspaceId, ctx.data || {}, log)
+        : await handleUpdateModels(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);

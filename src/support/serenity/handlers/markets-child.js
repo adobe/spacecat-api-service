@@ -16,7 +16,14 @@ import { ErrorWithStatusCode } from '../../utils.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import {
-  resolveLocation, resolveLanguageId, defaultMarketName,
+  resolveLocation,
+  resolveLanguageId,
+  defaultMarketName,
+  listTagsForProject,
+  listGlobalModelCatalog,
+  listSliceModels,
+  syncModelsForProject,
+  MAX_MODEL_IDS,
 } from './markets.js';
 import {
   listChildMarkets, resolveChildProject, mapPublishStatus, projectToSlice,
@@ -205,4 +212,94 @@ export async function handleDeleteMarketChild(
     }
   }
   return { status: 204 };
+}
+
+/**
+ * GET /serenity/tags (child) — unique tag names across the slice's prompts.
+ * Resolves the slice's project from the live listing, then reuses the shared
+ * project-keyed tag aggregation (cache + pagination + truncation guard). A
+ * missing slice returns an empty set, matching the legacy tags contract.
+ */
+export async function handleListTagsChild(transport, workspaceId, query, log) {
+  const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
+  const languageCode = normalizeLanguageCode(query?.languageCode);
+  if (geoTargetId === null || languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
+      400,
+    );
+  }
+  const project = await resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log);
+  if (!project) {
+    return { items: [] };
+  }
+  return listTagsForProject(
+    transport,
+    workspaceId,
+    String(project.id),
+    { geoTargetId, languageCode },
+    log,
+  );
+}
+
+/**
+ * GET /serenity/models (child). No params → the (workspace-independent) global
+ * catalog. With (geoTargetId, languageCode) → models on the slice's project,
+ * resolved from the live listing. Partial params → 400. A missing slice returns
+ * an empty set, matching the legacy models contract.
+ */
+export async function handleListModelsChild(transport, workspaceId, query, log) {
+  const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
+  const languageCode = normalizeLanguageCode(query?.languageCode);
+
+  if (geoTargetId === null && languageCode === null) {
+    return listGlobalModelCatalog(transport);
+  }
+  if (geoTargetId === null || languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'Provide both geoTargetId and languageCode to query a specific market, or omit both for the workspace catalog',
+      400,
+    );
+  }
+  const project = await resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log);
+  if (!project) {
+    return { items: [] };
+  }
+  return listSliceModels(transport, workspaceId, String(project.id));
+}
+
+/**
+ * PUT /serenity/models (child) — replace the AI-model set for a slice. Resolves
+ * the slice's project from the live listing (404 if absent), then reuses the
+ * shared diff-based sync. Validation mirrors the legacy handler exactly.
+ */
+export async function handleUpdateModelsChild(transport, workspaceId, body, log) {
+  const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
+  const languageCode = normalizeLanguageCode(body?.languageCode);
+  if (geoTargetId === null || languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
+      400,
+    );
+  }
+  const modelIds = body?.modelIds;
+  if (!Array.isArray(modelIds) || !modelIds.every((id) => hasText(id))) {
+    throw new ErrorWithStatusCode('modelIds must be an array of non-empty strings', 400);
+  }
+  if (modelIds.length > MAX_MODEL_IDS) {
+    throw new ErrorWithStatusCode(`modelIds must not exceed ${MAX_MODEL_IDS} entries`, 400);
+  }
+
+  const project = await resolveChildProject(transport, workspaceId, geoTargetId, languageCode, log);
+  if (!project) {
+    throw new ErrorWithStatusCode('Market not found for this brand', 404);
+  }
+  return syncModelsForProject(
+    transport,
+    workspaceId,
+    String(project.id),
+    modelIds,
+    { geoTargetId, languageCode },
+    log,
+  );
 }

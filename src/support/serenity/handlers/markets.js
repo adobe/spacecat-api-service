@@ -20,7 +20,7 @@ import { SerenityTransportError } from '../rest-transport.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
-const MAX_MODEL_IDS = 50;
+export const MAX_MODEL_IDS = 50;
 
 // Reusable English region-name formatter (ICU-backed, built into Node). Used
 // for the `location_name` we send upstream — matches the form Semrush stores
@@ -594,45 +594,13 @@ function evictTagCacheIfNeeded() {
 /* c8 ignore stop */
 
 /**
- * GET /serenity/tags?geoTargetId=&languageCode= — unique tag names across
- * the slice's prompts. Required filters; one slice → one upstream call set.
- * Short-TTL cache to keep dashboard polling cheap.
- *
- * TODO: the tag set is computed by paginating the project's prompts and
- * aggregating distinct tag names in JS. This is an O(N) approximation —
- * for a project with N prompts we do ceil(N/200) upstream calls. Capped
- * at 50 pages (10k prompts); beyond that the tag set is silently
- * truncated and a `warn` log fires (see TAG_PAGE_LIMIT in
- * `handleListTags`). When/if Semrush exposes a dedicated tags endpoint
- * (`GET /v1/workspaces/{ws}/projects/{pid}/tags`), this whole loop
- * collapses to one upstream call and the truncation risk goes away.
+ * Project-keyed tag aggregation core, shared by the legacy and child tag
+ * handlers (serenity dual-mode). The ONLY thing that differs between modes is
+ * how the slice resolves to a `projectId` (DB row vs live listing); the cache,
+ * pagination, truncation guard, and sort are identical, so they live here once.
+ * `logCtx` is spread into the truncation warning for diagnosability.
  */
-export async function handleListTags(
-  transport,
-  dataAccess,
-  brandId,
-  semrushWorkspaceId,
-  query,
-  log,
-) {
-  const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
-  const languageCode = normalizeLanguageCode(query?.languageCode);
-  if (geoTargetId === null || languageCode === null) {
-    throw new ErrorWithStatusCode(
-      'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
-      400,
-    );
-  }
-
-  const row = await dataAccess.BrandSemrushProject.findBySlice(
-    brandId,
-    geoTargetId,
-    languageCode,
-  );
-  if (!row) {
-    return { items: [] };
-  }
-  const projectId = row.getSemrushProjectId();
+export async function listTagsForProject(transport, semrushWorkspaceId, projectId, logCtx, log) {
   const cacheKey = tagCacheKey(semrushWorkspaceId, projectId);
   const now = Date.now();
   const cached = tagCache.get(cacheKey);
@@ -688,11 +656,9 @@ export async function handleListTags(
     log?.warn?.(
       'handleListTags: tag pagination ceiling reached, tag set is truncated',
       {
-        brandId,
+        ...(logCtx || {}),
         semrushWorkspaceId,
         projectId,
-        geoTargetId,
-        languageCode,
         pagesWalked: TAG_PAGE_LIMIT,
         pageSize: LIMIT,
         approximatePromptsScanned: TAG_PAGE_LIMIT * LIMIT,
@@ -708,6 +674,54 @@ export async function handleListTags(
   evictTagCacheIfNeeded();
   tagCache.set(cacheKey, { items: sorted, expiresAt: now + TAG_CACHE_TTL_MS });
   return { items: sorted };
+}
+
+/**
+ * GET /serenity/tags?geoTargetId=&languageCode= — unique tag names across
+ * the slice's prompts. Required filters; one slice → one upstream call set.
+ * Short-TTL cache to keep dashboard polling cheap.
+ *
+ * TODO: the tag set is computed by paginating the project's prompts and
+ * aggregating distinct tag names in JS. This is an O(N) approximation —
+ * for a project with N prompts we do ceil(N/200) upstream calls. Capped
+ * at 50 pages (10k prompts); beyond that the tag set is silently
+ * truncated and a `warn` log fires (see TAG_PAGE_LIMIT in
+ * `listTagsForProject`). When/if Semrush exposes a dedicated tags endpoint
+ * (`GET /v1/workspaces/{ws}/projects/{pid}/tags`), this whole loop
+ * collapses to one upstream call and the truncation risk goes away.
+ */
+export async function handleListTags(
+  transport,
+  dataAccess,
+  brandId,
+  semrushWorkspaceId,
+  query,
+  log,
+) {
+  const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
+  const languageCode = normalizeLanguageCode(query?.languageCode);
+  if (geoTargetId === null || languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
+      400,
+    );
+  }
+
+  const row = await dataAccess.BrandSemrushProject.findBySlice(
+    brandId,
+    geoTargetId,
+    languageCode,
+  );
+  if (!row) {
+    return { items: [] };
+  }
+  return listTagsForProject(
+    transport,
+    semrushWorkspaceId,
+    row.getSemrushProjectId(),
+    { brandId, geoTargetId, languageCode },
+    log,
+  );
 }
 
 const AI_MODELS_PAGE = 100;
@@ -736,16 +750,80 @@ async function fetchAllAiModels(transport, semrushWorkspaceId, projectId) {
 }
 
 /**
- * GET /serenity/models — AI models.
- *
- * With geoTargetId + languageCode: models configured for the slice's upstream
- * project (existing behaviour).
- *
- * Without params: global catalog of ALL AI models available for tracking.
- * Uses GET /v1/ai_models (not workspace-scoped) which returns the full
- * model catalog independent of any project configuration. Falls back to an
- * empty list if the endpoint is not available (e.g. 404/405 from upstream).
+ * Maps a raw Semrush assignment row to the shape returned by the models
+ * endpoints. Returns null for rows that lack a valid model id/key pair.
  */
+function assignmentToItem(it) {
+  const m = it?.model;
+  if (!m || typeof m !== 'object' || !hasText(m.id) || !hasText(m.key)) {
+    return null;
+  }
+  return {
+    id: m.id,
+    key: m.key,
+    name: m.name ?? null,
+    icon: m.icon ?? null,
+  };
+}
+
+/**
+ * Global AI-model catalog (no project). Shared by the legacy and child models
+ * handlers — the no-params path is workspace-independent, so both modes return
+ * the identical catalog. Swallows only 404/405 (endpoint not available); auth
+ * and server errors propagate.
+ */
+export async function listGlobalModelCatalog(transport) {
+  let rawItems = [];
+  try {
+    let page = 1;
+    while (page <= MAX_AI_MODELS_PAGES) {
+      // eslint-disable-next-line no-await-in-loop
+      const resp = await transport.listGlobalAiModels({
+        page,
+        limit: AI_MODELS_PAGE,
+      });
+      const batch = Array.isArray(resp?.items) ? resp.items : [];
+      if (batch.length === 0) {
+        break;
+      }
+      rawItems.push(...batch);
+      if (batch.length < AI_MODELS_PAGE) {
+        break;
+      }
+      page += 1;
+    }
+  } catch (e) {
+    if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+      rawItems = [];
+    } else {
+      throw e;
+    }
+  }
+  // Workspace items may be plain model objects { id, key, name, icon } or
+  // wrapped assignments { model: { id, key, name, icon } }. Normalise both.
+  const items = rawItems
+    .map((it) => (it?.model && typeof it.model === 'object' ? it.model : it))
+    .filter((m) => m && typeof m === 'object' && hasText(m.id) && hasText(m.key))
+    .map((m) => ({
+      id: m.id,
+      key: m.key,
+      name: m.name ?? null,
+      icon: m.icon ?? null,
+    }));
+  return { items };
+}
+
+/**
+ * Models configured on one upstream project. Shared by the legacy and child
+ * slice-models handlers (the only difference upstream is which projectId the
+ * slice resolved to).
+ */
+export async function listSliceModels(transport, semrushWorkspaceId, projectId) {
+  const allItems = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
+  const items = allItems.map(assignmentToItem).filter(Boolean);
+  return { items };
+}
+
 export async function handleListModels(
   transport,
   dataAccess,
@@ -758,48 +836,7 @@ export async function handleListModels(
 
   // No-params path: return global model catalog.
   if (geoTargetId === null && languageCode === null) {
-    let rawItems = [];
-    try {
-      let page = 1;
-      while (page <= MAX_AI_MODELS_PAGES) {
-        // eslint-disable-next-line no-await-in-loop
-        const resp = await transport.listGlobalAiModels({
-          page,
-          limit: AI_MODELS_PAGE,
-        });
-        const batch = Array.isArray(resp?.items) ? resp.items : [];
-        if (batch.length === 0) {
-          break;
-        }
-        rawItems.push(...batch);
-        if (batch.length < AI_MODELS_PAGE) {
-          break;
-        }
-        page += 1;
-      }
-    } catch (e) {
-      // Only swallow "endpoint not available" responses (404/405). Auth
-      // errors (401/403) and server errors must propagate — silently
-      // returning an empty list on a 403 would look like "no models to
-      // choose from" rather than the auth failure it actually is.
-      if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
-        rawItems = [];
-      } else {
-        throw e;
-      }
-    }
-    // Workspace items may be plain model objects { id, key, name, icon } or
-    // wrapped assignments { model: { id, key, name, icon } }. Normalise both.
-    const items = rawItems
-      .map((it) => (it?.model && typeof it.model === 'object' ? it.model : it))
-      .filter((m) => m && typeof m === 'object' && hasText(m.id) && hasText(m.key))
-      .map((m) => ({
-        id: m.id,
-        key: m.key,
-        name: m.name ?? null,
-        icon: m.icon ?? null,
-      }));
-    return { items };
+    return listGlobalModelCatalog(transport);
   }
 
   // Partial params: both must be provided together.
@@ -819,35 +856,96 @@ export async function handleListModels(
   if (!row) {
     return { items: [] };
   }
-  const projectId = row.getSemrushProjectId();
-  const allItems = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
-  const items = allItems
-    .map((it) => it?.model)
-    .filter((m) => m && typeof m === 'object' && hasText(m.id) && hasText(m.key))
-    .map((m) => ({
-      id: m.id,
-      key: m.key,
-      name: m.name ?? null,
-      icon: m.icon ?? null,
-    }));
-  return { items };
+  return listSliceModels(transport, semrushWorkspaceId, row.getSemrushProjectId());
 }
 
 /**
- * Maps a raw Semrush assignment row to the shape returned by the models
- * endpoints. Returns null for rows that lack a valid model id/key pair.
+ * Project-keyed diff-based model sync, shared by the legacy and child model
+ * update handlers. Removes models absent from `modelIds`, adds models present
+ * but unassigned, leaves already-assigned models untouched. The only thing that
+ * differs between modes is how the slice resolved to `projectId`. `logCtx` is
+ * spread into the structured logs for diagnosability.
  */
-function assignmentToItem(it) {
-  const m = it?.model;
-  if (!m || typeof m !== 'object' || !hasText(m.id) || !hasText(m.key)) {
-    return null;
+export async function syncModelsForProject(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  modelIds,
+  logCtx,
+  log,
+) {
+  const ctx = logCtx || {};
+  // Fetch current assignments: catalog-id → assignment-id mapping
+  const currentAssignments = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
+  const currentMap = new Map(
+    currentAssignments
+      .filter((it) => it && hasText(it.id) && hasText(it.model?.id))
+      .map((it) => [String(it.model.id), String(it.id)]),
+  );
+
+  const desiredSet = new Set(modelIds.map(String));
+  const currentSet = new Set(currentMap.keys());
+
+  const toAdd = [...desiredSet].filter((id) => !currentSet.has(id));
+  const toRemoveAssignmentIds = [...currentSet]
+    .filter((id) => !desiredSet.has(id))
+    .map((id) => currentMap.get(id))
+    .filter(Boolean);
+
+  // Short-circuit: nothing to do — return the already-fetched list as-is.
+  if (toAdd.length === 0 && toRemoveAssignmentIds.length === 0) {
+    const items = currentAssignments.map(assignmentToItem).filter(Boolean);
+    return { items };
   }
-  return {
-    id: m.id,
-    key: m.key,
-    name: m.name ?? null,
-    icon: m.icon ?? null,
-  };
+
+  // Apply removals first (fewer dangling adds if a later add fails)
+  if (toRemoveAssignmentIds.length > 0) {
+    try {
+      await transport.deleteAiModelsByIds(semrushWorkspaceId, projectId, toRemoveAssignmentIds);
+    } catch (e) {
+      log?.error?.('handleUpdateModels: failed to remove AI models', {
+        ...ctx,
+        semrushWorkspaceId,
+        projectId,
+        assignmentIds: toRemoveAssignmentIds,
+        error: e.message,
+      });
+      throw e;
+    }
+  }
+
+  // Apply additions sequentially — Semrush add endpoint takes one model at a
+  // time; parallel calls could race on the same project state.
+  const alreadyAdded = [];
+  for (const catalogId of toAdd) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await transport.addAiModel(semrushWorkspaceId, projectId, catalogId);
+      alreadyAdded.push(catalogId);
+    } catch (e) {
+      // Log which IDs were already added so operators can assess partial state.
+      log?.error?.('handleUpdateModels: failed to add AI model', {
+        ...ctx,
+        semrushWorkspaceId,
+        projectId,
+        catalogId,
+        alreadyAdded,
+        error: e.message,
+      });
+      throw e;
+    }
+  }
+
+  // Return the refreshed model list
+  const updated = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
+  const items = updated.map(assignmentToItem).filter(Boolean);
+  log?.info?.('handleUpdateModels: sync complete', {
+    ...ctx,
+    projectId,
+    added: toAdd.length,
+    removed: toRemoveAssignmentIds.length,
+  });
+  return { items };
 }
 
 /**
@@ -906,83 +1004,12 @@ export async function handleUpdateModels(
   if (!row) {
     throw new ErrorWithStatusCode('Market not found for this brand', 404);
   }
-  const projectId = row.getSemrushProjectId();
-
-  // Fetch current assignments: catalog-id → assignment-id mapping
-  const currentAssignments = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
-  const currentMap = new Map(
-    currentAssignments
-      .filter((it) => it && hasText(it.id) && hasText(it.model?.id))
-      .map((it) => [String(it.model.id), String(it.id)]),
+  return syncModelsForProject(
+    transport,
+    semrushWorkspaceId,
+    row.getSemrushProjectId(),
+    modelIds,
+    { brandId, geoTargetId, languageCode },
+    log,
   );
-
-  const desiredSet = new Set(modelIds.map(String));
-  const currentSet = new Set(currentMap.keys());
-
-  const toAdd = [...desiredSet].filter((id) => !currentSet.has(id));
-  const toRemoveAssignmentIds = [...currentSet]
-    .filter((id) => !desiredSet.has(id))
-    .map((id) => currentMap.get(id))
-    .filter(Boolean);
-
-  // Short-circuit: nothing to do — return the already-fetched list as-is.
-  if (toAdd.length === 0 && toRemoveAssignmentIds.length === 0) {
-    const items = currentAssignments.map(assignmentToItem).filter(Boolean);
-    return { items };
-  }
-
-  // Apply removals first (fewer dangling adds if a later add fails)
-  if (toRemoveAssignmentIds.length > 0) {
-    try {
-      await transport.deleteAiModelsByIds(semrushWorkspaceId, projectId, toRemoveAssignmentIds);
-    } catch (e) {
-      log?.error?.('handleUpdateModels: failed to remove AI models', {
-        brandId,
-        semrushWorkspaceId,
-        projectId,
-        geoTargetId,
-        languageCode,
-        assignmentIds: toRemoveAssignmentIds,
-        error: e.message,
-      });
-      throw e;
-    }
-  }
-
-  // Apply additions sequentially — Semrush add endpoint takes one model at a
-  // time; parallel calls could race on the same project state.
-  const alreadyAdded = [];
-  for (const catalogId of toAdd) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      await transport.addAiModel(semrushWorkspaceId, projectId, catalogId);
-      alreadyAdded.push(catalogId);
-    } catch (e) {
-      // Log which IDs were already added so operators can assess partial state.
-      log?.error?.('handleUpdateModels: failed to add AI model', {
-        brandId,
-        semrushWorkspaceId,
-        projectId,
-        geoTargetId,
-        languageCode,
-        catalogId,
-        alreadyAdded,
-        error: e.message,
-      });
-      throw e;
-    }
-  }
-
-  // Return the refreshed model list
-  const updated = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
-  const items = updated.map(assignmentToItem).filter(Boolean);
-  log?.info?.('handleUpdateModels: sync complete', {
-    brandId,
-    projectId,
-    geoTargetId,
-    languageCode,
-    added: toAdd.length,
-    removed: toRemoveAssignmentIds.length,
-  });
-  return { items };
 }
