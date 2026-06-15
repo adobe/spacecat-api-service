@@ -595,8 +595,10 @@ export class FixesController {
         }
         if (callerUserId !== fix.getExecutedBy()) {
           fix.setExecutedBy(callerUserId);
-          hasUpdates = true;
         }
+        // The intent signal itself counts as an update even if the resolved value
+        // is already stored (idempotent re-assertion of the executor).
+        hasUpdates = true;
       }
 
       if (executedAt !== fix.getExecutedAt() && isIsoDate(executedAt)) {

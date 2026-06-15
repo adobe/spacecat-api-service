@@ -2126,6 +2126,15 @@ describe('Fixes Controller', () => {
       expect(fix.getExecutedBy()).equals(testSub);
     });
 
+    it('returns 200 even when executedBy is already set to the caller identity (idempotent intent signal)', async () => {
+      fix.setExecutedBy(testExternalUserId);
+      requestContext.data = { executedBy: 'attacker@evil.org' };
+
+      const response = await fixesController.patchFix(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(fix.getExecutedBy()).equals(testExternalUserId);
+    });
+
     it('returns 400 when executedBy is sent but caller identity cannot be resolved', async () => {
       requestContext.attributes = {};
       requestContext.data = { executedBy: 'me' };
