@@ -95,10 +95,12 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
 /**
  * Guarantees the brand has a resourced subworkspace and returns its id
  * (design §6). Three cases:
- *   - column set        → re-grant an allocation onto the kept workspace
- *                         (handles the decommissioned case; a no-op-ish
- *                         re-grant on an already-resourced ws — the transfer
- *                         contract is Gate-A-pinned).
+ *   - column set        → the brand is already bound to a sub-workspace
+ *                         (idempotent re-activate): re-grant an allocation onto
+ *                         it (a no-op-ish re-grant on an already-resourced ws —
+ *                         the transfer contract is Gate-A-pinned). Note a
+ *                         deactivated brand has a NULL column (deactivate clears
+ *                         it), so it takes the create path below, not this one.
  *   - no column, create → create subworkspace → poll `created` → persist the column
  *                         AFTER it reads back created.
  *   - create timeout    → adopt from the parent family by exact title.
@@ -129,7 +131,9 @@ export async function ensureSubworkspace(
 
   const existing = brand.getSemrushWorkspaceId?.();
   if (hasText(existing)) {
-    // Re-grant the allocation onto the kept (possibly decommissioned) workspace.
+    // Re-grant the allocation onto the already-bound sub-workspace (idempotent
+    // re-activate of a still-active brand; a deactivated brand has a NULL
+    // pointer and takes the create path instead).
     // resources/transfer is ASYNC: it briefly flips the workspace to `locked`
     // and a subsequent op 422s "workspace not ready" (verified live
     // 2026-06-15). So settle before AND after the transfer so the caller can
@@ -178,14 +182,18 @@ export async function ensureSubworkspace(
 }
 
 /**
- * Decommissions a brand's subworkspace (design §6) — convergent and
- * idempotent. NEVER deletes the workspace; it is emptied and de-resourced and
- * the `semrush_workspace_id` pointer is kept for reuse:
+ * Decommissions a brand's sub-workspace (design §6) — convergent and
+ * idempotent. NEVER deletes the workspace; it is emptied and de-resourced:
  *   1. delete every project from the listing (404-as-success)
  *   2. release the ai allocation back to the parent pool
  *   3. (member removal is best-effort and currently deferred — parent admins
  *      inherit access regardless, workspace doc §7; enumerating members needs
  *      a listMembers transport method not added in this phase)
+ *
+ * This touches only the upstream workspace. Clearing the brand's
+ * `semrush_workspace_id` pointer (the disconnect) is the CALLER's job — the
+ * deactivate handler does it after this resolves, leaving the sub-workspace
+ * empty and unowned.
  *
  * @param {object} transport
  * @param {string} subworkspaceId

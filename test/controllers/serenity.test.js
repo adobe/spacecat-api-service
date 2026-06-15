@@ -827,13 +827,16 @@ describe('SerenityController', () => {
       expect(brand.setStatus).to.not.have.been.called;
     });
 
-    it('deactivate decommissions the subworkspace and sets the brand pending', async () => {
+    it('deactivate decommissions the subworkspace, clears the pointer, and sets the brand pending', async () => {
       const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
       expect(decommissionStub).to.have.been.calledOnceWithExactly({ name: 'transport' }, 'subworkspace-ws-1', sinon.match.any);
+      // The pointer is cleared (disconnect) — never the workspace deleted.
+      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('pending');
+      expect(brand.save).to.have.been.called;
     });
 
     it('deactivate is a no-op decommission for a brand with no subworkspace', async () => {
@@ -842,6 +845,8 @@ describe('SerenityController', () => {
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
       expect(decommissionStub).to.not.have.been.called;
+      // Nothing to disconnect — the pointer is already null.
+      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
       expect(brand.setStatus).to.have.been.calledWith('pending');
     });
   });

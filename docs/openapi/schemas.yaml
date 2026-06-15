@@ -10495,8 +10495,8 @@ SerenityBulkDeletePromptsResponse:
 SerenityMarketStatus:
   type: string
   description: |
-    Publish state of the market's upstream project, surfaced only in child
-    (sub-workspace) mode where markets are read live from the brand's own
+    Publish state of the market's upstream project, surfaced only in
+    sub-workspace mode where markets are read live from the brand's own
     workspace. Maps 1:1 from the upstream `publish_status`
     (`initial_publish_failed` → `publish_failed`). Absent in flat mode,
     where market existence is a pure DB-row contract.
@@ -10526,7 +10526,7 @@ SerenityMarket:
       oneOf:
         - $ref: '#/DateTime'
         - type: 'null'
-    # Additive, child (sub-workspace) mode only. In flat mode the list
+    # Additive, sub-workspace mode only. In flat mode the list
     # is a pure DB read and omits both. status reflects the live publish state;
     # semrushProjectId is the upstream project id for the slice (same value the
     # market-detail endpoint exposes). Optional so flat-mode responses still validate.
@@ -10534,7 +10534,7 @@ SerenityMarket:
       $ref: '#/SerenityMarketStatus'
     semrushProjectId:
       type: string
-      description: Upstream Semrush AIO project id for this slice (child mode only).
+      description: Upstream Semrush AIO project id for this slice (sub-workspace mode only).
 
 SerenityMarketListResponse:
   type: object
@@ -10563,7 +10563,7 @@ SerenityMarketDetail:
           description: Upstream Semrush AIO project id for this slice (provider-specific by design).
         initialized:
           description: |
-            AIO readiness for this slice's project (child mode only). `true`/`false`
+            AIO readiness for this slice's project (sub-workspace mode only). `true`/`false`
             from the upstream init-status probe, or `null` when the probe is
             unavailable or the read failed (best-effort enrichment — never fails
             the detail read). Absent in flat mode.
@@ -10574,8 +10574,8 @@ SerenityMarketDetail:
 SerenityActivateRequest:
   type: object
   description: |
-    Activates a brand into child (sub-workspace) mode: ensures the brand's own
-    Semrush child workspace exists (creating + resourcing it on first call),
+    Activates a brand into sub-workspace mode: ensures the brand's own
+    Semrush sub-workspace exists (creating + resourcing it on first call),
     then per supplied market creates-or-resumes a draft and publishes it once.
     Markets are caller-supplied — reactivation re-supplies them (there is no
     stored market memory). Sets the brand status to `active` once ≥1 market is live.
@@ -10646,7 +10646,7 @@ SerenityActivateResponse:
 SerenityDeactivateResponse:
   type: object
   description: |
-    Result of decommissioning a brand's child workspace: every project is
+    Result of decommissioning a brand's sub-workspace: every project is
     deleted and the allocation released back to the parent pool, but the
     workspace and its `semrush_workspace_id` pointer are KEPT for reuse
     (never-delete). The brand status is set to `pending`.

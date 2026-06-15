@@ -17,7 +17,11 @@ import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-u
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
-import { resolveWorkspaceId, resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
+import {
+  resolveWorkspaceId,
+  resolveBrandWorkspace,
+  clearBrandWorkspaceCache,
+} from '../support/serenity/workspace-resolver.js';
 import {
   handleListPrompts,
   handleCreatePrompts,
@@ -645,10 +649,15 @@ function SerenityController(context, log, env) {
   };
 
   /**
-   * POST /serenity/deactivate — decommissions the brand's subworkspace
-   * (design flow 6): delete every project, release the allocation back to the
-   * parent pool, keep the workspace and its semrush_workspace_id pointer. Sets
-   * brands.status = 'pending'. No-op (200) for a brand with no subworkspace.
+   * POST /serenity/deactivate — decommissions the brand's sub-workspace
+   * (design flow 6): delete every project and release the allocation back to
+   * the parent pool, then DISCONNECT the brand by clearing its
+   * semrush_workspace_id pointer. The sub-workspace itself is NEVER deleted
+   * (deletion is forbidden — upstream deprovisioning is Semrush CS's act); it
+   * is left empty and unowned. Clearing the pointer flips the brand back to
+   * flat mode, so a future activate allocates a fresh sub-workspace. Sets
+   * brands.status = 'pending'. No-op decommission (still 200) for a brand with
+   * no sub-workspace.
    */
   const deactivate = async (ctx) => {
     try {
@@ -662,11 +671,19 @@ function SerenityController(context, log, env) {
       const subworkspaceId = brand.getSemrushWorkspaceId?.();
       if (hasText(subworkspaceId)) {
         await decommissionBrandWorkspace(transport, subworkspaceId, log);
+        // Disconnect the brand from the now-emptied sub-workspace. The
+        // sub-workspace is kept (never deleted); clearing the pointer is what
+        // returns the brand to flat mode.
+        brand.setSemrushWorkspaceId?.(null);
       }
-      if (typeof brand.setStatus === 'function') {
-        brand.setStatus('pending');
+      brand.setStatus?.('pending');
+      if (typeof brand.save === 'function') {
         await brand.save();
       }
+      // Invalidate the resolver's brand cache so the next request sees flat
+      // mode immediately, instead of routing to the disconnected sub-workspace
+      // for the full positive-TTL window.
+      clearBrandWorkspaceCache();
       return ok({ brandId: auth.brandUuid, status: 'pending' });
     } catch (e) {
       return mapError(e, log);
