@@ -58,6 +58,10 @@ function PreflightController(ctx, log, env) {
     throw new Error('SQS client required');
   }
 
+  if (!isNonEmptyObject(imsClient)) {
+    throw new Error('IMS client required');
+  }
+
   if (!isNonEmptyObject(env)) {
     throw new Error('Environment object required');
   }
@@ -492,12 +496,26 @@ function PreflightController(ctx, log, env) {
     //
     // Mint before the AsyncJob / Preflight DB writes so a transient IMS
     // failure doesn't leave orphaned IN_PROGRESS records to clean up.
+    //
+    // Fail-closed in Phase 1 and Phase 2: mint failure returns 500 even
+    // though the Phase 1 edge gate is `optional: true` and could tolerate a
+    // missing header. The load-bearing rationale is symmetry with the Phase
+    // 2 `optional: false` flip — same behavior on both sides of the gate flip
+    // means no new failure modes to surprise callers. IMS reliability makes
+    // this a narrow availability cost in practice.
     let imsServiceToken;
     try {
       const tokenPayload = await imsClient.getServiceAccessTokenV3();
-      imsServiceToken = tokenPayload.access_token;
+      imsServiceToken = tokenPayload?.access_token;
+      // Post-condition: a successful mint must yield a non-empty access_token.
+      // Guards against an SDK shape change (e.g. `{ accessToken }` or `{}`)
+      // silently dropping the header — without this, Phase 2's `optional:
+      // false` edge gate would 401 with no spacecat-side diagnostic trail.
+      if (!hasText(imsServiceToken)) {
+        throw new Error('IMS token payload missing access_token');
+      }
     } catch (e) {
-      log.error(`Failed to acquire IMS service token for preflight analyze: ${e.message}`);
+      log.error(`Failed to acquire IMS service token for preflight analyze: ${e.message}`, e);
       return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to acquire IMS service token', 500);
     }
 
