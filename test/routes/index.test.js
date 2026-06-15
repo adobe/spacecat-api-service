@@ -510,6 +510,7 @@ describe('getRouteHandlers', () => {
 
   const mockFanoutReportController = {
     getFanoutReport: sinon.stub(),
+    triggerFanoutReport: sinon.stub(),
   };
 
   const mockSerenityController = {
@@ -804,6 +805,7 @@ describe('getRouteHandlers', () => {
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',
+      'POST /org/:spaceCatId/brands/:brandId/fanout-report',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions',
       'GET /org/:spaceCatId/brands/all/brand-presence/weeks',

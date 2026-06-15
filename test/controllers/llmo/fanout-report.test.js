@@ -14,7 +14,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
-import { HeadObjectCommand } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 use(sinonChai);
 
@@ -31,15 +31,48 @@ describe('FanoutReportController', () => {
   let mockAccessControlUtil;
   let mockS3Send;
   let mockGetSignedUrl;
+  let mockCurate;
+  let mockGetGrpcClients;
   let FanoutReportController;
+  const FAKE_REPORT = {
+    schemaVersion: 1,
+    generatedAt: '2026-05-13T10:00:00Z',
+    isoDate: '2026-05-08',
+    orgId: SPACE_CAT_ID,
+    brandId: BRAND_ID,
+    brandName: 'Acme',
+    brandDomains: ['acme.com'],
+    country: 'US',
+    llm: 'chatgpt',
+    windowDays: 7,
+    topics: [],
+  };
 
   before(async () => {
     // Single esmock cold-start; reused across all tests.
+    mockCurate = sinon.stub().resolves({
+      report: FAKE_REPORT,
+      stats: {
+        dbTopics: 0, semrushReturned: 0, similarityPassed: 0, topicsPicked: 0, tDb: 1, tSem: 1,
+      },
+    });
+    mockGetGrpcClients = sinon.stub().returns({
+      fanoutClient: { resolveTopicMetrics: sinon.stub() },
+    });
+
     const mod = await esmock('../../../src/controllers/llmo/fanout-report.js', {
       '../../../src/support/access-control-util.js': {
         default: {
           fromContext: () => mockAccessControlUtil,
         },
+      },
+      '../../../src/support/ai-visibility/grpc-transport.js': {
+        getGrpcClients: (...args) => mockGetGrpcClients(...args),
+      },
+      '../../../src/support/fanout/curate.js': {
+        curateFanoutReport: (...args) => mockCurate(...args),
+        // Real gzip implementation is fine here — output is just a buffer.
+        gzipReport: (report) => Buffer.from(JSON.stringify(report)),
       },
     });
     FanoutReportController = mod.default;
@@ -50,7 +83,7 @@ describe('FanoutReportController', () => {
 
     mockOrganization = { getId: sandbox.stub().returns(SPACE_CAT_ID) };
 
-    mockS3Send = sandbox.stub().resolves({ /* HeadObject 200 */ });
+    mockS3Send = sandbox.stub().resolves({ /* HeadObject / PutObject 200 */ });
     mockGetSignedUrl = sandbox.stub().resolves(PRESIGNED_URL);
 
     mockContext = {
@@ -60,9 +93,13 @@ describe('FanoutReportController', () => {
         error: sandbox.stub(),
       },
       params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID },
+      env: {},
       dataAccess: {
         Organization: {
           findById: sandbox.stub().resolves(mockOrganization),
+        },
+        services: {
+          postgrestClient: { rpc: sandbox.stub() },
         },
       },
       s3: {
@@ -79,6 +116,17 @@ describe('FanoutReportController', () => {
       hasAccess: sandbox.stub().resolves(true),
       hasAdminAccess: sandbox.stub().returns(false),
     };
+
+    // Full reset so behaviors don't leak across tests; then re-apply defaults.
+    mockCurate.reset();
+    mockCurate.resolves({
+      report: FAKE_REPORT,
+      stats: {
+        dbTopics: 0, semrushReturned: 0, similarityPassed: 0, topicsPicked: 0, tDb: 1, tSem: 1,
+      },
+    });
+    mockGetGrpcClients.reset();
+    mockGetGrpcClients.returns({ fanoutClient: { resolveTopicMetrics: sinon.stub() } });
   });
 
   afterEach(() => {
@@ -183,6 +231,120 @@ describe('FanoutReportController', () => {
 
       expect(result.status).to.equal(400);
       expect(mockContext.log.error).to.have.been.called;
+    });
+  });
+
+  describe('triggerFanoutReport', () => {
+    it('returns 201 and writes a gzipped report to S3', async () => {
+      const controller = FanoutReportController(mockContext);
+      const result = await controller.triggerFanoutReport(mockContext);
+
+      expect(result.status).to.equal(201);
+
+      // Curation called with the hardcoded country/llm + window
+      const curateArgs = mockCurate.firstCall.args[0];
+      expect(curateArgs.organizationId).to.equal(SPACE_CAT_ID);
+      expect(curateArgs.brandId).to.equal(BRAND_ID);
+      expect(curateArgs.countryName).to.equal('US');
+      expect(curateArgs.llmName).to.equal('chatgpt');
+      expect(curateArgs.windowDays).to.equal(7);
+      expect(curateArgs.concurrency).to.equal(5); // default
+      expect(curateArgs.batchSize).to.equal(100); // default
+
+      // PutObject called with the expected key + gzip encoding
+      expect(mockS3Send).to.have.been.calledOnce;
+      const putCommand = mockS3Send.firstCall.args[0];
+      expect(putCommand).to.be.instanceOf(PutObjectCommand);
+      expect(putCommand.input.Bucket).to.equal(S3_BUCKET);
+      expect(putCommand.input.Key).to.equal(EXPECTED_S3_KEY);
+      expect(putCommand.input.ContentEncoding).to.equal('gzip');
+      expect(putCommand.input.ContentType).to.equal('application/json');
+      expect(putCommand.input.Body).to.be.instanceOf(Buffer);
+    });
+
+    it('honours SEMRUSH_FANOUT_CONCURRENCY and SEMRUSH_FANOUT_BATCH_SIZE env vars', async () => {
+      mockContext.env = {
+        SEMRUSH_FANOUT_CONCURRENCY: '3',
+        SEMRUSH_FANOUT_BATCH_SIZE: '50',
+      };
+
+      const controller = FanoutReportController(mockContext);
+      const result = await controller.triggerFanoutReport(mockContext);
+
+      expect(result.status).to.equal(201);
+      const curateArgs = mockCurate.firstCall.args[0];
+      expect(curateArgs.concurrency).to.equal(3);
+      expect(curateArgs.batchSize).to.equal(50);
+    });
+
+    it('returns 400 when S3 is not configured', async () => {
+      mockContext.s3 = null;
+
+      const controller = FanoutReportController(mockContext);
+      const result = await controller.triggerFanoutReport(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockCurate).not.to.have.been.called;
+    });
+
+    it('returns 404 when the organization is not found', async () => {
+      mockContext.dataAccess.Organization.findById.resolves(null);
+
+      const controller = FanoutReportController(mockContext);
+      const result = await controller.triggerFanoutReport(mockContext);
+
+      expect(result.status).to.equal(404);
+      expect(mockCurate).not.to.have.been.called;
+      expect(mockS3Send).not.to.have.been.called;
+    });
+
+    it('returns 404 when the caller lacks LLMO access', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const controller = FanoutReportController(mockContext);
+      const result = await controller.triggerFanoutReport(mockContext);
+
+      expect(result.status).to.equal(404);
+      expect(mockCurate).not.to.have.been.called;
+    });
+
+    it('returns 400 when PostgREST is not configured', async () => {
+      mockContext.dataAccess.services = {};
+
+      const controller = FanoutReportController(mockContext);
+      const result = await controller.triggerFanoutReport(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockCurate).not.to.have.been.called;
+    });
+
+    it('returns 400 when gRPC client init fails', async () => {
+      mockGetGrpcClients.throws(new Error('missing creds'));
+
+      const controller = FanoutReportController(mockContext);
+      const result = await controller.triggerFanoutReport(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockCurate).not.to.have.been.called;
+    });
+
+    it('returns 500 when curation throws', async () => {
+      mockCurate.rejects(new Error('semrush exploded'));
+
+      const controller = FanoutReportController(mockContext);
+      const result = await controller.triggerFanoutReport(mockContext);
+
+      expect(result.status).to.equal(500);
+      expect(mockContext.log.error).to.have.been.called;
+    });
+
+    it('returns 500 when S3 PutObject throws', async () => {
+      mockS3Send.rejects(new Error('S3 down'));
+
+      const controller = FanoutReportController(mockContext);
+      const result = await controller.triggerFanoutReport(mockContext);
+
+      expect(result.status).to.equal(500);
     });
   });
 });

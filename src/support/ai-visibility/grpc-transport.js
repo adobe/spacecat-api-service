@@ -17,6 +17,7 @@ import { TopicService } from '@quazar/ai-seo-ts/v2/topic/service_pb.js';
 import { PromptService } from '@quazar/ai-seo-ts/v2/prompt/service_pb.js';
 import { SourceService } from '@quazar/ai-seo-ts/v2/source/service_pb.js';
 import { CompetitorService } from '@quazar/ai-seo-ts/v2/competitor/service_pb.js';
+import { FanoutService } from '@quazar/ai-seo-ts/v2/fanout/service_pb.js';
 import {
   CompetitorsMetrics,
   Meta as CrMeta,
@@ -37,7 +38,18 @@ function semrushAiSeoOAuthTokenUrl(env) {
   return new URL(path, 'https://api.semrush.com').href;
 }
 
+// Process-wide token cache. The OAuth roundtrip is otherwise issued on every
+// gRPC call, which with p-limit(5) fan-out and 10 batches means up to 10
+// redundant token fetches. Cache by expiry with a small leeway to avoid
+// edge-of-expiry races.
+let cachedToken = null;
+const TOKEN_LEEWAY_MS = 30_000;
+
 async function getAccessToken(env) {
+  if (cachedToken && Date.now() + TOKEN_LEEWAY_MS < cachedToken.expiresAt) {
+    return cachedToken.token;
+  }
+
   const id = env.SEO_CLIENT_ID;
   const secret = env.SEO_CLIENT_SECRET;
   if (!id?.trim() || !secret?.trim()) {
@@ -64,7 +76,18 @@ async function getAccessToken(env) {
     });
     throw new Error('Semrush OAuth token request failed');
   }
-  return j.access_token;
+
+  const expiresInSec = Number(j.expires_in) || 3600;
+  cachedToken = {
+    token: j.access_token,
+    expiresAt: Date.now() + (expiresInSec * 1000),
+  };
+  return cachedToken.token;
+}
+
+/** @visibleForTesting */
+export function resetTokenCache() {
+  cachedToken = null;
 }
 
 function createAuthInterceptor(env) {
@@ -98,6 +121,7 @@ export function getGrpcClients(env) {
     promptClient: createClient(PromptService, transport),
     sourceClient: createClient(SourceService, transport),
     competitorClient: createClient(CompetitorService, transport),
+    fanoutClient: createClient(FanoutService, transport),
     crMetricsClient: createClient(CompetitorsMetrics, transport),
     crMetaClient: createClient(CrMeta, transport),
     voSourcesClient: createClient(VoSources, transport),
