@@ -202,8 +202,8 @@ describe('brands-storage', () => {
     it('exposes provisioned Semrush markets on the brand (LLMO-5007)', async () => {
       const dbRow = makeBrandRow({
         brand_to_semrush_projects: [
-          { semrush_location_id: 2840, language_code: 'en' }, // US
-          { semrush_location_id: 2276, language_code: 'de' }, // DE
+          { semrush_location_id: 2840, language: 'en' }, // US
+          { semrush_location_id: 2276, language: 'de' }, // DE
         ],
       });
 
@@ -220,8 +220,8 @@ describe('brands-storage', () => {
     it('omits Semrush markets with unknown geoTargetId from the brand (LLMO-5007)', async () => {
       const dbRow = makeBrandRow({
         brand_to_semrush_projects: [
-          { semrush_location_id: 9999999, language_code: 'en' }, // unknown
-          { semrush_location_id: 2840, language_code: 'en' }, // US — known
+          { semrush_location_id: 9999999, language: 'en' }, // unknown
+          { semrush_location_id: 2840, language: 'en' }, // US — known
         ],
       });
 
