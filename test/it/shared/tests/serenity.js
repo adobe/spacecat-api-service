@@ -122,5 +122,47 @@ export default function serenityTests(getHttpClient) {
       );
       expect(res.status).to.equal(401);
     });
+
+    // ── Dual-mode (sub-workspace) routes — same route-gate + IMS-only contract ──
+    // The child-workspace dispatch + activate/deactivate handler behaviour needs
+    // an IMS token AND the live Semrush gateway, so (like the rest of this suite)
+    // it is covered by the unit + contract suites and the live through-api e2e.
+    // Here we only lock that the NEW routes are registered and enforce the same
+    // pre-handler contract as the rest of the surface.
+    it('401s on PUT models with JWT auth (same IMS-only contract)', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.put(
+        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/models`,
+        { geoTargetId: 2840, languageCode: 'en', modelIds: [] },
+      );
+      expect(res.status).to.equal(401);
+    });
+
+    it('401s on POST activate with JWT auth (same IMS-only contract)', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.post(
+        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/activate`,
+        { brandDomain: 'example.com', brandNames: ['Example'], markets: [{ market: 'US', languageCode: 'en' }] },
+      );
+      expect(res.status).to.equal(401);
+    });
+
+    it('401s on POST deactivate with JWT auth (same IMS-only contract)', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.post(
+        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/deactivate`,
+        {},
+      );
+      expect(res.status).to.equal(401);
+    });
+
+    it('400s on non-UUID brandId for activate (route gate, before auth)', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.post(
+        `/v2/orgs/${ORG_1_ID}/brands/not-a-uuid/serenity/activate`,
+        { brandDomain: 'example.com', brandNames: ['Example'], markets: [{ market: 'US', languageCode: 'en' }] },
+      );
+      expect(res.status).to.equal(400);
+    });
   });
 }
