@@ -109,8 +109,11 @@ export class FixesController {
     const { siteId, opportunityId } = context.params;
     const { fixCreatedDate } = context.data || {};
 
+    this.#ctx.log?.warn?.(`getAllForOpportunity: invoked siteId=${siteId} opportunityId=${opportunityId} fixCreatedDate=${fixCreatedDate ?? 'none'}`);
+
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) {
+      this.#ctx.log?.warn?.('getAllForOpportunity: returning early — failed param/access check');
       return res;
     }
 
@@ -148,6 +151,7 @@ export class FixesController {
       });
 
       if (fixEntitiesWithSuggestions.length === 0) {
+        this.#ctx.log?.warn?.(`getAllForOpportunity: returning early — no fixes matched fixCreatedDate=${fixCreatedDate} (date branch)`);
         return ok([]);
       }
 
@@ -182,6 +186,7 @@ export class FixesController {
     }
 
     if (fixEntitiesWithSuggestions.length === 0) {
+      this.#ctx.log?.warn?.('getAllForOpportunity: returning early — no fixes for opportunity (default branch)');
       return ok([]);
     }
 
