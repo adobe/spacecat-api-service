@@ -767,7 +767,9 @@ export class FixesController {
    * @param {FixEntity[]} fixes
    */
   async #enrichFixesWithUserNames(fixes) {
+    this.#ctx.log?.warn?.(`enrichFixesWithUserNames: triggered with ${fixes.length} fix(es)`);
     if (!this.#imsClient) {
+      this.#ctx.log?.warn?.('enrichFixesWithUserNames: skipping enrichment — IMS client not available');
       return;
     }
 
@@ -775,6 +777,7 @@ export class FixesController {
       ...new Set(fixes.map((f) => f.getExecutedBy()).filter((id) => id && IMS_ID_RE.test(id))),
     ];
     if (!userIds.length) {
+      this.#ctx.log?.warn?.(`enrichFixesWithUserNames: no resolvable IMS user IDs found in ${fixes.length} fix(es) — executedBy values: [${fixes.map((f) => f.getExecutedBy() ?? 'null').join(', ')}]`);
       return;
     }
 
