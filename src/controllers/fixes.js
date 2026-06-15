@@ -109,15 +109,8 @@ export class FixesController {
     const { siteId, opportunityId } = context.params;
     const { fixCreatedDate } = context.data || {};
 
-    this.#ctx.log?.warn?.(`getAllForOpportunity: invoked siteId=${siteId} opportunityId=${opportunityId} fixCreatedDate=${fixCreatedDate ?? 'none'}`);
-
-    // Temporary debug marker: lets `curl -i` confirm which build serves dev,
-    // independent of logging. Remove once enrichment debugging is complete.
-    const debugHeaders = { 'x-fixes-debug': 'getAllForOpportunity-enrich-v1' };
-
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) {
-      this.#ctx.log?.warn?.('getAllForOpportunity: returning early — failed param/access check');
       return res;
     }
 
@@ -155,8 +148,7 @@ export class FixesController {
       });
 
       if (fixEntitiesWithSuggestions.length === 0) {
-        this.#ctx.log?.warn?.(`getAllForOpportunity: returning early — no fixes matched fixCreatedDate=${fixCreatedDate} (date branch)`);
-        return ok([], debugHeaders);
+        return ok([]);
       }
 
       // Extract fix entities and attach suggestions to each one
@@ -170,7 +162,7 @@ export class FixesController {
 
       await this.#enrichFixesWithUserNames(fixEntities);
       fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
-      return ok(fixes, debugHeaders);
+      return ok(fixes);
     }
 
     const fixEntitiesWithSuggestions = await this.#FixEntity
@@ -190,8 +182,7 @@ export class FixesController {
     }
 
     if (fixEntitiesWithSuggestions.length === 0) {
-      this.#ctx.log?.warn?.('getAllForOpportunity: returning early — no fixes for opportunity (default branch)');
-      return ok([], debugHeaders);
+      return ok([]);
     }
 
     fixEntities = fixEntitiesWithSuggestions.map((item) => {
@@ -203,7 +194,7 @@ export class FixesController {
 
     await this.#enrichFixesWithUserNames(fixEntities);
     fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
-    return ok(fixes, debugHeaders);
+    return ok(fixes);
   }
 
   /**
@@ -777,9 +768,7 @@ export class FixesController {
    * @param {FixEntity[]} fixes
    */
   async #enrichFixesWithUserNames(fixes) {
-    this.#ctx.log?.warn?.(`enrichFixesWithUserNames: triggered with ${fixes.length} fix(es)`);
     if (!this.#imsClient) {
-      this.#ctx.log?.warn?.('enrichFixesWithUserNames: skipping enrichment — IMS client not available');
       return;
     }
 
@@ -787,7 +776,6 @@ export class FixesController {
       ...new Set(fixes.map((f) => f.getExecutedBy()).filter((id) => id && IMS_ID_RE.test(id))),
     ];
     if (!userIds.length) {
-      this.#ctx.log?.warn?.(`enrichFixesWithUserNames: no resolvable IMS user IDs found in ${fixes.length} fix(es) — executedBy values: [${fixes.map((f) => f.getExecutedBy() ?? 'null').join(', ')}]`);
       return;
     }
 
