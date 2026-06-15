@@ -2106,9 +2106,12 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const infoMessages = mockLog.info.getCalls().map((call) => String(call.args[0]));
+      const logMessages = ['info', 'warn', 'error', 'debug'].flatMap((level) => (
+        mockLog[level].getCalls().flatMap((call) => call.args.map((arg) => String(arg)))
+      ));
       expect(infoMessages.some((message) => message.includes('claims guidance modified'))).to.be.true;
-      expect(infoMessages.some((message) => message.includes('Sensitive brand context text'))).to.be.false;
-      expect(infoMessages.some((message) => message.includes('Sensitive sentiment guidance text'))).to.be.false;
+      expect(logMessages.some((message) => message.includes('Sensitive brand context text'))).to.be.false;
+      expect(logMessages.some((message) => message.includes('Sensitive sentiment guidance text'))).to.be.false;
     });
 
     it('should use "system" as userId when sub is missing from profile', async () => {

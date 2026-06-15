@@ -1000,21 +1000,7 @@ llmo-config:
                 - version
             examples:
               config-with-claims:
-                summary: LLMO configuration with claims guidance
-                value:
-                  config:
-                    entities: { }
-                    categories: { }
-                    topics: { }
-                    aiTopics: { }
-                    brands:
-                      aliases: [ ]
-                    competitors:
-                      competitors: [ ]
-                    claims:
-                      brandContext: "Treat Firefly as part of the Adobe product family."
-                      sentimentGuidance: "Claims about setup friction should be classified as unfavorable."
-                  version: "abc123def456"
+                $ref: './examples.yaml#/llmo-config-response-with-claims'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -1048,19 +1034,7 @@ llmo-config:
             $ref: './schemas.yaml#/LlmoConfig'
           examples:
             config-with-claims:
-              summary: LLMO configuration with claims guidance
-              value:
-                entities: { }
-                categories: { }
-                topics: { }
-                aiTopics: { }
-                brands:
-                  aliases: [ ]
-                competitors:
-                  competitors: [ ]
-                claims:
-                  brandContext: "Treat Firefly as part of the Adobe product family."
-                  sentimentGuidance: "Claims about setup friction should be classified as unfavorable."
+              $ref: './examples.yaml#/llmo-config-with-claims'
     responses:
       '200':
         description: LLMO configuration updated successfully

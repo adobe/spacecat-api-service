@@ -5113,7 +5113,10 @@ LlmoConfig:
 
 LlmoClaimsGuidance:
   type: object
-  description: Optional customer guidance for brand claims extraction and sentiment classification.
+  description: |
+    Optional customer guidance for brand claims extraction and sentiment classification.
+    Each field is limited to 4000 characters to keep downstream LLM prompts bounded.
+    Guidance text is stored for processing but is never written to application logs.
   properties:
     brandContext:
       type: string
@@ -5125,6 +5128,7 @@ LlmoClaimsGuidance:
       maxLength: 4000
       description: Customer-provided guidance for interpreting claim sentiment.
       example: "Claims about setup friction should be classified as unfavorable."
+  # Keep claims guidance closed because these free-text fields are passed to downstream LLM prompts.
   additionalProperties: false
 
 LlmoDeletedPrompt:

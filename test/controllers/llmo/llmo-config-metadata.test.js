@@ -138,6 +138,34 @@ describe('LLMO Config Metadata Utils', () => {
       expect(stats.claims.modified).to.equal(true);
     });
 
+    it('should mark claims guidance as modified when introduced', () => {
+      const inputConfig = {
+        claims: {
+          brandContext: 'New context',
+          sentimentGuidance: 'New guidance',
+        },
+      };
+
+      const { newConfig, stats } = updateModifiedByDetails(inputConfig, {}, userId);
+
+      expect(newConfig.claims).to.deep.equal(inputConfig.claims);
+      expect(stats.claims.modified).to.equal(true);
+    });
+
+    it('should preserve existing claims guidance when omitted from updates', () => {
+      const oldConfig = {
+        claims: {
+          brandContext: 'Existing context',
+          sentimentGuidance: 'Existing guidance',
+        },
+      };
+
+      const { newConfig, stats } = updateModifiedByDetails({}, oldConfig, userId);
+
+      expect(newConfig.claims).to.deep.equal(oldConfig.claims);
+      expect(stats.claims.modified).to.equal(false);
+    });
+
     it('should mark claims guidance as modified when cleared', () => {
       const oldConfig = {
         claims: {
