@@ -14,9 +14,6 @@ import { expect } from 'chai';
 
 import {
   isUpstreamGone,
-  isAllocationFailure,
-  isWorkspaceNotReady,
-  isWorkspaceDrift,
   ERROR_CODES,
 } from '../../../src/support/serenity/errors.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
@@ -33,46 +30,9 @@ describe('serenity error classification', () => {
     });
   });
 
-  describe('isAllocationFailure', () => {
-    it('matches a 405 with a non-JSON (HTML string) body', () => {
-      const e = new SerenityTransportError(405, 'method not allowed', '<html>405</html>');
-      expect(isAllocationFailure(e)).to.be.true;
-    });
-    it('rejects a 405 with a JSON (object) body', () => {
-      const e = new SerenityTransportError(405, 'method not allowed', { code: 'method_not_allowed' });
-      expect(isAllocationFailure(e)).to.be.false;
-    });
-    it('rejects other statuses and foreign error shapes', () => {
-      expect(isAllocationFailure(new SerenityTransportError(403, 'no', '<html/>'))).to.be.false;
-      expect(isAllocationFailure({ status: 405, body: '<html/>' })).to.be.false;
-    });
-  });
-
-  describe('isWorkspaceNotReady', () => {
-    it('matches a SerenityTransportError with status 500', () => {
-      expect(isWorkspaceNotReady(new SerenityTransportError(500, 'not ready'))).to.be.true;
-    });
-    it('rejects other statuses and foreign shapes', () => {
-      expect(isWorkspaceNotReady(new SerenityTransportError(404, 'x'))).to.be.false;
-      expect(isWorkspaceNotReady({ status: 500 })).to.be.false;
-    });
-  });
-
-  describe('isWorkspaceDrift', () => {
-    it('matches a SerenityTransportError with status 403', () => {
-      expect(isWorkspaceDrift(new SerenityTransportError(403, 'invalid access attempt'))).to.be.true;
-    });
-    it('rejects other statuses and foreign shapes', () => {
-      expect(isWorkspaceDrift(new SerenityTransportError(404, 'x'))).to.be.false;
-      expect(isWorkspaceDrift({ status: 403 })).to.be.false;
-    });
-  });
-
   describe('ERROR_CODES', () => {
-    it('exposes the sub-workspace provisioning tokens and is frozen', () => {
-      expect(ERROR_CODES.ALLOCATION_FAILURE).to.equal('allocationFailure');
-      expect(ERROR_CODES.WORKSPACE_NOT_READY).to.equal('workspaceNotReady');
-      expect(ERROR_CODES.WORKSPACE_DRIFT).to.equal('workspaceDrift');
+    it('exposes the serenity error tokens and is frozen', () => {
+      expect(ERROR_CODES.MARKET_NOT_FOUND).to.equal('marketNotFound');
       expect(ERROR_CODES.AMBIGUOUS_WORKSPACE).to.equal('ambiguousWorkspace');
       expect(Object.isFrozen(ERROR_CODES)).to.be.true;
     });

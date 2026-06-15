@@ -58,11 +58,14 @@ export function langOf(project) {
 }
 
 // Project list items expose `updated_at` (and `published_at` when live) but no
-// `created_at`. Use created_at when present (single-project getProject reads
-// may carry it), else fall back to updated_at — this is the ordering key for
-// the duplicate-slice oldest-wins rule.
+// `created_at`. Use created_at when present, else fall back to updated_at, and
+// append the project id as a stable tie-break so the duplicate-slice
+// oldest-wins rule stays deterministic even when timestamps are equal or
+// absent (otherwise the sort would be listing-order-dependent). ISO 8601
+// timestamps sort lexically, so the leading timestamp dominates the id suffix.
 function orderKey(project) {
-  return String(project?.created_at ?? project?.updated_at ?? '');
+  const ts = String(project?.created_at ?? project?.updated_at ?? '');
+  return `${ts}|${String(project?.id ?? '')}`;
 }
 
 /**

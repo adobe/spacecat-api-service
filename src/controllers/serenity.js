@@ -18,7 +18,6 @@ import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import {
-  resolveWorkspaceId,
   resolveBrandWorkspace,
   clearBrandWorkspaceCache,
 } from '../support/serenity/workspace-resolver.js';
@@ -244,15 +243,40 @@ function SerenityController(context, log, env) {
     if (!brandUuid) {
       return { error: notFound(`Brand not found for organization: ${brandId}`) };
     }
-    const { mode, workspaceId } = await resolveBrandWorkspace(ctx, spaceCatId, brandUuid);
-    // The org parent workspace is needed for flat mode (where it IS the
-    // workspaceId) and to mint a fresh sub-workspace on activate. A brand
-    // already in subworkspace mode resolves against its OWN workspace, so a
-    // missing/cleared parent must NOT 404 it out of a functioning sub-workspace
-    // — only flat mode without a parent is a genuine "no workspace" 404.
-    const parentWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
+    // resolveBrandWorkspace resolves the parent workspace once and returns it
+    // alongside the mode, so activate can mint a sub-workspace without a second
+    // org lookup. A brand already in subworkspace mode resolves against its OWN
+    // workspace, so a missing/cleared parent must NOT 404 it out of a
+    // functioning sub-workspace - only flat mode without a parent is a genuine
+    // "no workspace" 404 (in flat mode workspaceId IS the parent).
+    const { mode, workspaceId, parentWorkspaceId } = await resolveBrandWorkspace(
+      ctx,
+      spaceCatId,
+      brandUuid,
+    );
     if (mode !== 'subworkspace' && !hasText(workspaceId)) {
       return { error: notFound('Organization has no semrush_workspace_id') };
+    }
+    // Hard invariant: a brand's sub-workspace must NEVER be the org's shared
+    // parent workspace. If they coincide (misconfiguration / bad backfill / a
+    // gateway create that handed back the parent id), every sub-workspace
+    // operation - most dangerously deactivate's decommission, which deletes all
+    // projects and releases the allocation - would run against the shared
+    // parent pool and wipe it for every brand in the org. Refuse all operations
+    // until the pointer is corrected, rather than act on the parent.
+    if (mode === 'subworkspace' && workspaceId === parentWorkspaceId) {
+      log.error('serenity: brand sub-workspace equals org parent workspace - refusing', {
+        brandUuid, spaceCatId, workspaceId,
+      });
+      return {
+        error: createResponse(
+          {
+            error: 'workspaceMisconfigured',
+            message: 'Brand sub-workspace must not be the organization parent workspace',
+          },
+          409,
+        ),
+      };
     }
     return {
       brandUuid, mode, workspaceId, parentWorkspaceId,
@@ -629,15 +653,34 @@ function SerenityController(context, log, env) {
           brandDisplayName: body.brandDisplayName,
           name: m.name,
         };
-        // eslint-disable-next-line no-await-in-loop
-        const r = await handleCreateMarketSubworkspace(
-          transport,
-          brand,
-          auth.parentWorkspaceId,
-          createBody,
-          log,
-          workspaceId,
-        );
+        let r;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          r = await handleCreateMarketSubworkspace(
+            transport,
+            brand,
+            auth.parentWorkspaceId,
+            createBody,
+            log,
+            workspaceId,
+          );
+        } catch (e) {
+          // A single market failing must NOT abort the batch: markets already
+          // published in this loop are live upstream, and aborting would leave
+          // them live while the brand stays pending with no per-market record.
+          // Record the failure and continue; the multi-status response reports
+          // it per market. (A generic message - never the upstream error text,
+          // which carries the gateway URL.)
+          log?.error?.('serenity activate: market create failed', {
+            market: m.market,
+            languageCode: m.languageCode,
+            status: e?.status,
+          });
+          r = {
+            status: e?.status || 502,
+            body: { error: 'serenityUpstreamError', message: 'Market activation failed' },
+          };
+        }
         if (r.status === 201) {
           anyLive = true;
         }

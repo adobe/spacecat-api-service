@@ -172,6 +172,23 @@ describe('subworkspace-projects', () => {
       const p = await resolveProject(transport, WS, 2276, 'de', { error: sinon.spy() });
       expect(p.id).to.equal('older');
     });
+
+    it('breaks ties deterministically by id when no timestamps are present', async () => {
+      // Both timestamps absent: the id tie-break makes resolution deterministic
+      // (lexically-lowest id wins) instead of listing-order-dependent.
+      const mk = (id) => ({
+        id,
+        publish_status: 'draft',
+        settings: { ai: { location: { id: 2276 }, language: { name: 'de' } } },
+      });
+      const items = [mk('proj-b'), mk('proj-a')];
+      const t1 = { listProjects: sinon.stub().resolves({ items }) };
+      const t2 = { listProjects: sinon.stub().resolves({ items: [...items].reverse() }) };
+      const a = await resolveProject(t1, WS, 2276, 'de', { error: sinon.spy() });
+      const b = await resolveProject(t2, WS, 2276, 'de', { error: sinon.spy() });
+      expect(a.id).to.equal('proj-a');
+      expect(b.id).to.equal('proj-a');
+    });
   });
 
   describe('sliceKey', () => {

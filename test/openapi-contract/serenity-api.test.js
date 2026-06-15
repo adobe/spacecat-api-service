@@ -313,7 +313,9 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           },
           '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
-            resolveBrandWorkspace: () => Promise.resolve({ mode: 'flat', workspaceId: WORKSPACE }),
+            resolveBrandWorkspace: () => Promise.resolve({
+              mode: 'flat', workspaceId: WORKSPACE, parentWorkspaceId: WORKSPACE,
+            }),
           },
           '../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },

@@ -136,6 +136,11 @@ describe('markets-subworkspace handlers', () => {
       await expect(handleGetMarketSubworkspace(makeTransport(), BRAND, WS, -1, 'en', log))
         .to.be.rejectedWith(/geoTargetId/);
     });
+
+    it('400s on an invalid languageCode (valid geo)', async () => {
+      await expect(handleGetMarketSubworkspace(makeTransport(), BRAND, WS, 2840, 'zz9', log))
+        .to.be.rejectedWith(/languageCode/);
+    });
   });
 
   describe('handleCreateMarketSubworkspace', () => {
@@ -185,6 +190,25 @@ describe('markets-subworkspace handlers', () => {
       const res = await handleCreateMarketSubworkspace(makeTransport(), makeBrand(), PARENT, { ...createBody, market: 'zz' }, log);
       expect(res.status).to.equal(400);
       expect(res.body.error).to.equal('unknownMarket');
+    });
+
+    it('400s and reports an empty name and a non-ISO-2 market together', async () => {
+      const res = await handleCreateMarketSubworkspace(makeTransport(), makeBrand(), PARENT, {
+        name: '', market: 'usa', languageCode: 'en', brandDomain: 'x.com', brandNames: ['B'],
+      }, log);
+      expect(res.status).to.equal(400);
+      expect(res.body.message).to.match(/name/);
+      expect(res.body.message).to.match(/ISO-2/);
+    });
+
+    it('400s unknownLanguage when the language is not in the upstream catalog', async () => {
+      // Empty workspace -> create path -> resolveLanguageId('fr') misses (catalog
+      // only has English) -> unknownLanguage.
+      const res = await handleCreateMarketSubworkspace(makeTransport(), makeBrand(), PARENT, {
+        ...createBody, languageCode: 'fr',
+      }, log);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('unknownLanguage');
     });
 
     it('502s when createProject returns no id', async () => {
@@ -362,6 +386,25 @@ describe('markets-subworkspace handlers', () => {
         { geoTargetId: 2840, languageCode: 'en', modelIds: 'nope' },
         log,
       )).to.be.rejectedWith(/modelIds/);
+    });
+
+    it('400s on an invalid slice key', async () => {
+      await expect(handleUpdateModelsSubworkspace(
+        makeTransport(),
+        WS,
+        { geoTargetId: -1, languageCode: 'en', modelIds: ['m1'] },
+        log,
+      )).to.be.rejectedWith(/geoTargetId/);
+    });
+
+    it('400s when modelIds exceeds the maximum', async () => {
+      const modelIds = Array.from({ length: 51 }, (unused, i) => `m${i}`);
+      await expect(handleUpdateModelsSubworkspace(
+        makeTransport(),
+        WS,
+        { geoTargetId: 2840, languageCode: 'en', modelIds },
+        log,
+      )).to.be.rejectedWith(/exceed/);
     });
   });
 });

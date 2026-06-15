@@ -186,6 +186,39 @@ describe('workspace-lifecycle', () => {
 
       await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() })).to.be.rejectedWith(/did not settle to 'created'/);
     });
+
+    it('uses the real timer when no sleep is injected (bounded poll)', async () => {
+      const transport = makeTransport({
+        getWorkspaceStatus: sinon.stub().resolves({ status: 'not ready' }),
+      });
+      const brand = makeBrand({ workspaceId: SUB_WS });
+
+      // attempts:1, intervalMs:0, sleep NOT injected -> exercises the default
+      // setTimeout-based sleep once before the bounded poll gives up.
+      const timing = { attempts: 1, intervalMs: 0 };
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, timing))
+        .to.be.rejectedWith(/did not settle to 'created'/);
+    });
+
+    it('refuses to re-grant onto a workspace that IS the org parent', async () => {
+      const transport = makeTransport();
+      const brand = makeBrand({ workspaceId: PARENT_WS });
+
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+        .to.be.rejectedWith(/must not be the organization parent workspace/);
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
+    });
+
+    it('refuses to persist a created workspace that IS the org parent', async () => {
+      const transport = makeTransport({
+        createSubworkspace: sinon.stub().resolves({ id: PARENT_WS, status: 'not ready' }),
+      });
+      const brand = makeBrand();
+
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+        .to.be.rejectedWith(/must not be the organization parent workspace/);
+      expect(brand.save).to.not.have.been.called;
+    });
   });
 
   describe('decommissionBrandWorkspace', () => {

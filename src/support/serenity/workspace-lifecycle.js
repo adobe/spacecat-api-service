@@ -39,6 +39,19 @@ const defaultSleep = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
 
+// A brand's sub-workspace must never coincide with the org's shared parent
+// workspace - sub-workspace ops (notably decommission: delete every project +
+// release the allocation) against the parent would wipe the shared pool for
+// the whole org. Throw rather than ever act on the parent.
+function assertNotParent(workspaceId, parentWorkspaceId) {
+  if (hasText(parentWorkspaceId) && workspaceId === parentWorkspaceId) {
+    throw new ErrorWithStatusCode(
+      'Brand sub-workspace must not be the organization parent workspace',
+      409,
+    );
+  }
+}
+
 async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
   for (let i = 0; i < attempts; i += 1) {
     // eslint-disable-next-line no-await-in-loop
@@ -131,6 +144,11 @@ export async function ensureSubworkspace(
 
   const existing = brand.getSemrushWorkspaceId?.();
   if (hasText(existing)) {
+    // Defense-in-depth: a sub-workspace must never BE the org parent (else a
+    // re-grant/transfer would mutate the shared pool). The controller's
+    // authorize() already refuses such requests; guard here too so a direct
+    // caller can never transfer-onto / later decommission the parent.
+    assertNotParent(existing, parentWorkspaceId);
     // Re-grant the allocation onto the already-bound sub-workspace (idempotent
     // re-activate of a still-active brand; a deactivated brand has a NULL
     // pointer and takes the create path instead).
@@ -172,6 +190,9 @@ export async function ensureSubworkspace(
   if (!hasText(workspaceId)) {
     throw new ErrorWithStatusCode('createSubworkspace returned no workspace id', 502);
   }
+  // A create (or adoption) that handed back the parent id is a gateway bug;
+  // never persist the parent as the brand's sub-workspace.
+  assertNotParent(workspaceId, parentWorkspaceId);
 
   await pollUntilCreated(transport, workspaceId, poll);
 

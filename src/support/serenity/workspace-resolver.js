@@ -154,22 +154,26 @@ async function resolveBrandSubworkspaceId(ctx, brandId) {
  * which workspace a brand's serenity operations run against and which mode the
  * handlers branch on:
  *
- *   { mode: 'subworkspace', workspaceId: <sub ws> }   // brands.semrush_workspace_id set
- *   { mode: 'flat',         workspaceId: <parent ws> } // no subworkspace bound
+ *   { mode: 'subworkspace', workspaceId: <sub ws>,  parentWorkspaceId: <parent ws> }
+ *   { mode: 'flat',         workspaceId: <parent ws>, parentWorkspaceId: <parent ws> }
  *
- * In flat mode `workspaceId` may be null (org has no parent workspace yet);
- * the controller maps that to 404, exactly as today.
+ * `parentWorkspaceId` (the org's shared workspace) is always resolved and
+ * returned so callers that mint a sub-workspace on activate do not have to
+ * re-resolve it. In flat mode `workspaceId` IS the parent and may be null (org
+ * has no parent workspace yet); the controller maps that to 404, exactly as
+ * today.
  *
  * @param {object} ctx - Request context (uses ctx.dataAccess.Brand + .Organization).
  * @param {string} spaceCatId - SpaceCat organization UUID (for the flat-mode parent).
  * @param {string} brandId - Brand UUID.
- * @returns {Promise<{mode: 'subworkspace'|'flat', workspaceId: string|null}>}
+ * @returns {Promise<{mode: 'subworkspace'|'flat', workspaceId: string|null,
+ *   parentWorkspaceId: string|null}>}
  */
 export async function resolveBrandWorkspace(ctx, spaceCatId, brandId) {
   const subworkspaceId = await resolveBrandSubworkspaceId(ctx, brandId);
-  if (hasText(subworkspaceId)) {
-    return { mode: 'subworkspace', workspaceId: subworkspaceId };
-  }
   const parentWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
-  return { mode: 'flat', workspaceId: parentWorkspaceId };
+  if (hasText(subworkspaceId)) {
+    return { mode: 'subworkspace', workspaceId: subworkspaceId, parentWorkspaceId };
+  }
+  return { mode: 'flat', workspaceId: parentWorkspaceId, parentWorkspaceId };
 }

@@ -128,7 +128,9 @@ describe('SerenityController', () => {
     resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE);
     // Default: flat mode — existing assertions (handlers called with
     // WORKSPACE) hold unchanged. Subworkspace-mode tests override this stub.
-    resolveBrandWorkspaceStub = sinon.stub().resolves({ mode: 'flat', workspaceId: WORKSPACE });
+    resolveBrandWorkspaceStub = sinon.stub().resolves({
+      mode: 'flat', workspaceId: WORKSPACE, parentWorkspaceId: WORKSPACE,
+    });
     decommissionStub = sinon.stub().resolves();
     ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
     clearBrandWorkspaceCacheStub = sinon.stub();
@@ -256,8 +258,7 @@ describe('SerenityController', () => {
     it('404s when the org has no semrush_workspace_id (flat mode, no parent)', async () => {
       // Flat mode resolves the brand against the org parent workspace; when that
       // is unset, resolveBrandWorkspace returns a null workspaceId → 404.
-      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null });
-      resolveWorkspaceIdStub.resolves(null);
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null, parentWorkspaceId: null });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listPrompts(fakeContext());
       expect(response.status).to.equal(404);
@@ -668,7 +669,9 @@ describe('SerenityController', () => {
 
   describe('dual-mode dispatch (subworkspace)', () => {
     beforeEach(() => {
-      resolveBrandWorkspaceStub.resolves({ mode: 'subworkspace', workspaceId: 'subworkspace-ws-1' });
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'subworkspace-ws-1', parentWorkspaceId: WORKSPACE,
+      });
     });
 
     it('listMarkets routes to the subworkspace handler in subworkspace mode', async () => {
@@ -802,6 +805,18 @@ describe('SerenityController', () => {
       const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(404);
     });
+
+    it('returns 500 when the Brand data-access is unavailable for a subworkspace write', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      });
+      ctx.dataAccess.Brand = undefined;
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(500);
+    });
   });
 
   describe('activate / deactivate', () => {
@@ -830,6 +845,52 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({ data: { markets: [] } }));
       expect(response.status).to.equal(400);
+    });
+
+    it('activate records a thrown market as failed and keeps the published one live (no abort)', async () => {
+      // Market 1 publishes (201, live upstream); market 2 throws. The batch must
+      // NOT abort - the brand goes active and the failure is reported per market.
+      handlers.handleCreateMarketSubworkspace
+        .onFirstCall().resolves({ status: 201, body: {} })
+        .onSecondCall().rejects(new ErrorWithStatusCode('upstream boom', 502));
+      const brand = makeBrandModel();
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: {
+          brandDomain: 'x.com',
+          brandNames: ['X'],
+          markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
+        },
+      }));
+      expect(response.status).to.equal(200);
+      const { markets } = await readBody(response);
+      // both markets reported; the throwing one becomes a 502 entry, no URL leak.
+      expect(markets).to.have.length(2);
+      expect(markets[0].status).to.equal(201);
+      expect(markets[1].status).to.equal(502);
+      expect(markets[1].body.message).to.equal('Market activation failed');
+      expect(brand.setStatus).to.have.been.calledWith('active');
+    });
+
+    it('activate returns 200 for a mixed 201 + 409 batch and reports both markets', async () => {
+      handlers.handleCreateMarketSubworkspace
+        .onFirstCall().resolves({ status: 201, body: {} })
+        .onSecondCall().resolves({ status: 409, body: { error: 'sliceExists' } });
+      const brand = makeBrandModel();
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: {
+          brandDomain: 'x.com',
+          brandNames: ['X'],
+          markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
+        },
+      }));
+      expect(response.status).to.equal(200);
+      const { markets } = await readBody(response);
+      expect(markets.map((m) => m.status)).to.deep.equal([201, 409]);
+      expect(brand.setStatus).to.have.been.calledOnceWith('active');
     });
 
     it('activate returns 207 and stays pending when every market fails', async () => {
@@ -887,8 +948,9 @@ describe('SerenityController', () => {
       // A brand bound to its own sub-workspace is self-sufficient; a cleared org
       // parent pointer must not lock it out (it only matters for flat mode +
       // minting a fresh sub-workspace on activate).
-      resolveBrandWorkspaceStub.resolves({ mode: 'subworkspace', workspaceId: SUBWS });
-      resolveWorkspaceIdStub.resolves(null);
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: SUBWS, parentWorkspaceId: null,
+      });
       handlers.handleListMarketsSubworkspace.resolves({ items: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listMarkets(fakeContext());
@@ -901,11 +963,84 @@ describe('SerenityController', () => {
     });
 
     it('404s a flat-mode brand when the org has no parent workspace', async () => {
-      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null });
-      resolveWorkspaceIdStub.resolves(null);
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null, parentWorkspaceId: null });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listMarkets(fakeContext());
       expect(response.status).to.equal(404);
+    });
+
+    it('409s when a brand sub-workspace equals the org parent workspace (forbidden)', async () => {
+      // A sub-workspace that IS the shared parent would let destructive
+      // sub-workspace ops wipe the org pool; refuse all operations.
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: WORKSPACE, parentWorkspaceId: WORKSPACE,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(409);
+      const body = await readBody(response);
+      expect(body.error).to.equal('workspaceMisconfigured');
+    });
+  });
+
+  describe('authorize error branches', () => {
+    it('500s when Organization data-access is unavailable', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization = undefined;
+      const response = await controller.listMarkets(ctx);
+      expect(response.status).to.equal(500);
+    });
+
+    it('404s when the organization is not found', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById = sinon.stub().resolves(null);
+      const response = await controller.listMarkets(ctx);
+      expect(response.status).to.equal(404);
+    });
+
+    it('503s when the PostgREST client is unavailable', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.services = {};
+      const response = await controller.listMarkets(ctx);
+      expect(response.status).to.equal(503);
+    });
+  });
+
+  describe('error mapping - every handler routes a thrown error through mapError', () => {
+    const methods = [
+      'listPrompts', 'createPrompts', 'updatePrompt', 'bulkDeletePrompts',
+      'listMarkets', 'getMarket', 'createMarket', 'deleteMarket',
+      'listTags', 'listModels', 'updateModels', 'activate', 'deactivate',
+    ];
+    methods.forEach((method) => {
+      it(`${method} maps an unexpected error to 500`, async () => {
+        // authorize throws (resolveBrandWorkspace rejects) after the IMS gate,
+        // so every handler's catch -> mapError path runs.
+        resolveBrandWorkspaceStub.rejects(new Error('boom'));
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({
+          params: { semrushPromptId: 'p1', geoTargetId: '2840', languageCode: 'en' },
+          data: { markets: [{ market: 'us', languageCode: 'en' }] },
+        });
+        const response = await controller[method](ctx);
+        expect(response.status).to.equal(500);
+      });
+
+      it(`${method} returns the authorize error without throwing`, async () => {
+        // authorize RETURNS an error (access denied) - every handler's
+        // `if (auth.error) return auth.error` short-circuit runs.
+        accessControlHasAccessStub.resolves(false);
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({
+          params: { semrushPromptId: 'p1', geoTargetId: '2840', languageCode: 'en' },
+          data: { markets: [{ market: 'us', languageCode: 'en' }] },
+        });
+        const response = await controller[method](ctx);
+        expect(response.status).to.equal(403);
+      });
     });
   });
 });

@@ -216,16 +216,18 @@ describe('resolveBrandWorkspace', () => {
     sandbox.restore();
   });
 
-  it('returns subworkspace mode with the brand subworkspace when the column is set', async () => {
+  it('returns subworkspace mode with the brand subworkspace and the resolved parent', async () => {
     const brandFindById = sandbox.stub().resolves(makeBrand(SUB_WS));
     const orgFindById = sandbox.stub().resolves(makeOrg('parent-ws'));
     const ctx = makeDualCtx({ brandFindById, orgFindById });
 
     const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
 
-    expect(res).to.deep.equal({ mode: 'subworkspace', workspaceId: SUB_WS });
-    // Subworkspace mode never needs the org parent.
-    expect(orgFindById).to.not.have.been.called;
+    // The parent is resolved alongside the sub-workspace so activate can mint a
+    // fresh sub-workspace without a second org lookup.
+    expect(res).to.deep.equal({
+      mode: 'subworkspace', workspaceId: SUB_WS, parentWorkspaceId: 'parent-ws',
+    });
   });
 
   it('returns flat mode with the org parent workspace when the column is absent', async () => {
@@ -235,7 +237,9 @@ describe('resolveBrandWorkspace', () => {
 
     const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
 
-    expect(res).to.deep.equal({ mode: 'flat', workspaceId: 'parent-ws' });
+    expect(res).to.deep.equal({
+      mode: 'flat', workspaceId: 'parent-ws', parentWorkspaceId: 'parent-ws',
+    });
   });
 
   it('returns flat mode with a null workspace when the org has no parent', async () => {
@@ -245,7 +249,7 @@ describe('resolveBrandWorkspace', () => {
 
     const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
 
-    expect(res).to.deep.equal({ mode: 'flat', workspaceId: null });
+    expect(res).to.deep.equal({ mode: 'flat', workspaceId: null, parentWorkspaceId: null });
   });
 
   it('treats a missing brand row as flat mode', async () => {
@@ -255,7 +259,9 @@ describe('resolveBrandWorkspace', () => {
 
     const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
 
-    expect(res).to.deep.equal({ mode: 'flat', workspaceId: 'parent-ws' });
+    expect(res).to.deep.equal({
+      mode: 'flat', workspaceId: 'parent-ws', parentWorkspaceId: 'parent-ws',
+    });
   });
 
   it('caches the subworkspace lookup over the positive TTL window', async () => {
@@ -300,7 +306,7 @@ describe('resolveBrandWorkspace', () => {
 
     const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, '');
 
-    expect(res).to.deep.equal({ mode: 'flat', workspaceId: 'p' });
+    expect(res).to.deep.equal({ mode: 'flat', workspaceId: 'p', parentWorkspaceId: 'p' });
     expect(brandFindById).to.not.have.been.called;
   });
 

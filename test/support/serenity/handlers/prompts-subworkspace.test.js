@@ -95,6 +95,23 @@ describe('prompts-subworkspace handlers', () => {
       await expect(handleListPromptsSubworkspace(makeTransport(), WS, { languageCode: 'en' }, log))
         .to.be.rejectedWith(/geoTargetId/);
     });
+
+    it('uses the upstream total when a full page is returned', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', name: 'a', tags: [] }],
+          total: 137,
+        }),
+      });
+      const result = await handleListPromptsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en', limit: 1 },
+        log,
+      );
+      // items.length (1) is NOT < limit (1), so total comes from the upstream.
+      expect(result.total).to.equal(137);
+    });
   });
 
   describe('handleCreatePromptsSubworkspace', () => {
@@ -127,6 +144,51 @@ describe('prompts-subworkspace handlers', () => {
     it('400s on an empty prompts array', async () => {
       await expect(handleCreatePromptsSubworkspace(makeTransport(), WS, { prompts: [] }, log))
         .to.be.rejectedWith(/non-empty/);
+    });
+
+    it('400s when the prompts array exceeds maxItems', async () => {
+      const prompts = Array.from({ length: 501 }, (unused, i) => ({
+        text: `p${i}`, tags: [], geoTargetId: 2840, languageCode: 'en',
+      }));
+      await expect(handleCreatePromptsSubworkspace(makeTransport(), WS, { prompts }, log))
+        .to.be.rejectedWith(/maxItems/);
+    });
+
+    it('skips an input that fails normalization (missing text)', async () => {
+      const result = await handleCreatePromptsSubworkspace(makeTransport(), WS, {
+        prompts: [{ tags: ['x'], geoTargetId: 2840, languageCode: 'en' }],
+      }, log);
+      expect(result.created).to.have.length(0);
+      expect(result.skipped).to.have.length(1);
+      expect(result.skipped[0].reason).to.match(/required/);
+    });
+
+    it('records an upstream createTaggedPrompts failure per input', async () => {
+      const transport = makeTransport({
+        createTaggedPrompts: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+      });
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+      expect(result.created).to.have.length(0);
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(500);
+    });
+
+    it('appends a publish failure to failed', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(new SerenityTransportError(502, 'publish down')),
+      });
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+      expect(result.created).to.have.length(1);
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].message).to.match(/^publish:/);
     });
   });
 
@@ -174,6 +236,30 @@ describe('prompts-subworkspace handlers', () => {
       );
       expect(result.status).to.equal(400);
     });
+
+    it('400s when the slice key is invalid', async () => {
+      const result = await handleUpdatePromptSubworkspace(
+        makeTransport(),
+        WS,
+        'old-id',
+        {
+          text: 'new', tags: [], geoTargetId: -1, languageCode: 'en',
+        },
+        log,
+      );
+      expect(result.status).to.equal(400);
+      expect(result.body.error).to.equal('invalidRequest');
+    });
+
+    it('re-throws a non-404 delete failure (never creates after a failed delete)', async () => {
+      const transport = makeTransport({
+        deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+      });
+      await expect(handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'new', tags: [], geoTargetId: 2840, languageCode: 'en',
+      }, log)).to.be.rejected;
+      expect(transport.createTaggedPrompts).to.not.have.been.called;
+    });
   });
 
   describe('handleBulkDeletePromptsSubworkspace', () => {
@@ -214,6 +300,46 @@ describe('prompts-subworkspace handlers', () => {
     it('400s on an empty prompts array', async () => {
       await expect(handleBulkDeletePromptsSubworkspace(makeTransport(), WS, { prompts: [] }, log))
         .to.be.rejectedWith(/non-empty/);
+    });
+
+    it('400s when the prompts array exceeds maxItems', async () => {
+      const prompts = Array.from({ length: 501 }, (unused, i) => ({
+        semrushPromptId: `q${i}`, geoTargetId: 2840, languageCode: 'en',
+      }));
+      await expect(handleBulkDeletePromptsSubworkspace(makeTransport(), WS, { prompts }, log))
+        .to.be.rejectedWith(/maxItems/);
+    });
+
+    it('fails a target missing its id or slice key', async () => {
+      const result = await handleBulkDeletePromptsSubworkspace(makeTransport(), WS, {
+        prompts: [{ geoTargetId: 2840, languageCode: 'en' }],
+      }, log);
+      expect(result.deleted).to.equal(0);
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].message).to.match(/Missing/);
+    });
+
+    it('records a non-404 delete failure per target in the bucket', async () => {
+      const transport = makeTransport({
+        deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+      });
+      const result = await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, log);
+      expect(result.deleted).to.equal(0);
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(500);
+    });
+
+    it('appends a publish failure to failed', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(new SerenityTransportError(502, 'publish down')),
+      });
+      const result = await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, log);
+      expect(result.deleted).to.equal(1);
+      expect(result.failed.some((f) => /^publish:/.test(f.message))).to.equal(true);
     });
   });
 });

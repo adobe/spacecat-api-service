@@ -601,22 +601,6 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  describe('removeWorkspaceMember', () => {
-    it('DELETEs { members: [id] } from /v1/workspaces/{ws}/members', async () => {
-      fetchStub.resolves(fetchOk(null));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      await transport.removeWorkspaceMember(WORKSPACE_ID, 'member-7');
-
-      const [url, init] = fetchStub.firstCall.args;
-      expect(init.method).to.equal('DELETE');
-      expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/members`,
-      );
-      expect(JSON.parse(init.body)).to.deep.equal({ members: ['member-7'] });
-    });
-  });
-
   describe('deleteWorkspace (test-cleanup only)', () => {
     const DELETE_ENV = { ...TEST_ENV, SERENITY_ALLOW_WORKSPACE_DELETE: 'true' };
 
@@ -669,22 +653,6 @@ describe('Semrush REST transport', () => {
         `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects?type=ai`,
       );
       expect(result.items[0].id).to.equal(PROJECT_ID);
-    });
-  });
-
-  describe('getProject', () => {
-    it('GETs /v1/workspaces/{ws}/projects/{pid}', async () => {
-      fetchStub.resolves(fetchOk({ id: PROJECT_ID, publish_status: 'draft' }));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      const result = await transport.getProject(WORKSPACE_ID, PROJECT_ID);
-
-      const [url, init] = fetchStub.firstCall.args;
-      expect(init.method).to.equal('GET');
-      expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}`,
-      );
-      expect(result.publish_status).to.equal('draft');
     });
   });
 

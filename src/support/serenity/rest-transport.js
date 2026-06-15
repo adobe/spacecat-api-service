@@ -376,17 +376,6 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * DELETE /v1/workspaces/{ws}/members — remove a member during
-     * decommission (best-effort; parent admins inherit access regardless,
-     * workspace doc §7). Body shape mirrors the public members CRUD
-     * (`{ members: [...] }`).
-     */
-    async removeWorkspaceMember(workspaceId, memberId) {
-      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}/members`;
-      return request('DELETE', url, imsToken, { members: [memberId] });
-    },
-
-    /**
      * DELETE /v1/workspaces/{ws} — TEST CLEANUP ONLY, and fail-closed: throws
      * unless SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which
      * no deployed environment (dev/stage/prod) does. Production flows NEVER
@@ -418,14 +407,6 @@ export function createSerenityTransport({ env, imsToken }) {
      */
     async listProjects(workspaceId) {
       const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects?type=ai`;
-      return request('GET', url, imsToken, undefined);
-    },
-
-    /**
-     * GET /v1/workspaces/{ws}/projects/{pid} — v1 by-id read (draft-faithful).
-     */
-    async getProject(workspaceId, projectId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}`;
       return request('GET', url, imsToken, undefined);
     },
 
