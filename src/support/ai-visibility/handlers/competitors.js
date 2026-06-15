@@ -322,6 +322,11 @@ export async function handleCompetitorsGapPrompts(sp, clients) {
   const llm = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const fetchLimit = Math.min(limit + 1, GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT);
   const dimensionFilterQl = gapDimensionFilterQl(sp, 'prompt');
+  // Optional topic scoping (topic -> prompts drill-down). topic_hash is a uint64; the
+  // Connect client takes a BigInt on the plain init object (unlike the fromJson path in
+  // the v1 handler, which accepts the raw string). Ignore non-numeric input.
+  const topicId = sp.get('topicId')?.trim();
+  const topicHash = topicId && /^\d+$/.test(topicId) ? BigInt(topicId) : undefined;
   const body = {
     country,
     llm,
@@ -331,6 +336,7 @@ export async function handleCompetitorsGapPrompts(sp, clients) {
     order: resolveGapOrder(sp, GAP_PROMPTS_REQUEST_ORDER_BY_ENUM, GAP_PROMPTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT),
     range: { limit: fetchLimit, offset },
     ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
+    ...(topicHash != null ? { topicHash } : {}),
   };
   const explicit = sp.get('gapSnapshotDate')?.trim();
   const dm = explicit && /^(\d{4})-(\d{2})-(\d{1,2})$/.exec(explicit);
@@ -341,6 +347,7 @@ export async function handleCompetitorsGapPrompts(sp, clients) {
     target: body.target,
     competitors: body.competitors,
     ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
+    ...(topicHash != null ? { topicHash } : {}),
   };
   if (body.date) { totalsBody.date = body.date; }
   const [gapOutcome, totalsOutcome] = await Promise.allSettled([

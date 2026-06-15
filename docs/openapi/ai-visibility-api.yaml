@@ -884,6 +884,16 @@ ai-visibility-competitors-gap-prompts:
           type: string
           enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT, TOPIC_VOLUME]
       - *sortDirectionParam
+      - name: topicId
+        in: query
+        required: false
+        description: |
+          When set, restricts gap prompts to this topic hash (sent to Semrush as
+          `GapPromptsRequest.topic_hash`, applied to both the list and `GapPromptsTotals`
+          calls). Enables the topic → prompts drill-down. Non-numeric values are ignored.
+        schema:
+          type: string
+          example: '12345'
       - name: gapKinds
         in: query
         required: false

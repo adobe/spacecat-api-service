@@ -1058,5 +1058,19 @@ describe('AI Visibility – competitors handlers', () => {
       expect(clients.topicClient.gapTopics.firstCall.args[0]).to.not.have.property('dimensionFilterQl');
       expect(clients.topicClient.gapTopicsTotals.firstCall.args[0]).to.not.have.property('dimensionFilterQl');
     });
+
+    it('scopes gap prompts to topicId via topic_hash on both list and totals', async () => {
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&topicId=12345');
+      await handleCompetitorsGapPrompts(sp, clients);
+      expect(clients.promptClient.gapPrompts.firstCall.args[0].topicHash).to.equal(12345n);
+      expect(clients.promptClient.gapPromptsTotals.firstCall.args[0].topicHash).to.equal(12345n);
+    });
+
+    it('ignores a non-numeric topicId', async () => {
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&topicId=not-a-hash');
+      await handleCompetitorsGapPrompts(sp, clients);
+      expect(clients.promptClient.gapPrompts.firstCall.args[0]).to.not.have.property('topicHash');
+      expect(clients.promptClient.gapPromptsTotals.firstCall.args[0]).to.not.have.property('topicHash');
+    });
   });
 });
