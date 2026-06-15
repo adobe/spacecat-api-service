@@ -13,6 +13,7 @@
 /* eslint-disable no-await-in-loop */
 import { execSync } from 'child_process';
 
+import { POSTGREST_WRITER_JWT } from '../shared/postgrest-jwt.js';
 import { organizations } from './seed-data/organizations.js';
 import { facsAccessMappingAuditEvents } from './seed-data/facs-access-mapping-audit-events.js';
 import { sites } from './seed-data/sites.js';
@@ -47,14 +48,21 @@ const POSTGRES_DB = 'mysticat';
  * (Bulk inserts require uniform keys across all objects - PGRST102 - and seed
  * data has optional fields, so we insert individually but parallelize across tables.)
  */
-async function insertRows(table, rows) {
+async function insertRows(table, rows, { asWriter = false } = {}) {
+  // Most tables grant INSERT to postgrest_anon (default), so the unauthenticated
+  // seed works. Append-only audit tables revoke anon INSERT (writer-only), so
+  // pass { asWriter: true } to seed them with the postgrest_writer JWT.
+  const headers = {
+    'Content-Type': 'application/json',
+    Prefer: 'return=minimal',
+  };
+  if (asWriter) {
+    headers.Authorization = `Bearer ${POSTGREST_WRITER_JWT}`;
+  }
   for (const row of rows) {
     const res = await fetch(`${POSTGREST_URL}/${table}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
+      headers,
       body: JSON.stringify(row),
     });
 
@@ -112,7 +120,7 @@ async function seed() {
     insertRows('async_jobs', asyncJobs),
     insertRows('consumers', consumers),
     insertRows('projection_audit', projectionAudits),
-    insertRows('facs_access_mapping_audit_events', facsAccessMappingAuditEvents),
+    insertRows('facs_access_mapping_audit_events', facsAccessMappingAuditEvents, { asWriter: true }),
   ]);
 
   // Level 1a: depend on organizations
