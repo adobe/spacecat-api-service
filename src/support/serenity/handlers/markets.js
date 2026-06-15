@@ -97,7 +97,7 @@ function isoToEnglishName(languageTag) {
   return name && name.toLowerCase() !== primary ? name : null;
 }
 
-async function resolveLanguageId(transport, languageTag, log) {
+export async function resolveLanguageId(transport, languageTag, log) {
   const now = Date.now();
   if (languageCache.expiresAt <= now) {
     const resp = await transport.listLanguages();
@@ -240,7 +240,7 @@ function validateCreateBody(body) {
  * The random suffix prevents collisions in shared workspaces and
  * disambiguates re-create-after-delete.
  */
-function defaultMarketName(brandDisplayName) {
+export function defaultMarketName(brandDisplayName) {
   const base = hasText(brandDisplayName) ? String(brandDisplayName) : 'brand';
   const suffix = crypto.randomBytes(3).toString('hex');
   return `${base}-${suffix}`;
