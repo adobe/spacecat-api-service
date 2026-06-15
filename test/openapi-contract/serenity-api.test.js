@@ -42,6 +42,16 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
     attributes: { authInfo: { getType: () => 'ims' } },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves({ getId: () => ORG }) },
+      Brand: {
+        findById: sinon.stub().resolves({
+          getId: () => BRAND,
+          getName: () => 'Test Brand',
+          getSemrushWorkspaceId: () => null,
+          setSemrushWorkspaceId: sinon.stub(),
+          setStatus: sinon.stub(),
+          save: sinon.stub().resolves(),
+        }),
+      },
       services: { postgrestClient: { from: () => ({}) } },
     },
     params: { spaceCatId: ORG, brandId: BRAND, ...params },
@@ -265,6 +275,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           },
           '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
+            resolveBrandWorkspace: () => Promise.resolve({ mode: 'legacy', workspaceId: WORKSPACE }),
           },
           '../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
