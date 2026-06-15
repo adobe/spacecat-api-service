@@ -220,6 +220,8 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.listModels,
     'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': serenityController.deactivate,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,

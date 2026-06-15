@@ -33,12 +33,25 @@ function fakeLog() {
   };
 }
 
+function makeBrandModel(overrides = {}) {
+  return {
+    getId: () => BRAND,
+    getName: () => 'Test Brand',
+    getSemrushWorkspaceId: () => 'child-ws-1',
+    setSemrushWorkspaceId: sinon.stub(),
+    setStatus: sinon.stub(),
+    save: sinon.stub().resolves(),
+    ...overrides,
+  };
+}
+
 function fakeContext({
   bearer = 'ims-token-123',
   authType = 'ims',
   params = {},
   data = undefined,
   brandId = BRAND,
+  brand = makeBrandModel(),
 } = {}) {
   return {
     env: {},
@@ -50,6 +63,7 @@ function fakeContext({
     },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves({ getId: () => ORG }) },
+      Brand: { findById: sinon.stub().resolves(brand) },
       services: { postgrestClient: { from: () => ({}) } },
     },
     params: { spaceCatId: ORG, brandId, ...params },
@@ -85,8 +99,14 @@ describe('SerenityController', () => {
     handleListTags: sinon.stub(),
     handleListModels: sinon.stub(),
     handleUpdateModels: sinon.stub(),
+    handleListMarketsChild: sinon.stub(),
+    handleGetMarketChild: sinon.stub(),
+    handleCreateMarketChild: sinon.stub(),
+    handleDeleteMarketChild: sinon.stub(),
   };
+  let decommissionStub;
   let resolveWorkspaceIdStub;
+  let resolveBrandWorkspaceStub;
   let createTransportStub;
   let resolveBrandUuidStub;
   let accessControlHasAccessStub;
@@ -96,6 +116,10 @@ describe('SerenityController', () => {
   beforeEach(async () => {
     Object.values(handlers).forEach((s) => s.reset());
     resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE);
+    // Default: legacy mode — existing assertions (handlers called with
+    // WORKSPACE) hold unchanged. Child-mode tests override this stub.
+    resolveBrandWorkspaceStub = sinon.stub().resolves({ mode: 'legacy', workspaceId: WORKSPACE });
+    decommissionStub = sinon.stub().resolves();
     createTransportStub = sinon.stub().returns({ name: 'transport' });
     resolveBrandUuidStub = sinon.stub().resolves(BRAND);
     accessControlHasAccessStub = sinon.stub().resolves(true);
@@ -121,6 +145,7 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/workspace-resolver.js': {
         resolveWorkspaceId: resolveWorkspaceIdStub,
+        resolveBrandWorkspace: resolveBrandWorkspaceStub,
       },
       '../../src/support/serenity/handlers/prompts.js': {
         handleListPrompts: handlers.handleListPrompts,
@@ -136,6 +161,15 @@ describe('SerenityController', () => {
         handleListTags: handlers.handleListTags,
         handleListModels: handlers.handleListModels,
         handleUpdateModels: handlers.handleUpdateModels,
+      },
+      '../../src/support/serenity/handlers/markets-child.js': {
+        handleListMarketsChild: handlers.handleListMarketsChild,
+        handleGetMarketChild: handlers.handleGetMarketChild,
+        handleCreateMarketChild: handlers.handleCreateMarketChild,
+        handleDeleteMarketChild: handlers.handleDeleteMarketChild,
+      },
+      '../../src/support/serenity/workspace-lifecycle.js': {
+        decommissionBrandWorkspace: decommissionStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
@@ -603,6 +637,131 @@ describe('SerenityController', () => {
       expect(controller.listProjectTags).to.be.undefined;
       expect(controller.listProjectModels).to.be.undefined;
       expect(controller.listWorkspaceProjects).to.be.undefined;
+    });
+  });
+
+  describe('dual-mode dispatch (child)', () => {
+    beforeEach(() => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'child', workspaceId: 'child-ws-1' });
+    });
+
+    it('listMarkets routes to the child handler in child mode', async () => {
+      handlers.handleListMarketsChild.resolves({
+        items: [{
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', status: 'live',
+        }],
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListMarketsChild).to.have.been.calledOnceWithExactly({ name: 'transport' }, BRAND, 'child-ws-1');
+      expect(handlers.handleListMarkets).to.not.have.been.called;
+    });
+
+    it('getMarket routes to the child handler in child mode', async () => {
+      handlers.handleGetMarketChild.resolves({
+        brandId: BRAND, geoTargetId: 2840, languageCode: 'en', initialized: true,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'EN' } }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleGetMarketChild).to.have.been.calledOnce;
+      expect(handlers.handleGetMarket).to.not.have.been.called;
+    });
+
+    it('createMarket routes to the child handler with the brand + parent workspace', async () => {
+      handlers.handleCreateMarketChild.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(201);
+      expect(handlers.handleCreateMarketChild).to.have.been.calledOnce;
+      const { args } = handlers.handleCreateMarketChild.firstCall;
+      expect(args[2]).to.equal(WORKSPACE); // parentWorkspaceId
+    });
+
+    it('deleteMarket routes to the child handler in child mode', async () => {
+      handlers.handleDeleteMarketChild.resolves({ status: 204 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } }));
+      expect(response.status).to.equal(204);
+      expect(handlers.handleDeleteMarketChild).to.have.been.calledOnce;
+    });
+
+    it('501s prompts/tags/models for child-mode brands', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      for (const method of ['listPrompts', 'createPrompts', 'bulkDeletePrompts', 'listTags', 'listModels', 'updateModels']) {
+        // eslint-disable-next-line no-await-in-loop
+        const response = await controller[method](fakeContext({ data: {} }));
+        expect(response.status, method).to.equal(501);
+      }
+    });
+
+    it('returns 500 when the brand model cannot be loaded for a child write', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      });
+      ctx.dataAccess.Brand.findById = sinon.stub().resolves(null);
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(404);
+    });
+  });
+
+  describe('activate / deactivate', () => {
+    it('activate creates each market and sets the brand active', async () => {
+      handlers.handleCreateMarketChild.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel();
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreateMarketChild).to.have.been.calledTwice;
+      expect(brand.setStatus).to.have.been.calledWith('active');
+      expect(brand.save).to.have.been.called;
+    });
+
+    it('activate 400s on an empty markets array', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({ data: { markets: [] } }));
+      expect(response.status).to.equal(400);
+    });
+
+    it('activate returns 207 and stays pending when every market fails', async () => {
+      handlers.handleCreateMarketChild.resolves({ status: 409, body: {} });
+      const brand = makeBrandModel();
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(207);
+      expect(brand.setStatus).to.not.have.been.called;
+    });
+
+    it('deactivate decommissions the child workspace and sets the brand pending', async () => {
+      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'child-ws-1' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(fakeContext({ brand }));
+      expect(response.status).to.equal(200);
+      expect(decommissionStub).to.have.been.calledOnceWithExactly({ name: 'transport' }, 'child-ws-1', sinon.match.any);
+      expect(brand.setStatus).to.have.been.calledWith('pending');
+    });
+
+    it('deactivate is a no-op decommission for a brand with no child workspace', async () => {
+      const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(fakeContext({ brand }));
+      expect(response.status).to.equal(200);
+      expect(decommissionStub).to.not.have.been.called;
+      expect(brand.setStatus).to.have.been.calledWith('pending');
     });
   });
 });

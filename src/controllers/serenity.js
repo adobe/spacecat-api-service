@@ -17,7 +17,7 @@ import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-u
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
-import { resolveWorkspaceId } from '../support/serenity/workspace-resolver.js';
+import { resolveWorkspaceId, resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import {
   handleListPrompts,
   handleCreatePrompts,
@@ -33,6 +33,13 @@ import {
   handleListModels,
   handleUpdateModels,
 } from '../support/serenity/handlers/markets.js';
+import {
+  handleListMarketsChild,
+  handleGetMarketChild,
+  handleCreateMarketChild,
+  handleDeleteMarketChild,
+} from '../support/serenity/handlers/markets-child.js';
+import { decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
@@ -178,7 +185,12 @@ function SerenityController(context, log, env) {
    * brand between page load and a PATCH/DELETE would otherwise silently
    * 404 (or worse, resolve to a different row on a name collision).
    *
-   * Returns either `{ error: Response }` or `{ brandUuid, semrushWorkspaceId }`.
+   * Returns either `{ error: Response }` or
+   * `{ brandUuid, mode, workspaceId, parentWorkspaceId }`:
+   *   - `mode` is 'child' when brands.semrush_workspace_id is set, else 'legacy'
+   *   - `workspaceId` is the workspace handlers call upstream (child ws in child
+   *     mode, org parent in legacy mode)
+   *   - `parentWorkspaceId` is the org parent (needed for child create/activate)
    */
   async function authorize(ctx) {
     const spaceCatId = ctx?.params?.spaceCatId;
@@ -219,16 +231,45 @@ function SerenityController(context, log, env) {
     if (!brandUuid) {
       return { error: notFound(`Brand not found for organization: ${brandId}`) };
     }
-    const semrushWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
-    if (!hasText(semrushWorkspaceId)) {
+    const parentWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
+    if (!hasText(parentWorkspaceId)) {
       return { error: notFound('Organization has no semrush_workspace_id') };
     }
-    return { brandUuid, semrushWorkspaceId };
+    const { mode, workspaceId } = await resolveBrandWorkspace(ctx, spaceCatId, brandUuid);
+    return {
+      brandUuid, mode, workspaceId, parentWorkspaceId,
+    };
   }
 
   function buildTransport(ctx, imsToken) {
     return createSerenityTransport({ env: ctx.env || env, imsToken });
   }
+
+  /** Loads the Brand model instance (for child-mode write/lifecycle flows). */
+  async function loadBrand(ctx, brandUuid) {
+    const Brand = ctx?.dataAccess?.Brand;
+    if (!Brand || typeof Brand.findById !== 'function') {
+      throw new ErrorWithStatusCode('Brand data-access not available', 500);
+    }
+    const brand = await Brand.findById(brandUuid);
+    if (!brand) {
+      throw new ErrorWithStatusCode(`Brand not found: ${brandUuid}`, 404);
+    }
+    return brand;
+  }
+
+  // Prompts/tags/models child-mode resolution (resolve the project from the
+  // live listing instead of BrandSemrushProject) is the documented follow-up
+  // within this epic; until it lands, these surfaces 501 for child-mode brands
+  // rather than silently reading an empty legacy mapping. The legacy path is
+  // unchanged.
+  const childNotImplemented = (surface) => createResponse(
+    {
+      error: 'notImplemented',
+      message: `${surface} is not yet available for child-workspace brands`,
+    },
+    501,
+  );
 
   const listPrompts = async (ctx) => {
     try {
@@ -238,11 +279,14 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      if (auth.mode === 'child') {
+        return childNotImplemented('prompts');
+      }
       const result = await handleListPrompts(
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.semrushWorkspaceId,
+        auth.workspaceId,
         parsedQuery(ctx),
       );
       return ok(result);
@@ -259,11 +303,14 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      if (auth.mode === 'child') {
+        return childNotImplemented('prompts');
+      }
       const result = await handleCreatePrompts(
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.semrushWorkspaceId,
+        auth.workspaceId,
         ctx.data || {},
         log,
       );
@@ -285,11 +332,14 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      if (auth.mode === 'child') {
+        return childNotImplemented('prompts');
+      }
       const result = await handleUpdatePrompt(
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.semrushWorkspaceId,
+        auth.workspaceId,
         semrushPromptId,
         ctx.data || {},
         log,
@@ -308,11 +358,14 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      if (auth.mode === 'child') {
+        return childNotImplemented('prompts');
+      }
       const result = await handleBulkDeletePrompts(
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.semrushWorkspaceId,
+        auth.workspaceId,
         ctx.data || {},
         log,
       );
@@ -330,13 +383,15 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleListMarkets(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        log,
-      );
+      const result = auth.mode === 'child'
+        ? await handleListMarketsChild(transport, auth.brandUuid, auth.workspaceId)
+        : await handleListMarkets(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          log,
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -345,11 +400,10 @@ function SerenityController(context, log, env) {
 
   const getMarket = async (ctx) => {
     try {
-      // Enforce the IMS-only contract (throws 401 on non-IMS / missing bearer)
-      // even though this is a pure DB read with no upstream call — keeps the
-      // whole /serenity/* surface uniformly IMS-gated. Token is intentionally
-      // not captured: there is no upstream transport to build here.
-      requireImsBearer(ctx);
+      // IMS bearer is required on the whole surface. Legacy mode is a pure DB
+      // read (no upstream), but child mode reads the live listing, so the token
+      // is captured here and a transport built only when needed.
+      const imsToken = requireImsBearer(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -358,12 +412,17 @@ function SerenityController(context, log, env) {
       // Strict digit match — same rationale as deleteMarket: parseInt would
       // coerce '2840abc' → 2840 and silently resolve a different slice.
       const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
-      const result = await handleGetMarket(
-        ctx.dataAccess,
-        auth.brandUuid,
-        geoTargetId,
-        pLang ? String(pLang).toLowerCase() : null,
-      );
+      const languageCode = pLang ? String(pLang).toLowerCase() : null;
+      const result = auth.mode === 'child'
+        ? await handleGetMarketChild(
+          buildTransport(ctx, imsToken),
+          auth.brandUuid,
+          auth.workspaceId,
+          geoTargetId,
+          languageCode,
+          log,
+        )
+        : await handleGetMarket(ctx.dataAccess, auth.brandUuid, geoTargetId, languageCode);
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -378,14 +437,26 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleCreateMarket(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        ctx.data || {},
-        log,
-      );
+      let result;
+      if (auth.mode === 'child') {
+        const brand = await loadBrand(ctx, auth.brandUuid);
+        result = await handleCreateMarketChild(
+          transport,
+          brand,
+          auth.parentWorkspaceId,
+          ctx.data || {},
+          log,
+        );
+      } else {
+        result = await handleCreateMarket(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+        );
+      }
       return createResponse(result.body, result.status);
     } catch (e) {
       return mapError(e, log);
@@ -405,16 +476,19 @@ function SerenityController(context, log, env) {
       // OpenAPI contract declares `geoTargetId: integer, minimum: 1`, so the
       // path segment must be all digits.
       const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
+      const languageCode = pLang ? String(pLang).toLowerCase() : null;
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleDeleteMarket(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        geoTargetId,
-        pLang ? String(pLang).toLowerCase() : null,
-        log,
-      );
+      const result = auth.mode === 'child'
+        ? await handleDeleteMarketChild(transport, auth.workspaceId, geoTargetId, languageCode, log)
+        : await handleDeleteMarket(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          geoTargetId,
+          languageCode,
+          log,
+        );
       return createResponse(null, result.status);
     } catch (e) {
       return mapError(e, log);
@@ -429,11 +503,14 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      if (auth.mode === 'child') {
+        return childNotImplemented('tags');
+      }
       const result = await handleListTags(
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.semrushWorkspaceId,
+        auth.workspaceId,
         parsedQuery(ctx),
         log,
       );
@@ -451,11 +528,14 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      if (auth.mode === 'child') {
+        return childNotImplemented('models');
+      }
       const result = await handleListModels(
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.semrushWorkspaceId,
+        auth.workspaceId,
         parsedQuery(ctx),
       );
       return ok(result);
@@ -472,15 +552,116 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      if (auth.mode === 'child') {
+        return childNotImplemented('models');
+      }
       const result = await handleUpdateModels(
         transport,
         ctx.dataAccess,
         auth.brandUuid,
-        auth.semrushWorkspaceId,
+        auth.workspaceId,
         ctx.data || {},
         log,
       );
       return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * POST /serenity/activate — flips a brand into child mode (design flow 5):
+   * ensure the child workspace, then per caller-supplied market create a draft,
+   * publish once, and confirm. Sets brands.status = 'active' once ≥1 market is
+   * live. Body: { brandDomain, brandNames, brandDisplayName?, markets: [{ market,
+   * languageCode }] }. Markets are supplied by the caller (reactivation
+   * re-supplies them — there is no stored memory).
+   */
+  const activate = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const body = ctx.data || {};
+      const markets = Array.isArray(body.markets) ? body.markets : [];
+      if (markets.length === 0) {
+        throw new ErrorWithStatusCode('markets must be a non-empty array', 400);
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const brand = await loadBrand(ctx, auth.brandUuid);
+
+      // ensureChildWorkspace (inside handleCreateMarketChild) is idempotent —
+      // the first market creates/re-grants the workspace; later markets re-grant
+      // (a settle + transfer) onto the now-existing workspace.
+      const results = [];
+      let anyLive = false;
+      for (const m of markets) {
+        const createBody = {
+          market: m.market,
+          languageCode: m.languageCode,
+          brandDomain: body.brandDomain,
+          brandNames: body.brandNames,
+          brandDisplayName: body.brandDisplayName,
+          name: m.name,
+        };
+        // eslint-disable-next-line no-await-in-loop
+        const r = await handleCreateMarketChild(
+          transport,
+          brand,
+          auth.parentWorkspaceId,
+          createBody,
+          log,
+        );
+        if (r.status === 201) {
+          anyLive = true;
+        }
+        results.push({
+          market: m.market,
+          languageCode: m.languageCode,
+          status: r.status,
+          body: r.body,
+        });
+      }
+
+      if (anyLive && typeof brand.setStatus === 'function') {
+        brand.setStatus('active');
+        await brand.save();
+      }
+      return createResponse(
+        { brandId: auth.brandUuid, status: anyLive ? 'active' : 'pending', markets: results },
+        anyLive ? 200 : 207,
+      );
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * POST /serenity/deactivate — decommissions the brand's child workspace
+   * (design flow 6): delete every project, release the allocation back to the
+   * parent pool, keep the workspace and its semrush_workspace_id pointer. Sets
+   * brands.status = 'pending'. No-op (200) for a brand with no child workspace.
+   */
+  const deactivate = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const brand = await loadBrand(ctx, auth.brandUuid);
+      const childWorkspaceId = brand.getSemrushWorkspaceId?.();
+      if (hasText(childWorkspaceId)) {
+        await decommissionBrandWorkspace(transport, childWorkspaceId, log);
+      }
+      if (typeof brand.setStatus === 'function') {
+        brand.setStatus('pending');
+        await brand.save();
+      }
+      return ok({ brandId: auth.brandUuid, status: 'pending' });
     } catch (e) {
       return mapError(e, log);
     }
@@ -498,6 +679,8 @@ function SerenityController(context, log, env) {
     listTags,
     listModels,
     updateModels,
+    activate,
+    deactivate,
   };
 }
 
