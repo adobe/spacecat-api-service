@@ -1,3 +1,24 @@
+## [1.574.1](https://github.com/adobe/spacecat-api-service/compare/v1.574.0...v1.574.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* consume launchdarkly-client log-noise fix and dedupe nested copy ([#2606](https://github.com/adobe/spacecat-api-service/issues/2606)) ([e4e641d](https://github.com/adobe/spacecat-api-service/commit/e4e641dfa7f27105b7166b0530a2a04a612bdee7))
+
+# [1.574.0](https://github.com/adobe/spacecat-api-service/compare/v1.573.0...v1.574.0) (2026-06-13)
+
+
+### Features
+
+* **slack:** add mode:ai-only-missing for prerender suggestions without AI summary ([#2604](https://github.com/adobe/spacecat-api-service/issues/2604)) ([055039f](https://github.com/adobe/spacecat-api-service/commit/055039f797b44117d19cbca375eaa4184d6405c7))
+
+# [1.573.0](https://github.com/adobe/spacecat-api-service/compare/v1.572.0...v1.573.0) (2026-06-12)
+
+
+### Features
+
+* enable money-pages audit in paid onboarding profile ([#2601](https://github.com/adobe/spacecat-api-service/issues/2601)) ([b9cc4dd](https://github.com/adobe/spacecat-api-service/commit/b9cc4dd152a08f94bd9541e0369279a1ad8e1ae9))
+
 # [1.572.0](https://github.com/adobe/spacecat-api-service/compare/v1.571.1...v1.572.0) (2026-06-12)
 
 

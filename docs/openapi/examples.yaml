@@ -218,6 +218,17 @@ broken-internal-links-audit:
         priority: 'high'
         trafficDomain: 65272
       finalUrl: "www.example.com/uk/"
+money-pages-audit:
+  summary: Example for a money-pages audit
+  value:
+    id: '123e4567-e89b-12d3-a456-426614174000'
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    auditedAt: '2024-01-20T12:00:00Z'
+    expiresAt: '2024-07-20T12:00:00Z'
+    deliveryType: 'aem_edge'
+    fullAuditRef: 'https://www.example.com'
+    auditResult:
+      siteUrl: 'https://www.example.com'
 costs-audit:
   summary: Example for a costs audit
   value:

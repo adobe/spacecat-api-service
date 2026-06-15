@@ -159,6 +159,7 @@ AuditType:
     - 'related-urls'
     - 'summarization'
     - 'faqs'
+    - 'money-pages'
   example: 'cwv'
 URL:
   type: string
@@ -1110,6 +1111,17 @@ AuditResult:
           type: string
         finalUrl:
           description: The final URL for the audited page.
+          type: string
+    - type: object
+      description: |
+        The result of money-pages audit.
+      properties:
+        siteUrl:
+          description: The resolved site URL the money-pages audit was run against.
+          type: string
+        fullAuditRef:
+          description: |
+            A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
           type: string
     - type: array
       description: Information about the provided URLs in the Google index.
