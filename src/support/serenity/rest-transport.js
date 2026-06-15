@@ -179,6 +179,15 @@ function aioPromptsPath(semrushWorkspaceId, projectId, suffix) {
 export function createSerenityTransport({ env, imsToken }) {
   const root = baseUrl(env);
 
+  // Fail-closed guard for the destructive workspace delete. Deleting a child
+  // sub-workspace must be IMPOSSIBLE in every deployed environment
+  // (dev/stage/prod) — production decommission empties and releases a
+  // workspace but never deletes it (design §6); upstream deprovisioning is
+  // Semrush CS's act. The capability is retained only so the net-zero live
+  // smoke can tidy up after itself, and is unlocked solely by this explicit
+  // opt-in flag, which no deployed environment sets (local test-cleanup only).
+  const allowWorkspaceDelete = env?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
+
   return {
     /**
      * POST /v2/.../aio/prompts/by_tags — paginated list of prompts in a
@@ -374,13 +383,22 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * DELETE /v1/workspaces/{ws} — TEST CLEANUP ONLY. Production flows NEVER
+     * DELETE /v1/workspaces/{ws} — TEST CLEANUP ONLY, and fail-closed: throws
+     * unless SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which
+     * no deployed environment (dev/stage/prod) does. Production flows NEVER
      * delete child workspaces (decommission keeps them — design §6); workspace
      * deprovisioning at offboarding is Semrush CS's act. Kept here so the
      * net-zero live smoke can tidy up after itself. Delete cascades over the
      * workspace's projects; subsequent reads return 403 (workspace doc §4).
      */
     async deleteWorkspace(workspaceId) {
+      if (!allowWorkspaceDelete) {
+        throw new Error(
+          'Serenity workspace deletion is disabled. It is test-cleanup only and '
+          + 'must never run in a deployed environment; set '
+          + 'SERENITY_ALLOW_WORKSPACE_DELETE=true to enable it locally.',
+        );
+      }
       const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}`;
       return request('DELETE', url, imsToken, undefined);
     },

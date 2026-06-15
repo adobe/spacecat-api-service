@@ -618,9 +618,11 @@ describe('Semrush REST transport', () => {
   });
 
   describe('deleteWorkspace (test-cleanup only)', () => {
-    it('DELETEs /v1/workspaces/{ws} with no body', async () => {
+    const DELETE_ENV = { ...TEST_ENV, SERENITY_ALLOW_WORKSPACE_DELETE: 'true' };
+
+    it('DELETEs /v1/workspaces/{ws} with no body when explicitly allowed', async () => {
       fetchStub.resolves(fetchOk(null));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+      const transport = createSerenityTransport({ env: DELETE_ENV, imsToken: IMS });
 
       await transport.deleteWorkspace(WORKSPACE_ID);
 
@@ -630,6 +632,27 @@ describe('Semrush REST transport', () => {
         `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}`,
       );
       expect(init.body).to.be.undefined;
+    });
+
+    it('is fail-closed: throws and never calls fetch when the flag is absent', async () => {
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await expect(transport.deleteWorkspace(WORKSPACE_ID)).to.be.rejectedWith(
+        /workspace deletion is disabled/i,
+      );
+      expect(fetchStub.called).to.equal(false);
+    });
+
+    it('is fail-closed: rejects a non-"true" flag value', async () => {
+      const transport = createSerenityTransport({
+        env: { ...TEST_ENV, SERENITY_ALLOW_WORKSPACE_DELETE: '1' },
+        imsToken: IMS,
+      });
+
+      await expect(transport.deleteWorkspace(WORKSPACE_ID)).to.be.rejectedWith(
+        /workspace deletion is disabled/i,
+      );
+      expect(fetchStub.called).to.equal(false);
     });
   });
 
