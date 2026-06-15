@@ -111,6 +111,10 @@ export class FixesController {
 
     this.#ctx.log?.warn?.(`getAllForOpportunity: invoked siteId=${siteId} opportunityId=${opportunityId} fixCreatedDate=${fixCreatedDate ?? 'none'}`);
 
+    // Temporary debug marker: lets `curl -i` confirm which build serves dev,
+    // independent of logging. Remove once enrichment debugging is complete.
+    const debugHeaders = { 'x-fixes-debug': 'getAllForOpportunity-enrich-v1' };
+
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) {
       this.#ctx.log?.warn?.('getAllForOpportunity: returning early — failed param/access check');
@@ -152,7 +156,7 @@ export class FixesController {
 
       if (fixEntitiesWithSuggestions.length === 0) {
         this.#ctx.log?.warn?.(`getAllForOpportunity: returning early — no fixes matched fixCreatedDate=${fixCreatedDate} (date branch)`);
-        return ok([]);
+        return ok([], debugHeaders);
       }
 
       // Extract fix entities and attach suggestions to each one
@@ -166,7 +170,7 @@ export class FixesController {
 
       await this.#enrichFixesWithUserNames(fixEntities);
       fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
-      return ok(fixes);
+      return ok(fixes, debugHeaders);
     }
 
     const fixEntitiesWithSuggestions = await this.#FixEntity
@@ -187,7 +191,7 @@ export class FixesController {
 
     if (fixEntitiesWithSuggestions.length === 0) {
       this.#ctx.log?.warn?.('getAllForOpportunity: returning early — no fixes for opportunity (default branch)');
-      return ok([]);
+      return ok([], debugHeaders);
     }
 
     fixEntities = fixEntitiesWithSuggestions.map((item) => {
@@ -199,7 +203,7 @@ export class FixesController {
 
     await this.#enrichFixesWithUserNames(fixEntities);
     fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
-    return ok(fixes);
+    return ok(fixes, debugHeaders);
   }
 
   /**
