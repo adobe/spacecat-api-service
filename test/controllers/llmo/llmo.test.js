@@ -497,6 +497,7 @@ describe('LlmoController', () => {
         deletedPrompts: { total: 0, modified: 0 },
         ignoredPrompts: { total: 0, modified: 0 },
         categoryUrls: { total: 0 },
+        claims: { modified: false },
       },
     }));
     mockLlmoConfig = {
@@ -2056,6 +2057,7 @@ describe('LlmoController', () => {
           deletedPrompts: { total: 2, modified: 2 },
           ignoredPrompts: { total: 1, modified: 1 },
           categoryUrls: { total: 2 },
+          claims: { modified: false },
         },
       }));
 
@@ -2187,6 +2189,7 @@ describe('LlmoController', () => {
           deletedPrompts: { total: 0, modified: 0 },
           ignoredPrompts: { total: 0, modified: 0 },
           categoryUrls: { total: 4 },
+          claims: { modified: false },
         },
       }));
 
@@ -2225,6 +2228,7 @@ describe('LlmoController', () => {
           deletedPrompts: { total: 0, modified: 0 },
           ignoredPrompts: { total: 0, modified: 0 },
           categoryUrls: { total: 0 },
+          claims: { modified: false },
         },
       }));
 
@@ -2267,6 +2271,7 @@ describe('LlmoController', () => {
           deletedPrompts: { total: 0, modified: 0 },
           ignoredPrompts: { total: 0, modified: 0 },
           categoryUrls: { total: 0 },
+          claims: { modified: false },
         },
       }));
 
