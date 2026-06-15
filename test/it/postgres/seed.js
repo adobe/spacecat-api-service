@@ -14,6 +14,7 @@
 import { execSync } from 'child_process';
 
 import { organizations } from './seed-data/organizations.js';
+import { facsAccessMappingAuditEvents } from './seed-data/facs-access-mapping-audit-events.js';
 import { sites } from './seed-data/sites.js';
 import { audits } from './seed-data/audits.js';
 import { opportunities } from './seed-data/opportunities.js';
@@ -83,6 +84,7 @@ function clearData() {
     `docker exec ${POSTGRES_CONTAINER} psql -U postgres -d ${POSTGRES_DB} -c "`
     + 'DELETE FROM access_grant_logs;'
     + 'DELETE FROM facs_access_mappings;'
+    + 'DELETE FROM facs_access_mapping_audit_events;'
     + 'DELETE FROM site_ims_org_accesses;'
     + 'DELETE FROM plg_onboardings;'
     + 'DELETE FROM consumers;'
@@ -110,6 +112,7 @@ async function seed() {
     insertRows('async_jobs', asyncJobs),
     insertRows('consumers', consumers),
     insertRows('projection_audit', projectionAudits),
+    insertRows('facs_access_mapping_audit_events', facsAccessMappingAuditEvents),
   ]);
 
   // Level 1a: depend on organizations
