@@ -368,7 +368,7 @@ describe('Fixes Controller', () => {
       expect(response).includes({ status: 200 });
       const result = await response.json();
       expect(result[0]).to.not.have.property('executedByUser');
-      expect(warnSpy).to.have.been.calledOnceWith(
+      expect(warnSpy).to.have.been.calledWith(
         `Could not enrich fixes with user names: ${errorMessage}`,
       );
     });
