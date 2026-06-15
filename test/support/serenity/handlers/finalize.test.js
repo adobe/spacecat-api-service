@@ -294,6 +294,28 @@ describe('handlers/finalize.js — finalizeSerenityProjects (LLMO-5492)', () => 
     expect(result.publishFailed).to.have.lengthOf(0);
   });
 
+  it('skips a BrandSemrushProject row with a blank semrushProjectId — never publishes it', async () => {
+    const usEn = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+    // A row that never had a Semrush project id persisted (e.g. create failed
+    // mid-onboarding, leaving an orphan slice). It must be dropped from the
+    // publish loop entirely — not published, and not bucketed as skipped/failed.
+    const orphan = makeProject({ semrushProjectId: '', geoTargetId: 2250, languageCode: 'fr' });
+    const dataAccess = makeDataAccess([usEn, orphan]);
+    dataAccess.BrandSemrushProject.findBySlice.withArgs(BRAND, 2840, 'en').resolves(usEn);
+    const transport = makeTransport();
+
+    const result = await finalizeSerenityProjects(transport, dataAccess, BRAND, WORKSPACE, {
+      models: [{ geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] }],
+    }, fakeLog());
+
+    // Only the project carrying a real id is published; the blank-id row is gone.
+    expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
+    expect(result.published).to.deep.equal(['proj-us-en']);
+    expect(result.publishSkipped).to.have.lengthOf(0);
+    expect(result.publishPending).to.have.lengthOf(0);
+    expect(result.publishFailed).to.have.lengthOf(0);
+  });
+
   it('tolerates allByBrandId returning null (no rows → no publish)', async () => {
     const dataAccess = makeDataAccess(null);
     const transport = makeTransport();
