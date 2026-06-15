@@ -10,6 +10,26 @@
 > sub-workspace must never equal the org parent workspace (enforced at the
 > controller `authorize()` chokepoint and in `ensureSubworkspace` /
 > `decommissionBrandWorkspace`).
+>
+> **Hardening pass (post-review, gap audit):** five further safety/correctness
+> gaps were closed. (1) The sub-workspace **title now embeds the brand id**
+> (`"<name> [<uuid>]"`) so ambiguous-create recovery cannot adopt a *same-named*
+> brand's workspace; adoption additionally verifies the candidate is
+> **project-empty** before adopting. (2) `ensureSubworkspace` takes an optional
+> `reloadPointer` and, on the create path, **re-reads the brand pointer before
+> persisting** — if a concurrent activation already won, it releases its own
+> freshly-created workspace's allocation and adopts the winner (residual race
+> noted; a fully race-free fix needs a conditional DB write). (3) The
+> duplicate-slice `orderKey` **no longer falls back to the mutable `updated_at`**
+> (id-stable tie-break; updated_at would flip the canonical project on edit).
+> (4) `activate` returns **207 whenever any market failed** (not 200), and
+> **counts `409 sliceExists` as live** so a full idempotent re-activate reports
+> 200/active instead of 207/pending. (5) The `decommissionBrandWorkspace`
+> linked-sub-workspace child guard is **gated behind
+> `SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD` (default off)** until the
+> `GET …/family` leaf-direction semantics are live-verified — an always-on guard
+> would falsely 409 every deactivate if `family(leaf)` returns siblings. The
+> parent-equality guard remains always-on.
 
 **Status:** Plan · 2026-06-15
 **Implements:** `adobe/serenity-docs` PR #12 → `docs/discovery/brand-semrush-provisioning-v2-phase1-sync.md` (cited as *design §N*) and `…-v2-phase1-implementation.md`.

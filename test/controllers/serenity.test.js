@@ -16,6 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
+import { brandPointerReloader } from '../../src/controllers/serenity.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -53,9 +54,10 @@ function fakeContext({
   data = undefined,
   brandId = BRAND,
   brand = makeBrandModel(),
+  env = {},
 } = {}) {
   return {
-    env: {},
+    env,
     pathInfo: {
       headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
     },
@@ -873,7 +875,8 @@ describe('SerenityController', () => {
 
     it('activate records a thrown market as failed and keeps the published one live (no abort)', async () => {
       // Market 1 publishes (201, live upstream); market 2 throws. The batch must
-      // NOT abort - the brand goes active and the failure is reported per market.
+      // NOT abort - the brand goes active (≥1 live) but the HTTP status is 207
+      // because ≥1 market failed, surfacing the partial failure to the caller.
       handlers.handleCreateMarketSubworkspace
         .onFirstCall().resolves({ status: 201, body: {} })
         .onSecondCall().rejects(new ErrorWithStatusCode('upstream boom', 502));
@@ -887,7 +890,8 @@ describe('SerenityController', () => {
           markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
         },
       }));
-      expect(response.status).to.equal(200);
+      // partial failure -> 207, even though the brand is active (one market live).
+      expect(response.status).to.equal(207);
       const { markets } = await readBody(response);
       // both markets reported; the throwing one becomes a 502 entry, no URL leak.
       expect(markets).to.have.length(2);
@@ -937,8 +941,10 @@ describe('SerenityController', () => {
       expect(brand.setStatus).to.have.been.calledOnceWith('active');
     });
 
-    it('activate returns 207 and stays pending when every market fails', async () => {
-      handlers.handleCreateMarketSubworkspace.resolves({ status: 409, body: {} });
+    it('activate returns 207 and stays pending when every market genuinely fails', async () => {
+      // A real failure status (502), NOT 409 - a 409 sliceExists means the market
+      // is already live and counts as success (see the all-409 re-activate test).
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 502, body: {} });
       const brand = makeBrandModel();
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
@@ -947,6 +953,27 @@ describe('SerenityController', () => {
       }));
       expect(response.status).to.equal(207);
       expect(brand.setStatus).to.not.have.been.called;
+    });
+
+    it('activate returns 200 active for an all-409 idempotent re-activate (markets already live)', async () => {
+      // Re-activating a brand whose markets are all already live: every market
+      // returns 409 sliceExists. That is a COMPLETE success, not a partial one -
+      // the brand is active and the HTTP status is 200, never 207/pending.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 409, body: { error: 'sliceExists' } });
+      const brand = makeBrandModel();
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: {
+          brandDomain: 'x.com',
+          brandNames: ['X'],
+          markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
+        },
+      }));
+      expect(response.status).to.equal(200);
+      const { status } = await readBody(response);
+      expect(status).to.equal('active');
+      expect(brand.setStatus).to.have.been.calledWith('active');
     });
 
     it('deactivate decommissions the subworkspace, clears the pointer, and sets the brand pending', async () => {
@@ -959,11 +986,29 @@ describe('SerenityController', () => {
         'subworkspace-ws-1',
         sinon.match.any,
         WORKSPACE,
+        { enforceLinkedGuard: false },
       );
       // The pointer is cleared (disconnect) — never the workspace deleted.
       expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('pending');
       expect(brand.save).to.have.been.called;
+    });
+
+    it('deactivate enables the linked-sub-workspace guard when the env flag is set', async () => {
+      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(fakeContext({
+        brand,
+        env: { SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD: 'true' },
+      }));
+      expect(response.status).to.equal(200);
+      expect(decommissionStub).to.have.been.calledOnceWithExactly(
+        { name: 'transport' },
+        'subworkspace-ws-1',
+        sinon.match.any,
+        WORKSPACE,
+        { enforceLinkedGuard: true },
+      );
     });
 
     it('deactivate is a no-op decommission for a brand with no subworkspace', async () => {
@@ -1091,5 +1136,35 @@ describe('SerenityController', () => {
         expect(response.status).to.equal(403);
       });
     });
+  });
+});
+
+describe('brandPointerReloader', () => {
+  it('returns the brand current semrush_workspace_id when present', async () => {
+    const ctx = {
+      dataAccess: {
+        Brand: { findById: sinon.stub().resolves({ getSemrushWorkspaceId: () => 'ws-current' }) },
+      },
+    };
+    expect(await brandPointerReloader(ctx, 'brand-1')()).to.equal('ws-current');
+  });
+
+  it('returns null when the brand has no pointer', async () => {
+    const ctx = {
+      dataAccess: {
+        Brand: { findById: sinon.stub().resolves({ getSemrushWorkspaceId: () => null }) },
+      },
+    };
+    expect(await brandPointerReloader(ctx, 'brand-1')()).to.equal(null);
+  });
+
+  it('returns null when the Brand data-access is unavailable', async () => {
+    expect(await brandPointerReloader({ dataAccess: {} }, 'brand-1')()).to.equal(null);
+    expect(await brandPointerReloader({ dataAccess: { Brand: {} } }, 'brand-1')()).to.equal(null);
+  });
+
+  it('returns null when the resolved brand is missing', async () => {
+    const ctx = { dataAccess: { Brand: { findById: sinon.stub().resolves(null) } } };
+    expect(await brandPointerReloader(ctx, 'brand-1')()).to.equal(null);
   });
 });

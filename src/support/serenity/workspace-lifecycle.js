@@ -52,6 +52,23 @@ function assertNotParent(workspaceId, parentWorkspaceId) {
   }
 }
 
+// The sub-workspace title must be UNIQUE per brand within the org parent: it is
+// the ONLY key ambiguous-create recovery (adoptFromFamily) has to match a
+// timed-out create against the parent's family listing. Brand DISPLAY names are
+// NOT unique within an org, so a name-only title would let one brand adopt a
+// different, same-named brand's sub-workspace after a create timeout - and a
+// later deactivate would then decommission the WRONG brand's live markets.
+// Embed the immutable brand id so the title is collision-free and the adoption
+// match is deterministic.
+function subworkspaceTitle(brand) {
+  const name = brand?.getName?.();
+  const id = brand?.getId?.();
+  if (hasText(name) && hasText(id)) {
+    return `${name} [${id}]`;
+  }
+  return hasText(id) ? `brand-${id}` : name;
+}
+
 async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
   for (let i = 0; i < attempts; i += 1) {
     // eslint-disable-next-line no-await-in-loop
@@ -97,12 +114,39 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
     err.code = ERROR_CODES.AMBIGUOUS_WORKSPACE;
     throw err;
   }
+  const adopted = matches[0];
+  const adoptedId = String(adopted?.id || '');
+  if (!hasText(adoptedId)) {
+    throw new ErrorWithStatusCode(
+      `Ambiguous subworkspace create for '${title}': sole family match has no id`,
+      502,
+    );
+  }
+  // Defense-in-depth: adopt ONLY a genuinely empty sub-workspace. A timed-out
+  // create has not yet created any projects (projects are created only after
+  // the workspace settles to `created`), so a non-empty match is NOT our
+  // interrupted create — adopting it would graft this brand onto an
+  // already-provisioned workspace. Refuse rather than risk contamination.
+  const adoptedListing = await transport.listProjects(adoptedId);
+  const projectCount = Array.isArray(adoptedListing?.items) ? adoptedListing.items.length : 0;
+  if (projectCount > 0) {
+    log?.error?.('ensureSubworkspace: refusing to adopt a non-empty family match', {
+      parentWorkspaceId,
+      title,
+      adoptedId,
+      projectCount,
+    });
+    throw new ErrorWithStatusCode(
+      `Ambiguous subworkspace create for '${title}': sole family match has ${projectCount} project(s), refusing to adopt`,
+      502,
+    );
+  }
   log?.info?.('ensureSubworkspace: adopted subworkspace after ambiguous create', {
     parentWorkspaceId,
     title,
-    adoptedId: matches[0]?.id,
+    adoptedId,
   });
-  return matches[0];
+  return adopted;
 }
 
 /**
@@ -126,6 +170,10 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
  * @param {number} marketCount - sizing input for the allocation.
  * @param {object} log
  * @param {object} [timing] - injectable poll timing for tests.
+ * @param {function} [reloadPointer] - optional async () => string|null that
+ *   re-reads the brand's CURRENT semrush_workspace_id from the data layer.
+ *   When supplied, the create path uses it as a last-update concurrency guard
+ *   (see below) so a parallel activation cannot orphan a resourced workspace.
  * @returns {Promise<string>} the subworkspace id.
  */
 export async function ensureSubworkspace(
@@ -135,6 +183,7 @@ export async function ensureSubworkspace(
   marketCount,
   log,
   timing = {},
+  reloadPointer = null,
 ) {
   const poll = {
     attempts: timing.attempts ?? DEFAULT_POLL_ATTEMPTS,
@@ -166,7 +215,7 @@ export async function ensureSubworkspace(
     throw new ErrorWithStatusCode('Cannot create a subworkspace: organization has no parent workspace', 404);
   }
 
-  const title = brand.getName?.();
+  const title = subworkspaceTitle(brand);
   let created;
   try {
     created = await transport.createSubworkspace(
@@ -195,6 +244,38 @@ export async function ensureSubworkspace(
   assertNotParent(workspaceId, parentWorkspaceId);
 
   await pollUntilCreated(transport, workspaceId, poll);
+
+  // Concurrency guard (defense-in-depth against a lost-update orphan): a
+  // parallel activate / createMarket for the SAME brand may have created and
+  // persisted its own sub-workspace while we were creating + polling ours.
+  // Overwriting the pointer now would orphan the winner's workspace AND leave
+  // two resourced sub-workspaces drawing from the shared parent pool. Re-read
+  // the brand's current pointer; if another request already won, release OUR
+  // freshly-created workspace's allocation back to the parent (it cannot be
+  // deleted — deletion is forbidden) and adopt the winner's id instead.
+  // Residual: two requests that both re-read null in the same instant still
+  // both persist; a fully race-free fix needs a conditional "set pointer where
+  // pointer is null" write at the data layer (tracked follow-up).
+  if (typeof reloadPointer === 'function') {
+    const concurrent = await reloadPointer();
+    if (hasText(concurrent) && concurrent !== workspaceId) {
+      log?.error?.('ensureSubworkspace: concurrent activation won; releasing our orphaned workspace allocation', {
+        keptWorkspaceId: concurrent,
+        releasedWorkspaceId: workspaceId,
+      });
+      try {
+        await transport.transferWorkspaceResources(workspaceId, RELEASE_ALLOCATION);
+      } catch (e) {
+        // Best-effort: a failed release leaves the orphan resourced, but we
+        // still must NOT clobber the winner's pointer below.
+        log?.error?.('ensureSubworkspace: failed to release orphaned workspace allocation', {
+          releasedWorkspaceId: workspaceId,
+          error: e.message,
+        });
+      }
+      return concurrent;
+    }
+  }
 
   // Persist AFTER the workspace reads back `created` — flips the brand to subworkspace mode.
   brand.setSemrushWorkspaceId(workspaceId);
@@ -227,12 +308,23 @@ export async function ensureSubworkspace(
  * @param {string} [parentWorkspaceId] - when provided, a self-defending guard:
  *   refuse to empty/release the org's shared parent workspace even if a caller
  *   ever reaches here without the controller's authorize() guard.
+ * @param {object} [options]
+ * @param {boolean} [options.enforceLinkedGuard=false] - enable the
+ *   linked-sub-workspace guard (refuse if the target still has active children).
+ *   Default OFF: the guard relies on `GET …/family` returning a leaf's
+ *   DESCENDANTS only. That leaf-direction semantic is NOT yet live-verified - if
+ *   `family(leaf)` instead returns SIBLINGS, an always-on guard would falsely
+ *   409 EVERY deactivate in any org with ≥2 sub-workspaces. Keep it gated until
+ *   the dev gateway is probed, then flip the flag on
+ *   (SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD=true). The parent-equality guard
+ *   below is always on - that invariant is verified and safe.
  */
 export async function decommissionBrandWorkspace(
   transport,
   subworkspaceId,
   log,
   parentWorkspaceId,
+  { enforceLinkedGuard = false } = {},
 ) {
   if (!hasText(subworkspaceId)) {
     return;
@@ -247,19 +339,22 @@ export async function decommissionBrandWorkspace(
   // leaf by design, so this is normally empty; any child means the target is
   // acting as a parent and must not be emptied. Fail-closed: a family-listing
   // error propagates and aborts the decommission rather than guessing.
-  // NOTE: the family endpoint is otherwise exercised only on the ORG parent; we
+  // Gated (default off) because the family endpoint's leaf-direction semantics
+  // are not yet live-verified - see the @param note. When enabled we
   // conservatively exclude the target's own id and treat any other returned
-  // workspace as a blocking child (semantics not yet live-verified for a leaf).
-  const family = await transport.listWorkspaceFamily(subworkspaceId);
-  const children = (Array.isArray(family?.items) ? family.items : [])
-    .filter((w) => hasText(w?.id) && w.id !== subworkspaceId);
-  if (children.length > 0) {
-    const err = new ErrorWithStatusCode(
-      `Refusing to decommission ${subworkspaceId}: it has ${children.length} active linked sub-workspace(s)`,
-      409,
-    );
-    err.code = ERROR_CODES.LINKED_SUBWORKSPACES;
-    throw err;
+  // workspace as a blocking child.
+  if (enforceLinkedGuard) {
+    const family = await transport.listWorkspaceFamily(subworkspaceId);
+    const children = (Array.isArray(family?.items) ? family.items : [])
+      .filter((w) => hasText(w?.id) && w.id !== subworkspaceId);
+    if (children.length > 0) {
+      const err = new ErrorWithStatusCode(
+        `Refusing to decommission ${subworkspaceId}: it has ${children.length} active linked sub-workspace(s)`,
+        409,
+      );
+      err.code = ERROR_CODES.LINKED_SUBWORKSPACES;
+      throw err;
+    }
   }
 
   const listing = await transport.listProjects(subworkspaceId);

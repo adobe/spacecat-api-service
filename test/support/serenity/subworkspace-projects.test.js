@@ -157,7 +157,14 @@ describe('subworkspace-projects', () => {
       expect(alert).to.have.been.calledOnce;
     });
 
-    it('orders duplicates by updated_at when created_at is absent (live shape)', async () => {
+    it('ignores updated_at for ordering when created_at is absent (stable id tie-break)', async () => {
+      // The live list view omits created_at. Ordering must NOT fall back to the
+      // mutable updated_at — a write that bumps the canonical project's
+      // updated_at would otherwise flip which duplicate is "oldest". With
+      // created_at absent the immutable id is the sole tie-break, so the same
+      // project wins regardless of updated_at. Here 'aaa' (lexically lowest id)
+      // is given the NEWEST updated_at: the buggy updated_at fallback would have
+      // picked 'zzz', the id-stable rule picks 'aaa'.
       const mk = (id, updatedAt) => ({
         id,
         publish_status: 'live',
@@ -166,11 +173,11 @@ describe('subworkspace-projects', () => {
       });
       const transport = {
         listProjects: sinon.stub().resolves({
-          items: [mk('newer', '2026-06-10T00:00:00Z'), mk('older', '2026-06-01T00:00:00Z')],
+          items: [mk('zzz', '2026-06-01T00:00:00Z'), mk('aaa', '2026-06-10T00:00:00Z')],
         }),
       };
       const p = await resolveProject(transport, WS, 2276, 'de', { error: sinon.spy() });
-      expect(p.id).to.equal('older');
+      expect(p.id).to.equal('aaa');
     });
 
     it('breaks ties deterministically by id when no timestamps are present', async () => {

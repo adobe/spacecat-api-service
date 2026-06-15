@@ -136,6 +136,8 @@ function validateCreateBody(body) {
  * @param {string|null} [preResolvedWorkspaceId] - when set (the activate batch
  *   path), the sub-workspace is already ensured/sized; skip the per-call ensure
  *   and create directly against it. Omitted on the single-market POST path.
+ * @param {function|null} [reloadPointer] - lost-update concurrency guard passed
+ *   through to ensureSubworkspace on the single-market POST path (see there).
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -144,6 +146,7 @@ export async function handleCreateMarketSubworkspace(
   body,
   log,
   preResolvedWorkspaceId = null,
+  reloadPointer = null,
 ) {
   const errors = validateCreateBody(body);
   if (errors.length > 0) {
@@ -160,7 +163,7 @@ export async function handleCreateMarketSubworkspace(
   // path passes nothing, so we ensure on the spot, sized for one market.
   const workspaceId = hasText(preResolvedWorkspaceId)
     ? preResolvedWorkspaceId
-    : await ensureSubworkspace(transport, brand, parentWorkspaceId, 1, log);
+    : await ensureSubworkspace(transport, brand, parentWorkspaceId, 1, log, {}, reloadPointer);
 
   const existing = await resolveProject(
     transport,

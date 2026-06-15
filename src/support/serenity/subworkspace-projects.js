@@ -57,14 +57,19 @@ export function langOf(project) {
   return hasText(lang) ? String(lang).toLowerCase() : null;
 }
 
-// Project list items expose `updated_at` (and `published_at` when live) but no
-// `created_at`. Use created_at when present, else fall back to updated_at, and
-// append the project id as a stable tie-break so the duplicate-slice
-// oldest-wins rule stays deterministic even when timestamps are equal or
-// absent (otherwise the sort would be listing-order-dependent). ISO 8601
-// timestamps sort lexically, so the leading timestamp dominates the id suffix.
+// Deterministic ordering key for the duplicate-slice "oldest wins" rule. The
+// key is built from the IMMUTABLE `created_at` plus the (immutable) project id
+// ONLY — it deliberately does NOT fall back to `updated_at`. The v1 list view
+// omits `created_at` today, so in practice every project's timestamp component
+// is the empty string and the project id (stable) is what picks the canonical
+// duplicate. Falling back to `updated_at` would make the choice UNSTABLE: a
+// write bumps the canonical project's `updated_at`, pushing it later than its
+// duplicate, so the OTHER project would become "oldest" and subsequent reads
+// and writes would silently flip to it mid-life. ISO 8601 timestamps sort
+// lexically, so when `created_at` is present it dominates the id suffix and the
+// rule degrades to true chronological oldest.
 function orderKey(project) {
-  const ts = String(project?.created_at ?? project?.updated_at ?? '');
+  const ts = String(project?.created_at ?? '');
   return `${ts}|${String(project?.id ?? '')}`;
 }
 

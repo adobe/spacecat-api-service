@@ -180,6 +180,23 @@ function requireImsBearer(ctx) {
   return header.substring(BEARER_PREFIX.length);
 }
 
+/**
+ * Builds an async reload callback that re-reads the brand's CURRENT
+ * semrush_workspace_id from the data layer. ensureSubworkspace uses it as a
+ * lost-update concurrency guard so a parallel activation cannot orphan a
+ * freshly-created, resourced sub-workspace.
+ */
+export function brandPointerReloader(ctx, brandUuid) {
+  return async () => {
+    const Brand = ctx?.dataAccess?.Brand;
+    if (!Brand || typeof Brand.findById !== 'function') {
+      return null;
+    }
+    const fresh = await Brand.findById(brandUuid);
+    return fresh?.getSemrushWorkspaceId?.() ?? null;
+  };
+}
+
 function SerenityController(context, log, env) {
   if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
@@ -481,6 +498,8 @@ function SerenityController(context, log, env) {
           auth.parentWorkspaceId,
           ctx.data || {},
           log,
+          null,
+          brandPointerReloader(ctx, auth.brandUuid),
         );
       } else {
         result = await handleCreateMarket(
@@ -641,9 +660,12 @@ function SerenityController(context, log, env) {
         auth.parentWorkspaceId,
         markets.length,
         log,
+        {},
+        brandPointerReloader(ctx, auth.brandUuid),
       );
       const results = [];
-      let anyLive = false;
+      let anyLive = false; // ≥1 market is live (created now OR already live)
+      let anyFailed = false; // ≥1 market neither created nor already-live
       for (const m of markets) {
         const createBody = {
           market: m.market,
@@ -681,8 +703,15 @@ function SerenityController(context, log, env) {
             body: { error: 'serenityUpstreamError', message: 'Market activation failed' },
           };
         }
-        if (r.status === 201) {
+        // 201 = created+published now; 409 = sliceExists (the market is already
+        // live upstream). Both mean the slice IS live, so both count toward
+        // brand-active and neither trips the partial-failure path — a full
+        // idempotent re-activate (every market already live → all 409s) is a
+        // complete success, not a 207/pending.
+        if (r.status === 201 || r.status === 409) {
           anyLive = true;
+        } else {
+          anyFailed = true;
         }
         results.push({
           market: m.market,
@@ -696,9 +725,16 @@ function SerenityController(context, log, env) {
         brand.setStatus('active');
         await brand.save();
       }
+      // 207 Multi-Status whenever ANY market failed (even if others went live),
+      // so a caller keying off the HTTP status sees the partial failure instead
+      // of a bare 200. 200 only when every market is live.
       return createResponse(
-        { brandId: auth.brandUuid, status: anyLive ? 'active' : 'pending', markets: results },
-        anyLive ? 200 : 207,
+        {
+          brandId: auth.brandUuid,
+          status: anyLive ? 'active' : 'pending',
+          markets: results,
+        },
+        anyFailed ? 207 : 200,
       );
     } catch (e) {
       return mapError(e, log);
@@ -727,7 +763,16 @@ function SerenityController(context, log, env) {
       const brand = await loadBrand(ctx, auth.brandUuid);
       const subworkspaceId = brand.getSemrushWorkspaceId?.();
       if (hasText(subworkspaceId)) {
-        await decommissionBrandWorkspace(transport, subworkspaceId, log, auth.parentWorkspaceId);
+        await decommissionBrandWorkspace(
+          transport,
+          subworkspaceId,
+          log,
+          auth.parentWorkspaceId,
+          {
+            enforceLinkedGuard:
+              (ctx.env || env)?.SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD === 'true',
+          },
+        );
         // Disconnect the brand from the now-emptied sub-workspace. The
         // sub-workspace is kept (never deleted); clearing the pointer is what
         // returns the brand to flat mode. Invalidate the resolver cache HERE —

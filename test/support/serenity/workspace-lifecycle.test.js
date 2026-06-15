@@ -29,6 +29,10 @@ use(sinonChai);
 
 const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
 const SUB_WS = 'subworkspace-ws-1';
+const BRAND_ID = 'brand-uuid-1';
+// The sub-workspace title embeds the immutable brand id for per-brand uniqueness
+// (so ambiguous-create recovery cannot adopt a same-named brand's workspace).
+const EXPECTED_TITLE = `Adobe Express [${BRAND_ID}]`;
 const NOOP_TIMING = { intervalMs: 0, sleep: () => Promise.resolve() };
 const log = { info: () => {}, error: () => {}, warn: () => {} };
 
@@ -44,9 +48,10 @@ function makeTransport(overrides = {}) {
   };
 }
 
-function makeBrand({ workspaceId = null, name = 'Adobe Express' } = {}) {
+function makeBrand({ workspaceId = null, name = 'Adobe Express', id = BRAND_ID } = {}) {
   let ws = workspaceId;
   return {
+    getId: () => id,
     getSemrushWorkspaceId: () => ws,
     getName: () => name,
     setSemrushWorkspaceId: sinon.spy((v) => { ws = v; }),
@@ -95,7 +100,7 @@ describe('workspace-lifecycle', () => {
 
       expect(result).to.equal(SUB_WS);
       expect(transport.createSubworkspace)
-        .to.have.been.calledOnceWithExactly(PARENT_WS, 'Adobe Express', resourceAllocation(2));
+        .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE, resourceAllocation(2));
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
       expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(brand.save).to.have.been.calledOnce;
@@ -105,7 +110,7 @@ describe('workspace-lifecycle', () => {
       const transport = makeTransport({
         createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
         listWorkspaceFamily: sinon.stub().resolves({
-          items: [{ id: 'adopted-ws', title: 'Adobe Express' }],
+          items: [{ id: 'adopted-ws', title: EXPECTED_TITLE }],
         }),
       });
       const brand = makeBrand();
@@ -116,13 +121,54 @@ describe('workspace-lifecycle', () => {
       expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('adopted-ws');
     });
 
+    it('refuses to adopt a NON-empty family match after a create timeout', async () => {
+      // A timed-out create has no projects yet; a non-empty title match is some
+      // OTHER provisioned workspace, never our interrupted create. Refuse it.
+      const transport = makeTransport({
+        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+        listWorkspaceFamily: sinon.stub().resolves({
+          items: [{ id: 'occupied-ws', title: EXPECTED_TITLE }],
+        }),
+        listProjects: sinon.stub().resolves({ items: [{ id: 'existing-project' }] }),
+      });
+      const brand = makeBrand();
+
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+        .to.be.rejectedWith(/refusing to adopt/);
+      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+    });
+
+    it('throws when the sole family match has no id', async () => {
+      const transport = makeTransport({
+        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+        listWorkspaceFamily: sinon.stub().resolves({
+          items: [{ title: EXPECTED_TITLE }],
+        }),
+      });
+      const brand = makeBrand();
+
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+        .to.be.rejectedWith(/sole family match has no id/);
+      expect(transport.listProjects).to.not.have.been.called;
+    });
+
+    it('falls back to a name-only title when the brand has no id', async () => {
+      const transport = makeTransport();
+      const brand = makeBrand({ id: null });
+
+      await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+
+      expect(transport.createSubworkspace)
+        .to.have.been.calledOnceWithExactly(PARENT_WS, 'Adobe Express', resourceAllocation(1));
+    });
+
     it('fails with an ambiguousWorkspace alert on multiple family matches', async () => {
       const transport = makeTransport({
         createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
         listWorkspaceFamily: sinon.stub().resolves({
           items: [
-            { id: 'ws-a', title: 'Adobe Express' },
-            { id: 'ws-b', title: 'Adobe Express' },
+            { id: 'ws-a', title: EXPECTED_TITLE },
+            { id: 'ws-b', title: EXPECTED_TITLE },
           ],
         }),
       });
@@ -219,6 +265,72 @@ describe('workspace-lifecycle', () => {
         .to.be.rejectedWith(/must not be the organization parent workspace/);
       expect(brand.save).to.not.have.been.called;
     });
+
+    it('releases our new workspace and adopts the winner when a concurrent activation won', async () => {
+      // reloadPointer reports a DIFFERENT id was persisted while we created ours.
+      const transport = makeTransport();
+      const brand = makeBrand();
+      const reloadPointer = sinon.stub().resolves('winner-ws');
+
+      const result = await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        1,
+        log,
+        NOOP_TIMING,
+        reloadPointer,
+      );
+
+      expect(result).to.equal('winner-ws');
+      // Our orphan's allocation is released back to the parent pool.
+      expect(transport.transferWorkspaceResources)
+        .to.have.been.calledOnceWithExactly(SUB_WS, RELEASE_ALLOCATION);
+      // The winner's pointer is NOT clobbered.
+      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.save).to.not.have.been.called;
+    });
+
+    it('still persists when reloadPointer reports no concurrent winner', async () => {
+      const transport = makeTransport();
+      const brand = makeBrand();
+      const reloadPointer = sinon.stub().resolves(null);
+
+      const result = await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        1,
+        log,
+        NOOP_TIMING,
+        reloadPointer,
+      );
+
+      expect(result).to.equal(SUB_WS);
+      expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
+      expect(brand.save).to.have.been.calledOnce;
+    });
+
+    it('tolerates a failed release when adopting a concurrent winner', async () => {
+      const transport = makeTransport({
+        transferWorkspaceResources: sinon.stub().rejects(new Error('release boom')),
+      });
+      const brand = makeBrand();
+      const reloadPointer = sinon.stub().resolves('winner-ws');
+
+      const result = await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        1,
+        log,
+        NOOP_TIMING,
+        reloadPointer,
+      );
+
+      expect(result).to.equal('winner-ws');
+      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+    });
   });
 
   describe('decommissionBrandWorkspace', () => {
@@ -287,7 +399,7 @@ describe('workspace-lifecycle', () => {
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });
 
-    it('refuses to decommission a workspace with active linked sub-workspaces', async () => {
+    it('refuses to decommission a workspace with active linked sub-workspaces (guard enabled)', async () => {
       const transport = makeTransport({
         // family includes a no-id entry and the target itself (both ignored)
         // plus one real child that must block the decommission.
@@ -297,7 +409,13 @@ describe('workspace-lifecycle', () => {
         listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
       });
 
-      const promise = decommissionBrandWorkspace(transport, SUB_WS, log, PARENT_WS);
+      const promise = decommissionBrandWorkspace(
+        transport,
+        SUB_WS,
+        log,
+        PARENT_WS,
+        { enforceLinkedGuard: true },
+      );
       await expect(promise).to.be.rejectedWith(/active linked sub-workspace/);
       try {
         await promise;
@@ -309,14 +427,36 @@ describe('workspace-lifecycle', () => {
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });
 
-    it('ignores the target own id in the family listing and proceeds', async () => {
+    it('ignores the target own id in the family listing and proceeds (guard enabled)', async () => {
       const transport = makeTransport({
         listWorkspaceFamily: sinon.stub().resolves({ items: [{ id: SUB_WS }] }),
         listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
       });
 
+      await decommissionBrandWorkspace(
+        transport,
+        SUB_WS,
+        log,
+        PARENT_WS,
+        { enforceLinkedGuard: true },
+      );
+
+      expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
+      expect(transport.transferWorkspaceResources).to.have.been.calledOnce;
+    });
+
+    it('SKIPS the linked-sub-workspace guard by default (flag off, family not queried)', async () => {
+      // Default (no options): the unverified family-direction guard is OFF, so a
+      // family listing that WOULD report a child does not block, and the family
+      // endpoint is never called. Parent-equality guard remains always-on.
+      const transport = makeTransport({
+        listWorkspaceFamily: sinon.stub().resolves({ items: [{ id: 'child-1' }] }),
+        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
+      });
+
       await decommissionBrandWorkspace(transport, SUB_WS, log, PARENT_WS);
 
+      expect(transport.listWorkspaceFamily).to.not.have.been.called;
       expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
       expect(transport.transferWorkspaceResources).to.have.been.calledOnce;
     });
