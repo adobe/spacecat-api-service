@@ -155,16 +155,17 @@ function RunAuditCommand(context) {
         await Promise.all(
           auditTypesToRun.map(async (enabledAuditType) => {
             try {
-              // `run audit` is an explicit one-off command — pass onDemand so the
-              // audit worker bypasses the per-site handler enabled-list check
-              // (entitlement is still enforced downstream).
+              // Skip audit types explicitly disabled for this site (deny-list).
+              if (configuration.isHandlerDisabledForSite(enabledAuditType, site)) {
+                log.info(`Skipping audit ${enabledAuditType} for site ${baseURL}: explicitly disabled.`);
+                return;
+              }
               await triggerAuditForSite(
                 site,
                 enabledAuditType,
                 undefined,
                 slackContext,
                 context,
-                { onDemand: true },
               );
             } catch (error) {
               log.error(`Error running audit ${enabledAuditType.id} for site ${baseURL}`, error);
@@ -203,14 +204,18 @@ function RunAuditCommand(context) {
           return;
         }
 
-        // One-off run: bypass enabled-list check downstream (entitlement already verified here).
+        // Block audit if the handler is explicitly disabled for this site (deny-list).
+        if (configuration.isHandlerDisabledForSite(auditType, site)) {
+          await say(`:x: Audit \`${auditType}\` is explicitly disabled for site \`${baseURL}\`. Re-enable it via the audit configuration before running on-demand.`);
+          return;
+        }
+
         await triggerAuditForSite(
           site,
           auditType,
           auditData,
           slackContext,
           context,
-          { onDemand: true },
         );
       }
     } catch (error) {
@@ -257,14 +262,19 @@ function RunAuditCommand(context) {
         return;
       }
 
-      // One-off run: bypass enabled-list check downstream (entitlement already verified here).
+      // Block audit if the handler is explicitly disabled for this site (deny-list).
+      if (configuration.isHandlerDisabledForSite(auditType, site)) {
+        await say(`:x: Audit \`${auditType}\` is explicitly disabled for site \`${baseURL}\`. Re-enable it via the audit configuration before running on-demand.`);
+        return;
+      }
+
       await triggerAuditForSite(
         site,
         auditType,
         auditData,
         slackContext,
         context,
-        { urls, onDemand: true },
+        { urls },
       );
       await say(`:white_check_mark: ${auditType} audit queued for ${urls.length} URLs.`);
     } catch (error) {

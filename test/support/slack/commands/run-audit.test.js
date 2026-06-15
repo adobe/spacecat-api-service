@@ -47,6 +47,7 @@ describe('RunAuditCommand', () => {
     });
     return {
       isHandlerEnabledForSite: () => true,
+      isHandlerDisabledForSite: () => false,
       getHandlers: () => handlers,
     };
   };
@@ -228,7 +229,6 @@ describe('RunAuditCommand', () => {
           'https://valid.site/page-1',
           'https://valid.site/page-2',
         ],
-        onDemand: true,
       });
       expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 2 URLs.');
     });
@@ -306,10 +306,11 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
-    it('allows prerender CSV audits even when the prerender handler is disabled (onDemand bypass)', async () => {
+    it('blocks prerender CSV audits when the prerender handler is explicitly disabled for the site', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
       dataAccessStub.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: sinon.stub().returns(false),
+        isHandlerEnabledForSite: sinon.stub().returns(true),
+        isHandlerDisabledForSite: sinon.stub().returns(true),
         getHandlers: sinon.stub().returns({ prerender: { productCodes: ['LLMO'] } }),
       });
       slackContext.files = [
@@ -325,12 +326,8 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['site.com', 'prerender'], slackContext);
 
-      expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.deep.include({
-        onDemand: true,
-        urls: ['https://valid.site/page-1'],
-      });
-      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 1 URLs.');
+      expect(sqsStub.sendMessage.called).to.be.false;
+      expect(slackContext.say.secondCall.args[0]).to.equal(':x: Audit `prerender` is explicitly disabled for site `https://site.com`. Re-enable it via the audit configuration before running on-demand.');
     });
 
     it('blocks prerender CSV audits when no product codes are configured', async () => {
@@ -746,6 +743,7 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
@@ -774,6 +772,7 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
@@ -826,6 +825,7 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
@@ -858,6 +858,7 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
@@ -889,6 +890,7 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
@@ -911,7 +913,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say).to.have.been.calledWith(':x: Will not audit site \'https://validsite.com\' because site is not entitled for this audit.');
     });
 
-    it('passes onDemand: true in the SQS auditContext for single-audit runs', async () => {
+    it('does not pass onDemand in the SQS auditContext for single-audit runs', async () => {
       const site = { getId: () => '123' };
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
@@ -920,30 +922,49 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['validsite.com'], slackContext);
 
       expect(sqsStub.sendMessage).to.have.been.called;
-      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.deep.include({
-        onDemand: true,
-      });
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.not.have.property('onDemand');
     });
 
-    it('passes onDemand: true in the SQS auditContext for `audit:all` runs', async () => {
+    it('blocks a single audit when the handler is explicitly disabled for the site', async () => {
       const site = { getId: () => '123' };
       dataAccessStub.Site.findByBaseURL.resolves(site);
-      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': { productCodes: ['LLMO'] } }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(':x: Audit `lhs-mobile` is explicitly disabled for site `https://validsite.com`. Re-enable it via the audit configuration before running on-demand.');
+    });
+
+    it('audit:all skips audit types explicitly disabled for the site but queues the rest', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: (auditType) => auditType === 'cwv',
+        getHandlers: () => ({}),
+      });
 
       const command = RunAuditCommand(context);
       await command.handleExecution(['validsite.com', 'all'], slackContext);
 
       expect(sqsStub.sendMessage).to.have.been.called;
-      sqsStub.sendMessage.getCalls().forEach((call) => {
-        expect(call.args[1].auditContext).to.deep.include({ onDemand: true });
-      });
+      const queuedTypes = sqsStub.sendMessage.getCalls().map((call) => call.args[1].type);
+      expect(queuedTypes).to.not.include('cwv');
+      expect(queuedTypes.length).to.be.greaterThan(0);
     });
 
-    it('triggers audit even when site is not in the handler enabled-list (relying on onDemand bypass downstream)', async () => {
+    it('triggers a single audit even when the site is not in the handler enabled-list (no enabled-list gate)', async () => {
       const site = { getId: () => '123' };
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => false,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': { productCodes: ['LLMO'] } }),
       });
 
@@ -951,9 +972,7 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['validsite.com'], slackContext);
 
       expect(sqsStub.sendMessage).to.have.been.called;
-      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.deep.include({
-        onDemand: true,
-      });
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.not.have.property('onDemand');
     });
 
     it('should handle checkValidEntitlement errors gracefully', async () => {
@@ -965,6 +984,7 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
