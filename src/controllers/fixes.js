@@ -160,6 +160,7 @@ export class FixesController {
         return fixEntity;
       });
 
+      await this.#enrichFixesWithUserNames(fixEntities);
       fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
       return ok(fixes);
     }

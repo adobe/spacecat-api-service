@@ -538,6 +538,43 @@ describe('Fixes Controller', () => {
         expect(result[0].suggestions[1].id).to.equal(suggestion2.getId());
       });
 
+      it('hydrates executedByUser via IMS admin profile in the date-filtered branch', async () => {
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({
+            first_name: 'John',
+            last_name: 'Doe',
+            email: 'john.doe@example.com',
+          }),
+        };
+        fixesController = new FixesController(
+          { dataAccess, log, imsClient: mockImsClient },
+          accessControlUtil,
+        );
+
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          executedBy: testExternalUserId,
+          changeDetails: { arbitrary: 'value 1' },
+          executedAt: executedAtOnDate,
+        });
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result[0]).to.have.property('executedByUser');
+        expect(result[0].executedByUser).to.deep.equal({
+          firstName: 'John',
+          lastName: 'Doe',
+          email: 'john.doe@example.com',
+        });
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(testExternalUserId);
+      });
+
       it('filters out fixes whose executedAt ?? createdAt does not match the date', async () => {
         const fixOnDate = await fixEntityCollection.create({
           type: Suggestion.TYPES.CONTENT_UPDATE,
