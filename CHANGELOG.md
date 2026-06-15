@@ -1,3 +1,38 @@
+# [1.574.0](https://github.com/adobe/spacecat-api-service/compare/v1.573.0...v1.574.0) (2026-06-13)
+
+
+### Features
+
+* **slack:** add mode:ai-only-missing for prerender suggestions without AI summary ([#2604](https://github.com/adobe/spacecat-api-service/issues/2604)) ([055039f](https://github.com/adobe/spacecat-api-service/commit/055039f797b44117d19cbca375eaa4184d6405c7))
+
+# [1.573.0](https://github.com/adobe/spacecat-api-service/compare/v1.572.0...v1.573.0) (2026-06-12)
+
+
+### Features
+
+* enable money-pages audit in paid onboarding profile ([#2601](https://github.com/adobe/spacecat-api-service/issues/2601)) ([b9cc4dd](https://github.com/adobe/spacecat-api-service/commit/b9cc4dd152a08f94bd9541e0369279a1ad8e1ae9))
+
+# [1.572.0](https://github.com/adobe/spacecat-api-service/compare/v1.571.1...v1.572.0) (2026-06-12)
+
+
+### Features
+
+* ai visibility brand data ([#2577](https://github.com/adobe/spacecat-api-service/issues/2577)) ([1099575](https://github.com/adobe/spacecat-api-service/commit/109957510b357137be74555d6b85aba196f97559))
+
+## [1.571.1](https://github.com/adobe/spacecat-api-service/compare/v1.571.0...v1.571.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* edge-deploy API increase createschedule api timeout ([#2599](https://github.com/adobe/spacecat-api-service/issues/2599)) ([7edd7b6](https://github.com/adobe/spacecat-api-service/commit/7edd7b6aa205c42ece3909000fd66f053632c72c))
+
+# [1.571.0](https://github.com/adobe/spacecat-api-service/compare/v1.570.0...v1.571.0) (2026-06-12)
+
+
+### Features
+
+* **slack:** add prerender modes (full/ai-only) and CSV batching to run-audit command ([#2598](https://github.com/adobe/spacecat-api-service/issues/2598)) ([a057e87](https://github.com/adobe/spacecat-api-service/commit/a057e87d6db58e00c91a3fc70a21b36d506234bf))
+
 # [1.570.0](https://github.com/adobe/spacecat-api-service/compare/v1.569.0...v1.570.0) (2026-06-12)
 
 

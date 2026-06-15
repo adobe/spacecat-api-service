@@ -694,6 +694,10 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-brands'
   /llmo/ai-visibility/topics/research/source-domains:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
+  /llmo/ai-visibility/v1/brand/stats-by-llm:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-llm'
+  /llmo/ai-visibility/v1/brand/stats-by-country:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-country'
   /llmo/ai-visibility/v1/topic/brand-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
   /llmo/ai-visibility/v1/topic/brand-topics-export:
@@ -716,6 +720,8 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
+  /llmo/ai-visibility/v1/meta/meta:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-meta-meta'
 
   /state/access-mappings:
     $ref: './state-access-mappings-api.yaml#/state-access-mappings'

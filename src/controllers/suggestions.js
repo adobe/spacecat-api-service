@@ -1998,6 +1998,7 @@ function SuggestionsController(ctx, sqs, env) {
             triggerImmediately: true,
             enableBrandPresence: true,
             metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
+            timeout: 12_000,
           });
           preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;
           if (!preScheduleId) {
