@@ -94,3 +94,82 @@ export async function resolveWorkspaceId(ctx, spaceCatId) {
   cache.set(spaceCatId, { value: workspaceId, expiresAt: now + ttl });
   return workspaceId;
 }
+
+/**
+ * Brand-level cache, mirroring the org cache above. Keyed by brandId, it holds
+ * the brand's OWN child-workspace id (or null when the brand is legacy/flat).
+ * The legacy parent is NOT cached here — it is resolved fresh via
+ * resolveWorkspaceId (itself cached), so a parent change can never go stale
+ * behind a brand entry.
+ *
+ * Exported for unit tests; production code should not call clearBrandWorkspaceCache.
+ */
+const brandCache = new Map();
+
+export function clearBrandWorkspaceCache() {
+  brandCache.clear();
+}
+
+function evictBrandIfNeeded() {
+  while (brandCache.size >= MAX_ENTRIES) {
+    const oldest = brandCache.keys().next().value;
+    /* c8 ignore start -- defensive: size>=MAX_ENTRIES implies a key exists */
+    if (oldest === undefined) {
+      break;
+    }
+    /* c8 ignore stop */
+    brandCache.delete(oldest);
+  }
+}
+
+async function resolveBrandChildWorkspaceId(ctx, brandId) {
+  if (!hasText(brandId)) {
+    return null;
+  }
+  const now = Date.now();
+  const cached = brandCache.get(brandId);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  const Brand = ctx?.dataAccess?.Brand;
+  if (!Brand || typeof Brand.findById !== 'function') {
+    throw new Error('Brand data-access not available on context');
+  }
+
+  const brand = await Brand.findById(brandId);
+  const childWorkspaceId = (brand && typeof brand.getSemrushWorkspaceId === 'function')
+    ? (brand.getSemrushWorkspaceId() ?? null)
+    : null;
+
+  brandCache.delete(brandId);
+  evictBrandIfNeeded();
+  const ttl = childWorkspaceId === null ? NEG_TTL_MS : CACHE_TTL_MS;
+  brandCache.set(brandId, { value: childWorkspaceId, expiresAt: now + ttl });
+  return childWorkspaceId;
+}
+
+/**
+ * Dual-mode resolution predicate (serenity design §3). Computes, in one place,
+ * which workspace a brand's serenity operations run against and which mode the
+ * handlers branch on:
+ *
+ *   { mode: 'child',  workspaceId: <brand child ws> }  // brands.semrush_workspace_id set
+ *   { mode: 'legacy', workspaceId: <org parent ws> }   // column absent → flat mode
+ *
+ * In legacy mode `workspaceId` may be null (org has no parent workspace yet);
+ * the controller maps that to 404, exactly as today.
+ *
+ * @param {object} ctx - Request context (uses ctx.dataAccess.Brand + .Organization).
+ * @param {string} spaceCatId - SpaceCat organization UUID (for the legacy parent).
+ * @param {string} brandId - Brand UUID.
+ * @returns {Promise<{mode: 'child'|'legacy', workspaceId: string|null}>}
+ */
+export async function resolveBrandWorkspace(ctx, spaceCatId, brandId) {
+  const childWorkspaceId = await resolveBrandChildWorkspaceId(ctx, brandId);
+  if (hasText(childWorkspaceId)) {
+    return { mode: 'child', workspaceId: childWorkspaceId };
+  }
+  const parentWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
+  return { mode: 'legacy', workspaceId: parentWorkspaceId };
+}
