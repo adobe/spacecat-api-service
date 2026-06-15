@@ -48,6 +48,7 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
+import { detectedCdnPatchGuard } from '../support/detected-cdn-validation.js';
 import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 import {
@@ -893,6 +894,13 @@ function SitesController(ctx, log, env) {
           ...existingConfig.llmo,
           ...requestBody.config.llmo,
         };
+      }
+      // Reject malformed `llmo.detectedCdn` (array, stringified array, display name) before
+      // persisting. `Config()` would otherwise swallow the schema error and store the raw value,
+      // which then re-fails validation on every read.
+      const detectedCdnResult = detectedCdnPatchGuard(requestBody.config, badRequest);
+      if (detectedCdnResult?.error) {
+        return detectedCdnResult.error;
       }
       const auditTargetURLsResult = auditTargetURLsPatchGuard(
         merged,
