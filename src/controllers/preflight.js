@@ -48,7 +48,7 @@ function PreflightController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess, sqs } = ctx;
+  const { dataAccess, sqs, imsClient } = ctx;
 
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
@@ -308,11 +308,21 @@ function PreflightController(ctx, log, env) {
    * Calls Mysticat's POST /v1/preflight/analyze and returns once the request is accepted.
    * Mysticat processes the analysis asynchronously and writes results directly to the AsyncJob
    * identified by scanId.
+   *
+   * Two distinct auth headers are sent (SITES-43236 / mystique-deploy PR #463):
+   *  - `Authorization`: the customer site's page-auth token, forwarded by
+   *    Mysticat to DRS for authenticated page-HTML fetch.
+   *  - `x-ims-authorization`: spacecat-api-service's own IMS service token,
+   *    validated at the Ethos CGW-Flex edge before reaching the Mysticat pod.
+   *    Kept on a dedicated header — not `Authorization` — so the IMS edge gate
+   *    does not collide with the customer's page-auth token above.
+   *
    * @param {string} mysticatBaseUrl - The base URL of the Mystique service (MYSTIQUE_API_BASE_URL).
    * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
    * @param {string} siteId - The site ID.
    * @param {string} url - The page URL to analyze.
-   * @param {string} [authorizationHeader] - Optional auth header forwarded to Mysticat.
+   * @param {string} [authorizationHeader] - Optional customer-site page-auth header.
+   * @param {string} [imsServiceToken] - Optional spacecat IMS v3 service token (raw access_token).
    */
   async function callMysticatAnalyze(
     mysticatBaseUrl,
@@ -320,6 +330,7 @@ function PreflightController(ctx, log, env) {
     siteId,
     url,
     authorizationHeader,
+    imsServiceToken,
   ) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -331,6 +342,7 @@ function PreflightController(ctx, log, env) {
         headers: {
           'Content-Type': 'application/json',
           ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
+          ...(hasText(imsServiceToken) && { 'x-ims-authorization': `Bearer ${imsServiceToken}` }),
         },
         body: JSON.stringify({
           site_id: siteId,
@@ -471,6 +483,24 @@ function PreflightController(ctx, log, env) {
       }
     }
 
+    // Mint a spacecat-api-service IMS v3 service token for the Mystique CGW
+    // edge gate (SITES-43236 / mystique-deploy PR #463). Sent on the dedicated
+    // x-ims-authorization header — separate from `Authorization` above, which
+    // carries the customer site's page-auth token for DRS upstream. The
+    // ImsClient caches the token in-memory on the wrapper instance, so warm
+    // Lambda invocations short-circuit the IMS round-trip.
+    //
+    // Mint before the AsyncJob / Preflight DB writes so a transient IMS
+    // failure doesn't leave orphaned IN_PROGRESS records to clean up.
+    let imsServiceToken;
+    try {
+      const tokenPayload = await imsClient.getServiceAccessTokenV3();
+      imsServiceToken = tokenPayload.access_token;
+    } catch (e) {
+      log.error(`Failed to acquire IMS service token for preflight analyze: ${e.message}`);
+      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to acquire IMS service token', 500);
+    }
+
     // Build createdBy from the authenticated IMS profile
     const profile = context.attributes?.authInfo?.getProfile?.();
     const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ')
@@ -518,6 +548,7 @@ function PreflightController(ctx, log, env) {
         siteId,
         url,
         authorizationHeader,
+        imsServiceToken,
       );
     } catch (mysticatError) {
       log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);
