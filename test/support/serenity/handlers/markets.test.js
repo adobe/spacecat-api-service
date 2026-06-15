@@ -1117,6 +1117,8 @@ describe('handlers/markets.js — handleUpdateModels', () => {
       listAiModels: sinon.stub().resolves({ items: currentItems }),
       addAiModel: sinon.stub().resolves(addResult),
       deleteAiModelsByIds: sinon.stub().resolves(deleteResult),
+      // The model sync publishes after a real change so the new set goes live.
+      publishProject: sinon.stub().resolves(),
     };
   }
 
@@ -1287,8 +1289,36 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.addAiModel).not.to.have.been.called;
     // Short-circuit: only one upstream list call (the initial fetch; no second refresh)
     expect(transport.listAiModels).to.have.callCount(1);
+    // No change → no publish (publishing is only needed when the set actually moved).
+    expect(transport.publishProject).not.to.have.been.called;
     expect(result.items).to.have.length(1);
     expect(result.items[0].id).to.equal('cat-gpt');
+  });
+
+  it('publishes the project after a model-set change so it goes live', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+
+    expect(transport.publishProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-1');
   });
 
   it('propagates transport errors from deleteAiModelsByIds', async () => {

@@ -157,6 +157,10 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-tags'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:
     $ref: './serenity-api.yaml#/v2-serenity-models'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/activate:
+    $ref: './serenity-api.yaml#/v2-serenity-activate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/deactivate:
+    $ref: './serenity-api.yaml#/v2-serenity-deactivate'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:

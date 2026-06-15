@@ -936,6 +936,14 @@ export async function syncModelsForProject(
     }
   }
 
+  // Publish so the model-set change goes live. Model assignments are staged on
+  // the draft layer (like prompts); without a publish the new set never reaches
+  // the live project. This is the one deliberate exception to the "legacy
+  // handlers frozen" rule — the legacy PUT /models never published, a latent
+  // bug — and living in the shared core it fixes legacy AND child in one place.
+  // Only reached when something actually changed (the no-op path returned above).
+  await transport.publishProject(semrushWorkspaceId, projectId);
+
   // Return the refreshed model list
   const updated = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
   const items = updated.map(assignmentToItem).filter(Boolean);

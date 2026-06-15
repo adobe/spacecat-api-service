@@ -304,6 +304,7 @@ describe('markets-child handlers', () => {
         log,
       );
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'p-mod', 'm1');
+      expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-mod');
       expect(result.items).to.deep.equal([{
         id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: null,
       }]);
