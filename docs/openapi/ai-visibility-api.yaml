@@ -754,6 +754,26 @@ ai-visibility-competitors-gap-topics:
       - *engineParam
       - *limitParam
       - *offsetParam
+      - name: searchQuery
+        in: query
+        required: false
+        description: |
+          Server-side search. Pushed to Semrush `GapTopicsRequest.dimension_filter_ql`
+          (and `GapTopicsTotals`) as `topic CONTAINS "<searchQuery>"`, so the returned
+          `total` reflects the filtered set. Quotes and backslashes are escaped.
+        schema:
+          type: string
+          example: running shoes
+      - name: sortBy
+        in: query
+        required: false
+        description: |
+          `TOPICS_REQUEST_ORDER_BY` for Semrush `order.by`. Unknown or omitted values fall
+          back to the default. Default: `MENTIONED_COMPETITORS`.
+        schema:
+          type: string
+          enum: [NAME, VISIBILITY, DIFFICULTY, MENTIONS, VOLUME, MENTIONS_COUNT_BY_BRAND, MENTIONED_COMPETITORS, TOTAL_COMPETITOR_MENTIONS]
+      - *sortDirectionParam
       - name: gapKinds
         in: query
         required: false
@@ -788,6 +808,26 @@ ai-visibility-competitors-gap-source-domains:
       - *engineParam
       - *limitParam
       - *offsetParam
+      - name: searchQuery
+        in: query
+        required: false
+        description: |
+          Server-side search. Pushed to Semrush `GapSourceDomainsRequest.dimension_filter_ql`
+          (and `GapSourceDomainsTotals`) as `domain CONTAINS "<searchQuery>"`, so the returned
+          `total` reflects the filtered set. Quotes and backslashes are escaped.
+        schema:
+          type: string
+          example: cdn.example.com
+      - name: sortBy
+        in: query
+        required: false
+        description: |
+          `DOMAINS_REQUEST_ORDER_BY` for Semrush `order.by`. Unknown or omitted values fall
+          back to the default. Default: `ORGANIC_TRAFFIC`.
+        schema:
+          type: string
+          enum: [DOMAIN, MENTIONS, SOURCES_COUNT, PROMPTS_COUNT, ORGANIC_TRAFFIC, MENTIONS_COUNT_BY_BRAND, MENTIONED_COMPETITORS, TOTAL_COMPETITOR_MENTIONS]
+      - *sortDirectionParam
       - name: gapKinds
         in: query
         required: false
@@ -824,6 +864,26 @@ ai-visibility-competitors-gap-prompts:
       - *engineParam
       - *limitParam
       - *offsetParam
+      - name: searchQuery
+        in: query
+        required: false
+        description: |
+          Server-side search. Pushed to Semrush `GapPromptsRequest.dimension_filter_ql`
+          (and `GapPromptsTotals`) as `prompt CONTAINS "<searchQuery>"`, so the returned
+          `total` reflects the filtered set. Quotes and backslashes are escaped.
+        schema:
+          type: string
+          example: best running shoes
+      - name: sortBy
+        in: query
+        required: false
+        description: |
+          `GAP_PROMPTS_REQUEST_ORDER_BY` for Semrush `order.by`. Unknown or omitted values fall
+          back to the default. Default: `MENTIONED_BRANDS_COUNT`.
+        schema:
+          type: string
+          enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT, TOPIC_VOLUME]
+      - *sortDirectionParam
       - name: gapKinds
         in: query
         required: false
