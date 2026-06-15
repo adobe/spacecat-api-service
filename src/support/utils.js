@@ -1973,6 +1973,32 @@ export const CUSTOMER_VISIBLE_TIERS = [
   EntitlementModel.TIERS.PLG,
 ];
 
+/**
+ * Returns the set of product codes the organization currently has a valid entitlement for.
+ * Iterates over the known PRODUCT_CODES enum and probes TierClient per code; codes whose
+ * entitlement is absent are filtered out.
+ *
+ * Used by the cross-product sites-listing branch (SITES-46454, Phase 1 of multi-product
+ * login support — see
+ * mysticat-architecture/platform/decisions/cross-product-sites-listing-via-client-id-scope.md).
+ * No other caller should need this today.
+ *
+ * @param {object} context - Request context (carries dataAccess + log).
+ * @param {object} organization - The Organization model.
+ * @returns {Promise<string[]>} Product codes (e.g. ['ASO','LLMO']); empty when the org has
+ *   no entitlements.
+ */
+export const getEntitledProductCodes = async (context, organization) => {
+  const productCodes = Object.values(EntitlementModel.PRODUCT_CODES);
+  const results = await Promise.all(productCodes.map(async (code) => {
+    const { entitlement } = await TierClient
+      .createForOrg(context, organization, code)
+      .checkValidEntitlement();
+    return isNonEmptyObject(entitlement) ? code : null;
+  }));
+  return results.filter(Boolean);
+};
+
 export const filterSitesForProductCode = async (
   context,
   organization,

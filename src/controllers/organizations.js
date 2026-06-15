@@ -30,11 +30,19 @@ import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
-import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
+import {
+  filterSitesForProductCode,
+  getEntitledProductCodes,
+  CUSTOMER_VISIBLE_TIERS,
+} from '../support/utils.js';
 import {
   ensureOrgEntitlement,
   resolveProductCode,
 } from '../support/tier-provisioning.js';
+
+// Cross-product sites-listing scope (SITES-46454, Phase 1 of multi-product login support).
+// See mysticat-architecture/platform/decisions/cross-product-sites-listing-via-client-id-scope.md
+const SITES_LIST_CROSS_PRODUCT_SCOPE = 'sites:list:cross_product';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -319,15 +327,47 @@ function OrganizationsController(ctx, env) {
       }
     }
 
-    // Own sites go through the enrollment filter (delegate org's entitlement).
-    // Delegated sites have already been validated against the target org's entitlement above.
-    const filteredSites = await filterSitesForProductCode(
-      context,
-      organization,
-      ownSites,
-      productCode,
-      accessControlUtil,
-    );
+    // Cross-product branch (SITES-46454). When the session JWT carries
+    // sites:list:cross_product (minted by spacecat-auth-service for allow-listed IMS
+    // client_ids), widen the per-product filter to a union across every product the
+    // org is entitled to — preserving today's entitlement, tier-visibility, and
+    // enrollment gates and dropping only the single-product restriction. Delegated
+    // sites are NOT touched; their flow above stays product-pinned to x-product.
+    const authInfo = context?.attributes?.authInfo;
+    const isCrossProduct = authInfo?.hasScope?.(SITES_LIST_CROSS_PRODUCT_SCOPE) === true;
+
+    let filteredSites;
+    if (isCrossProduct) {
+      ctx.log.info(`[sites] cross-product listing for org=${organizationId} user=${authInfo?.getProfile?.()?.userId || 'n/a'}`);
+      const entitledProductCodes = await getEntitledProductCodes(context, organization);
+      const byId = new Map();
+      // Sequential (not parallel) so log lines and DB call ordering stay predictable;
+      // the entitled-product set is small (one entry per SpaceCat product, currently 3).
+      for (const code of entitledProductCodes) {
+        // eslint-disable-next-line no-await-in-loop
+        const perProduct = await filterSitesForProductCode(
+          context,
+          organization,
+          ownSites,
+          code,
+          accessControlUtil,
+        );
+        for (const s of perProduct) {
+          byId.set(s.getId(), s);
+        }
+      }
+      filteredSites = [...byId.values()];
+    } else {
+      // Own sites go through the enrollment filter (delegate org's entitlement).
+      // Delegated sites have already been validated against the target org's entitlement above.
+      filteredSites = await filterSitesForProductCode(
+        context,
+        organization,
+        ownSites,
+        productCode,
+        accessControlUtil,
+      );
+    }
 
     return ok([...filteredSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
   };
