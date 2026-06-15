@@ -196,9 +196,9 @@ function SerenityController(context, log, env) {
    *
    * Returns either `{ error: Response }` or
    * `{ brandUuid, mode, workspaceId, parentWorkspaceId }`:
-   *   - `mode` is 'child' when brands.semrush_workspace_id is set, else 'legacy'
+   *   - `mode` is 'child' when brands.semrush_workspace_id is set, else 'flat'
    *   - `workspaceId` is the workspace handlers call upstream (child ws in child
-   *     mode, org parent in legacy mode)
+   *     mode, org parent in flat mode)
    *   - `parentWorkspaceId` is the org parent (needed for child create/activate)
    */
   async function authorize(ctx) {
@@ -398,7 +398,7 @@ function SerenityController(context, log, env) {
 
   const getMarket = async (ctx) => {
     try {
-      // IMS bearer is required on the whole surface. Legacy mode is a pure DB
+      // IMS bearer is required on the whole surface. Flat mode is a pure DB
       // read (no upstream), but child mode reads the live listing, so the token
       // is captured here and a transport built only when needed.
       const imsToken = requireImsBearer(ctx);

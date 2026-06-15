@@ -31,8 +31,8 @@ import { resolveChildProject, buildChildSliceProjectMap, sliceKey } from '../chi
 
 /**
  * Child-mode prompt handlers (serenity dual-mode, child path). Behaviourally
- * identical to the legacy prompt handlers EXCEPT for how a `(geoTargetId,
- * languageCode)` slice resolves to an upstream project: legacy reads the
+ * identical to the flat-mode prompt handlers EXCEPT for how a `(geoTargetId,
+ * languageCode)` slice resolves to an upstream project: flat mode reads the
  * BrandSemrushProject mapping table, child resolves it from the brand's own
  * child workspace via the live `listProjects` listing. Everything downstream —
  * the Semrush prompt calls, the publish-once contract, the per-project tag
@@ -44,7 +44,7 @@ import { resolveChildProject, buildChildSliceProjectMap, sliceKey } from '../chi
 /**
  * GET /serenity/prompts (child) — list one slice's prompts. The slice resolves
  * to a project via the live listing; a missing project is a hard 404
- * marketNotFound (same contract as the legacy single-slice list — "no such
+ * marketNotFound (same contract as the flat-mode single-slice list — "no such
  * slice" must not masquerade as "slice exists but empty").
  */
 export async function handleListPromptsChild(transport, workspaceId, query, log) {

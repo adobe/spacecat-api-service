@@ -123,9 +123,9 @@ describe('SerenityController', () => {
   beforeEach(async () => {
     Object.values(handlers).forEach((s) => s.reset());
     resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE);
-    // Default: legacy mode — existing assertions (handlers called with
+    // Default: flat mode — existing assertions (handlers called with
     // WORKSPACE) hold unchanged. Child-mode tests override this stub.
-    resolveBrandWorkspaceStub = sinon.stub().resolves({ mode: 'legacy', workspaceId: WORKSPACE });
+    resolveBrandWorkspaceStub = sinon.stub().resolves({ mode: 'flat', workspaceId: WORKSPACE });
     decommissionStub = sinon.stub().resolves();
     createTransportStub = sinon.stub().returns({ name: 'transport' });
     resolveBrandUuidStub = sinon.stub().resolves(BRAND);

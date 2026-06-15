@@ -18,7 +18,7 @@ import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 
 // Exported (additively) so the child-mode handlers (prompts-child.js) share
-// the exact same limits — the only thing that differs between legacy and child
+// the exact same limits — the only thing that differs between flat and child
 // is slice→project resolution (DB row vs live listing), never the contract.
 export const DEFAULT_PAGE_LIMIT = 50;
 export const MAX_PAGE_LIMIT = 1000;

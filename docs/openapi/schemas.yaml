@@ -10498,8 +10498,8 @@ SerenityMarketStatus:
     Publish state of the market's upstream project, surfaced only in child
     (sub-workspace) mode where markets are read live from the brand's own
     workspace. Maps 1:1 from the upstream `publish_status`
-    (`initial_publish_failed` → `publish_failed`). Absent in legacy (flat)
-    mode, where market existence is a pure DB-row contract.
+    (`initial_publish_failed` → `publish_failed`). Absent in flat mode,
+    where market existence is a pure DB-row contract.
   enum: [draft, publishing, publish_failed, live, live_with_unpublished_updates]
 
 SerenityMarket:
@@ -10526,10 +10526,10 @@ SerenityMarket:
       oneOf:
         - $ref: '#/DateTime'
         - type: 'null'
-    # Additive, child (sub-workspace) mode only. In legacy/flat mode the list
+    # Additive, child (sub-workspace) mode only. In flat mode the list
     # is a pure DB read and omits both. status reflects the live publish state;
     # semrushProjectId is the upstream project id for the slice (same value the
-    # market-detail endpoint exposes). Optional so legacy responses still validate.
+    # market-detail endpoint exposes). Optional so flat-mode responses still validate.
     status:
       $ref: '#/SerenityMarketStatus'
     semrushProjectId:
@@ -10566,7 +10566,7 @@ SerenityMarketDetail:
             AIO readiness for this slice's project (child mode only). `true`/`false`
             from the upstream init-status probe, or `null` when the probe is
             unavailable or the read failed (best-effort enrichment — never fails
-            the detail read). Absent in legacy mode.
+            the detail read). Absent in flat mode.
           oneOf:
             - type: boolean
             - type: 'null'

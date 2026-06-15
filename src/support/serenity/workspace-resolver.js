@@ -97,8 +97,8 @@ export async function resolveWorkspaceId(ctx, spaceCatId) {
 
 /**
  * Brand-level cache, mirroring the org cache above. Keyed by brandId, it holds
- * the brand's OWN child-workspace id (or null when the brand is legacy/flat).
- * The legacy parent is NOT cached here — it is resolved fresh via
+ * the brand's OWN child-workspace id (or null when no child workspace is bound).
+ * The flat-mode parent is NOT cached here — it is resolved fresh via
  * resolveWorkspaceId (itself cached), so a parent change can never go stale
  * behind a brand entry.
  *
@@ -154,16 +154,16 @@ async function resolveBrandChildWorkspaceId(ctx, brandId) {
  * which workspace a brand's serenity operations run against and which mode the
  * handlers branch on:
  *
- *   { mode: 'child',  workspaceId: <brand child ws> }  // brands.semrush_workspace_id set
- *   { mode: 'legacy', workspaceId: <org parent ws> }   // column absent → flat mode
+ *   { mode: 'child', workspaceId: <brand child ws> }  // brands.semrush_workspace_id set
+ *   { mode: 'flat',  workspaceId: <org parent ws> }   // no child workspace bound
  *
- * In legacy mode `workspaceId` may be null (org has no parent workspace yet);
+ * In flat mode `workspaceId` may be null (org has no parent workspace yet);
  * the controller maps that to 404, exactly as today.
  *
  * @param {object} ctx - Request context (uses ctx.dataAccess.Brand + .Organization).
- * @param {string} spaceCatId - SpaceCat organization UUID (for the legacy parent).
+ * @param {string} spaceCatId - SpaceCat organization UUID (for the flat-mode parent).
  * @param {string} brandId - Brand UUID.
- * @returns {Promise<{mode: 'child'|'legacy', workspaceId: string|null}>}
+ * @returns {Promise<{mode: 'child'|'flat', workspaceId: string|null}>}
  */
 export async function resolveBrandWorkspace(ctx, spaceCatId, brandId) {
   const childWorkspaceId = await resolveBrandChildWorkspaceId(ctx, brandId);
@@ -171,5 +171,5 @@ export async function resolveBrandWorkspace(ctx, spaceCatId, brandId) {
     return { mode: 'child', workspaceId: childWorkspaceId };
   }
   const parentWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
-  return { mode: 'legacy', workspaceId: parentWorkspaceId };
+  return { mode: 'flat', workspaceId: parentWorkspaceId };
 }

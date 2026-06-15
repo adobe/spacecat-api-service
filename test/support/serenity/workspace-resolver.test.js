@@ -228,34 +228,34 @@ describe('resolveBrandWorkspace', () => {
     expect(orgFindById).to.not.have.been.called;
   });
 
-  it('returns legacy mode with the org parent workspace when the column is absent', async () => {
+  it('returns flat mode with the org parent workspace when the column is absent', async () => {
     const brandFindById = sandbox.stub().resolves(makeBrand(null));
     const orgFindById = sandbox.stub().resolves(makeOrg('parent-ws'));
     const ctx = makeDualCtx({ brandFindById, orgFindById });
 
     const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
 
-    expect(res).to.deep.equal({ mode: 'legacy', workspaceId: 'parent-ws' });
+    expect(res).to.deep.equal({ mode: 'flat', workspaceId: 'parent-ws' });
   });
 
-  it('returns legacy mode with a null workspace when the org has no parent', async () => {
+  it('returns flat mode with a null workspace when the org has no parent', async () => {
     const brandFindById = sandbox.stub().resolves(makeBrand(undefined));
     const orgFindById = sandbox.stub().resolves(makeOrg(null));
     const ctx = makeDualCtx({ brandFindById, orgFindById });
 
     const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
 
-    expect(res).to.deep.equal({ mode: 'legacy', workspaceId: null });
+    expect(res).to.deep.equal({ mode: 'flat', workspaceId: null });
   });
 
-  it('treats a missing brand row as legacy mode', async () => {
+  it('treats a missing brand row as flat mode', async () => {
     const brandFindById = sandbox.stub().resolves(null);
     const orgFindById = sandbox.stub().resolves(makeOrg('parent-ws'));
     const ctx = makeDualCtx({ brandFindById, orgFindById });
 
     const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
 
-    expect(res).to.deep.equal({ mode: 'legacy', workspaceId: 'parent-ws' });
+    expect(res).to.deep.equal({ mode: 'flat', workspaceId: 'parent-ws' });
   });
 
   it('caches the child-workspace lookup over the positive TTL window', async () => {
@@ -282,7 +282,7 @@ describe('resolveBrandWorkspace', () => {
     expect(brandFindById).to.have.been.calledTwice;
   });
 
-  it('uses the shorter negative TTL for a legacy (no child workspace) brand', async () => {
+  it('uses the shorter negative TTL for a flat (no child workspace) brand', async () => {
     clock = sinon.useFakeTimers({ now: 0, toFake: ['Date'] });
     const brandFindById = sandbox.stub().resolves(makeBrand(null));
     const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub().resolves(makeOrg('p')) });
@@ -294,13 +294,13 @@ describe('resolveBrandWorkspace', () => {
     expect(brandFindById).to.have.been.calledTwice;
   });
 
-  it('returns legacy mode when brandId is blank (no Brand lookup)', async () => {
+  it('returns flat mode when brandId is blank (no Brand lookup)', async () => {
     const brandFindById = sandbox.stub();
     const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub().resolves(makeOrg('p')) });
 
     const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, '');
 
-    expect(res).to.deep.equal({ mode: 'legacy', workspaceId: 'p' });
+    expect(res).to.deep.equal({ mode: 'flat', workspaceId: 'p' });
     expect(brandFindById).to.not.have.been.called;
   });
 

@@ -34,7 +34,7 @@ import { ensureChildWorkspace } from '../workspace-lifecycle.js';
  * Child-mode market handlers (serenity design §3/§5). The brand has its own
  * Semrush child workspace; markets are enumerated live (no BrandSemrushProject
  * mapping). The controller dispatches here when resolveBrandWorkspace returns
- * mode === 'child'; the legacy handlers stay frozen and untouched.
+ * mode === 'child'; the flat-mode handlers stay frozen and untouched.
  */
 
 // "live" publish states — a slice that already has a published project (a real
@@ -218,7 +218,7 @@ export async function handleDeleteMarketChild(
  * GET /serenity/tags (child) — unique tag names across the slice's prompts.
  * Resolves the slice's project from the live listing, then reuses the shared
  * project-keyed tag aggregation (cache + pagination + truncation guard). A
- * missing slice returns an empty set, matching the legacy tags contract.
+ * missing slice returns an empty set, matching the flat-mode tags contract.
  */
 export async function handleListTagsChild(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
@@ -246,7 +246,7 @@ export async function handleListTagsChild(transport, workspaceId, query, log) {
  * GET /serenity/models (child). No params → the (workspace-independent) global
  * catalog. With (geoTargetId, languageCode) → models on the slice's project,
  * resolved from the live listing. Partial params → 400. A missing slice returns
- * an empty set, matching the legacy models contract.
+ * an empty set, matching the flat-mode models contract.
  */
 export async function handleListModelsChild(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
@@ -271,7 +271,7 @@ export async function handleListModelsChild(transport, workspaceId, query, log) 
 /**
  * PUT /serenity/models (child) — replace the AI-model set for a slice. Resolves
  * the slice's project from the live listing (404 if absent), then reuses the
- * shared diff-based sync. Validation mirrors the legacy handler exactly.
+ * shared diff-based sync. Validation mirrors the flat-mode handler exactly.
  */
 export async function handleUpdateModelsChild(transport, workspaceId, body, log) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
