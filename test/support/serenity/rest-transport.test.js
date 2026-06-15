@@ -529,4 +529,155 @@ describe('Semrush REST transport', () => {
       expect(result.items[0].id).to.equal('cat-gpt');
     });
   });
+
+  // ── Sub-workspace lifecycle (serenity dual-mode, child path) ──────────────
+  const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
+
+  describe('createChildWorkspace', () => {
+    it('POSTs { title, resources } to /v2/workspaces/{parent}/child (no X-Upload-Receipt)', async () => {
+      fetchStub.resolves(fetchOk({ id: 'child-ws-1', status: 'not ready' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const resources = { ai: { projects: 3, prompts: 1500 } };
+      const result = await transport.createChildWorkspace(PARENT_WS, 'Adobe Express', resources);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${PARENT_WS}/child`,
+      );
+      expect(JSON.parse(init.body)).to.deep.equal({ title: 'Adobe Express', resources });
+      expect(init.headers).to.not.have.property('X-Upload-Receipt');
+      expect(result.id).to.equal('child-ws-1');
+    });
+  });
+
+  describe('getWorkspaceStatus', () => {
+    it('GETs /v1/workspaces/{ws}/status', async () => {
+      fetchStub.resolves(fetchOk({ status: 'created' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getWorkspaceStatus(WORKSPACE_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/status`,
+      );
+      expect(result.status).to.equal('created');
+    });
+  });
+
+  describe('listWorkspaceFamily', () => {
+    it('GETs /v1/workspaces/{parent}/family', async () => {
+      fetchStub.resolves(fetchOk({ items: [{ id: 'child-ws-1', title: 'Adobe Express' }] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.listWorkspaceFamily(PARENT_WS);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${PARENT_WS}/family`,
+      );
+      expect(result.items[0].id).to.equal('child-ws-1');
+    });
+  });
+
+  describe('transferWorkspaceResources', () => {
+    it('POSTs the payload to /v1/workspaces/{ws}/resources/transfer', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const payload = { ai: { projects: 3, prompts: 1500 } };
+      await transport.transferWorkspaceResources(WORKSPACE_ID, payload);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/resources/transfer`,
+      );
+      expect(JSON.parse(init.body)).to.deep.equal(payload);
+    });
+  });
+
+  describe('removeWorkspaceMember', () => {
+    it('DELETEs { members: [id] } from /v1/workspaces/{ws}/members', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.removeWorkspaceMember(WORKSPACE_ID, 'member-7');
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('DELETE');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/members`,
+      );
+      expect(JSON.parse(init.body)).to.deep.equal({ members: ['member-7'] });
+    });
+  });
+
+  describe('deleteWorkspace (test-cleanup only)', () => {
+    it('DELETEs /v1/workspaces/{ws} with no body', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.deleteWorkspace(WORKSPACE_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('DELETE');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}`,
+      );
+      expect(init.body).to.be.undefined;
+    });
+  });
+
+  describe('listProjects', () => {
+    it('GETs the v1 default-view project list for a workspace', async () => {
+      fetchStub.resolves(fetchOk({ items: [{ id: PROJECT_ID, publish_status: 'live' }] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.listProjects(WORKSPACE_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects`,
+      );
+      expect(result.items[0].id).to.equal(PROJECT_ID);
+    });
+  });
+
+  describe('getProject', () => {
+    it('GETs /v1/workspaces/{ws}/projects/{pid}', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID, publish_status: 'draft' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getProject(WORKSPACE_ID, PROJECT_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}`,
+      );
+      expect(result.publish_status).to.equal('draft');
+    });
+  });
+
+  describe('getInitStatus', () => {
+    it('GETs /v1/workspaces/{ws}/projects/{pid}/aio/init_status', async () => {
+      fetchStub.resolves(fetchOk({ initialized: false }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getInitStatus(WORKSPACE_ID, PROJECT_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/init_status`,
+      );
+      expect(result.initialized).to.equal(false);
+    });
+  });
 });

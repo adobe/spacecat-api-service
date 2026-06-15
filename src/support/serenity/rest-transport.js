@@ -301,5 +301,110 @@ export function createSerenityTransport({ env, imsToken }) {
       const url = `${root}${API_PREFIX}/v1/languages`;
       return request('GET', url, imsToken, undefined);
     },
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Sub-workspace lifecycle (serenity dual-mode, child path).
+    //
+    // These are thin URL+verb wrappers, deliberately colocated with the
+    // project ops so the later swap to the typed sub-workspace-API client is
+    // mechanical (call sites don't change, only these internals). Behaviour
+    // pins live in serenity-docs brand-semrush-workspace-provisioning-details
+    // §4/§5/§7 and the design's §6 error classification (see errors.js).
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * POST /v2/workspaces/{parent}/child — create a brand's child workspace.
+     * v2 takes NO `X-Upload-Receipt` header (v1-only); tier/products inherit
+     * from the parent. `resources.ai` must be non-zero — a zero-`ai.projects`
+     * child fails publish as a bare nginx 405 (workspace doc §5). The new
+     * workspace settles `not ready → created` in seconds; poll
+     * getWorkspaceStatus before creating projects against it.
+     */
+    async createChildWorkspace(parentWorkspaceId, title, resources) {
+      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(parentWorkspaceId)}/child`;
+      return request('POST', url, imsToken, { title, resources });
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/status — poll until `created` after a child
+     * create (creating projects against `not ready` can 500).
+     */
+    async getWorkspaceStatus(workspaceId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/status`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * GET /v1/workspaces/{parent}/family — list the parent's children/
+     * grandchildren. Used for ambiguous-create recovery: on a timed-out
+     * create, match the exact title and adopt a `created`, project-empty
+     * child (design §6).
+     */
+    async listWorkspaceFamily(parentWorkspaceId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(parentWorkspaceId)}/family`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * POST /v1/workspaces/{ws}/resources/transfer — grant an allocation onto a
+     * child (activation / re-grant) and release it back to the parent pool
+     * (decommission). A public user-token endpoint (workspace doc §5/§7). The
+     * exact payload shape is pinned by the Gate-A live smoke.
+     */
+    async transferWorkspaceResources(workspaceId, payload) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/resources/transfer`;
+      return request('POST', url, imsToken, payload);
+    },
+
+    /**
+     * DELETE /v1/workspaces/{ws}/members — remove a member during
+     * decommission (best-effort; parent admins inherit access regardless,
+     * workspace doc §7). Body shape mirrors the public members CRUD
+     * (`{ members: [...] }`).
+     */
+    async removeWorkspaceMember(workspaceId, memberId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/members`;
+      return request('DELETE', url, imsToken, { members: [memberId] });
+    },
+
+    /**
+     * DELETE /v1/workspaces/{ws} — TEST CLEANUP ONLY. Production flows NEVER
+     * delete child workspaces (decommission keeps them — design §6); workspace
+     * deprovisioning at offboarding is Semrush CS's act. Kept here so the
+     * net-zero live smoke can tidy up after itself. Delete cascades over the
+     * workspace's projects; subsequent reads return 403 (workspace doc §4).
+     */
+    async deleteWorkspace(workspaceId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}`;
+      return request('DELETE', url, imsToken, undefined);
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/projects — the v1 DEFAULT view, the only
+     * draft-faithful listing (workspace doc §6/§10 V1). Child mode enumerates
+     * a brand's markets from this; never the v2 list for draft settings.
+     */
+    async listProjects(workspaceId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/projects/{pid} — v1 by-id read (draft-faithful).
+     */
+    async getProject(workspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/projects/{pid}/aio/init_status — AIO readiness
+     * for a live project (`{ initialized: bool }`). Surfaced on the single
+     * market-detail read only, never per-item in the list (would be N+1).
+     */
+    async getInitStatus(workspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/aio/init_status`;
+      return request('GET', url, imsToken, undefined);
+    },
   };
 }
