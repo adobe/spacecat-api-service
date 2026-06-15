@@ -136,16 +136,16 @@ function appendCsvRow(result) {
 function getApiConfig() {
   return {
     apiUrl: process.env.SPACECAT_API_BASE_URL,
-    apiKey: process.env.ADMIN_API_KEY,
+    sessionToken: (process.env.session_token || '').replace(/[^\x20-\x7E]/g, '').trim(),
   };
 }
 
 async function apiFetch(path, options = {}) {
-  const { apiUrl, apiKey } = getApiConfig();
+  const { apiUrl, sessionToken } = getApiConfig();
   const resp = await fetch(`${apiUrl}${path}`, {
     ...options,
     headers: {
-      'x-api-key': apiKey,
+      Authorization: `Bearer ${sessionToken}`,
       'Content-Type': 'application/json',
       'Accept-Encoding': 'gzip, deflate',
       ...options.headers,
@@ -695,13 +695,8 @@ async function preonboardDomain({ domain, imsOrgId }) {
   try {
     const payload = ASO_PLG_HANDLERS
       .map((auditType) => ({ baseURL, auditType, enable: true }));
-    const { apiUrl, apiKey } = getApiConfig();
-    const resp = await fetch(`${apiUrl}/configurations/sites/audits`, {
+    const resp = await apiFetch('/configurations/sites/audits', {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-      },
       body: JSON.stringify(payload),
     });
     if (resp.ok) {
