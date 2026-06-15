@@ -32,12 +32,20 @@ function project({
   id = 'p1', location = 2276, language = 'de', publishStatus = 'live',
   createdAt = '2026-06-01T00:00:00Z', updatedAt = '2026-06-02T00:00:00Z',
 } = {}) {
+  // Mirrors the live v1 list item shape: nested location/language objects,
+  // updated_at present, created_at usually absent (passed here for mapping
+  // assertions; the no-created_at path is covered separately).
   return {
     id,
     publish_status: publishStatus,
     created_at: createdAt,
     updated_at: updatedAt,
-    settings: { ai: { location, language } },
+    settings: {
+      ai: {
+        location: location === null ? null : { id: location, name: 'X' },
+        language: language === null ? null : { id: 'lang-uuid', name: language },
+      },
+    },
   };
 }
 
@@ -75,6 +83,19 @@ describe('child-projects', () => {
       const s = projectToSlice(project({ location: 'x', language: 'EN' }), BRAND);
       expect(s.geoTargetId).to.equal(null);
       expect(s.languageCode).to.equal('en');
+    });
+
+    it('maps createdAt to null and updatedAt to published_at when the live item omits both (live shape)', () => {
+      const live = {
+        id: 'p9',
+        publish_status: 'live',
+        published_at: '2026-06-05T00:00:00Z',
+        settings: { ai: { location: { id: 2840 }, language: { name: 'en' } } },
+      };
+      const s = projectToSlice(live, BRAND);
+      expect(s.createdAt).to.equal(null);
+      expect(s.updatedAt).to.equal('2026-06-05T00:00:00Z');
+      expect(s.status).to.equal('live');
     });
   });
 
@@ -132,6 +153,22 @@ describe('child-projects', () => {
       const p = await resolveChildProject(transport, WS, 2276, 'de', { error: alert });
       expect(p.id).to.equal('older');
       expect(alert).to.have.been.calledOnce;
+    });
+
+    it('orders duplicates by updated_at when created_at is absent (live shape)', async () => {
+      const mk = (id, updatedAt) => ({
+        id,
+        publish_status: 'live',
+        updated_at: updatedAt,
+        settings: { ai: { location: { id: 2276 }, language: { name: 'de' } } },
+      });
+      const transport = {
+        listProjects: sinon.stub().resolves({
+          items: [mk('newer', '2026-06-10T00:00:00Z'), mk('older', '2026-06-01T00:00:00Z')],
+        }),
+      };
+      const p = await resolveChildProject(transport, WS, 2276, 'de', { error: sinon.spy() });
+      expect(p.id).to.equal('older');
     });
   });
 });

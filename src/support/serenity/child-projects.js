@@ -20,10 +20,12 @@ import { hasText } from '@adobe/spacecat-shared-utils';
  * write/prompt/model handlers route their slice→project resolution through
  * here so the listing/mapping rules live in exactly one place.
  *
- * Read rules (workspace doc §2/§6, live-verified): the v1 default view echoes
- * `settings.ai.location` (numeric geo target id) and `settings.ai.language`
- * (BCP-47 code) faithfully for drafts; counts/sub-resources read the live
- * layer. We never trust the v2 list for draft settings.
+ * Read rules (workspace doc §2/§6, verified live 2026-06-15 against the dev
+ * parent): the v1 default view (`GET …/projects?type=ai`) echoes the draft's
+ * real settings as NESTED objects — `settings.ai.location.id` (numeric geo
+ * target id) and `settings.ai.language.name` (BCP-47 code). Project list items
+ * expose `updated_at` (and `published_at` when live) but NOT `created_at`. We
+ * never trust the v2 list for draft settings (it returns `brand_names: null`).
  */
 
 /**
@@ -45,14 +47,22 @@ export function mapPublishStatus(publishStatus) {
 }
 
 function geoOf(project) {
-  const raw = project?.settings?.ai?.location;
+  const raw = project?.settings?.ai?.location?.id;
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 function langOf(project) {
-  const lang = project?.settings?.ai?.language;
+  const lang = project?.settings?.ai?.language?.name;
   return hasText(lang) ? String(lang).toLowerCase() : null;
+}
+
+// Project list items expose `updated_at` (and `published_at` when live) but no
+// `created_at`. Use created_at when present (single-project getProject reads
+// may carry it), else fall back to updated_at — this is the ordering key for
+// the duplicate-slice oldest-wins rule.
+function orderKey(project) {
+  return String(project?.created_at ?? project?.updated_at ?? '');
 }
 
 /**
@@ -66,8 +76,10 @@ export function projectToSlice(project, brandId) {
     brandId,
     geoTargetId: geoOf(project),
     languageCode: langOf(project),
+    // Projects expose no created_at; surface it when present (null otherwise),
+    // and always carry updated_at. The elmo DTO treats both as optional.
     createdAt: project?.created_at ?? null,
-    updatedAt: project?.updated_at ?? null,
+    updatedAt: project?.updated_at ?? project?.published_at ?? null,
     status: mapPublishStatus(project?.publish_status),
     semrushProjectId: hasText(project?.id) ? String(project.id) : null,
   };
@@ -104,7 +116,7 @@ export async function resolveChildProject(transport, workspaceId, geoTargetId, l
     return null;
   }
   if (matches.length > 1) {
-    matches.sort((a, b) => String(a?.created_at ?? '').localeCompare(String(b?.created_at ?? '')));
+    matches.sort((a, b) => orderKey(a).localeCompare(orderKey(b)));
     log?.error?.('serenity child: duplicate projects on one slice — oldest wins', {
       workspaceId,
       geoTargetId,

@@ -544,7 +544,7 @@ describe('Semrush REST transport', () => {
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('POST');
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${PARENT_WS}/child`,
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/child`,
       );
       expect(JSON.parse(init.body)).to.deep.equal({ title: 'Adobe Express', resources });
       expect(init.headers).to.not.have.property('X-Upload-Receipt');
@@ -562,7 +562,7 @@ describe('Semrush REST transport', () => {
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('GET');
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/status`,
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/status`,
       );
       expect(result.status).to.equal('created');
     });
@@ -578,7 +578,7 @@ describe('Semrush REST transport', () => {
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('GET');
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${PARENT_WS}/family`,
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${PARENT_WS}/family`,
       );
       expect(result.items[0].id).to.equal('child-ws-1');
     });
@@ -595,7 +595,7 @@ describe('Semrush REST transport', () => {
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('POST');
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/resources/transfer`,
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/resources/transfer`,
       );
       expect(JSON.parse(init.body)).to.deep.equal(payload);
     });
@@ -611,7 +611,7 @@ describe('Semrush REST transport', () => {
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('DELETE');
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/members`,
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/members`,
       );
       expect(JSON.parse(init.body)).to.deep.equal({ members: ['member-7'] });
     });
@@ -627,7 +627,7 @@ describe('Semrush REST transport', () => {
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('DELETE');
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}`,
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}`,
       );
       expect(init.body).to.be.undefined;
     });
@@ -643,7 +643,7 @@ describe('Semrush REST transport', () => {
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('GET');
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects`,
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects?type=ai`,
       );
       expect(result.items[0].id).to.equal(PROJECT_ID);
     });

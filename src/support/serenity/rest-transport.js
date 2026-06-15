@@ -14,6 +14,12 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../utils.js';
 
 const API_PREFIX = '/enterprise/projects/api';
+// Workspace lifecycle (create child / status / family / resources / members)
+// is served by a DIFFERENT gateway service than project ops — the
+// "user-manager" API under /enterprise/users/api (verified live 2026-06-15
+// against the dev parent; the project prefix 404s these routes). Project ops
+// stay on API_PREFIX above.
+const USERS_API_PREFIX = '/enterprise/users/api';
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
 // ceiling that still gives the user a clean error rather than a Lambda timeout.
@@ -321,7 +327,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * getWorkspaceStatus before creating projects against it.
      */
     async createChildWorkspace(parentWorkspaceId, title, resources) {
-      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(parentWorkspaceId)}/child`;
+      const url = `${root}${USERS_API_PREFIX}/v2/workspaces/${enc(parentWorkspaceId)}/child`;
       return request('POST', url, imsToken, { title, resources });
     },
 
@@ -330,7 +336,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * create (creating projects against `not ready` can 500).
      */
     async getWorkspaceStatus(workspaceId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/status`;
+      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}/status`;
       return request('GET', url, imsToken, undefined);
     },
 
@@ -341,7 +347,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * child (design §6).
      */
     async listWorkspaceFamily(parentWorkspaceId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(parentWorkspaceId)}/family`;
+      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(parentWorkspaceId)}/family`;
       return request('GET', url, imsToken, undefined);
     },
 
@@ -352,7 +358,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * exact payload shape is pinned by the Gate-A live smoke.
      */
     async transferWorkspaceResources(workspaceId, payload) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/resources/transfer`;
+      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}/resources/transfer`;
       return request('POST', url, imsToken, payload);
     },
 
@@ -363,7 +369,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * (`{ members: [...] }`).
      */
     async removeWorkspaceMember(workspaceId, memberId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/members`;
+      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}/members`;
       return request('DELETE', url, imsToken, { members: [memberId] });
     },
 
@@ -375,17 +381,20 @@ export function createSerenityTransport({ env, imsToken }) {
      * workspace's projects; subsequent reads return 403 (workspace doc §4).
      */
     async deleteWorkspace(workspaceId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}`;
+      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}`;
       return request('DELETE', url, imsToken, undefined);
     },
 
     /**
-     * GET /v1/workspaces/{ws}/projects — the v1 DEFAULT view, the only
-     * draft-faithful listing (workspace doc §6/§10 V1). Child mode enumerates
-     * a brand's markets from this; never the v2 list for draft settings.
+     * GET /v1/workspaces/{ws}/projects?type=ai — the v1 DEFAULT view, the only
+     * draft-faithful listing (workspace doc §6/§10 V1). The `type=ai` query is
+     * REQUIRED (verified live 2026-06-15: omitting it 500s; the v2 list 400s
+     * with "type query parameter is required"). Child mode enumerates a brand's
+     * markets from this; never the v2 list for draft settings (v2 returns a
+     * live-view shape with `brand_names: null` for drafts).
      */
     async listProjects(workspaceId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects`;
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects?type=ai`;
       return request('GET', url, imsToken, undefined);
     },
 

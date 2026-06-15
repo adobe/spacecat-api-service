@@ -121,10 +121,22 @@ export async function ensureChildWorkspace(
   log,
   timing = {},
 ) {
+  const poll = {
+    attempts: timing.attempts ?? DEFAULT_POLL_ATTEMPTS,
+    intervalMs: timing.intervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+    sleep: timing.sleep ?? defaultSleep,
+  };
+
   const existing = brand.getSemrushWorkspaceId?.();
   if (hasText(existing)) {
     // Re-grant the allocation onto the kept (possibly decommissioned) workspace.
+    // resources/transfer is ASYNC: it briefly flips the workspace to `locked`
+    // and a subsequent op 422s "workspace not ready" (verified live
+    // 2026-06-15). So settle before AND after the transfer so the caller can
+    // immediately create/publish projects against it.
+    await pollUntilCreated(transport, existing, poll);
     await transport.transferWorkspaceResources(existing, resourceAllocation(marketCount));
+    await pollUntilCreated(transport, existing, poll);
     return existing;
   }
 
@@ -154,11 +166,7 @@ export async function ensureChildWorkspace(
     throw new ErrorWithStatusCode('createChildWorkspace returned no workspace id', 502);
   }
 
-  await pollUntilCreated(transport, workspaceId, {
-    attempts: timing.attempts ?? DEFAULT_POLL_ATTEMPTS,
-    intervalMs: timing.intervalMs ?? DEFAULT_POLL_INTERVAL_MS,
-    sleep: timing.sleep ?? defaultSleep,
-  });
+  await pollUntilCreated(transport, workspaceId, poll);
 
   // Persist AFTER the workspace reads back `created` — flips the brand to child mode.
   brand.setSemrushWorkspaceId(workspaceId);
