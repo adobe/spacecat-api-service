@@ -23,6 +23,7 @@ use(sinonChai);
 const ORG = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const BRAND = '11111111-2222-3333-4444-555555555555';
 const WORKSPACE = '22222222-3333-4444-5555-666666666666';
+const SUBWS = '33333333-4444-5555-6666-777777777777';
 
 function fakeLog() {
   return {
@@ -112,6 +113,8 @@ describe('SerenityController', () => {
     handleBulkDeletePromptsSubworkspace: sinon.stub(),
   };
   let decommissionStub;
+  let ensureSubworkspaceStub;
+  let clearBrandWorkspaceCacheStub;
   let resolveWorkspaceIdStub;
   let resolveBrandWorkspaceStub;
   let createTransportStub;
@@ -127,6 +130,8 @@ describe('SerenityController', () => {
     // WORKSPACE) hold unchanged. Subworkspace-mode tests override this stub.
     resolveBrandWorkspaceStub = sinon.stub().resolves({ mode: 'flat', workspaceId: WORKSPACE });
     decommissionStub = sinon.stub().resolves();
+    ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
+    clearBrandWorkspaceCacheStub = sinon.stub();
     createTransportStub = sinon.stub().returns({ name: 'transport' });
     resolveBrandUuidStub = sinon.stub().resolves(BRAND);
     accessControlHasAccessStub = sinon.stub().resolves(true);
@@ -153,6 +158,7 @@ describe('SerenityController', () => {
       '../../src/support/serenity/workspace-resolver.js': {
         resolveWorkspaceId: resolveWorkspaceIdStub,
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
+        clearBrandWorkspaceCache: clearBrandWorkspaceCacheStub,
       },
       '../../src/support/serenity/handlers/prompts.js': {
         handleListPrompts: handlers.handleListPrompts,
@@ -185,6 +191,7 @@ describe('SerenityController', () => {
         handleBulkDeletePromptsSubworkspace: handlers.handleBulkDeletePromptsSubworkspace,
       },
       '../../src/support/serenity/workspace-lifecycle.js': {
+        ensureSubworkspace: ensureSubworkspaceStub,
         decommissionBrandWorkspace: decommissionStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
@@ -246,7 +253,10 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(403);
     });
 
-    it('404s when the org has no semrush_workspace_id', async () => {
+    it('404s when the org has no semrush_workspace_id (flat mode, no parent)', async () => {
+      // Flat mode resolves the brand against the org parent workspace; when that
+      // is unset, resolveBrandWorkspace returns a null workspaceId → 404.
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null });
       resolveWorkspaceIdStub.resolves(null);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listPrompts(fakeContext());
@@ -795,7 +805,7 @@ describe('SerenityController', () => {
   });
 
   describe('activate / deactivate', () => {
-    it('activate creates each market and sets the brand active', async () => {
+    it('activate ensures the subworkspace ONCE for the batch and creates each market against it', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const brand = makeBrandModel();
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -804,7 +814,14 @@ describe('SerenityController', () => {
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
       }));
       expect(response.status).to.equal(200);
+      // ensured exactly once, sized to the real market count (2) — not per market.
+      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(ensureSubworkspaceStub.firstCall.args[3]).to.equal(2);
       expect(handlers.handleCreateMarketSubworkspace).to.have.been.calledTwice;
+      // each market create receives the pre-resolved workspace id (6th arg) so it
+      // skips its own ensure.
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[5]).to.equal(SUBWS);
+      expect(handlers.handleCreateMarketSubworkspace.secondCall.args[5]).to.equal(SUBWS);
       expect(brand.setStatus).to.have.been.calledWith('active');
       expect(brand.save).to.have.been.called;
     });
@@ -848,6 +865,47 @@ describe('SerenityController', () => {
       // Nothing to disconnect — the pointer is already null.
       expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
       expect(brand.setStatus).to.have.been.calledWith('pending');
+    });
+
+    it('deactivate clears the resolver cache even when the brand save fails', async () => {
+      // The upstream is already emptied by decommission; a failed save must not
+      // leave the resolver routing to the emptied sub-workspace for the TTL.
+      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      brand.save = sinon.stub().rejects(new Error('db down'));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(fakeContext({ brand }));
+      expect(response.status).to.equal(500);
+      expect(decommissionStub).to.have.been.called;
+      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
+      // cache was invalidated BEFORE the save threw.
+      expect(clearBrandWorkspaceCacheStub).to.have.been.called;
+    });
+  });
+
+  describe('authorize — parent workspace requirement', () => {
+    it('does NOT 404 a subworkspace-mode brand when the org parent workspace is missing', async () => {
+      // A brand bound to its own sub-workspace is self-sufficient; a cleared org
+      // parent pointer must not lock it out (it only matters for flat mode +
+      // minting a fresh sub-workspace on activate).
+      resolveBrandWorkspaceStub.resolves({ mode: 'subworkspace', workspaceId: SUBWS });
+      resolveWorkspaceIdStub.resolves(null);
+      handlers.handleListMarketsSubworkspace.resolves({ items: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListMarketsSubworkspace).to.have.been.calledOnceWith(
+        { name: 'transport' },
+        BRAND,
+        SUBWS,
+      );
+    });
+
+    it('404s a flat-mode brand when the org has no parent workspace', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null });
+      resolveWorkspaceIdStub.resolves(null);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(404);
     });
   });
 });

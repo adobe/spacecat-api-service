@@ -52,7 +52,7 @@ import {
   handleUpdatePromptSubworkspace,
   handleBulkDeletePromptsSubworkspace,
 } from '../support/serenity/handlers/prompts-subworkspace.js';
-import { decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
+import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
@@ -244,11 +244,16 @@ function SerenityController(context, log, env) {
     if (!brandUuid) {
       return { error: notFound(`Brand not found for organization: ${brandId}`) };
     }
+    const { mode, workspaceId } = await resolveBrandWorkspace(ctx, spaceCatId, brandUuid);
+    // The org parent workspace is needed for flat mode (where it IS the
+    // workspaceId) and to mint a fresh sub-workspace on activate. A brand
+    // already in subworkspace mode resolves against its OWN workspace, so a
+    // missing/cleared parent must NOT 404 it out of a functioning sub-workspace
+    // — only flat mode without a parent is a genuine "no workspace" 404.
     const parentWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
-    if (!hasText(parentWorkspaceId)) {
+    if (mode !== 'subworkspace' && !hasText(workspaceId)) {
       return { error: notFound('Organization has no semrush_workspace_id') };
     }
-    const { mode, workspaceId } = await resolveBrandWorkspace(ctx, spaceCatId, brandUuid);
     return {
       brandUuid, mode, workspaceId, parentWorkspaceId,
     };
@@ -397,7 +402,6 @@ function SerenityController(context, log, env) {
           ctx.dataAccess,
           auth.brandUuid,
           auth.workspaceId,
-          log,
         );
       return ok(result);
     } catch (e) {
@@ -602,9 +606,18 @@ function SerenityController(context, log, env) {
       const transport = buildTransport(ctx, imsToken);
       const brand = await loadBrand(ctx, auth.brandUuid);
 
-      // ensureSubworkspace (inside handleCreateMarketSubworkspace) is idempotent —
-      // the first market creates/re-grants the workspace; later markets re-grant
-      // (a settle + transfer) onto the now-existing workspace.
+      // Ensure the sub-workspace ONCE for the whole batch, sized to the real
+      // market count, then create each market against the resolved workspace.
+      // (Calling ensureSubworkspace per market would re-grant + double-poll N
+      // times — seconds of redundant settling that risks the Lambda timeout —
+      // and size the allocation as if there were a single market.)
+      const workspaceId = await ensureSubworkspace(
+        transport,
+        brand,
+        auth.parentWorkspaceId,
+        markets.length,
+        log,
+      );
       const results = [];
       let anyLive = false;
       for (const m of markets) {
@@ -623,6 +636,7 @@ function SerenityController(context, log, env) {
           auth.parentWorkspaceId,
           createBody,
           log,
+          workspaceId,
         );
         if (r.status === 201) {
           anyLive = true;
@@ -673,17 +687,18 @@ function SerenityController(context, log, env) {
         await decommissionBrandWorkspace(transport, subworkspaceId, log);
         // Disconnect the brand from the now-emptied sub-workspace. The
         // sub-workspace is kept (never deleted); clearing the pointer is what
-        // returns the brand to flat mode.
+        // returns the brand to flat mode. Invalidate the resolver cache HERE —
+        // before the save — so that even if save() throws, the resolver can't
+        // keep routing to the already-emptied sub-workspace for the full
+        // positive-TTL window (the upstream is empty the moment decommission
+        // returns).
         brand.setSemrushWorkspaceId?.(null);
+        clearBrandWorkspaceCache();
       }
       brand.setStatus?.('pending');
       if (typeof brand.save === 'function') {
         await brand.save();
       }
-      // Invalidate the resolver's brand cache so the next request sees flat
-      // mode immediately, instead of routing to the disconnected sub-workspace
-      // for the full positive-TTL window.
-      clearBrandWorkspaceCache();
       return ok({ brandId: auth.brandUuid, status: 'pending' });
     } catch (e) {
       return mapError(e, log);

@@ -132,6 +132,10 @@ function validateCreateBody(body) {
  * once, and confirm. No mapping write, no rollback: a leftover draft is a
  * resumable state, not an orphan (design §7). The duplicate-create race is
  * accepted (oldest-wins reads + alert).
+ *
+ * @param {string|null} [preResolvedWorkspaceId] - when set (the activate batch
+ *   path), the sub-workspace is already ensured/sized; skip the per-call ensure
+ *   and create directly against it. Omitted on the single-market POST path.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -139,6 +143,7 @@ export async function handleCreateMarketSubworkspace(
   parentWorkspaceId,
   body,
   log,
+  preResolvedWorkspaceId = null,
 ) {
   const errors = validateCreateBody(body);
   if (errors.length > 0) {
@@ -150,7 +155,12 @@ export async function handleCreateMarketSubworkspace(
   }
   const languageCode = normalizeLanguageCode(body.languageCode);
 
-  const workspaceId = await ensureSubworkspace(transport, brand, parentWorkspaceId, 1, log);
+  // activate() ensures the sub-workspace once for the whole batch (sized to the
+  // real market count) and passes it in here. The single-market POST /markets
+  // path passes nothing, so we ensure on the spot, sized for one market.
+  const workspaceId = hasText(preResolvedWorkspaceId)
+    ? preResolvedWorkspaceId
+    : await ensureSubworkspace(transport, brand, parentWorkspaceId, 1, log);
 
   const existing = await resolveProject(
     transport,

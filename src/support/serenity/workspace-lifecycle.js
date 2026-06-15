@@ -157,8 +157,11 @@ export async function ensureSubworkspace(
       resourceAllocation(marketCount),
     );
   } catch (e) {
-    // 504 = our transport's timeout signal → ambiguous create, recover by adoption.
-    if (e instanceof ErrorWithStatusCode === false && e?.status === 504) {
+    // 504 = our transport's timeout signal → ambiguous create, recover by
+    // adoption. The transport timeout is a SerenityTransportError (status 504),
+    // NOT an ErrorWithStatusCode — guard on that so a 504 from our own poll
+    // helper (an ErrorWithStatusCode) re-throws instead of re-entering adoption.
+    if (!(e instanceof ErrorWithStatusCode) && e?.status === 504) {
       created = await adoptFromFamily(transport, parentWorkspaceId, title, log);
     } else {
       throw e;

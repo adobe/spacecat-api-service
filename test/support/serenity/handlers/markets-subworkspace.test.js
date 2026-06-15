@@ -198,6 +198,23 @@ describe('markets-subworkspace handlers', () => {
       );
       expect(res.status).to.equal(502);
     });
+
+    it('uses a pre-resolved workspace id and skips the per-call ensure (activate batch path)', async () => {
+      const transport = makeTransport();
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        'preset-ws',
+      );
+      expect(res.status).to.equal(201);
+      // ensure was skipped: no settle/transfer was performed for this call.
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
+      // the draft is created against the pre-resolved workspace.
+      expect(transport.createProject).to.have.been.calledWith('preset-ws');
+    });
   });
 
   describe('handleDeleteMarketSubworkspace', () => {

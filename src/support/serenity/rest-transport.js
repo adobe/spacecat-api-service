@@ -211,8 +211,12 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * POST /v2/.../aio/prompts/tagged — creates prompts grouped by tag names.
-     * Body shape: { prompts: { [tagName]: [promptText, ...] } }.
+     * POST /v2/.../aio/prompts/tagged — bulk-creates prompts with their tags.
+     * Body shape: { prompts: { [promptText]: [tagName, ...] } } — keyed by
+     * prompt text, each value the list of tag names to attach. Both flat and
+     * subworkspace callers send this same prompt-text-keyed shape; `promptsByTag`
+     * is a legacy parameter name kept for continuity, not an indication of the
+     * key.
      */
     async createTaggedPrompts(semrushWorkspaceId, projectId, promptsByTag) {
       const url = `${root}${aioPromptsPath(semrushWorkspaceId, projectId, '/tagged')}`;

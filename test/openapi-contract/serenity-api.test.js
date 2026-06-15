@@ -299,6 +299,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
+        ensureSubworkspace: sinon.stub().resolves(WORKSPACE),
         decommissionBrandWorkspace: sinon.stub(),
       };
       handlerStubs[fx.handlerName].resolves(fx.handlerResult);
@@ -351,6 +352,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleBulkDeletePromptsSubworkspace: sinon.stub(),
           },
           '../../src/support/serenity/workspace-lifecycle.js': {
+            ensureSubworkspace: handlerStubs.ensureSubworkspace,
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
           },
         },
