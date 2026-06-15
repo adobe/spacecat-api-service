@@ -1916,6 +1916,7 @@ function SuggestionsController(ctx, sqs, env) {
             .filter((s) => {
               const data = s.getData() || {};
               return !domainWideSuggestionIds.has(s.getId())
+                && s.getStatus() === SuggestionModel.STATUSES.NEW
                 && !data.edgeDeployed
                 && data.aiSummary
                 && data.valuable === true;
