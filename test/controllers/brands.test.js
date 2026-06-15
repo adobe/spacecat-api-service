@@ -38,6 +38,9 @@ describe('Brands Controller', () => {
   };
 
   const ORGANIZATION_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
+  // Category CRUD now addresses rows by the categories.id UUID, not the
+  // retired category_id business key (LLMO-5515).
+  const CATEGORY_UUID = 'c1111111-1111-4111-b111-111111111111';
   const SITE_ID = '0b4dcf79-fe5f-410b-b11f-641f0bf56da3';
   const IMS_ORG_ID = '1234567890ABCDEF12345678@AdobeOrg';
   const BRAND_ID = 'brand123';
@@ -812,6 +815,43 @@ describe('Brands Controller', () => {
       expect(body).to.have.property('prompts');
     });
 
+    it('createPromptsByBrand persists normalized intent from the request body', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        // legacy 'commercial' -> 'transactional'; uppercase lowercased; bogus -> null
+        data: [{ prompt: 'P', regions: ['us'], intent: 'COMMERCIAL' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].intent).to.equal('transactional');
+    });
+
     it('createPromptsByBrand returns 400 when prompts not an array', async () => {
       const response = await brandsController.createPromptsByBrand({
         ...context,
@@ -889,6 +929,51 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.id).to.equal(PROMPT_ID);
+    });
+
+    it('updatePromptByBrandAndId persists normalized intent from the request body', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const updatedRow = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Prompt text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: 'informational',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+        brands: { id: BRAND_UUID, name: 'Test Brand' },
+        categories: null,
+        topics: null,
+      };
+      const single = (data) => ({ maybeSingle: () => thenable({ data, error: null }) });
+      const updateStub = sandbox.stub().returns({
+        eq: () => ({ eq: () => ({ eq: () => ({ select: () => single(updatedRow) }) }) }),
+      });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'brands') {
+          return { select: () => ({ eq: () => ({ eq: () => single({ id: BRAND_UUID }) }) }) };
+        }
+        // prompts: update path + the getPromptById re-read
+        return {
+          update: updateStub,
+          select: () => ({ eq: () => ({ eq: () => ({ eq: () => single(updatedRow) }) }) }),
+        };
+      });
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        // legacy 'statistical' -> 'informational'
+        data: { intent: 'Statistical' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(updateStub.firstCall.args[0].intent).to.equal('informational');
+      const body = await response.json();
+      expect(body.intent).to.equal('informational');
     });
 
     it('updatePromptByBrandAndId uses empty object when data is undefined', async () => {
@@ -3044,7 +3129,8 @@ describe('Brands Controller', () => {
       const response = await brandsController.createCategoryForOrg({
         ...context,
         params: { spaceCatId: ORGANIZATION_ID },
-        // Client posts a drifted slug; the stable `category_id` must be preserved.
+        // Client posts a stray `id`; it is ignored. The stable UUID PK is
+        // authoritative and is what `id` reflects (LLMO-5515).
         data: { id: 'discovery-research', name: 'Discovery & Research' },
         dataAccess: mockDataAccess,
         attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
@@ -3052,7 +3138,9 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body.id).to.equal('baseurl-discovery-research');
+      // `id` is now the UUID primary key (== `uuid`), not the retired
+      // category_id business key.
+      expect(body.id).to.equal('uuid-existing');
       expect(body.uuid).to.equal('uuid-existing');
     });
 
@@ -3192,7 +3280,7 @@ describe('Brands Controller', () => {
     it('returns 200 when category is updated', async () => {
       const response = await brandsController.updateCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         data: { name: 'Updated Category' },
         dataAccess: mockDataAccess,
         attributes: { authInfo: { profile: { email: 'user@test.com' } } },
@@ -3215,7 +3303,7 @@ describe('Brands Controller', () => {
     it('returns 400 when spaceCatId is not a valid UUID', async () => {
       const response = await brandsController.updateCategoryForOrg({
         ...context,
-        params: { spaceCatId: 'not-a-uuid', categoryId: 'my-category' },
+        params: { spaceCatId: 'not-a-uuid', categoryId: CATEGORY_UUID },
         data: { name: 'Updated' },
         dataAccess: mockDataAccess,
       });
@@ -3232,13 +3320,23 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 400 when categoryId is not a valid UUID (business keys retired, LLMO-5515)', async () => {
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 404 when organization is not found', async () => {
       mockDataAccess.Organization.findById.resolves(null);
       brandsController = BrandsController(context, loggerStub, mockEnv);
 
       const response = await brandsController.updateCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         data: { name: 'Updated' },
         dataAccess: mockDataAccess,
       });
@@ -3251,7 +3349,7 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.updateCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         data: { name: 'Updated' },
         dataAccess: mockDataAccess,
       });
@@ -3273,7 +3371,7 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.updateCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'nonexistent' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         data: { name: 'Updated' },
         dataAccess: mockDataAccess,
       });
@@ -3297,7 +3395,7 @@ describe('Brands Controller', () => {
       }, loggerStub, mockEnv);
 
       const response = await unauthorizedController.updateCategoryForOrg({
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         data: { name: 'Updated' },
         dataAccess: mockDataAccess,
       });
@@ -3312,7 +3410,7 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.updateCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         data: { name: 'Updated' },
         dataAccess: mockDataAccess,
       });
@@ -3345,7 +3443,7 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.updateCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         data: { name: 'Collides With Sibling' },
         dataAccess: mockDataAccess,
         attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
@@ -3375,7 +3473,7 @@ describe('Brands Controller', () => {
     it('returns 204 when category is deleted', async () => {
       const response = await brandsController.deleteCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         dataAccess: mockDataAccess,
         attributes: { authInfo: { profile: { email: 'user@test.com' } } },
       });
@@ -3394,7 +3492,7 @@ describe('Brands Controller', () => {
     it('returns 400 when spaceCatId is not a valid UUID', async () => {
       const response = await brandsController.deleteCategoryForOrg({
         ...context,
-        params: { spaceCatId: 'not-a-uuid', categoryId: 'my-category' },
+        params: { spaceCatId: 'not-a-uuid', categoryId: CATEGORY_UUID },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
@@ -3409,13 +3507,22 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 400 when categoryId is not a valid UUID (business keys retired, LLMO-5515)', async () => {
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 404 when organization is not found', async () => {
       mockDataAccess.Organization.findById.resolves(null);
       brandsController = BrandsController(context, loggerStub, mockEnv);
 
       const response = await brandsController.deleteCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(404);
@@ -3427,7 +3534,7 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.deleteCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(503);
@@ -3448,7 +3555,7 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.deleteCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'nonexistent' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(404);
@@ -3471,7 +3578,7 @@ describe('Brands Controller', () => {
       }, loggerStub, mockEnv);
 
       const response = await unauthorizedController.deleteCategoryForOrg({
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(403);
@@ -3485,7 +3592,7 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.deleteCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);

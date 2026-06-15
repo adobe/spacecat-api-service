@@ -51,36 +51,46 @@ export async function handleBrandPrompts(sp, clients) {
     PROMPT_CATEGORY_ENUM.CITES_TARGET,
   ];
 
-  const listRequest = fromJson(
-    PromptsRequestSchema,
-    {
-      country,
-      llm: engine,
-      target: { domain, name: domain },
-      order: {
-        by: sortBy,
-        direction: sortDirection,
+  let listRequest;
+  let totalsRequest;
+  try {
+    listRequest = fromJson(
+      PromptsRequestSchema,
+      {
+        country,
+        llm: engine,
+        target: { domain, name: domain },
+        order: {
+          by: sortBy,
+          direction: sortDirection,
+        },
+        range: { limit, offset },
+        categories,
+        dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
+        target_date: date,
       },
-      range: { limit, offset },
-      categories,
-      dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
-      target_date: date,
-    },
-    PROTO_FROM_JSON,
-  );
+      PROTO_FROM_JSON,
+    );
 
-  const totalsRequest = fromJson(
-    PromptsTotalsRequestSchema,
-    {
-      country,
-      llm: engine,
-      target: { domain, name: domain },
-      categories,
-      dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
-      target_date: date,
-    },
-    PROTO_FROM_JSON,
-  );
+    totalsRequest = fromJson(
+      PromptsTotalsRequestSchema,
+      {
+        country,
+        llm: engine,
+        target: { domain, name: domain },
+        categories,
+        dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
+        target_date: date,
+      },
+      PROTO_FROM_JSON,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid brand prompts request';
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message },
+    };
+  }
 
   try {
     const [promptsMessage, totalsMessage] = await Promise.all([

@@ -71,7 +71,7 @@ The controller validates that the `url` hostname matches one of the site's known
 different site returns `PREFLIGHT_INVALID_REQUEST`. This replaces the implicit validation
 previously provided by `findByPreviewURL`.
 
-`promiseToken` is passed via cookie for authenticated CMS pages (CS/CS_CW/AMS sites); it is not part of the request body.
+For authenticated CMS pages (CS, CS_CW, AMS), the promise token is sent on the `x-promise-token` request header (obtained from `POST /auth/v2/promise`); it is not part of the request body. The header is **required** for those authoring types; the API does not mint a promise token from the Spacecat session JWT in `Authorization`.
 
 `createdBy` is derived server-side from the caller's IMS profile and is never supplied by the client. It is an object containing the IMS user email (`profile.email`) and a display name composed from `profile.first_name` and `profile.last_name` (falling back to `profile.name`). Both fields are stored in async job metadata at creation time. No additional IMS lookup is required — both are available on the authenticated profile.
 
@@ -101,7 +101,6 @@ Body:
 |--------|-------------|-----------|
 | `400 Bad Request` | `PREFLIGHT_INVALID_REQUEST` | `url` is missing, not a valid URI, or does not belong to the site identified by `:siteId` |
 | `403 Forbidden` | `PREFLIGHT_ACCESS_DENIED` | Caller does not have access to the site |
-| `403 Forbidden` | `PREFLIGHT_NOT_ENABLED` | Preflight is not enabled for the site |
 | `404 Not Found` | `PREFLIGHT_SITE_NOT_FOUND` | `siteId` does not exist |
 | `502 Bad Gateway` | `PREFLIGHT_UPSTREAM_ERROR` | Mysticat returned a 5xx response |
 | `500 Internal Server Error` | `PREFLIGHT_INTERNAL_ERROR` | Unexpected error within this service |
@@ -109,16 +108,16 @@ Body:
 Error response body:
 ```json
 {
-  "errorCode": "PREFLIGHT_NOT_ENABLED",
-  "message": "Preflight is not enabled for this site"
+  "errorCode": "PREFLIGHT_ACCESS_DENIED",
+  "message": "Access denied"
 }
 ```
 
 `errorCode` gives consumers a stable machine-readable contract; `message` is a human-readable hint and should not be parsed by clients.
 
-No job record is created for `400`, `403`, or `404` responses. The current `/preflight/beta/jobs`
-behavior of creating a job and immediately setting it to `CANCELLED` when preflight is disabled
-is not carried forward — a `403` is returned immediately, keeping the job store clean.
+**Eligibility is Mysticat's decision, not SpaceCat's.** This endpoint does not consult `Configuration.handlers.preflight`, `Entitlement`, `SiteEnrollment`, or any product-code gating to decide whether the call should proceed. The only gate SpaceCat enforces is the tenancy boundary (`accessControlUtil.hasAccess(site)` — IMS org membership) plus the basic URL-belongs-to-site sanity check. Past those, the request proceeds to Mysticat unconditionally, and Mysticat's three-gate model (Gate 0 tier features, Gate 1 `enabled_opportunity_types`, Gates 2/3 per-fact + per-site overrides) is the sole source of truth for what runs. A site whose tier disables preflight will return `200` with `audits: []` — not a `403` from SpaceCat. See SITES-46202.
+
+No job record is created for `400`, `403`, or `404` responses **emitted by SpaceCat's own checks** (access, URL validation). Once those pass, the `AsyncJob` + `Preflight` rows are created unconditionally before dispatching to Mysticat; any subsequent Mysticat-side `5xx` flips the rows to `FAILED` with a `502 PREFLIGHT_UPSTREAM_ERROR` response.
 
 ---
 
@@ -221,7 +220,7 @@ Key changes:
   resource is communicated via the `Location` response header. Clients that need to poll for
   completion read `Location` rather than a body field.
 - **`step` is removed.** Mysticat's agent always performs both identify and suggest as a single
-  flow, making the field redundant. `promiseToken` (cookie) is retained unchanged. The existing
+  flow, making the field redundant. Promise-token auth via required `x-promise-token` (from `POST /auth/v2/promise`) is retained. The existing
   `step` branching in `src/preflight/links.js:102` and `src/preflight/metatags.js:103` is dead
   code that will be removed as part of this implementation.
 - **`createdBy`** is captured server-side as `{ email, displayName }` from the caller's IMS
@@ -230,10 +229,11 @@ Key changes:
   always a human-readable address for technical accounts). `displayName` is composed from
   `profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`). No
   additional IMS lookup required — both fields are on the authenticated profile.
-- **No phantom jobs for rejected requests.** If the site is not found, the caller lacks access,
-  or preflight is not enabled for the site, the endpoint returns an error immediately without
-  creating a job record. The previous behavior of creating a `CANCELLED` job in these cases
-  is removed.
+- **No phantom jobs for SpaceCat-side rejections.** If the site is not found or the caller lacks
+  access, the endpoint returns an error immediately without creating a job record. The previous
+  behavior of creating a `CANCELLED` job in these cases is removed. Note that preflight-eligibility
+  is **not** a SpaceCat-side concern (see Eligibility below) — sites whose tier disables preflight
+  pass through to Mysticat and receive a `200` with `audits: []`, not a SpaceCat `403`.
 - **No `organizationId` in the path.** `siteId` is a globally unique UUID, consistent with
   all other site-scoped resources in this service.
 
@@ -264,5 +264,8 @@ That decision was aligned with @ekdogan (SITES-44675) before implementation bega
 - Existing consumers of `/preflight/jobs` are unaffected for now; migration timeline to be
   coordinated separately.
 - Job records are only created for requests that pass validation and access checks, keeping the
-  job store clean. Callers that previously relied on polling a `CANCELLED` job to detect a
-  disabled-preflight condition must handle `403` instead.
+  job store clean. Eligibility (which audits run, whether the tier enables preflight at all) is
+  delegated to Mysticat — see [SITES-46202](https://jira.corp.adobe.com/browse/SITES-46202). Callers
+  that previously relied on polling a `CANCELLED` job to detect a disabled-preflight condition
+  must now poll `Preflight.status` and inspect `result.audits` (an empty list signals the tier
+  has nothing eligible to run for this site).

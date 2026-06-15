@@ -130,7 +130,11 @@
 			"hreflang": {},
 			"security-vulnerabilities": {},
 			"security-vulnerabilities-auto-suggest": {},
-			"wikipedia-analysis": {}
+			"structured-data": {},
+			"sitemap": {},
+			"toc": {},
+			"wikipedia-analysis": {},
+			"money-pages": {}
 		},
 		"imports": {
 			"organic-traffic" : {},

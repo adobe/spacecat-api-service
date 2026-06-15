@@ -47,11 +47,68 @@ import {
   isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { CAP_FIX_ENTITY_CREATE } from '../routes/capability-constants.js';
+import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+async function isSitePlgTier(site, log) {
+  try {
+    const enrollments = await site.getSiteEnrollments();
+    const entitlements = await Promise.all((enrollments ?? []).map((e) => e.getEntitlement()));
+    return entitlements.some((e) => e?.getProductCode() === 'ASO' && e.getTier() === 'PLG');
+  } catch (err) {
+    log.warn(`Failed to determine PLG tier for site ${site.getId()}: ${err.message}`);
+    return false;
+  }
+}
+
+async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context, isPlgTier) {
+  const { env, log } = context;
+  const channelId = env?.SLACK_PLG_SKIP_CHANNEL_ID;
+  const token = env?.SLACK_BOT_TOKEN;
+  if (!channelId || !token) {
+    return;
+  }
+
+  try {
+    const plg = isPlgTier !== undefined ? isPlgTier : await isSitePlgTier(site, log);
+    if (!plg) {
+      return;
+    }
+
+    const siteBaseURL = site.getBaseURL?.() ?? site.getId();
+    const opportunityType = opportunity.getType?.() ?? 'unknown';
+    const opportunityId = opportunity.getId?.() ?? 'unknown';
+    const suggestionId = suggestion.getId?.() ?? 'unknown';
+    const skipReason = suggestion.getSkipReason?.() ?? null;
+    const skipDetail = suggestion.getSkipDetail?.() ?? null;
+
+    let message = ':no_entry_sign: *PLG Customer Skipped a Suggestion*\n\n'
+      + `• *Site:* \`${siteBaseURL}\`\n`
+      + `• *Site ID:* \`${site.getId()}\`\n`
+      + `• *Opportunity Type:* \`${opportunityType}\`\n`
+      + `• *Opportunity ID:* \`${opportunityId}\`\n`
+      + `• *Suggestion ID:* \`${suggestionId}\``;
+
+    if (skipReason) {
+      message += `\n• *Skip Reason:* \`${skipReason}\``;
+    }
+    if (skipDetail) {
+      message += `\n• *Skip Detail:* \`${skipDetail}\``;
+    }
+
+    await postSlackMessage(channelId, message, token);
+  } catch (alertError) {
+    log.error('Failed to send PLG suggestion skip Slack alert', {
+      error: alertError,
+      suggestionId: suggestion.getId?.(),
+      siteId: site.getId?.(),
+    });
+  }
+}
 
 /**
  * Suggestions controller.
@@ -679,6 +736,7 @@ function SuggestionsController(ctx, sqs, env) {
         suggestion.setKpiDeltas(kpiDeltas);
       }
 
+      let isNewSkipTransition = false;
       if (hasText(status) && status !== suggestion.getStatus()) {
         const { valid, error } = validateSkipFields(status, skipReason, skipDetail);
         if (!valid) {
@@ -687,6 +745,7 @@ function SuggestionsController(ctx, sqs, env) {
         hasUpdates = true;
         suggestion.setStatus(status);
         if (status === SuggestionModel.STATUSES.SKIPPED) {
+          isNewSkipTransition = true;
           if (suggestion.setSkipReason) {
             suggestion.setSkipReason(skipReason ?? null);
             suggestion.setSkipDetail(skipDetail ?? null);
@@ -716,6 +775,10 @@ function SuggestionsController(ctx, sqs, env) {
       if (hasUpdates) {
         suggestion.setUpdatedBy(profile.email || 'system');
         const updatedSuggestion = await suggestion.save();
+        if (isNewSkipTransition) {
+          postPlgSuggestionSkipAlert(site, opportunity, updatedSuggestion, context)
+            .catch((err) => context.log.error(`PLG skip alert failed: ${err.message}`));
+        }
         return ok(SuggestionDto.toJSON(updatedSuggestion));
       }
     } catch (e) {
@@ -802,6 +865,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Request body must be an array of [{ id: <suggestion id>, status: <suggestion status> },...]');
     }
 
+    const isPlgSite = await isSitePlgTier(site, context.log);
+
     const suggestionPromises = context.data.map(async (item, index) => {
       const {
         id, status, skipReason, skipDetail,
@@ -853,12 +918,26 @@ function SuggestionsController(ctx, sqs, env) {
       }
 
       const currentStatus = suggestion.getStatus();
+      let isNewSkipTransition = false;
       try {
         if (currentStatus !== status) {
           // Validate REJECTED status transition
           if (status === SuggestionModel.STATUSES.REJECTED) {
-            // Check admin access for REJECTED status
-            if (!accessControlUtil.hasAdminAccess()) {
+            // S2S consumers with suggestion:write capability may also reject suggestions
+            const s2sResult = await accessControlUtil.hasS2SCapability(CAP_SUGGESTION_WRITE);
+            if (s2sResult.allowed) {
+              context.log.info(`[acl] S2S REJECT granted - suggestionId=${id} clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
+            } else if (s2sResult.reason !== 'not-s2s') {
+              // S2S call but missing the required capability — audit trail + immediate denial
+              context.log.warn(`[acl] S2S REJECT denied - suggestionId=${id} reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+              return {
+                index,
+                uuid: id,
+                message: 'S2S consumer does not have the required capability to reject suggestions',
+                statusCode: 403,
+              };
+            } else if (!accessControlUtil.hasAdminAccess()) {
+              // Not an S2S call — original admin gate, unchanged
               return {
                 index,
                 uuid: id,
@@ -880,6 +959,7 @@ function SuggestionsController(ctx, sqs, env) {
 
           suggestion.setStatus(status);
           if (status === SuggestionModel.STATUSES.SKIPPED) {
+            isNewSkipTransition = true;
             if (suggestion.setSkipReason) {
               suggestion.setSkipReason(skipReason ?? null);
               suggestion.setSkipDetail(skipDetail ?? null);
@@ -912,16 +992,23 @@ function SuggestionsController(ctx, sqs, env) {
           };
         }
       } catch (e) {
-        // Validation error on setStatus
+        if (e?.name !== VALIDATION_ERROR_NAME) {
+          context.log.error(`[patchSuggestionsStatus] unexpected error for suggestionId=${id}: ${e.message}`);
+        }
         return {
           index,
           uuid: id,
           message: e.message,
-          statusCode: 400,
+          statusCode: e?.name === VALIDATION_ERROR_NAME ? 400 : 500,
         };
       }
       try {
         const updatedSuggestion = await suggestion.save();
+        if (isNewSkipTransition) {
+          const opp = await suggestion.getOpportunity();
+          postPlgSuggestionSkipAlert(site, opp, updatedSuggestion, context, isPlgSite)
+            .catch((err) => context.log.error(`PLG skip alert failed: ${err.message}`));
+        }
         return {
           index,
           uuid: id,
@@ -1911,6 +1998,7 @@ function SuggestionsController(ctx, sqs, env) {
             triggerImmediately: true,
             enableBrandPresence: true,
             metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
+            timeout: 12_000,
           });
           preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;
           if (!preScheduleId) {
