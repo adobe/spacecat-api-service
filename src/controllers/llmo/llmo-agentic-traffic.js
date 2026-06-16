@@ -45,6 +45,10 @@ const VALID_SORT_COLUMNS_BY_USER_AGENT = new Set([
 ]);
 const DEFAULT_BY_URL_LIMIT = 50;
 const MAX_BY_URL_LIMIT = 200;
+// Upper bound on the URL set accepted by the hits-by-urls endpoint. Must stay
+// <= the matching cap in rpc_agentic_hits_for_urls (2000) so the handler
+// rejects oversized input with a clean 400 before the RPC raises.
+const MAX_HITS_BY_URLS = 2000;
 
 // UI platform code → DB value. 'all' / unknown → null (no filter). Applied
 // in parseAgenticTrafficParams, so it affects every site-scoped endpoint.
@@ -755,8 +759,6 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
  * Calls rpc_agentic_hits_for_urls, which matches rpc_agentic_traffic_by_url's
  * fact-derived totals/trend exactly without the full-site scan + ranking.
  */
-const MAX_HITS_BY_URLS = 2000;
-
 export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) {
   return async function getAgenticTrafficHitsByUrls(context) {
     return withAgenticTrafficAuth(
@@ -781,7 +783,9 @@ export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) 
           .filter((u) => hasText(u.host) && hasText(u.url_path));
 
         if (urls.length === 0) {
-          return cachedOk({ rows: [] });
+          // ok() not cachedOk(): this is a POST whose result varies by body,
+          // and cachedOk is documented as GET-only.
+          return ok({ rows: [] });
         }
 
         const rpcParams = {
@@ -802,7 +806,8 @@ export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) 
         }
         /* c8 ignore next */
         const rows = data ?? [];
-        return cachedOk({
+        ctx.log.info(`Agentic traffic hits-by-urls: requested=${urls.length} returned=${rows.length}`);
+        return ok({
           rows: rows.map((row) => ({
             url: row.url || '',
             host: row.host || '',

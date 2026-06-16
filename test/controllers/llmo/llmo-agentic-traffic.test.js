@@ -2290,5 +2290,40 @@ describe('llmo-agentic-traffic', () => {
       const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
       expect(res.status).to.equal(500);
     });
+
+    it('accepts exactly the 2000-entry cap (inclusive boundary)', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const urls = Array.from({ length: 2000 }, (_, i) => ({ host: 'h', urlPath: `/p/${i}` }));
+      const ctx = makeContext({ client, data: { urls } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      expect(client.rpc).to.have.been.calledWith('rpc_agentic_hits_for_urls');
+    });
+
+    it('coerces null total_hits and a non-array hits_trend to safe defaults', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: {
+          data: [
+            {
+              url: 'u', host: 'h', url_path: '/p', total_hits: null, hits_trend: null,
+            },
+            {
+              url: 'u2', host: 'h', url_path: '/q', total_hits: 5, hits_trend: [{ week_start: '2026-01-05' }],
+            },
+          ],
+          error: null,
+        },
+      });
+      const ctx = makeContext({ client, data: { urls: urlsBody } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.rows[0].totalHits).to.equal(0);
+      expect(body.rows[0].hitsTrend).to.deep.equal([]);
+      // missing point.value coerces to 0
+      expect(body.rows[1].hitsTrend).to.deep.equal([{ weekStart: '2026-01-05', value: 0 }]);
+    });
   });
 });
