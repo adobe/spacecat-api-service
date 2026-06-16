@@ -4353,6 +4353,101 @@ describe('Sites Controller', () => {
     });
   });
 
+  describe('detectedCdn validation', () => {
+    it('accepts a valid enum value', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: 'aem-cs-fastly' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.llmo.detectedCdn).to.equal('aem-cs-fastly');
+    });
+
+    it('rejects an array value', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: ['Adobe-managed Fastly'] } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('config.llmo.detectedCdn must be one of');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('rejects a stringified array (prod marriottvacationclubs.com case)', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: '["Adobe-managed Fastly"]' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('config.llmo.detectedCdn must be one of');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('rejects a human display name', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: 'Adobe-managed Fastly' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('config.llmo.detectedCdn must be one of');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('does not validate detectedCdn when llmo patch omits it', async () => {
+      const site = sites[0];
+      // Pre-existing (possibly legacy) value must not be re-rejected by an unrelated llmo patch.
+      sandbox.stub(Config, 'toDynamoItem').returns({
+        llmo: { detectedCdn: 'Adobe-managed Fastly', brand: 'Old' },
+      });
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { brand: 'New' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.llmo.brand).to.equal('New');
+      expect(merged.llmo.detectedCdn).to.equal('Adobe-managed Fastly');
+    });
+  });
+
   describe('enableMoneyPageUrls config flag', () => {
     it('allows disabling money page URLs via config patch', async () => {
       const site = sites[0];
