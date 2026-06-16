@@ -1,3 +1,10 @@
+# [1.575.0](https://github.com/adobe/spacecat-api-service/compare/v1.574.3...v1.575.0) (2026-06-16)
+
+
+### Features
+
+* server-side search and sort for competitor gap endpoints | LLMO-5609 ([#2609](https://github.com/adobe/spacecat-api-service/issues/2609)) ([0c3c0df](https://github.com/adobe/spacecat-api-service/commit/0c3c0dfe01b8d1df8d60421235b5a75758b06787))
+
 ## [1.574.3](https://github.com/adobe/spacecat-api-service/compare/v1.574.2...v1.574.3) (2026-06-15)
 
 
