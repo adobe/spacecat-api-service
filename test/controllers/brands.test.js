@@ -4354,6 +4354,122 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    describe('serenity-first provisioning (semrushMarket present)', () => {
+      const semrushData = {
+        name: 'New Brand',
+        urls: [{ value: 'https://acme.com/path' }],
+        semrushMarket: { market: 'us', languageCode: 'en' },
+      };
+
+      async function buildController({ provisionBrandSubworkspace, upsertBrand }) {
+        const Mocked = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/serenity/brand-provisioning.js': { provisionBrandSubworkspace },
+          ...(upsertBrand ? { '../../src/support/brands-storage.js': { upsertBrand } } : {}),
+        });
+        return Mocked.default(context, loggerStub, mockEnv);
+      }
+
+      it('provisions the sub-workspace then creates the brand bound to it (201)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.calledOnce).to.equal(true);
+        const provisionArgs = provisionStub.firstCall.args[1];
+        expect(provisionArgs.market).to.equal('us');
+        expect(provisionArgs.languageCode).to.equal('en');
+        expect(provisionArgs.brandDomain).to.equal('acme.com');
+        expect(provisionArgs.brandName).to.equal('New Brand');
+        // provisioning happens before the row is written, and its outputs are
+        // persisted onto the row.
+        expect(upsertStub.calledOnce).to.equal(true);
+        expect(upsertStub.calledAfter(provisionStub)).to.equal(true);
+        const upsertArgs = upsertStub.firstCall.args[0];
+        expect(upsertArgs.forceBrandId).to.equal(provisionArgs.brandId);
+        expect(upsertArgs.semrushWorkspaceId).to.equal('ws-1');
+      });
+
+      it('returns the provisioning error and does NOT create the brand on failure', async () => {
+        const err = new Error('Organization has no Semrush workspace configured');
+        err.status = 400;
+        const provisionStub = sinon.stub().rejects(err);
+        const upsertStub = sinon.stub().resolves({ id: 'x' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(upsertStub.called).to.equal(false);
+      });
+
+      it('returns 400 when semrushMarket lacks a languageCode', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', urls: [{ value: 'https://acme.com' }], semrushMarket: { market: 'us' } },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(provisionStub.called).to.equal(false);
+      });
+
+      it('returns 400 when no primary URL is present to derive a domain', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', urls: [], semrushMarket: { market: 'us', languageCode: 'en' } },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(provisionStub.called).to.equal(false);
+      });
+
+      it('does NOT provision when no semrushMarket is supplied (flat create)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand' },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(false);
+      });
+    });
+
     it('returns 400 when brand name is missing', async () => {
       const response = await brandsController.createBrandForOrg({
         ...context,

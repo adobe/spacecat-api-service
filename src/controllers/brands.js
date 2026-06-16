@@ -9,6 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { randomUUID } from 'crypto';
+
 import BrandClient from '@adobe/spacecat-shared-brand-client';
 import {
   badRequest,
@@ -48,6 +50,7 @@ import {
   getBrandById,
   getBrandBySite,
 } from '../support/brands-storage.js';
+import { provisionBrandSubworkspace } from '../support/serenity/brand-provisioning.js';
 import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
@@ -67,6 +70,28 @@ import {
 } from '../support/topics-storage.js';
 
 const HEADER_ERROR = 'x-error';
+
+/**
+ * Derives the brand domain (hostname) from a brand-create payload's URLs, used as
+ * the Semrush project `domain` when provisioning a Semrush-mode brand. Takes the
+ * first non-empty URL (the primary), tolerating bare hostnames and missing
+ * schemes. Returns null when no usable URL is present.
+ */
+function brandDomainFromPayload(brandData) {
+  const urls = Array.isArray(brandData?.urls) ? brandData.urls : [];
+  const first = urls
+    .map((u) => (typeof u === 'string' ? u : u?.value))
+    .find(hasText);
+  if (!hasText(first)) {
+    return null;
+  }
+  try {
+    const url = new URL(first.includes('://') ? first : `https://${first}`);
+    return url.hostname || null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * BrandsController. Provides methods to read brands and brand guidelines.
@@ -1314,12 +1339,43 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
+      // Semrush-prompts mode (serenity dual-mode): the UI sends an initial market
+      // (location + language). Provision the brand's Semrush sub-workspace +
+      // project FIRST, and only write the brand row once that succeeds — so a
+      // brand never exists without a valid Semrush side. The pre-generated id is
+      // the sub-workspace title key and is forced onto the row.
+      let provisionedBrandId = null;
+      let provisionedWorkspaceId = null;
+      const { semrushMarket } = brandData;
+      if (isNonEmptyObject(semrushMarket)) {
+        const { market, languageCode } = semrushMarket;
+        if (!hasText(market) || !hasText(languageCode)) {
+          return badRequest('semrushMarket requires market and languageCode');
+        }
+        const brandDomain = brandDomainFromPayload(brandData);
+        if (!hasText(brandDomain)) {
+          return badRequest('A primary URL is required to provision a Semrush brand');
+        }
+        provisionedBrandId = randomUUID();
+        const provisioned = await provisionBrandSubworkspace(context, {
+          spaceCatId,
+          brandId: provisionedBrandId,
+          brandName: brandData.name,
+          market,
+          languageCode,
+          brandDomain,
+        }, log);
+        provisionedWorkspaceId = provisioned.semrushWorkspaceId;
+      }
+
       const created = await upsertBrand({
         organizationId: spaceCatId,
         brand: brandData,
         postgrestClient,
         updatedBy,
         log,
+        forceBrandId: provisionedBrandId,
+        semrushWorkspaceId: provisionedWorkspaceId,
       });
 
       return createResponse(created, 201);

@@ -487,6 +487,15 @@ export async function upsertBrand({
   postgrestClient,
   updatedBy = 'system',
   log = console,
+  // Serenity-first provisioning: when a brand is created in Semrush-prompts mode
+  // the sub-workspace + project are provisioned BEFORE the row is written, so the
+  // controller supplies the pre-generated brand id (used as the sub-workspace
+  // title key) and the resulting sub-workspace pointer to persist atomically with
+  // the row. Both default to null (normal create — DB generates the id, the brand
+  // stays in flat mode). These are explicit params, NOT read from `brand`, so a
+  // client-supplied id can never force a row id.
+  forceBrandId = null,
+  semrushWorkspaceId = null,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -517,10 +526,15 @@ export async function upsertBrand({
     throw new Error(`Failed to look up existing brand "${brand.name}": ${existingError.message}`);
   }
 
-  // A brand cannot be active without a base site ID — but respect persisted state
-  // on the update path (the DB row may already have site_id set).
-  const hasBaseSite = hasText(brand.baseSiteId) || hasText(existing?.site_id);
-  const status = (!hasBaseSite && (brand.status || 'active') === 'active')
+  // An active brand must be anchored by either a SpaceCat base site OR a Semrush
+  // sub-workspace (serenity dual-mode): a Semrush brand has no SpaceCat site, but
+  // its sub-workspace (semrush_workspace_id, set on the serenity-first create
+  // path) is a valid anchor — mirrors the relaxed chk_active_brand_has_site_id
+  // DB constraint. Respect persisted site_id on the update path.
+  const hasAnchor = hasText(brand.baseSiteId)
+    || hasText(existing?.site_id)
+    || hasText(semrushWorkspaceId);
+  const status = (!hasAnchor && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
 
@@ -537,6 +551,16 @@ export async function upsertBrand({
     social: [],
     updated_by: updatedBy,
   };
+
+  // Serenity-first create: force the pre-generated id (so the row matches the
+  // sub-workspace title key) and bind the brand to its sub-workspace in the same
+  // write. Both only ever set on a fresh Semrush-mode create.
+  if (hasText(forceBrandId)) {
+    row.id = forceBrandId;
+  }
+  if (hasText(semrushWorkspaceId)) {
+    row.semrush_workspace_id = semrushWorkspaceId;
+  }
 
   // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
   // when the brand has no site_id yet — re-onboarding/re-upserting an existing

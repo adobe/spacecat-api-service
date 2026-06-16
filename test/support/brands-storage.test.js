@@ -625,6 +625,89 @@ describe('brands-storage', () => {
       expect(brandsUpsert.row.site_id).to.equal('new-site');
     });
 
+    it('forces the brand id and binds the sub-workspace on the upsert row (serenity-first create)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+          { data: { id: 'forced-id', name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' },
+        postgrestClient: client,
+        forceBrandId: 'forced-id',
+        semrushWorkspaceId: 'ws-9999',
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.id).to.equal('forced-id');
+      expect(brandsUpsert.row.semrush_workspace_id).to.equal('ws-9999');
+    });
+
+    it('omits id and semrush_workspace_id from the row when not provided (default create)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row).to.not.have.property('id');
+      expect(brandsUpsert.row).to.not.have.property('semrush_workspace_id');
+    });
+
+    it('keeps the brand active without a site_id when a semrush_workspace_id anchors it', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', status: 'active' }, // no baseSiteId
+        postgrestClient: client,
+        semrushWorkspaceId: 'ws-1',
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.status).to.equal('active');
+      expect(brandsUpsert.row.semrush_workspace_id).to.equal('ws-1');
+      expect(brandsUpsert.row).to.not.have.property('site_id');
+    });
+
+    it('downgrades to pending when neither site_id nor semrush_workspace_id anchors the brand', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', status: 'active' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.status).to.equal('pending');
+    });
+
     it('does NOT overwrite an existing brand site_id and warns (LLMO-5556)', async () => {
       const log = { warn: sinon.stub(), info: sinon.stub(), error: sinon.stub() };
       const client = createCapturingClient({
