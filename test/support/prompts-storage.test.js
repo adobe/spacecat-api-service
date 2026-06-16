@@ -28,6 +28,7 @@ import {
   getPromptStats,
   normalizeIntent,
   isMissingIntentColumnError,
+  cascadeBrandRegionToPrompts,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -3240,6 +3241,125 @@ describe('prompts-storage', () => {
       // Known-unsupported client: intent never set on the patch up front, so the
       // second update's patch carries no `intent` key.
       expect(updateStub.getCall(2).args[0]).to.not.have.property('intent');
+    });
+  });
+
+  describe('cascadeBrandRegionToPrompts (LLMO-5645)', () => {
+    // Mock client: the read path ends at `.limit()` (resolves the prompt rows);
+    // the update path ends at `.select('id')` and is awaited (thenable). Each
+    // `.from()` returns a fresh chain so read and update do not interfere.
+    function makeCascadeClient(promptRows) {
+      const updates = [];
+      const client = {
+        from: () => {
+          let patch = null;
+          let ids = null;
+          const chain = {
+            select() { return chain; },
+            update(p) {
+              patch = p;
+              return chain;
+            },
+            eq() { return chain; },
+            neq() { return chain; },
+            limit() { return Promise.resolve({ data: promptRows, error: null }); },
+            in(_col, idList) {
+              ids = idList;
+              return chain;
+            },
+            then(resolve) {
+              updates.push({ patch, ids });
+              const rows = (ids || []).map((id) => ({ id }));
+              return resolve({ data: rows, error: null });
+            },
+          };
+          return chain;
+        },
+      };
+      return { client, updates };
+    }
+
+    it('rewrites only prompts still on the old brand region, sparing multi-market', async () => {
+      const { client, updates } = makeCascadeClient([
+        { id: 'p1', regions: ['WW'] }, // untouched default → cascade
+        { id: 'p2', regions: ['US', 'DE'] }, // intentional multi-market → spare
+        { id: 'p3', regions: ['ww'] }, // case-insensitive match → cascade
+        { id: 'p4', regions: ['GB'] }, // different single market → spare
+      ]);
+
+      const result = await cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: client,
+      });
+
+      expect(result.updated).to.equal(2);
+      expect(result.candidates).to.equal(2);
+      expect(updates).to.have.lengthOf(1);
+      expect(updates[0].ids).to.deep.equal(['p1', 'p3']);
+      expect(updates[0].patch.regions).to.deep.equal(['US']);
+    });
+
+    it('chunks bulk updates across the 200-row boundary', async () => {
+      const rows = Array.from({ length: 201 }, (_, i) => ({ id: `p${i}`, regions: ['WW'] }));
+      const { client, updates } = makeCascadeClient(rows);
+
+      const result = await cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: client,
+      });
+
+      expect(result.candidates).to.equal(201);
+      expect(result.updated).to.equal(201);
+      // 200 + 1 → two chunked update calls.
+      expect(updates).to.have.lengthOf(2);
+      expect(updates[0].ids).to.have.lengthOf(200);
+      expect(updates[1].ids).to.have.lengthOf(1);
+    });
+
+    it('is a no-op when the region did not effectively change (case/order-insensitive)', async () => {
+      const { client, updates } = makeCascadeClient([{ id: 'p1', regions: ['US'] }]);
+
+      const result = await cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US'],
+        newRegions: ['us'],
+        postgrestClient: client,
+      });
+
+      expect(result.updated).to.equal(0);
+      expect(updates).to.have.lengthOf(0);
+    });
+
+    it('updates nothing when no prompt is on the old default', async () => {
+      const { client, updates } = makeCascadeClient([{ id: 'p1', regions: ['DE'] }]);
+
+      const result = await cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: client,
+      });
+
+      expect(result.updated).to.equal(0);
+      expect(updates).to.have.lengthOf(0);
+    });
+
+    it('throws when the PostgREST client is missing', async () => {
+      await expect(cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: {},
+      })).to.be.rejectedWith('PostgREST client is required');
     });
   });
 });

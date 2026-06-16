@@ -39,6 +39,7 @@ import {
   checkPromptsExist,
   getPromptStats,
   resolveBrandUuid,
+  cascadeBrandRegionToPrompts,
 } from '../support/prompts-storage.js';
 import {
   listBrands,
@@ -1368,6 +1369,15 @@ function BrandsController(ctx, log, env) {
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
 
+      // LLMO-5645: capture the brand region BEFORE the update so we can cascade
+      // a region change to the brand's prompt regions (the field DRS schedules
+      // off). Only read when a region change was actually requested.
+      let oldRegions = null;
+      if (updates.region !== undefined) {
+        const before = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        oldRegions = before?.region || [];
+      }
+
       const updated = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -1379,6 +1389,33 @@ function BrandsController(ctx, log, env) {
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
+      // LLMO-5645: propagate the new brand region to prompts whose regions are
+      // still the untouched default (guarded against clobbering intentional
+      // multi-market prompts). A DRS schedule re-sync then picks up the new
+      // market on its next run.
+      if (updates.region !== undefined) {
+        try {
+          const result = await cascadeBrandRegionToPrompts({
+            organizationId: spaceCatId,
+            brandUuid,
+            oldRegions,
+            newRegions: updated.region || [],
+            postgrestClient,
+            updatedBy,
+            log,
+          });
+          if (result.updated > 0) {
+            log.info(`Cascaded brand ${brandUuid} region change to ${result.updated} prompt(s); `
+              + 'DRS schedule re-sync required to apply the new market');
+          }
+        } catch (cascadeError) {
+          // Non-fatal: the brand region was updated. Surface the cascade gap so
+          // it can be retried (a follow-up region edit re-runs the cascade).
+          log.error(`Brand ${brandUuid} region updated but prompt cascade failed: ${cascadeError.message}`);
+        }
+      }
+
       return ok(updated);
     } catch (error) {
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);

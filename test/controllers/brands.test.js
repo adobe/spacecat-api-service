@@ -4817,3 +4817,92 @@ describe('Brands Controller', () => {
     });
   });
 });
+
+describe('Brands Controller — region cascade wiring (LLMO-5645)', () => {
+  const ORG_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
+  const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+  const loggerStub = {
+    info: stub(), error: stub(), warn: stub(), debug: stub(),
+  };
+  const mockEnv = { BRAND_IMS_HOST: 'https://ims-na1.adobelogin.com' };
+
+  function buildContext() {
+    return {
+      dataAccess: {
+        Organization: { findById: stub().resolves({ getId: () => ORG_ID }) },
+        services: { postgrestClient: { from: () => ({}) } },
+      },
+      attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+    };
+  }
+
+  async function mountController(cascadeStub) {
+    return esmock('../../src/controllers/brands.js', {
+      '../../src/support/prompts-storage.js': {
+        resolveBrandUuid: stub().resolves(BRAND_UUID),
+        cascadeBrandRegionToPrompts: cascadeStub,
+      },
+      '../../src/support/brands-storage.js': {
+        getBrandById: stub().resolves({ id: BRAND_UUID, region: ['WW'] }),
+        updateBrand: stub().resolves({ id: BRAND_UUID, region: ['US'] }),
+      },
+      '../../src/support/access-control-util.js': {
+        default: {
+          fromContext: () => ({ hasAccess: async () => true, hasAdminAccess: () => true }),
+        },
+      },
+    });
+  }
+
+  it('cascades the brand region to prompts when region changes', async () => {
+    const cascadeStub = stub().resolves({ updated: 3, candidates: 3, truncated: false });
+    const BrandsControllerMocked = await mountController(cascadeStub);
+    const ctx = buildContext();
+    const controller = BrandsControllerMocked(ctx, loggerStub, mockEnv);
+
+    const response = await controller.updateBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: { region: ['US'] },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(cascadeStub).to.have.been.calledOnce;
+    const arg = cascadeStub.firstCall.args[0];
+    expect(arg.oldRegions).to.deep.equal(['WW']);
+    expect(arg.newRegions).to.deep.equal(['US']);
+    expect(arg.brandUuid).to.equal(BRAND_UUID);
+  });
+
+  it('does not cascade when the update carries no region change', async () => {
+    const cascadeStub = stub().resolves({ updated: 0, candidates: 0, truncated: false });
+    const BrandsControllerMocked = await mountController(cascadeStub);
+    const ctx = buildContext();
+    const controller = BrandsControllerMocked(ctx, loggerStub, mockEnv);
+
+    const response = await controller.updateBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: { name: 'Renamed Brand' },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(cascadeStub).to.not.have.been.called;
+  });
+
+  it('still returns 200 when the cascade fails (non-fatal)', async () => {
+    const cascadeStub = stub().rejects(new Error('boom'));
+    const BrandsControllerMocked = await mountController(cascadeStub);
+    const ctx = buildContext();
+    const controller = BrandsControllerMocked(ctx, loggerStub, mockEnv);
+
+    const response = await controller.updateBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: { region: ['US'] },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(cascadeStub).to.have.been.calledOnce;
+  });
+});

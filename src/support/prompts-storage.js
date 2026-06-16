@@ -898,6 +898,122 @@ export async function updatePromptById({
 }
 
 /**
+ * Normalizes a regions array for set comparison: lower-cased, trimmed, non-empty
+ * codes, sorted. Used by the brand-region cascade so casing/order differences
+ * never defeat the "untouched default" guard.
+ *
+ * @param {string[]} regions
+ * @returns {string[]} normalized, sorted region codes
+ */
+function normalizeRegionsForCompare(regions) {
+  if (!Array.isArray(regions)) {
+    return [];
+  }
+  return regions
+    .map((r) => (typeof r === 'string' ? r : String(r)).trim().toLowerCase())
+    .filter((r) => r.length > 0)
+    .sort();
+}
+
+/**
+ * Cascades a brand-level region change to that brand's prompt `regions`
+ * (LLMO-5645). DRS schedules off each prompt's `regions`, so a brand-level
+ * region edit only reaches DRS once the prompts are rewritten.
+ *
+ * GUARD: only prompts whose `regions` still EQUAL the OLD brand region (the
+ * untouched onboarding default) are rewritten. Prompts a customer deliberately
+ * set to a different or multi-market value (e.g. ["US","DE"]) are left alone.
+ * Comparison is case- and order-insensitive. Deleted prompts are skipped.
+ *
+ * Callers MUST trigger a DRS schedule re-sync afterwards so DynamoDB schedules
+ * drop the stale `-<OLD>` entries and create `-<NEW>` ones.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {string} params.brandUuid - brands.id (uuid)
+ * @param {string[]} params.oldRegions - brand regions BEFORE the update
+ * @param {string[]} params.newRegions - brand regions AFTER the update
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {string} [params.updatedBy] - User performing the cascade
+ * @param {object} [params.log] - Logger
+ * @returns {Promise<{updated:number, candidates:number, truncated:boolean}>}
+ */
+export async function cascadeBrandRegionToPrompts({
+  organizationId,
+  brandUuid,
+  oldRegions,
+  newRegions,
+  postgrestClient,
+  updatedBy = 'system',
+  log = console,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const oldKey = normalizeRegionsForCompare(oldRegions);
+  const newKey = normalizeRegionsForCompare(newRegions);
+  // No-op when the brand region did not effectively change.
+  if (oldKey.join(',') === newKey.join(',')) {
+    return { updated: 0, candidates: 0, truncated: false };
+  }
+
+  // Fetch the brand's non-deleted prompts. A single brand carries tens to a few
+  // hundred prompts in practice; cap the read and warn (never silently truncate)
+  // if a brand somehow exceeds it so the operator knows the cascade was partial.
+  const READ_CAP = 5000;
+  const { data, error } = await postgrestClient
+    .from('prompts')
+    .select('id, regions')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandUuid)
+    .neq('status', 'deleted')
+    .limit(READ_CAP);
+
+  if (error) {
+    throw new Error(`Failed to read prompts for region cascade: ${error.message}`);
+  }
+
+  const prompts = data || [];
+  const truncated = prompts.length >= READ_CAP;
+  if (truncated) {
+    log.warn?.(`cascadeBrandRegionToPrompts: brand ${brandUuid} has >= ${READ_CAP} prompts; `
+      + 'region cascade may be partial — re-run if needed');
+  }
+
+  // Guard: only rewrite prompts still on the OLD brand region (untouched default).
+  const targetKey = oldKey.join(',');
+  const matchedIds = prompts
+    .filter((p) => normalizeRegionsForCompare(p.regions).join(',') === targetKey)
+    .map((p) => p.id);
+
+  if (matchedIds.length === 0) {
+    return { updated: 0, candidates: 0, truncated };
+  }
+
+  // Bulk-update in chunks to keep the PostgREST `in.()` filter URL bounded.
+  const CHUNK = 200;
+  let updated = 0;
+  for (let i = 0; i < matchedIds.length; i += CHUNK) {
+    const chunk = matchedIds.slice(i, i + CHUNK);
+    // eslint-disable-next-line no-await-in-loop
+    const { data: rows, error: updErr } = await postgrestClient
+      .from('prompts')
+      .update({ regions: newRegions, updated_by: updatedBy })
+      .eq('organization_id', organizationId)
+      .eq('brand_id', brandUuid)
+      .in('id', chunk)
+      .select('id');
+    if (updErr) {
+      throw new Error(`Failed to cascade region to prompts: ${updErr.message}`);
+    }
+    updated += (rows || []).length;
+  }
+
+  return { updated, candidates: matchedIds.length, truncated };
+}
+
+/**
  * Soft-deletes a prompt by setting status to 'deleted'.
  *
  * @param {object} params

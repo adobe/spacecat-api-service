@@ -3860,6 +3860,39 @@ describe('LLMO Onboarding Functions', () => {
     });
   });
 
+  describe('triggerBrandalfOnboardingJob region plumbing (LLMO-5645)', () => {
+    const baseArgs = {
+      organizationId: 'org123',
+      siteId: 'site123',
+      imsOrgId: 'ABC123@AdobeOrg',
+      brandName: 'Test Brand',
+      companyWebsite: 'https://example.com',
+      onboardingMode: 'v2',
+      log: { info: () => {}, debug: () => {}, error: () => {} },
+    };
+
+    it('forwards the operator-selected market in the DRS job parameters', async () => {
+      const { triggerBrandalfOnboardingJob } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+      const submitJob = sinon.stub().resolves({ job_id: 'job-1' });
+
+      await triggerBrandalfOnboardingJob({ ...baseArgs, region: 'US', drsClient: { submitJob } });
+
+      const { parameters } = submitJob.firstCall.args[0];
+      expect(parameters.region).to.equal('US');
+      expect(parameters.prompt_type).to.equal('brandalf');
+    });
+
+    it('omits region from the DRS job parameters when no market was selected', async () => {
+      const { triggerBrandalfOnboardingJob } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+      const submitJob = sinon.stub().resolves({ job_id: 'job-1' });
+
+      await triggerBrandalfOnboardingJob({ ...baseArgs, drsClient: { submitJob } });
+
+      const { parameters } = submitJob.firstCall.args[0];
+      expect(parameters).to.not.have.property('region');
+    });
+  });
+
   describe('buildInitialCustomerConfigV2', () => {
     it('builds a single active brand config for onboarding', async () => {
       const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
@@ -3889,6 +3922,22 @@ describe('LLMO Onboarding Functions', () => {
       expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['gl'] }]);
       expect(brand.updatedBy).to.equal('tester@example.com');
       expect(brand.prompts).to.deep.equal([]);
+    });
+
+    it('seeds the operator-selected market in place of the gl placeholder (LLMO-5645)', async () => {
+      const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      const result = buildInitialCustomerConfigV2({
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        region: 'US',
+        updatedBy: 'tester@example.com',
+      });
+
+      const [brand] = result.customer.brands;
+      expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['US'] }]);
     });
   });
 
