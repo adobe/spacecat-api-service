@@ -196,6 +196,69 @@ v2-brand-for-org:
       '503':
         description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
 
+v2-brand-status-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  patch:
+    tags:
+      - brands
+      - customer-config
+    summary: Transition a brand's status (v2)
+    description: |
+      Explicitly transitions a brand's lifecycle status (approve -> `active`,
+      move-to-pending -> `pending`). This is the sanctioned path for an
+      active -> pending demotion; the generic
+      `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}` refuses that transition (LLMO-5587).
+    operationId: transitionBrandStatusForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - status
+            properties:
+              status:
+                type: string
+                enum:
+                  - active
+                  - pending
+                description: Target brand status.
+    responses:
+      '200':
+        description: Brand status updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or brand not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
 v2-brand-for-org-site:
   parameters:
     - name: spaceCatId

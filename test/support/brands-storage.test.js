@@ -22,6 +22,7 @@ import {
   upsertBrand,
   updateBrand,
   deleteBrand,
+  setBrandStatus,
   listRegions,
 } from '../../src/support/brands-storage.js';
 
@@ -1795,6 +1796,77 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(deleteBrand(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to delete brand: delete failed');
+    });
+  });
+
+  describe('setBrandStatus', () => {
+    it('throws when postgrestClient is missing', async () => {
+      await expect(setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'pending', postgrestClient: null,
+      })).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('updates status and returns the mapped brand (LLMO-5587 intentful path)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          // 1st call: status update
+          { data: { id: BRAND_ID }, error: null },
+          // 2nd call: getBrandById re-fetch
+          { data: makeBrandRow({ status: 'pending' }), error: null },
+        ],
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        status: 'pending',
+        postgrestClient,
+        updatedBy: 'user@test.com',
+      });
+
+      expect(result).to.not.be.null;
+      expect(result.status).to.equal('pending');
+    });
+
+    it('returns null when the brand is not found', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: null, error: null },
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      });
+
+      expect(result).to.be.null;
+    });
+
+    it('maps chk_active_brand_has_site_id violation to a 400 (lifted from #2504)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{
+          data: null,
+          error: {
+            code: '23514',
+            message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+          },
+        }],
+      });
+
+      const err = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal('Cannot activate a brand without a base site URL');
+      expect(err.status).to.equal(400);
+    });
+
+    it('throws a generic error on other database failures', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{ data: null, error: { message: 'boom' } }],
+      });
+
+      await expect(setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'pending', postgrestClient,
+      })).to.be.rejectedWith('Failed to set brand status: boom');
     });
   });
 });

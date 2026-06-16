@@ -4816,4 +4816,178 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(500);
     });
   });
+
+  describe('transitionBrandStatusForOrg', () => {
+    const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID,
+              name: 'Express',
+              status: 'pending',
+              origin: 'human',
+              updated_at: '2026-01-02T00:00:00Z',
+              updated_by: 'user@test.com',
+              brand_aliases: [],
+              brand_social_accounts: [],
+              brand_earned_sources: [],
+              competitors: [],
+              brand_sites: [],
+            },
+            error: null,
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 200 and transitions status via the explicit path (LLMO-5587)', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns 400 when status is not active or pending', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'deleted' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when status is missing', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when brand not found during resolve', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.transitionBrandStatusForOrg({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB connection lost')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
 });
