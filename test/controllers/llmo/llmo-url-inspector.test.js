@@ -454,6 +454,8 @@ describe('URL Inspector Handlers', () => {
             { week_start: '2026-01-12', value: 4400 },
             { week_start: '2026-01-19', value: 5000 },
           ],
+          avg_citability_score: 88.0,
+          deployed_at_edge: true,
           total_count: 100,
         },
         {
@@ -468,6 +470,8 @@ describe('URL Inspector Handlers', () => {
           agentic_hits_trend: [],
           referral_hits: 0,
           referral_hits_trend: [],
+          avg_citability_score: null,
+          deployed_at_edge: false,
           total_count: 100,
         },
       ];
@@ -506,6 +510,13 @@ describe('URL Inspector Handlers', () => {
       ]);
       expect(body.urls[1].referralHits).to.equal(0);
       expect(body.urls[1].referralHitsTrend).to.deep.equal([]);
+      // LLMO-5586: citability/deployed come keyed off this RPC so the owned
+      // table no longer fans out to by_url. null citability maps to null;
+      // deployed defaults to false.
+      expect(body.urls[0].avgCitabilityScore).to.equal(88.0);
+      expect(body.urls[0].deployedAtEdge).to.equal(true);
+      expect(body.urls[1].avgCitabilityScore).to.be.null;
+      expect(body.urls[1].deployedAtEdge).to.equal(false);
     });
 
     // Same defence-in-depth as the agentic-trend test below — referral side
