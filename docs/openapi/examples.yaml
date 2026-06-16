@@ -597,6 +597,36 @@ CustomerConfigAdobe:
         - "News & Entertainment"
         - "Software & Technology"
         - "Professional Services"
+llmo-config-with-claims:
+  summary: LLMO configuration with claims guidance
+  value:
+    entities: { }
+    categories: { }
+    topics: { }
+    aiTopics: { }
+    brands:
+      aliases: [ ]
+    competitors:
+      competitors: [ ]
+    claims:
+      brandContext: "Treat Firefly as part of the Adobe product family."
+      sentimentGuidance: "Claims about setup friction should be classified as unfavorable."
+llmo-config-response-with-claims:
+  summary: LLMO configuration response with claims guidance
+  value:
+    config:
+      entities: { }
+      categories: { }
+      topics: { }
+      aiTopics: { }
+      brands:
+        aliases: [ ]
+      competitors:
+        competitors: [ ]
+      claims:
+        brandContext: "Treat Firefly as part of the Adobe product family."
+        sentimentGuidance: "Claims about setup friction should be classified as unfavorable."
+    version: "abc123def456"
 customer-config-v2-create:
   description: Example for creating a V2 customer configuration (POST)
   value:
