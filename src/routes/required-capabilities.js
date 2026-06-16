@@ -97,6 +97,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/by-status',
   'GET /sites/:siteId/agentic-traffic/by-user-agent',
   'GET /sites/:siteId/agentic-traffic/by-url',
+  'POST /sites/:siteId/agentic-traffic/hits-by-urls',
   'GET /sites/:siteId/agentic-traffic/filter-dimensions',
   'GET /sites/:siteId/agentic-traffic/weeks',
   'GET /sites/:siteId/agentic-traffic/movers',

@@ -737,6 +737,90 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
   };
 }
 
+/**
+ * POST /sites/:siteId/agentic-traffic/hits-by-urls
+ *
+ * Bounded keyed lookup of per-URL agentic totalHits + weekly hitsTrend for a
+ * caller-supplied set of canonical URLs (LLMO-5586). Backs the per-URL
+ * consumers (URL Inspector, opportunity sections, domain chart) that only need
+ * hits, so they no longer eager-page the expensive ranked `by-url` grid.
+ *
+ * Body: {
+ *   urls: [{ host, urlPath }],   // the URLs already on screen
+ *   startDate, endDate,          // same shape as the other agentic endpoints
+ *   platform?, agentType?, agentTypes?, userAgent?
+ * }
+ * Returns: { rows: [{ url, host, urlPath, totalHits, hitsTrend }] }
+ *
+ * Calls rpc_agentic_hits_for_urls, which matches rpc_agentic_traffic_by_url's
+ * fact-derived totals/trend exactly without the full-site scan + ranking.
+ */
+const MAX_HITS_BY_URLS = 2000;
+
+export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) {
+  return async function getAgenticTrafficHitsByUrls(context) {
+    return withAgenticTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'hits-by-urls',
+      async (ctx, client, siteId) => {
+        const parsed = parseAgenticTrafficParams(ctx);
+
+        const rawUrls = ctx.data?.urls;
+        if (!Array.isArray(rawUrls)) {
+          return badRequest('urls must be an array of { host, urlPath } objects');
+        }
+        if (rawUrls.length > MAX_HITS_BY_URLS) {
+          return badRequest(`urls must contain at most ${MAX_HITS_BY_URLS} entries`);
+        }
+
+        // Normalise to the RPC's { host, url_path } shape; accept camelCase or
+        // snake_case for url_path and drop entries missing host or path.
+        const urls = rawUrls
+          .map((u) => ({ host: u?.host, url_path: u?.urlPath ?? u?.url_path }))
+          .filter((u) => hasText(u.host) && hasText(u.url_path));
+
+        if (urls.length === 0) {
+          return cachedOk({ rows: [] });
+        }
+
+        const rpcParams = {
+          p_site_id: siteId,
+          p_start_date: parsed.startDate,
+          p_end_date: parsed.endDate,
+          p_urls: urls,
+          p_platform: parsed.platform,
+          p_agent_type: parsed.agentType,
+          p_user_agent: parsed.userAgent,
+          ...buildAgentTypesRpcParam(parsed),
+        };
+
+        const { data, error } = await client.rpc('rpc_agentic_hits_for_urls', rpcParams);
+        if (error) {
+          ctx.log.error(`Agentic traffic hits-by-urls PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch agentic hits by URLs');
+        }
+        /* c8 ignore next */
+        const rows = data ?? [];
+        return cachedOk({
+          rows: rows.map((row) => ({
+            url: row.url || '',
+            host: row.host || '',
+            urlPath: row.url_path || '',
+            totalHits: Number(row.total_hits ?? 0),
+            hitsTrend: Array.isArray(row.hits_trend)
+              ? row.hits_trend.map((point) => ({
+                weekStart: point.week_start,
+                value: Number(point.value ?? 0),
+              }))
+              : [],
+          })),
+        });
+      },
+    );
+  };
+}
+
 // POST /sites/:siteId/agentic-traffic/urls/export — cache-check S3 → enqueue SQS on miss.
 export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) {
   return async function exportAgenticTrafficUrls(context) {

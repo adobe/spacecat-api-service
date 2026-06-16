@@ -2864,6 +2864,102 @@ llmo-agentic-traffic-by-url:
       - ims_key: []
       - scoped_api_key: []
 
+llmo-agentic-traffic-hits-by-urls:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Per-URL agentic hits (total + weekly trend) for a known URL set
+    description: |
+      Queries `rpc_agentic_hits_for_urls` (LLMO-5586). A bounded, keyed lookup
+      that returns only `totalHits` + weekly `hitsTrend` for a caller-supplied
+      set of canonical URLs (the URLs already on screen). Unlike
+      `/agentic-traffic/by-url`, it does not rank, sort, search or paginate the
+      whole site, so it avoids the full-site scan that makes by-url the heaviest
+      query on the Aurora reader. Values match `by-url` for the same URLs and
+      filters.
+
+      At most 2000 URLs per request; a larger set returns `400`. Entries missing
+      a host or path are ignored. The same date-range guardrail as the other
+      agentic endpoints applies (start/end together, span <= 62 days).
+    operationId: getAgenticTrafficHitsByUrls
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [urls]
+            properties:
+              urls:
+                type: array
+                maxItems: 2000
+                items:
+                  type: object
+                  required: [host, urlPath]
+                  properties:
+                    host: { type: string }
+                    urlPath: { type: string }
+              startDate: { type: string, format: date }
+              endDate: { type: string, format: date }
+              platform: { type: string }
+              agentType: { type: string }
+              agentTypes:
+                type: array
+                items: { type: string }
+              userAgent: { type: string }
+          example:
+            urls:
+              - { host: 'www.example.com', urlPath: '/products/widget' }
+              - { host: 'www.example.com', urlPath: '/about' }
+            startDate: '2026-05-01'
+            endDate: '2026-05-28'
+            agentTypes: [Chatbots, Research]
+    responses:
+      '200':
+        description: Per-URL agentic hits + weekly trend for the requested URLs
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      url: { type: string }
+                      host: { type: string }
+                      urlPath: { type: string }
+                      totalHits: { type: integer }
+                      hitsTrend:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            weekStart: { type: string, format: date }
+                            value: { type: integer }
+            example:
+              rows:
+                - url: 'https://www.example.com/products/widget'
+                  host: 'www.example.com'
+                  urlPath: '/products/widget'
+                  totalHits: 1234
+                  hitsTrend:
+                    - { weekStart: '2026-05-04', value: 321 }
+                    - { weekStart: '2026-05-11', value: 410 }
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
 llmo-agentic-traffic-urls-export:
   parameters:
     - $ref: './parameters.yaml#/siteId'
