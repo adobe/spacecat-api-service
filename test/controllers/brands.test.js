@@ -4911,4 +4911,28 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
     expect(findStub).to.not.have.been.called;
     expect(updateStub).to.have.been.calledOnce;
   });
+
+  it('rejects clearing ALL regions (region: []) when any prompt still uses one', async () => {
+    // Removing every region makes all old regions "removed"; the guard fires if
+    // any prompt references one of them.
+    const { Mocked, findStub, updateStub } = await mountController({
+      oldRegion: ['US', 'DE'],
+      blocking: { us: 5, de: 2 },
+    });
+    const ctx = buildContext();
+    const controller = Mocked(ctx, loggerStub, mockEnv);
+
+    const response = await controller.updateBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: { region: [] },
+    });
+
+    expect(response.status).to.equal(400);
+    expect(findStub.firstCall.args[0].newRegions).to.deep.equal([]);
+    const body = await response.json();
+    expect(body.message).to.contain('US (5 prompts)');
+    expect(body.message).to.contain('DE (2 prompts)');
+    expect(updateStub).to.not.have.been.called;
+  });
 });

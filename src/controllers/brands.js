@@ -1374,6 +1374,12 @@ function BrandsController(ctx, log, env) {
       // region would orphan those prompts on a market the brand no longer
       // covers. Reject the change and have the operator relocate the prompts
       // first (consistency guard, enforced before the brand is mutated).
+      //
+      // Best-effort, NOT transactional: there is a TOCTOU window between this
+      // check and the update below — a prompt created in the removed region in
+      // between could slip past. Acceptable given how infrequent brand-region
+      // edits are, and the next edit re-checks; a prompt added later still can't
+      // be scheduled for a region the brand lacks.
       if (updates.region !== undefined) {
         const before = await getBrandById(spaceCatId, brandUuid, postgrestClient);
         const blocking = await findPromptsBlockingRegionRemoval({
