@@ -357,14 +357,14 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   if (token) {
     ({ token, didRevoke } = await handleExistingTokenCycle(collections, ids, token));
   } else {
-    const prevToken = await Token.findLastCreatedBySiteIdAndTokenType(siteId, tokenType);
-    if (prevToken) {
-      try {
+    try {
+      const prevToken = await Token.findLastCreatedBySiteIdAndTokenType(siteId, tokenType);
+      if (prevToken) {
         // Side-effect only: revoke stale grants from previous cycle
         await handleExistingTokenCycle(collections, ids, prevToken);
-      } catch {
-        // cleanup failure must not block new token creation
       }
+    } catch {
+      // previous-cycle lookup/cleanup failure must not block new token creation
     }
     if (!newSuggestionIds.length) {
       return;
