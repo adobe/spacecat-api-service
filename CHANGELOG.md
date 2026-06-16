@@ -1,3 +1,25 @@
+## [1.574.3](https://github.com/adobe/spacecat-api-service/compare/v1.574.2...v1.574.3) (2026-06-15)
+
+
+### Bug Fixes
+
+* reject malformed detectedCdn on PATCH + re-pin shared deps for recoverable log-level fixes ([#2612](https://github.com/adobe/spacecat-api-service/issues/2612)) ([d5b01e2](https://github.com/adobe/spacecat-api-service/commit/d5b01e2f8c2e21a1a3bcea4f4074b3430e92801e)), closes [adobe/spacecat-shared#1681](https://github.com/adobe/spacecat-shared/issues/1681)
+
+## [1.574.2](https://github.com/adobe/spacecat-api-service/compare/v1.574.1...v1.574.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* **brands:** make baseSiteId immutable in upsertBrand (LLMO-5556) ([#2593](https://github.com/adobe/spacecat-api-service/issues/2593)) ([27354bf](https://github.com/adobe/spacecat-api-service/commit/27354bf8ceb37206fa37dba4365917800c27fa93))
+* edge deploy api - support domain wide deployment ([#2605](https://github.com/adobe/spacecat-api-service/issues/2605)) ([bd5c6ce](https://github.com/adobe/spacecat-api-service/commit/bd5c6ce62a9486aa4c046f7548dff7d734ca2ccb))
+
+## [1.574.1](https://github.com/adobe/spacecat-api-service/compare/v1.574.0...v1.574.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* consume launchdarkly-client log-noise fix and dedupe nested copy ([#2606](https://github.com/adobe/spacecat-api-service/issues/2606)) ([e4e641d](https://github.com/adobe/spacecat-api-service/commit/e4e641dfa7f27105b7166b0530a2a04a612bdee7))
+
 # [1.574.0](https://github.com/adobe/spacecat-api-service/compare/v1.573.0...v1.574.0) (2026-06-13)
 
 
