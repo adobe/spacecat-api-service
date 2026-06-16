@@ -199,6 +199,15 @@ describe('utils', () => {
         ],
       });
 
+    // wwwUrlResolver (shared-utils >=1.119) probes bundles.aem.page (today, then yesterday)
+    // to pick the www/non-www variant. Mock the probe's "today" hit with non-empty
+    // bundles so it resolves on the first date and leaves the yesterday interceptor
+    // for autoResolveAuthorUrl's own fetch.
+    const mockBundleProbe = (hostname = 'example.com', domainkey = 'test-domainkey') => nock('https://bundles.aem.page')
+      .get(`/bundles/${hostname}/${todayPath}`)
+      .query({ domainkey })
+      .reply(200, { rumBundles: [{ id: 'probe', host: 'probe.example' }] });
+
     beforeEach(() => {
       sandbox = sinon.createSandbox();
       sandbox.useFakeTimers({ now: testNow, toFake: ['Date'] });
@@ -237,6 +246,8 @@ describe('utils', () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
       mockResolverBundleProbe();
 
+      mockBundleProbe();
+
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
         .query({ domainkey: 'test-domainkey' })
@@ -266,6 +277,8 @@ describe('utils', () => {
     it('returns resolved author URL when RUM bundle has an AEM CS .net publish host', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
       mockResolverBundleProbe();
+
+      mockBundleProbe();
 
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
@@ -325,6 +338,8 @@ describe('utils', () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
       mockResolverBundleProbe();
 
+      mockBundleProbe();
+
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
         .query({ domainkey: 'test-domainkey' })
@@ -348,6 +363,8 @@ describe('utils', () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
       mockResolverBundleProbe();
 
+      mockBundleProbe();
+
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
         .query({ domainkey: 'test-domainkey' })
@@ -362,6 +379,8 @@ describe('utils', () => {
     it('returns null when fetch fails', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
       mockResolverBundleProbe();
+
+      mockBundleProbe();
 
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
@@ -386,6 +405,8 @@ describe('utils', () => {
     it('returns host object when first bundle host is undefined', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
       mockResolverBundleProbe();
+
+      mockBundleProbe();
 
       nock('https://bundles.aem.page')
         .get(`/bundles/example.com/${datePath}`)
