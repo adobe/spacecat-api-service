@@ -754,7 +754,8 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
  *   startDate, endDate,          // same shape as the other agentic endpoints
  *   platform?, agentType?, agentTypes?, userAgent?
  * }
- * Returns: { rows: [{ url, host, urlPath, totalHits, hitsTrend }] }
+ * Returns: { rows: [{ url, host, urlPath, totalHits, hitsTrend,
+ *                      avgCitabilityScore, deployedAtEdge }] }
  *
  * Calls rpc_agentic_hits_for_urls, which matches rpc_agentic_traffic_by_url's
  * fact-derived totals/trend exactly without the full-site scan + ranking.
@@ -819,6 +820,10 @@ export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) 
                 value: Number(point.value ?? 0),
               }))
               : [],
+            avgCitabilityScore: row.avg_citability_score !== null
+              && row.avg_citability_score !== undefined
+              ? Number(row.avg_citability_score) : null,
+            deployedAtEdge: row.deployed_at_edge ?? false,
           })),
         });
       },

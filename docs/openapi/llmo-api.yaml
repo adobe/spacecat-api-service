@@ -2940,6 +2940,8 @@ llmo-agentic-traffic-hits-by-urls:
                           properties:
                             weekStart: { type: string, format: date }
                             value: { type: integer }
+                      avgCitabilityScore: { type: [number, 'null'] }
+                      deployedAtEdge: { type: boolean }
             example:
               rows:
                 - url: 'https://www.example.com/products/widget'
@@ -2949,6 +2951,8 @@ llmo-agentic-traffic-hits-by-urls:
                   hitsTrend:
                     - { weekStart: '2026-05-04', value: 321 }
                     - { weekStart: '2026-05-11', value: 410 }
+                  avgCitabilityScore: 87.5
+                  deployedAtEdge: false
       '400': { $ref: './responses.yaml#/400' }
       '401': { $ref: './responses.yaml#/401' }
       '403': { $ref: './responses.yaml#/403' }

@@ -2201,6 +2201,8 @@ describe('llmo-agentic-traffic', () => {
             url_path: '/a',
             total_hits: 42,
             hits_trend: [{ week_start: '2026-01-05', value: 42 }],
+            avg_citability_score: 87.5,
+            deployed_at_edge: true,
           }],
           error: null,
         },
@@ -2236,6 +2238,8 @@ describe('llmo-agentic-traffic', () => {
         urlPath: '/a',
         totalHits: 42,
         hitsTrend: [{ weekStart: '2026-01-05', value: 42 }],
+        avgCitabilityScore: 87.5,
+        deployedAtEdge: true,
       }]);
     });
 
