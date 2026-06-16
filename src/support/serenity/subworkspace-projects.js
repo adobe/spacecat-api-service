@@ -12,6 +12,8 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+import { resolveLocation } from './locations.js';
+
 /**
  * Shared helpers for the subworkspace path (serenity dual-mode). In subworkspace mode there
  * is no BrandSemrushProject mapping: a brand's markets are enumerated live
@@ -47,9 +49,20 @@ export function mapPublishStatus(publishStatus) {
 }
 
 export function geoOf(project) {
-  const raw = project?.settings?.ai?.location?.id;
+  const ai = project?.settings?.ai;
+  const raw = ai?.location?.id;
   const n = Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : null;
+  if (Number.isInteger(n) && n > 0) {
+    return n;
+  }
+  // Fallback for projects created in the Semrush native UI: they may carry only
+  // a country (settings.ai.country.code) and leave settings.ai.location.id null.
+  // Derive the country-level geoTargetId from the ISO-2 code via the same map
+  // the create path uses, so a country market reads back with the exact
+  // geoTargetId we would have written for it. Sub-national locations (cities,
+  // regions) always carry a real location.id, so this only fills the country gap.
+  const resolved = hasText(ai?.country?.code) ? resolveLocation(ai.country.code) : null;
+  return resolved ? resolved.geoTargetId : null;
 }
 
 export function langOf(project) {

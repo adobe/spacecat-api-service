@@ -31,12 +31,14 @@ const BRAND = 'brand-1';
 const WS = 'subworkspace-ws-1';
 
 function project({
-  id = 'p1', location = 2276, language = 'de', publishStatus = 'live',
+  id = 'p1', location = 2276, language = 'de', country = null, publishStatus = 'live',
   createdAt = '2026-06-01T00:00:00Z', updatedAt = '2026-06-02T00:00:00Z',
 } = {}) {
   // Mirrors the live v1 list item shape: nested location/language objects,
   // updated_at present, created_at usually absent (passed here for mapping
-  // assertions; the no-created_at path is covered separately).
+  // assertions; the no-created_at path is covered separately). `country` mirrors
+  // the Semrush-UI shape where settings.ai.location.id is null but a country is
+  // set (settings.ai.country.code); omitted by default.
   return {
     id,
     publish_status: publishStatus,
@@ -46,6 +48,7 @@ function project({
       ai: {
         location: location === null ? null : { id: location, name: 'X' },
         language: language === null ? null : { id: 'lang-uuid', name: language },
+        ...(country === null ? {} : { country: { code: country, name: 'X' } }),
       },
     },
   };
@@ -87,6 +90,25 @@ describe('subworkspace-projects', () => {
       expect(s.languageCode).to.equal('en');
     });
 
+    it('derives geoTargetId from the country code when location.id is null (Semrush-UI projects)', () => {
+      // CH → 2000 + ISO numeric 756 = 2756.
+      const s = projectToSlice(project({ location: null, country: 'ch', language: 'de' }), BRAND);
+      expect(s.geoTargetId).to.equal(2756);
+      expect(s.languageCode).to.equal('de');
+    });
+
+    it('prefers an explicit location.id over the country fallback', () => {
+      const s = projectToSlice(project({ location: 2840, country: 'ch', language: 'en' }), BRAND);
+      expect(s.geoTargetId).to.equal(2840);
+    });
+
+    it('nulls the geo when location.id is null and the country is unknown or absent', () => {
+      expect(projectToSlice(project({ location: null, country: 'zz', language: 'de' }), BRAND).geoTargetId)
+        .to.equal(null);
+      expect(projectToSlice(project({ location: null, country: null, language: 'de' }), BRAND).geoTargetId)
+        .to.equal(null);
+    });
+
     it('maps createdAt to null and updatedAt to published_at when the live item omits both (live shape)', () => {
       const live = {
         id: 'p9',
@@ -118,6 +140,19 @@ describe('subworkspace-projects', () => {
       expect(result).to.have.length(2);
       expect(result.map((m) => m.semrushProjectId)).to.deep.equal(['a', 'b']);
       expect(transport.listProjects).to.have.been.calledOnceWithExactly(WS);
+    });
+
+    it('keeps country-only projects (location.id null, country set) as markets', async () => {
+      const transport = {
+        listProjects: sinon.stub().resolves({
+          items: [project({
+            id: 'co', location: null, country: 'us', language: 'en',
+          })],
+        }),
+      };
+      const result = await listMarkets(transport, WS, BRAND);
+      expect(result).to.have.length(1);
+      expect(result[0].geoTargetId).to.equal(2840); // US → 2000 + 840
     });
 
     it('returns an empty array for an empty/absent listing', async () => {
