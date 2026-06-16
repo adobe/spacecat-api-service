@@ -474,6 +474,22 @@ describe('URL Inspector Handlers', () => {
           deployed_at_edge: false,
           total_count: 100,
         },
+        {
+          // Row that OMITS citability/deployed entirely (defends the deploy-order
+          // gap where an older RPC hasn't shipped the columns yet).
+          url: 'https://example.com/page3',
+          citations: 10,
+          prompts_cited: 2,
+          products: [],
+          regions: [],
+          weekly_citations: [],
+          weekly_prompts_cited: [],
+          agentic_hits: 0,
+          agentic_hits_trend: [],
+          referral_hits: 0,
+          referral_hits_trend: [],
+          total_count: 100,
+        },
       ];
 
       const { context } = createContext({}, {}, {
@@ -485,7 +501,7 @@ describe('URL Inspector Handlers', () => {
       const body = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(body.urls).to.have.length(2);
+      expect(body.urls).to.have.length(3);
       expect(body.totalCount).to.equal(100);
       expect(body.urls[0].url).to.equal('https://example.com/page1');
       expect(body.urls[0].citations).to.equal(42);
@@ -517,6 +533,10 @@ describe('URL Inspector Handlers', () => {
       expect(body.urls[0].deployedAtEdge).to.equal(true);
       expect(body.urls[1].avgCitabilityScore).to.be.null;
       expect(body.urls[1].deployedAtEdge).to.equal(false);
+      // page3 omits both columns entirely (deploy-order gap where the RPC
+      // hasn't shipped them): handler must default to null / false, not crash.
+      expect(body.urls[2].avgCitabilityScore).to.be.null;
+      expect(body.urls[2].deployedAtEdge).to.equal(false);
     });
 
     // Same defence-in-depth as the agentic-trend test below — referral side
