@@ -7,6 +7,7 @@ import type { Message } from "@bufbuild/protobuf";
 import type { Brand, COUNTRY_ENUM, Date, DateRange, LLM_ENUM, ORDER_DIRECTION_ENUM, Range } from "../../common/types_pb.js";
 import type { BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from "./enums_pb.js";
 import type { EXPORT_FILE_FORMAT_ENUM } from "../common/messages_pb.js";
+import type { SEARCH_TYPE_ENUM } from "../source/enums_pb.js";
 
 /**
  * Describes the file v2/brand/messages.proto.
@@ -873,6 +874,16 @@ export declare type StatsByLLMRequest = Message<"semrush.services.ai_seo.v2.bran
    * @generated from field: optional string date_to = 5;
    */
   dateTo?: string;
+
+  /**
+   * search_type controls how target is scoped when counting citations: as a whole
+   * root domain, a specific subdomain, a subfolder path, or an exact URL. The scope
+   * item is the target.domain. Unset / UNSPECIFIED is treated as DOMAIN, so existing
+   * callers see no behavior change.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 6;
+   */
+  searchType: SEARCH_TYPE_ENUM;
 };
 
 /**

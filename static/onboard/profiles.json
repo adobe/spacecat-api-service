@@ -133,7 +133,8 @@
 			"structured-data": {},
 			"sitemap": {},
 			"toc": {},
-			"wikipedia-analysis": {}
+			"wikipedia-analysis": {},
+			"money-pages": {}
 		},
 		"imports": {
 			"organic-traffic" : {},

@@ -58,6 +58,9 @@ describe('AiVisibilityController', () => {
   let mockHandleV1PromptGapPrompts;
   let mockHandleV1PromptGapPromptsExport;
   let mockHandleV1PromptPromptResponse;
+  let mockHandleV1BrandStatsByCountry;
+  let mockHandleV1BrandStatsByLlm;
+  let mockHandleV1MetaMeta;
 
   const log = {
     info: sinon.stub(),
@@ -174,6 +177,13 @@ describe('AiVisibilityController', () => {
     mockHandleV1PromptPromptResponse = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1BrandStatsByCountry = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1BrandStatsByLlm = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1MetaMeta = sandbox.stub().resolves({ status: 200, body: {} });
 
     const mod = await esmock('../../src/controllers/ai-visibility.js', {
       '../../src/support/ai-visibility/grpc-transport.js': {
@@ -255,6 +265,15 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/v1/prompt/prompt-response.js': {
         handlePromptResponse: mockHandleV1PromptPromptResponse,
+      },
+      '../../src/support/ai-visibility/handlers/v1/brand/stats-by-country.js': {
+        handleStatsByCountry: mockHandleV1BrandStatsByCountry,
+      },
+      '../../src/support/ai-visibility/handlers/v1/brand/stats-by-llm.js': {
+        handleStatsByLLM: mockHandleV1BrandStatsByLlm,
+      },
+      '../../src/support/ai-visibility/handlers/v1/meta/meta.js': {
+        handleMeta: mockHandleV1MetaMeta,
       },
       '../../third-party/ai-seo-ts/v2/brand/service_pb.js': {
         BrandService: {},
@@ -571,6 +590,9 @@ describe('AiVisibilityController', () => {
       getV1PromptGapPrompts: mockHandleV1PromptGapPrompts,
       getV1PromptGapPromptsExport: mockHandleV1PromptGapPromptsExport,
       getV1PromptPromptResponse: mockHandleV1PromptPromptResponse,
+      getV1BrandStatsByCountry: mockHandleV1BrandStatsByCountry,
+      getV1BrandStatsByLlm: mockHandleV1BrandStatsByLlm,
+      getV1MetaMeta: mockHandleV1MetaMeta,
     });
 
     it('each method invokes its corresponding handler', async () => {

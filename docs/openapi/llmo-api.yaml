@@ -971,7 +971,8 @@ llmo-config:
       Retrieves the LLMO (Large Language Model Optimizer) configuration for a specific site.
       This endpoint retrieves the configuration directly from S3 storage. The configuration
       includes entities (categories, topics, aiTopics), brand aliases, and competitor information.
-      Categories may include optional URLs for content matching.
+      Categories may include optional URLs for content matching. The configuration may also include
+      optional claims guidance fields, each limited to 4000 characters.
 
       If a version parameter is provided, the specific version of the configuration will be
       retrieved. If the version does not exist, a 404 error will be returned. If no version
@@ -997,6 +998,9 @@ llmo-config:
               required:
                 - config
                 - version
+            examples:
+              config-with-claims:
+                $ref: './examples.yaml#/llmo-config-response-with-claims'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -1019,6 +1023,8 @@ llmo-config:
 
       Categories can optionally include URLs that can be either exact URLs or URL prefixes
       (ending with /*) to match against specific content areas.
+      Optional claims guidance fields are accepted under `claims` and each field is limited
+      to 4000 characters.
     operationId: postLlmoConfig
     requestBody:
       required: true
@@ -1026,6 +1032,9 @@ llmo-config:
         application/json:
           schema:
             $ref: './schemas.yaml#/LlmoConfig'
+          examples:
+            config-with-claims:
+              $ref: './examples.yaml#/llmo-config-with-claims'
     responses:
       '200':
         description: LLMO configuration updated successfully
@@ -3678,6 +3687,516 @@ brand-presence-prompt-execution-status:
       '500': { $ref: './responses.yaml#/500' }
       '503':
         description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+# ============ Referral Traffic PG (mysticat PostgREST) ============
+# Site-scoped referral traffic read endpoints backed by the mysticat PostgREST
+# data service. siteId path param is declared at path level via
+# parameters.yaml#/siteId. When the PostgREST / Postgres data service is absent
+# these endpoints return 400 (not 503). Supported `source` values: optel, cdn,
+# adobe_analytics, ga4, cja (Customer Journey Analytics).
+#
+# Date range guardrail (shared with agentic traffic): on by-url, by-url-trend
+# and business-impact, `startDate` and `endDate` must be supplied together —
+# providing only one returns 400. The requested span may not exceed 62 days; a
+# wider span returns 400. Omitting both applies the default 28-day window.
+
+llmo-referral-traffic-has-data:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Whether the site has referral traffic data
+    description: |
+      Returns whether the site has any referral traffic data and which sources
+      are available. Uses a direct table existence check (no RPC). Ignores the
+      `source` query param. Response is cacheable. `availableSources` items are
+      `optel` or `cdn` only, in priority order (optel first).
+    operationId: getReferralTrafficHasData
+    responses:
+      '200':
+        description: Referral traffic availability
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficHasData'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-filter-dimensions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Distinct referral traffic filter values
+    description: |
+      Returns the distinct filter values (platforms, regions, devices, page
+      intents) and available sources for the selected site and date range.
+      Queries `rpc_referral_traffic_filter_dimensions`.
+    operationId: getReferralTrafficFilterDimensions
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+    responses:
+      '200':
+        description: Referral traffic filter dimensions
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficFilterDimensions'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-kpis:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Aggregated referral traffic KPIs for a site
+    description: |
+      Returns a single row of aggregated referral traffic KPI metrics for the
+      site over the requested date range. Queries `rpc_referral_traffic_kpis`.
+      `bounceRate` and `consentRate` are null for `cdn` / `adobe_analytics`
+      sources; meaningful for `optel` / `ga4`.
+    operationId: getReferralTrafficKpis
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: region, in: query, schema: { type: string } }
+      - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
+      - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+    responses:
+      '200':
+        description: Aggregated KPI metrics
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficKpis'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-trend:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Referral traffic KPI time series for a site
+    description: |
+      Returns referral traffic metrics per day over the requested date range.
+      Queries `rpc_referral_traffic_trend`. Business metrics (revenue, orders,
+      conversionRate, etc.) are non-null only for `adobe_analytics` / `ga4` /
+      `cja` sources; null for `optel` / `cdn`.
+    operationId: getReferralTrafficTrend
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: region, in: query, schema: { type: string } }
+      - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
+      - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+    responses:
+      '200':
+        description: Referral traffic KPI time series
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficTrend'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-by-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Referral traffic grouped by platform
+    description: |
+      Queries `rpc_referral_traffic_by_platform`. Returns rows ordered by
+      pageviews descending. `visits`, `avgTimeOnSite`, `revenue`, `visitors`
+      and `orders` are null for `optel` / `cdn` sources.
+    operationId: getReferralTrafficByPlatform
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: region, in: query, schema: { type: string } }
+      - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
+      - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by platform
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficByPlatform'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-by-region:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Referral traffic grouped by region
+    description: Queries `rpc_referral_traffic_by_region`. Returns rows ordered by pageviews descending.
+    operationId: getReferralTrafficByRegion
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: region, in: query, schema: { type: string } }
+      - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
+      - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by region
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficByRegion'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-by-page-intent:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Referral traffic grouped by page intent
+    description: Queries `rpc_referral_traffic_by_page_intent`. Returns rows ordered by pageviews descending.
+    operationId: getReferralTrafficByPageIntent
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: region, in: query, schema: { type: string } }
+      - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
+      - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by page intent
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficByPageIntent'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-by-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Per-URL referral traffic performance analysis (paginated)
+    description: |
+      Queries `rpc_referral_traffic_by_url`. Returns a page of `pageSize` rows
+      (default 50, max 500) plus `totalCount` for pagination context. Supports
+      server-side substring search via `urlPathSearch`.
+
+      Date range guardrail: `startDate` and `endDate` must be supplied together —
+      providing only one returns `400`. The requested span may not exceed
+      62 days; a wider span returns `400`. Omitting both applies the default
+      28-day window.
+    operationId: getReferralTrafficByUrl
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
+      - name: startDate
+        in: query
+        description: Range start (`YYYY-MM-DD`). Required if `endDate` is set; span with `endDate` must be <= 62 days.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
+        schema: { type: string, format: date }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: region, in: query, schema: { type: string } }
+      - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
+      - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - name: pageSize
+        in: query
+        description: 'Number of rows per page (default 50, max 500). Aliases: page_size, limit'
+        schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      - name: pageOffset
+        in: query
+        description: 'Zero-based row offset for pagination. Alias: page_offset'
+        schema: { type: integer, minimum: 0, default: 0 }
+      - name: urlPathSearch
+        in: query
+        description: 'Substring search applied to url_path server-side. Alias: url_path_search'
+        schema: { type: string }
+      - name: sortBy
+        in: query
+        description: 'Aliases: sort_by'
+        schema:
+          type: string
+          enum: [total_pageviews, url_path, bounce_rate, consent_rate, page_intent, entries, exits, avg_time_on_site, revenue]
+          default: total_pageviews
+      - name: sortOrder
+        in: query
+        description: 'Alias: sort_order'
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: desc
+    responses:
+      '200':
+        description: Paginated per-URL performance analysis
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficByUrl'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-by-url-trend:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Weekly pageview trend for a single URL
+    description: |
+      Queries `rpc_referral_traffic_by_url_trend`. Returns a weekly pageview
+      time series for the exact `urlPath` (e.g. `/blog/my-post`). `urlPath` is
+      required — omitting it returns `400`.
+
+      Date range guardrail: `startDate` and `endDate` must be supplied together —
+      providing only one returns `400`. The requested span may not exceed
+      62 days; a wider span returns `400`. Omitting both applies the default
+      28-day window.
+    operationId: getReferralTrafficByUrlTrend
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
+      - name: startDate
+        in: query
+        description: Range start (`YYYY-MM-DD`). Required if `endDate` is set; span with `endDate` must be <= 62 days.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
+        schema: { type: string, format: date }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: region, in: query, schema: { type: string } }
+      - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
+      - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - name: urlPath
+        in: query
+        required: true
+        description: Exact URL path to trend (e.g. `/blog/my-post`). Required.
+        schema: { type: string }
+    responses:
+      '200':
+        description: Weekly pageview trend for the URL
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficUrlTrend'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-by-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Referral traffic grouped by device
+    description: |
+      Queries `rpc_referral_traffic_by_device`. Returns rows ordered by
+      pageviews descending. `bounceRate` is null for `cdn` / `adobe_analytics`
+      sources.
+    operationId: getReferralTrafficByDevice
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: region, in: query, schema: { type: string } }
+      - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
+      - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by device
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficByDevice'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-business-impact:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Referral traffic business impact metrics
+    description: |
+      Queries `rpc_referral_traffic_business_impact`. Returns aggregated business
+      impact metrics (visits, revenue, orders, conversion rate, etc.). Only
+      available for `adobe_analytics`, `ga4` and `cja` sources — supplying
+      `optel` or `cdn` returns `400` ("Business impact is only available for
+      adobe_analytics, ga4 and cja sources").
+
+      Date range guardrail: `startDate` and `endDate` must be supplied together —
+      providing only one returns `400`. The requested span may not exceed
+      62 days; a wider span returns `400`. Omitting both applies the default
+      28-day window.
+    operationId: getReferralTrafficBusinessImpact
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficBusinessImpactSource' }
+      - name: startDate
+        in: query
+        description: Range start (`YYYY-MM-DD`). Required if `endDate` is set; span with `endDate` must be <= 62 days.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
+        schema: { type: string, format: date }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: region, in: query, schema: { type: string } }
+      - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
+      - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+    responses:
+      '200':
+        description: Business impact metrics
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficBusinessImpact'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-referral-traffic-weeks:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Available ISO weeks for the site's referral traffic data
+    description: |
+      Returns the ISO weeks for which the site has referral traffic data,
+      derived from a min/max `traffic_date` scan (no RPC).
+    operationId: getReferralTrafficWeeks
+    parameters:
+      - name: source
+        in: query
+        schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
+    responses:
+      '200':
+        description: Available ISO weeks
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ReferralTrafficWeeks'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
       - ims_key: []

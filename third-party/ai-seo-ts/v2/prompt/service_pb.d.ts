@@ -3,7 +3,7 @@
 /* eslint-disable */
 
 import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
-import type { GapPromptsExportRequestSchema, GapPromptsRequestSchema, GapPromptsResponseSchema, GapPromptsTotalsRequestSchema, GapPromptsTotalsResponseSchema, LastCrawledPromptByHashRequestSchema, LastCrawledPromptByHashResponseSchema, PromptsByTopicFTSExportRequestSchema, PromptsByTopicFTSRequestSchema, PromptsByTopicFTSResponseSchema, PromptsByTopicFTSTotalsRequestSchema, PromptsByTopicFTSTotalsResponseSchema, PromptsByTopicIDsRequestSchema, PromptsByTopicIDsResponseSchema, PromptsByTopicIDsTotalRequestSchema, PromptsByTopicIDsTotalResponseSchema, PromptsByTopicIDsV2RequestSchema, PromptsByTopicIDsV2ResponseSchema, PromptsExportRequestSchema, PromptsRequestSchema, PromptsResponseSchema, PromptsTotalsRequestSchema, PromptsTotalsResponseSchema } from "./messages_pb.js";
+import type { GapPromptsExportRequestSchema, GapPromptsRequestSchema, GapPromptsResponseSchema, GapPromptsTotalsRequestSchema, GapPromptsTotalsResponseSchema, LastCrawledPromptByHashRequestSchema, LastCrawledPromptByHashResponseSchema, PromptsByTopicFTSExportRequestSchema, PromptsByTopicFTSRequestSchema, PromptsByTopicFTSResponseSchema, PromptsByTopicFTSTotalsRequestSchema, PromptsByTopicFTSTotalsResponseSchema, PromptsByTopicIDsExportRequestSchema, PromptsByTopicIDsRequestSchema, PromptsByTopicIDsResponseSchema, PromptsByTopicIDsTotalRequestSchema, PromptsByTopicIDsTotalResponseSchema, PromptsByTopicIDsV2RequestSchema, PromptsByTopicIDsV2ResponseSchema, PromptsExportRequestSchema, PromptsRequestSchema, PromptsResponseSchema, PromptsTotalsRequestSchema, PromptsTotalsResponseSchema } from "./messages_pb.js";
 import type { ExportResponseSchema } from "../common/messages_pb.js";
 
 /**
@@ -120,6 +120,14 @@ export declare const PromptService: GenService<{
     methodKind: "unary";
     input: typeof PromptsByTopicIDsTotalRequestSchema;
     output: typeof PromptsByTopicIDsTotalResponseSchema;
+  },
+  /**
+   * @generated from rpc semrush.services.ai_seo.v2.prompt.PromptService.PromptsByTopicIDsExport
+   */
+  promptsByTopicIDsExport: {
+    methodKind: "unary";
+    input: typeof PromptsByTopicIDsExportRequestSchema;
+    output: typeof ExportResponseSchema;
   },
 }>;
 
