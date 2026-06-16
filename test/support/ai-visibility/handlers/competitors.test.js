@@ -15,6 +15,10 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import { ConnectError, Code } from '@connectrpc/connect';
+import { TOPICS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
+import { GAP_PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
+import { DOMAINS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
+import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   handleCompetitorsMetrics,
   handleCompetitorsGapTopics,
@@ -952,6 +956,121 @@ describe('AI Visibility – competitors handlers', () => {
       const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
       const res = await handleCompetitorsGapPrompts(sp, clients);
       expect(res.body.data[0].mentioned).to.equal(0);
+    });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  search (dimension_filter_ql) + sort (order) plumbing              */
+  /* ------------------------------------------------------------------ */
+  describe('search and sort plumbing', () => {
+    beforeEach(() => {
+      clients.topicClient.gapTopics.resolves({ topics: [] });
+      clients.topicClient.gapTopicsTotals.resolves({ total: 0 });
+      clients.promptClient.gapPrompts.resolves({ prompts: [] });
+      clients.promptClient.gapPromptsTotals.resolves({ total: 0 });
+      clients.sourceClient.gapSourceDomains.resolves({ domains: [] });
+      clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 0 });
+    });
+
+    it('pushes searchQuery to dimension_filter_ql on both list and totals (gap topics)', async () => {
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&searchQuery=shoes');
+      await handleCompetitorsGapTopics(sp, clients);
+      expect(clients.topicClient.gapTopics.firstCall.args[0].dimensionFilterQl)
+        .to.equal('topic CONTAINS "shoes"');
+      expect(clients.topicClient.gapTopicsTotals.firstCall.args[0].dimensionFilterQl)
+        .to.equal('topic CONTAINS "shoes"');
+    });
+
+    it('filters gap prompts on the prompt dimension and gap source domains on domain', async () => {
+      const promptSp = new URLSearchParams('domain=example.com&competitors=comp.com&searchQuery=run');
+      await handleCompetitorsGapPrompts(promptSp, clients);
+      expect(clients.promptClient.gapPrompts.firstCall.args[0].dimensionFilterQl)
+        .to.equal('prompt CONTAINS "run"');
+      expect(clients.promptClient.gapPromptsTotals.firstCall.args[0].dimensionFilterQl)
+        .to.equal('prompt CONTAINS "run"');
+
+      const sourceSp = new URLSearchParams('domain=example.com&competitors=comp.com&searchQuery=cdn');
+      await handleCompetitorsGapSourceDomains(sourceSp, clients);
+      expect(clients.sourceClient.gapSourceDomains.firstCall.args[0].dimensionFilterQl)
+        .to.equal('domain CONTAINS "cdn"');
+      expect(clients.sourceClient.gapSourceDomainsTotals.firstCall.args[0].dimensionFilterQl)
+        .to.equal('domain CONTAINS "cdn"');
+    });
+
+    it('escapes quotes in the search term', async () => {
+      const sp = new URLSearchParams();
+      sp.set('domain', 'example.com');
+      sp.set('competitors', 'comp.com');
+      sp.set('searchQuery', 'say "hi"');
+      await handleCompetitorsGapTopics(sp, clients);
+      expect(clients.topicClient.gapTopics.firstCall.args[0].dimensionFilterQl)
+        .to.equal('topic CONTAINS "say \\"hi\\""');
+    });
+
+    it('omits dimension_filter_ql when no searchQuery is provided', async () => {
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com');
+      await handleCompetitorsGapTopics(sp, clients);
+      expect(clients.topicClient.gapTopics.firstCall.args[0]).to.not.have.property('dimensionFilterQl');
+      expect(clients.topicClient.gapTopicsTotals.firstCall.args[0]).to.not.have.property('dimensionFilterQl');
+    });
+
+    it('maps sortBy/sortDirection to the order field (gap topics)', async () => {
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&sortBy=VOLUME&sortDirection=ASC');
+      await handleCompetitorsGapTopics(sp, clients);
+      const { order } = clients.topicClient.gapTopics.firstCall.args[0];
+      expect(order.by).to.equal(TOPICS_REQUEST_ORDER_BY_ENUM.VOLUME);
+      expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.ASC);
+    });
+
+    it('maps gap prompts and gap source domains sort enums', async () => {
+      const promptSp = new URLSearchParams('domain=example.com&competitors=comp.com&sortBy=SOURCES_COUNT');
+      await handleCompetitorsGapPrompts(promptSp, clients);
+      expect(clients.promptClient.gapPrompts.firstCall.args[0].order.by)
+        .to.equal(GAP_PROMPTS_REQUEST_ORDER_BY_ENUM.SOURCES_COUNT);
+
+      const sourceSp = new URLSearchParams('domain=example.com&competitors=comp.com&sortBy=DOMAIN');
+      await handleCompetitorsGapSourceDomains(sourceSp, clients);
+      expect(clients.sourceClient.gapSourceDomains.firstCall.args[0].order.by)
+        .to.equal(DOMAINS_REQUEST_ORDER_BY_ENUM.DOMAIN);
+    });
+
+    it('falls back to the default order for unknown/missing sortBy', async () => {
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&sortBy=NOT_A_COLUMN');
+      await handleCompetitorsGapTopics(sp, clients);
+      const { order } = clients.topicClient.gapTopics.firstCall.args[0];
+      expect(order.by).to.equal(TOPICS_REQUEST_ORDER_BY_ENUM.MENTIONED_COMPETITORS);
+      expect(order.direction).to.equal(ORDER_DIRECTION_ENUM.DESC);
+    });
+
+    it('falls back to DESC for an invalid sortDirection', async () => {
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&sortBy=VOLUME&sortDirection=BOGUS');
+      await handleCompetitorsGapTopics(sp, clients);
+      expect(clients.topicClient.gapTopics.firstCall.args[0].order.direction)
+        .to.equal(ORDER_DIRECTION_ENUM.DESC);
+    });
+
+    it('omits dimension_filter_ql for a whitespace-only searchQuery', async () => {
+      const sp = new URLSearchParams();
+      sp.set('domain', 'example.com');
+      sp.set('competitors', 'comp.com');
+      sp.set('searchQuery', '   ');
+      await handleCompetitorsGapTopics(sp, clients);
+      expect(clients.topicClient.gapTopics.firstCall.args[0]).to.not.have.property('dimensionFilterQl');
+      expect(clients.topicClient.gapTopicsTotals.firstCall.args[0]).to.not.have.property('dimensionFilterQl');
+    });
+
+    it('scopes gap prompts to topicId via topic_hash on both list and totals', async () => {
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&topicId=12345');
+      await handleCompetitorsGapPrompts(sp, clients);
+      expect(clients.promptClient.gapPrompts.firstCall.args[0].topicHash).to.equal(12345n);
+      expect(clients.promptClient.gapPromptsTotals.firstCall.args[0].topicHash).to.equal(12345n);
+    });
+
+    it('ignores a non-numeric topicId', async () => {
+      const sp = new URLSearchParams('domain=example.com&competitors=comp.com&topicId=not-a-hash');
+      await handleCompetitorsGapPrompts(sp, clients);
+      expect(clients.promptClient.gapPrompts.firstCall.args[0]).to.not.have.property('topicHash');
+      expect(clients.promptClient.gapPromptsTotals.firstCall.args[0]).to.not.have.property('topicHash');
     });
   });
 });
