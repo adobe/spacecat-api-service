@@ -90,7 +90,6 @@ unset for IMS-authenticated callers who do not have `sub` populated.
 - Changing `getAllForOpportunity` enrichment logic.
 - `getByStatus` enrichment — intentionally skipped to avoid unbounded IMS fan-out on large result sets.
 - Handling the IMS auth path `user_id`/`sub` disambiguation fully.
-- Adding `executedByUser` to the OpenAPI `Fix` response schema (tracked as follow-up).
 
 ## Changes
 
@@ -98,7 +97,7 @@ unset for IMS-authenticated callers who do not have `sub` populated.
 |------|--------|
 | `src/controllers/fixes.js` | Added `#imsClient` field and `#enrichFixesWithUserNames` private method; modified `patchFix` to use intent-signal pattern; modified `createFixes` to override client-supplied `executedBy` with JWT identity |
 | `src/dto/fix.js` | Added conditional `executedByUser: { firstName, lastName, email }` field to `FixDto.toJSON` output |
-| `docs/openapi/schemas.yaml` | Removed `executedBy` from `FixUpdate` schema |
+| `docs/openapi/schemas.yaml` | Removed `executedBy` from `FixUpdate` schema; added `executedByUser` to `Fix` response schema with `readOnly: true` |
 | `test/controllers/fixes.test.js` | Updated `patchFix` and `createFixes` tests; added enrichment tests |
 | `test/dto/fix.test.js` | Added `executedByUser` inclusion/exclusion tests |
 
@@ -106,15 +105,13 @@ unset for IMS-authenticated callers who do not have `sub` populated.
 
 The following items were identified during review and are tracked for follow-up:
 
-1. **`executedByUser` missing from OpenAPI `Fix` response schema** - the field is returned by the
-   controller but not documented in `schemas.yaml`. Add it to the `Fix` schema.
-2. **`getByStatus` not enriched** - `#enrichFixesWithUserNames` is called from `getAllForOpportunity`
+1. **`getByStatus` not enriched** - `#enrichFixesWithUserNames` is called from `getAllForOpportunity`
    and `getByID`. `getByStatus` intentionally omits enrichment to avoid fan-out for large result
    sets, but this inconsistency should be documented in the API contract.
-3. **IMS auth path silent no-op** - for callers whose profile has neither `user_id` nor `sub`,
+2. **IMS auth path silent no-op** - for callers whose profile has neither `user_id` nor `sub`,
    a client-supplied `executedBy` intent signal results in a no-op with a `log.warn`. Consider
    returning a `400` instead for clearer operator feedback.
-4. **Stale comment in `src/dto/fix.js:57`** - says "TrialUser store"; should say "IMS admin
+3. **Stale comment in `src/dto/fix.js:57`** - says "TrialUser store"; should say "IMS admin
    profile API".
 
 ## Verification

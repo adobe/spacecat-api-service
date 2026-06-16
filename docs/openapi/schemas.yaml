@@ -4059,7 +4059,7 @@ Fix:
       readOnly: true
     executedByUser:
       type: object
-      description: Resolved IMS profile for the user who executed the fix. Present only on the list endpoint (getAllForOpportunity) when the executor identity was successfully resolved.
+      description: Resolved IMS profile for the user who executed the fix. Present on getAllForOpportunity and getByID when the executor identity was successfully resolved. Omitted from getByStatus.
       readOnly: true
       properties:
         firstName:
