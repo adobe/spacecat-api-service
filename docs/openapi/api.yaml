@@ -143,6 +143,20 @@ paths:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-and-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/{semrushPromptId}:
+    $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets:
+    $ref: './serenity-api.yaml#/v2-serenity-markets'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/{geoTargetId}/{languageCode}:
+    $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
+    $ref: './serenity-api.yaml#/v2-serenity-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:
+    $ref: './serenity-api.yaml#/v2-serenity-models'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -218,6 +232,8 @@ paths:
     $ref: './site-metrics-api.yaml#/site-metrics-latest'
   /sites/{siteId}:
     $ref: './site-api.yaml#/site'
+  /sites/{siteId}/identity:
+    $ref: './site-api.yaml#/site-identity'
   /sites/{siteId}/audits:
     $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/audits/{auditType}:
@@ -238,6 +254,8 @@ paths:
     $ref: './sites-api.yaml#/site-brand-profile'
   /sites/{siteId}/config/cdn-logs:
     $ref: './site-api.yaml#/site-cdn-logs-config'
+  /sites/{siteId}/config/scraper:
+    $ref: './site-api.yaml#/site-scraper-config'
   /sites/{siteId}/page-relationships/search:
     $ref: './site-api.yaml#/site-page-relationships-search'
   /sites/{siteId}/opportunities:
@@ -294,6 +312,14 @@ paths:
     $ref: './url-store-api.yaml#/url-store-get'
   /sites/{siteId}/url-store/delete:
     $ref: './url-store-api.yaml#/url-store-delete'
+  /sites/{siteId}/agentic-categories:
+    $ref: './agentic-rules-api.yaml#/agentic-categories-list'
+  /sites/{siteId}/agentic-categories/{name}:
+    $ref: './agentic-rules-api.yaml#/agentic-categories-one'
+  /sites/{siteId}/agentic-page-types:
+    $ref: './agentic-rules-api.yaml#/agentic-page-types-list'
+  /sites/{siteId}/agentic-page-types/{name}:
+    $ref: './agentic-rules-api.yaml#/agentic-page-types-one'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:
@@ -468,6 +494,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-data-with-type'
   /sites/{siteId}/llmo/data/{sheetType}/{week}/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-data-with-type-and-week'
+  /sites/{siteId}/llmo/data/{dataSource}/row:
+    $ref: './llmo-api.yaml#/llmo-data-row-with-datasource'
+  /sites/{siteId}/llmo/data/{sheetType}/{dataSource}/row:
+    $ref: './llmo-api.yaml#/llmo-data-row-with-type'
   /sites/{siteId}/llmo/sheet-data/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
   /sites/{siteId}/llmo/sheet-data/{sheetType}/{dataSource}:
@@ -504,6 +534,31 @@ paths:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
   /sites/{siteId}/agentic-traffic/movers:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  # Referral Traffic PG
+  /sites/{siteId}/referral-traffic/has-data:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-has-data'
+  /sites/{siteId}/referral-traffic/filter-dimensions:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-filter-dimensions'
+  /sites/{siteId}/referral-traffic/kpis:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-kpis'
+  /sites/{siteId}/referral-traffic/trend:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-trend'
+  /sites/{siteId}/referral-traffic/by-platform:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-platform'
+  /sites/{siteId}/referral-traffic/by-region:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-region'
+  /sites/{siteId}/referral-traffic/by-page-intent:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-page-intent'
+  /sites/{siteId}/referral-traffic/by-url:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-url'
+  /sites/{siteId}/referral-traffic/by-url-trend:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-url-trend'
+  /sites/{siteId}/referral-traffic/by-device:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-device'
+  /sites/{siteId}/referral-traffic/business-impact:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-business-impact'
+  /sites/{siteId}/referral-traffic/weeks:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-weeks'
   /org/{spaceCatId}/brands/{brandId}/fanout-report:
     $ref: './fanout-report-api.yaml#/fanout-report'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/filter-dimensions:
@@ -634,10 +689,34 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-brands'
   /llmo/ai-visibility/topics/research/source-domains:
     $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
+  /llmo/ai-visibility/v1/brand/stats-by-llm:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-llm'
+  /llmo/ai-visibility/v1/brand/stats-by-country:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-country'
   /llmo/ai-visibility/v1/topic/brand-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
+  /llmo/ai-visibility/v1/topic/brand-topics-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics-export'
+  /llmo/ai-visibility/v1/topic/brand-topics-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics-totals'
+  /llmo/ai-visibility/v1/topic/gap-topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics'
+  /llmo/ai-visibility/v1/topic/gap-topics-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-export'
+  /llmo/ai-visibility/v1/topic/gap-topics-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-totals'
   /llmo/ai-visibility/v1/prompt/brand-prompts:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts'
+  /llmo/ai-visibility/v1/prompt/brand-prompts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts-export'
+  /llmo/ai-visibility/v1/prompt/gap-prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts'
+  /llmo/ai-visibility/v1/prompt/gap-prompts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
+  /llmo/ai-visibility/v1/prompt/prompt-response:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
+  /llmo/ai-visibility/v1/meta/meta:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-meta-meta'
 
 components:
   securitySchemes:

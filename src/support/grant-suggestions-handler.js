@@ -78,7 +78,10 @@ function defaultSortFn(groupA, groupB) {
 const OPPORTUNITY_STRATEGIES = {
   // Groups suggestions by target URL (url_to) so all backlinks pointing to the
   // same broken URL are granted as a single unit. The group rank is the highest
-  // rank among its items, since higher rank = top priority opportunity.
+  // traffic_domain score among its items (0-100 authority score from SEO provider),
+  // since higher rank = top priority opportunity.
+  // Groups are sorted by rank descending so the most authoritative broken URLs
+  // are granted first. Tie-breaks by first item's ID ascending for determinism.
   'broken-backlinks': {
     groupFn: (suggestions) => {
       const groups = new Map();
@@ -98,6 +101,17 @@ const OPPORTUNITY_STRATEGIES = {
           () => Math.max(...items.map(getSuggestionRank)),
         ),
       );
+    },
+    sortFn: (groupA, groupB) => {
+      const rankDiff = groupB.getRank() - groupA.getRank();
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+      const a = groupA.items[0];
+      const b = groupB.items[0];
+      const idA = typeof a?.getId === 'function' ? a.getId() : (a?.id ?? '');
+      const idB = typeof b?.getId === 'function' ? b.getId() : (b?.id ?? '');
+      return idA.localeCompare(idB);
     },
   },
   // For PLG customers, CWV grants are limited to the top 3 pages by page views

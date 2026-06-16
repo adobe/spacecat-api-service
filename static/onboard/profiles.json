@@ -23,10 +23,10 @@
 	},
 	"aso_plg": {
 		"audits": {
+			"scrape-top-pages": {},
 			"alt-text": {},
 			"cwv": {},
 			"broken-backlinks": {},
-			"scrape-top-pages": {},
 			"broken-backlinks-auto-suggest": {},
 			"broken-backlinks-auto-fix": {},
 			"alt-text-auto-fix": {},
@@ -130,7 +130,11 @@
 			"hreflang": {},
 			"security-vulnerabilities": {},
 			"security-vulnerabilities-auto-suggest": {},
-			"wikipedia-analysis": {}
+			"structured-data": {},
+			"sitemap": {},
+			"toc": {},
+			"wikipedia-analysis": {},
+			"money-pages": {}
 		},
 		"imports": {
 			"organic-traffic" : {},

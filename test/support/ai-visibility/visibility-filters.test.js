@@ -31,7 +31,10 @@ describe('visibility-filters', () => {
     });
 
     it('contains expected market codes', () => {
-      expect(SR_AI_SEO_SUPPORTED_MARKET_CODES).to.include.members(['US', 'UK', 'DE', 'FR', 'JP']);
+      expect(SR_AI_SEO_SUPPORTED_MARKET_CODES).to.include.members([
+        'US', 'UK', 'DE', 'FR', 'JP',
+        'HK', 'ID', 'KR', 'MY', 'PH', 'SG', 'TH', 'TR', 'TW', 'VN',
+      ]);
     });
   });
 
@@ -77,6 +80,7 @@ describe('visibility-filters', () => {
       expect(normalizeMarketToken('us')).to.equal('US');
       expect(normalizeMarketToken('DE')).to.equal('DE');
       expect(normalizeMarketToken('jp')).to.equal('JP');
+      expect(normalizeMarketToken('sg')).to.equal('SG');
     });
 
     it('defaults unknown codes to US', () => {

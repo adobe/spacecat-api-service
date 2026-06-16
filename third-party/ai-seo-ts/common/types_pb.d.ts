@@ -452,6 +452,56 @@ export enum COUNTRY_ENUM {
   SA = 32,
 
   /**
+   * @generated from enum value: HK = 33;
+   */
+  HK = 33,
+
+  /**
+   * @generated from enum value: ID = 34;
+   */
+  ID = 34,
+
+  /**
+   * @generated from enum value: KR = 35;
+   */
+  KR = 35,
+
+  /**
+   * @generated from enum value: MY = 36;
+   */
+  MY = 36,
+
+  /**
+   * @generated from enum value: PH = 37;
+   */
+  PH = 37,
+
+  /**
+   * @generated from enum value: SG = 38;
+   */
+  SG = 38,
+
+  /**
+   * @generated from enum value: TH = 39;
+   */
+  TH = 39,
+
+  /**
+   * @generated from enum value: TR = 40;
+   */
+  TR = 40,
+
+  /**
+   * @generated from enum value: TW = 41;
+   */
+  TW = 41,
+
+  /**
+   * @generated from enum value: VN = 42;
+   */
+  VN = 42,
+
+  /**
    * @generated from enum value: WORLDWIDE = 999;
    */
   WORLDWIDE = 999,

@@ -48,7 +48,7 @@ describe('email-service', () => {
 
     mockContext = {
       env: {
-        IMS_HOST: 'https://ims.example.com',
+        IMS_HOST: 'ims.example.com',
         LLMO_EMAIL_IMS_CLIENT_ID: 'client-id',
         LLMO_EMAIL_IMS_CLIENT_CODE: 'client-code',
         LLMO_EMAIL_IMS_CLIENT_SECRET: 'client-secret',
@@ -123,7 +123,7 @@ describe('email-service', () => {
       expect(ctxArg.env.IMS_CLIENT_CODE).to.equal('client-code');
       expect(ctxArg.env.IMS_CLIENT_SECRET).to.equal('client-secret');
       expect(ctxArg.env.IMS_SCOPE).to.equal('email-scope');
-      expect(ctxArg.env.IMS_HOST).to.equal('https://ims.example.com');
+      expect(ctxArg.env.IMS_HOST).to.equal('ims.example.com');
     });
 
     it('should return error when no recipients provided', async () => {

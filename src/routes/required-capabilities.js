@@ -10,7 +10,16 @@
  * governing permissions and limitations under the License.
  */
 
-import { CAP_ORG_READ_ALL, CAP_SITE_READ_ALL } from './capability-constants.js';
+import {
+  CAP_CONFIGURATION_READ,
+  CAP_CONFIGURATION_WRITE,
+  CAP_FIX_ENTITY_CREATE,
+  CAP_ORG_READ_ALL,
+  CAP_SITE_CREATE,
+  CAP_SITE_READ_ALL,
+  CAP_SUGGESTION_WRITE,
+  CAP_TRIAL_USER_READ,
+} from './capability-constants.js';
 
 /**
  * Routes that are intentionally excluded from S2S consumer access.
@@ -38,17 +47,13 @@ export const INTERNAL_ROUTES = [
   // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
   'POST /webhooks/github',
 
-  // Suggestion edge ops (auto-fix, edge-deploy, etc.): not yet required by S2S
-  // TODO: Add these back in when we have a S2S consumer that needs them
-  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
+  // Suggestion edge ops (edge-deploy, etc.): not yet required by S2S
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
 
-  // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
-  'GET /sites/:siteId/geo-experiments',
-  'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+  // Geo experiment — write/delete endpoints used by DRS/UI
   'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
   'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
 
@@ -56,10 +61,6 @@ export const INTERNAL_ROUTES = [
   'GET /slack/events',
   'POST /slack/events',
   'POST /slack/channels/invite-by-user-id',
-
-  // Consent banner - screenshot tooling, end-user/internal use only
-  'POST /consent-banner',
-  'GET /consent-banner/:jobId',
 
   // Brand Presence stats - org-scoped, LLMO product; not yet required by S2S consumers
   'GET /org/:spaceCatId/brands/all/brand-presence/stats',
@@ -99,7 +100,6 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/filter-dimensions',
   'GET /sites/:siteId/agentic-traffic/weeks',
   'GET /sites/:siteId/agentic-traffic/movers',
-  'GET /sites/:siteId/agentic-traffic/has-data',
   'POST /sites/:siteId/agentic-traffic/urls/export',
   'GET /sites/:siteId/agentic-traffic/urls/export/:exportId',
 
@@ -138,10 +138,8 @@ export const INTERNAL_ROUTES = [
   'PATCH /plg/records/:plgOnboardingId',
   'DELETE /plg/records/:plgOnboardingId',
 
-  // Tier-specific - user activities, trial users, user details: end-user/admin flows only
-  'GET /sites/:siteId/user-activities',
+  // Tier-specific - user activities (POST only), user details: end-user/admin flows
   'POST /sites/:siteId/user-activities',
-  'GET /organizations/:organizationId/trial-users',
   'GET /admin/users/:userId',
   'GET /organizations/:organizationId/userDetails/:externalUserId',
   'POST /organizations/:organizationId/userDetails',
@@ -180,6 +178,8 @@ export const INTERNAL_ROUTES = [
   'POST /tools/api-keys',
   'DELETE /tools/api-keys/:id',
   'GET /tools/api-keys',
+  // URL preview proxy - UI-only utility for iframe rendering; not for S2S consumers
+  'GET /tools/proxy',
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
@@ -221,17 +221,23 @@ const routeRequiredCapabilities = {
   // Audits
   'GET /audits/latest/:auditType': 'audit:read',
 
+  // Consent Banner — POST is a screenshot *scrape* trigger, so it's gated like
+  // the sibling `/tools/scrape/jobs` POST (scrapeJob:write) rather than
+  // organization:write, letting S2S scrape consumers (e.g. Mystique) trigger it.
+  'POST /consent-banner': 'scrapeJob:write',
+  'GET /consent-banner/:jobId': 'organization:read',
+
   // Configuration
-  'GET /configurations/latest': 'configuration:read',
-  'PATCH /configurations/latest': 'configuration:write',
-  'POST /configurations/:version/restore': 'configuration:write',
-  'GET /configurations/:version': 'configuration:read',
-  'POST /configurations/audits': 'configuration:write',
-  'DELETE /configurations/audits/:auditType': 'configuration:write',
-  'PUT /configurations/latest/queues': 'configuration:write',
-  'PATCH /configurations/latest/jobs/:jobType': 'configuration:write',
-  'PATCH /configurations/latest/handlers/:handlerType': 'configuration:write',
-  'PATCH /configurations/sites/audits': 'configuration:write',
+  'GET /configurations/latest': CAP_CONFIGURATION_READ,
+  'PATCH /configurations/latest': CAP_CONFIGURATION_WRITE,
+  'POST /configurations/:version/restore': CAP_CONFIGURATION_WRITE,
+  'GET /configurations/:version': CAP_CONFIGURATION_READ,
+  'POST /configurations/audits': CAP_CONFIGURATION_WRITE,
+  'DELETE /configurations/audits/:auditType': CAP_CONFIGURATION_WRITE,
+  'PUT /configurations/latest/queues': CAP_CONFIGURATION_WRITE,
+  'PATCH /configurations/latest/jobs/:jobType': CAP_CONFIGURATION_WRITE,
+  'PATCH /configurations/latest/handlers/:handlerType': CAP_CONFIGURATION_WRITE,
+  'PATCH /configurations/sites/audits': CAP_CONFIGURATION_WRITE,
 
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,
@@ -257,12 +263,24 @@ const routeRequiredCapabilities = {
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
-  'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:read',
+  'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:read',
+  'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
   'GET /org/:spaceCatId/brands/:brandId/fanout-report': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
@@ -309,11 +327,13 @@ const routeRequiredCapabilities = {
   'GET /projects/:projectId/sites': 'site:read',
   'GET /projects/by-project-name/:projectName/sites': 'site:read',
 
-  // preflight jobs
+  // preflight jobs (legacy)
   'POST /preflight/jobs': 'site:write',
   'GET /preflight/jobs/:jobId': 'site:read',
-  'POST /preflight/beta/jobs': 'site:write',
-  'GET /preflight/beta/jobs/:jobId': 'site:read',
+  // preflight site-scoped endpoints
+  'POST /sites/:siteId/preflights': 'site:write',
+  'GET /sites/:siteId/preflights': 'site:read',
+  'GET /sites/:siteId/preflights/:preflightId': 'site:read',
   // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
   'POST /sites/:siteId/autofix-checks': 'site:read',
 
@@ -321,7 +341,11 @@ const routeRequiredCapabilities = {
   // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
   // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
   'GET /sites': CAP_SITE_READ_ALL,
-  'POST /sites': 'site:write',
+  // GET /sites/:siteId/identity is a readAll-class single-site route: it returns only the
+  // routing identity (org ids, baseURL, deliveryType) a site:readAll holder can already
+  // derive from the bulk list + org join, so it is gated on site:readAll, not site:read.
+  'GET /sites/:siteId/identity': CAP_SITE_READ_ALL,
+  'POST /sites': CAP_SITE_CREATE,
   'POST /sites/detect/jobs': 'site:write',
   'GET /sites/detect/jobs/:jobId': 'site:read',
   'GET /sites.csv': 'site:read',
@@ -329,6 +353,8 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId': 'site:read',
   'PATCH /sites/:siteId': 'site:write',
   'PATCH /sites/:siteId/config/cdn-logs': 'site:write',
+  'GET /sites/:siteId/config/scraper': 'site:read',
+  'PATCH /sites/:siteId/config/scraper': 'site:write',
   'DELETE /sites/:siteId': 'site:write',
   'GET /sites/:siteId/bot-blocker': 'site:read',
   'GET /sites/:siteId/audits': 'audit:read',
@@ -344,9 +370,24 @@ const routeRequiredCapabilities = {
   'PATCH /sites/:siteId/url-store': 'site:write',
   'POST /sites/:siteId/url-store/delete': 'site:write',
 
+  // Agentic traffic
+  'GET /sites/:siteId/agentic-traffic/has-data': 'site:read',
+
+  // Agentic URL classification rules
+  'GET /sites/:siteId/agentic-categories': 'site:read',
+  'POST /sites/:siteId/agentic-categories': 'site:write',
+  'PATCH /sites/:siteId/agentic-categories/:name': 'site:write',
+  'DELETE /sites/:siteId/agentic-categories/:name': 'site:write',
+  'GET /sites/:siteId/agentic-page-types': 'site:read',
+  'POST /sites/:siteId/agentic-page-types': 'site:write',
+  'PATCH /sites/:siteId/agentic-page-types/:name': 'site:write',
+  'DELETE /sites/:siteId/agentic-page-types/:name': 'site:write',
+
   'PATCH /sites/:siteId/:auditType': 'audit:write',
   'GET /sites/:siteId/latest-audit/:auditType': 'audit:read',
   'GET /sites/:siteId/experiments': 'experiment:read',
+  'GET /sites/:siteId/geo-experiments': 'site:read',
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'site:read', // detail includes prompts
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
@@ -372,10 +413,11 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fixEntity:read',
-  'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:write',
-  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': 'suggestion:write',
-  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
-  'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/suggestions': CAP_SUGGESTION_WRITE,
+  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': CAP_SUGGESTION_WRITE,
+  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': CAP_FIX_ENTITY_CREATE,
+  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': CAP_SUGGESTION_WRITE,
+  'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': CAP_SUGGESTION_WRITE,
 
   // Traffic
   'GET /sites/:siteId/traffic/paid': 'site:read',
@@ -516,6 +558,8 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource': 'site:read',
+  'PATCH /sites/:siteId/llmo/data/:dataSource/row': 'site:write',
+  'PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row': 'site:write',
   'GET /sites/:siteId/llmo/config': 'site:read',
   'PATCH /sites/:siteId/llmo/config': 'site:write',
   'POST /sites/:siteId/llmo/config': 'site:write',
@@ -563,10 +607,28 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/topics/research': 'report:read',
   'GET /llmo/ai-visibility/topics/stats': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/brand-topics': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/brand-topics-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/brand-topics-totals': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/gap-topics': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/gap-topics-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'report:read',
+  'GET /llmo/ai-visibility/v1/meta/meta': 'report:read',
+
+  // User Activities
+  'GET /sites/:siteId/user-activities': 'trialUser:read',
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
+
+  // Trial Users
+  'GET /organizations/:organizationId/trial-users': CAP_TRIAL_USER_READ,
 
   // Entitlements
   'GET /organizations/:organizationId/entitlements': 'entitlement:read',
@@ -609,7 +671,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/tokens/:tokenId/grants': 'token:read',
 
   // Suggestion grants
-  'DELETE /sites/:siteId/suggestions/grants/:grantId': 'suggestion:write',
+  'DELETE /sites/:siteId/suggestions/grants/:grantId': CAP_SUGGESTION_WRITE,
 };
 
 export default routeRequiredCapabilities;
