@@ -39,7 +39,7 @@ import {
   checkPromptsExist,
   getPromptStats,
   resolveBrandUuid,
-  cascadeBrandRegionToPrompts,
+  findPromptsBlockingRegionRemoval,
 } from '../support/prompts-storage.js';
 import {
   listBrands,
@@ -1369,17 +1369,31 @@ function BrandsController(ctx, log, env) {
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
 
-      // LLMO-5645: capture the brand region BEFORE the update so we can cascade
-      // a region change to the brand's prompt regions (the field DRS schedules
-      // off). Only read when a region change was actually requested.
-      // Known TOCTOU: a concurrent region edit to the same brand between this
-      // read and the update below could cascade against stale oldRegions. This
-      // is tolerated — the cascade is non-fatal and idempotent, so the next
-      // region edit re-runs it and converges the prompts.
-      let oldRegions = null;
+      // LLMO-5645: a region must not be removed from a brand while prompts still
+      // use it — DRS schedules off each prompt's `regions`, so dropping a brand
+      // region would orphan those prompts on a market the brand no longer
+      // covers. Reject the change and have the operator relocate the prompts
+      // first (consistency guard, enforced before the brand is mutated).
       if (updates.region !== undefined) {
         const before = await getBrandById(spaceCatId, brandUuid, postgrestClient);
-        oldRegions = before?.region || [];
+        const blocking = await findPromptsBlockingRegionRemoval({
+          organizationId: spaceCatId,
+          brandUuid,
+          oldRegions: before?.region || [],
+          newRegions: updates.region || [],
+          postgrestClient,
+          log,
+        });
+        const blockedRegions = Object.keys(blocking).sort();
+        if (blockedRegions.length > 0) {
+          const detail = blockedRegions
+            .map((r) => `${r.toUpperCase()} (${blocking[r]} prompt${blocking[r] === 1 ? '' : 's'})`)
+            .join(', ');
+          return badRequest(
+            `Cannot remove region(s) still used by prompts: ${detail}. `
+            + 'Reassign or delete those prompts first, then retry the region change.',
+          );
+        }
       }
 
       const updated = await updateBrand({
@@ -1392,35 +1406,6 @@ function BrandsController(ctx, log, env) {
 
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
-      }
-
-      // LLMO-5645: propagate the new brand region to prompts whose regions are
-      // still the untouched default (guarded against clobbering intentional
-      // multi-market prompts). A DRS schedule re-sync then picks up the new
-      // market on its next run.
-      if (updates.region !== undefined) {
-        try {
-          const result = await cascadeBrandRegionToPrompts({
-            organizationId: spaceCatId,
-            brandUuid,
-            oldRegions,
-            newRegions: updated.region || [],
-            postgrestClient,
-            updatedBy,
-            log,
-          });
-          if (result.updated > 0) {
-            log.info(`Cascaded brand ${brandUuid} region change to ${result.updated} prompt(s); `
-              + 'DRS schedule re-sync required to apply the new market');
-          }
-        } catch (cascadeError) {
-          // Non-fatal: the brand region was updated. Surface the cascade gap so
-          // it can be retried (a follow-up region edit re-runs the cascade).
-          log.error(
-            `Brand ${brandUuid} region updated but prompt cascade failed: ${cascadeError.message}`,
-            cascadeError,
-          );
-        }
       }
 
       return ok(updated);

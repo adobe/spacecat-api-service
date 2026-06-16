@@ -28,7 +28,7 @@ import {
   getPromptStats,
   normalizeIntent,
   isMissingIntentColumnError,
-  cascadeBrandRegionToPrompts,
+  findPromptsBlockingRegionRemoval,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -3244,116 +3244,97 @@ describe('prompts-storage', () => {
     });
   });
 
-  describe('cascadeBrandRegionToPrompts (LLMO-5645)', () => {
-    // Mock client: the read path ends at `.limit()` (resolves the prompt rows);
-    // the update path ends at `.select('id')` and is awaited (thenable). Each
-    // `.from()` returns a fresh chain so read and update do not interfere.
-    function makeCascadeClient(promptRows) {
-      const updates = [];
-      const client = {
-        from: () => {
-          let patch = null;
-          let ids = null;
-          const chain = {
-            select() { return chain; },
-            update(p) {
-              patch = p;
-              return chain;
-            },
-            eq() { return chain; },
-            neq() { return chain; },
-            limit() { return Promise.resolve({ data: promptRows, error: null }); },
-            in(_col, idList) {
-              ids = idList;
-              return chain;
-            },
-            then(resolve) {
-              updates.push({ patch, ids });
-              const rows = (ids || []).map((id) => ({ id }));
-              return resolve({ data: rows, error: null });
-            },
-          };
-          return chain;
-        },
+  describe('findPromptsBlockingRegionRemoval (LLMO-5645)', () => {
+    // Read-only mock: the consistency check fetches non-deleted prompts and
+    // counts, per removed region, how many still reference it.
+    function makeReadClient(promptRows, opts = {}) {
+      return {
+        from: () => ({
+          select() { return this; },
+          eq() { return this; },
+          neq() { return this; },
+          limit() {
+            return Promise.resolve(
+              opts.error ? { data: null, error: opts.error } : { data: promptRows, error: null },
+            );
+          },
+        }),
       };
-      return { client, updates };
     }
 
-    it('rewrites only prompts still on the old brand region, sparing multi-market', async () => {
-      const { client, updates } = makeCascadeClient([
-        { id: 'p1', regions: ['WW'] }, // untouched default → cascade
-        { id: 'p2', regions: ['US', 'DE'] }, // intentional multi-market → spare
-        { id: 'p3', regions: ['ww'] }, // case-insensitive match → cascade
-        { id: 'p4', regions: ['GB'] }, // different single market → spare
-      ]);
-
-      const result = await cascadeBrandRegionToPrompts({
-        organizationId: ORG_ID,
-        brandUuid: BRAND_UUID,
-        oldRegions: ['WW'],
-        newRegions: ['US'],
-        postgrestClient: client,
-      });
-
-      expect(result.updated).to.equal(2);
-      expect(result.candidates).to.equal(2);
-      expect(updates).to.have.lengthOf(1);
-      expect(updates[0].ids).to.deep.equal(['p1', 'p3']);
-      expect(updates[0].patch.regions).to.deep.equal(['US']);
-    });
-
-    it('chunks bulk updates across the 200-row boundary', async () => {
-      const rows = Array.from({ length: 201 }, (_, i) => ({ id: `p${i}`, regions: ['WW'] }));
-      const { client, updates } = makeCascadeClient(rows);
-
-      const result = await cascadeBrandRegionToPrompts({
-        organizationId: ORG_ID,
-        brandUuid: BRAND_UUID,
-        oldRegions: ['WW'],
-        newRegions: ['US'],
-        postgrestClient: client,
-      });
-
-      expect(result.candidates).to.equal(201);
-      expect(result.updated).to.equal(201);
-      // 200 + 1 → two chunked update calls.
-      expect(updates).to.have.lengthOf(2);
-      expect(updates[0].ids).to.have.lengthOf(200);
-      expect(updates[1].ids).to.have.lengthOf(1);
-    });
-
-    it('is a no-op when the region did not effectively change (case/order-insensitive)', async () => {
-      const { client, updates } = makeCascadeClient([{ id: 'p1', regions: ['US'] }]);
-
-      const result = await cascadeBrandRegionToPrompts({
+    it('returns empty when no region is removed (new set is a superset)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
         oldRegions: ['US'],
-        newRegions: ['us'],
-        postgrestClient: client,
+        newRegions: ['US', 'DE'],
+        postgrestClient: makeReadClient([{ id: 'p1', regions: ['US'] }]),
       });
-
-      expect(result.updated).to.equal(0);
-      expect(updates).to.have.lengthOf(0);
+      expect(result).to.deep.equal({});
     });
 
-    it('updates nothing when no prompt is on the old default', async () => {
-      const { client, updates } = makeCascadeClient([{ id: 'p1', regions: ['DE'] }]);
+    it('returns empty when a removed region has no prompts using it', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['US'] },
+          { id: 'p2', regions: ['US'] },
+        ]),
+      });
+      expect(result).to.deep.equal({});
+    });
 
-      const result = await cascadeBrandRegionToPrompts({
+    it('counts prompts still using a removed region (incl. multi-market prompts)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['US', 'DE'] }, // multi-market → still references DE
+          { id: 'p2', regions: ['DE'] }, // DE-only
+          { id: 'p3', regions: ['de'] }, // case-insensitive
+          { id: 'p4', regions: ['US'] }, // unaffected
+          { id: 'p5', regions: null }, // non-array → normalized to [], ignored
+        ]),
+      });
+      expect(result).to.deep.equal({ de: 3 });
+    });
+
+    it('counts each removed region independently when several are stripped at once', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE', 'FR'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['DE'] },
+          { id: 'p2', regions: ['FR'] },
+          { id: 'p3', regions: ['DE', 'FR'] }, // counts toward both
+        ]),
+      });
+      expect(result).to.deep.equal({ de: 2, fr: 2 });
+    });
+
+    it('treats WW like any other region (strict — blocks WW removal)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
         oldRegions: ['WW'],
         newRegions: ['US'],
-        postgrestClient: client,
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['WW'] },
+          { id: 'p2', regions: ['ww'] },
+        ]),
       });
-
-      expect(result.updated).to.equal(0);
-      expect(updates).to.have.lengthOf(0);
+      expect(result).to.deep.equal({ ww: 2 });
     });
 
     it('throws when the PostgREST client is missing', async () => {
-      await expect(cascadeBrandRegionToPrompts({
+      await expect(findPromptsBlockingRegionRemoval({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
         oldRegions: ['WW'],
@@ -3362,136 +3343,29 @@ describe('prompts-storage', () => {
       })).to.be.rejectedWith('PostgREST client is required');
     });
 
-    it('treats a prompt with non-array regions as empty (no match)', async () => {
-      const { client, updates } = makeCascadeClient([
-        { id: 'p1', regions: null }, // non-array → normalized to [], never matches
-        { id: 'p2', regions: ['WW'] }, // real match
-        { id: 'p3', regions: [42] }, // non-string element → coerced, never matches
-      ]);
-
-      const result = await cascadeBrandRegionToPrompts({
-        organizationId: ORG_ID,
-        brandUuid: BRAND_UUID,
-        oldRegions: ['WW'],
-        newRegions: ['US'],
-        postgrestClient: client,
-      });
-
-      expect(result.updated).to.equal(1);
-      expect(updates[0].ids).to.deep.equal(['p2']);
-    });
-
-    it('returns zero when the read yields null data without error', async () => {
-      const client = {
-        from: () => ({
-          select() { return this; },
-          eq() { return this; },
-          neq() { return this; },
-          limit() { return Promise.resolve({ data: null, error: null }); },
-        }),
-      };
-
-      const result = await cascadeBrandRegionToPrompts({
-        organizationId: ORG_ID,
-        brandUuid: BRAND_UUID,
-        oldRegions: ['WW'],
-        newRegions: ['US'],
-        postgrestClient: client,
-      });
-
-      expect(result).to.deep.equal({ updated: 0, candidates: 0, truncated: false });
-    });
-
-    it('counts zero updated when an update returns null rows', async () => {
-      const client = {
-        from: () => {
-          const chain = {
-            select() { return chain; },
-            update() { return chain; },
-            eq() { return chain; },
-            neq() { return chain; },
-            limit() { return Promise.resolve({ data: [{ id: 'p1', regions: ['WW'] }], error: null }); },
-            in() { return chain; },
-            then(resolve) { return resolve({ data: null, error: null }); },
-          };
-          return chain;
-        },
-      };
-
-      const result = await cascadeBrandRegionToPrompts({
-        organizationId: ORG_ID,
-        brandUuid: BRAND_UUID,
-        oldRegions: ['WW'],
-        newRegions: ['US'],
-        postgrestClient: client,
-      });
-
-      expect(result.candidates).to.equal(1);
-      expect(result.updated).to.equal(0);
-    });
-
     it('throws when the prompt read fails', async () => {
-      const client = {
-        from: () => ({
-          select() { return this; },
-          eq() { return this; },
-          neq() { return this; },
-          limit() { return Promise.resolve({ data: null, error: { message: 'read boom' } }); },
-        }),
-      };
-
-      await expect(cascadeBrandRegionToPrompts({
+      await expect(findPromptsBlockingRegionRemoval({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
-        oldRegions: ['WW'],
+        oldRegions: ['US', 'DE'],
         newRegions: ['US'],
-        postgrestClient: client,
-      })).to.be.rejectedWith('Failed to read prompts for region cascade: read boom');
+        postgrestClient: makeReadClient(null, { error: { message: 'read boom' } }),
+      })).to.be.rejectedWith('Failed to read prompts for region consistency check: read boom');
     });
 
-    it('warns and reports truncated when the brand exceeds the read cap', async () => {
-      // READ_CAP rows, none on the old region → no updates, but truncated flag + warn.
-      const rows = Array.from({ length: 5000 }, (_, i) => ({ id: `p${i}`, regions: ['DE'] }));
-      const { client } = makeCascadeClient(rows);
+    it('warns when the brand exceeds the read cap', async () => {
+      const rows = Array.from({ length: 5000 }, (_, i) => ({ id: `p${i}`, regions: ['US'] }));
       const warn = sinon.spy();
-
-      const result = await cascadeBrandRegionToPrompts({
+      const result = await findPromptsBlockingRegionRemoval({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
-        oldRegions: ['WW'],
+        oldRegions: ['US', 'DE'],
         newRegions: ['US'],
-        postgrestClient: client,
+        postgrestClient: makeReadClient(rows),
         log: { warn },
       });
-
-      expect(result.truncated).to.equal(true);
-      expect(result.updated).to.equal(0);
+      expect(result).to.deep.equal({});
       expect(warn.calledOnce).to.equal(true);
-    });
-
-    it('throws when a chunk update fails', async () => {
-      const client = {
-        from: () => {
-          const chain = {
-            select() { return chain; },
-            update() { return chain; },
-            eq() { return chain; },
-            neq() { return chain; },
-            limit() { return Promise.resolve({ data: [{ id: 'p1', regions: ['WW'] }], error: null }); },
-            in() { return chain; },
-            then(resolve) { return resolve({ data: null, error: { message: 'update boom' } }); },
-          };
-          return chain;
-        },
-      };
-
-      await expect(cascadeBrandRegionToPrompts({
-        organizationId: ORG_ID,
-        brandUuid: BRAND_UUID,
-        oldRegions: ['WW'],
-        newRegions: ['US'],
-        postgrestClient: client,
-      })).to.be.rejectedWith('Failed to cascade region to prompts (0/1 already updated): update boom');
     });
   });
 });
