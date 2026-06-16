@@ -39,7 +39,14 @@ export async function handleGapTopicsTotals(sp, clients) {
   const competitorDomains = parseCompetitorDomainsList(sp);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
-  const date = sp.get('date');
+  // `GapTopicsTotalsRequest.date` is a `common.v1.Date` message — parse an exact
+  // `YYYY-MM-DD` snapshot day so the count matches the date-filtered list; omit
+  // otherwise so the upstream uses the latest snapshot. See gap-topics.js.
+  const dateRaw = sp.get('date')?.trim();
+  const dm = dateRaw && /^(\d{4})-(\d{2})-(\d{1,2})$/.exec(dateRaw);
+  const snapshotDate = dm
+    ? { year: Number(dm[1]), month: Number(dm[2]), day: Number(dm[3]) }
+    : undefined;
 
   const dimensionFilterQl = buildGapTopicsDimensionFilterQl(sp);
   const metricFilterResult = buildGapTopicsMetricFilterQl(sp);
@@ -58,7 +65,7 @@ export async function handleGapTopicsTotals(sp, clients) {
         competitors: competitorDomains.map(brandTarget),
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
-        target_date: date,
+        ...(snapshotDate ? { date: snapshotDate } : {}),
       },
       PROTO_FROM_JSON,
     );

@@ -73,7 +73,15 @@ export async function handleGapTopics(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || TOPICS_REQUEST_ORDER_BY_ENUM.TOTAL_COMPETITOR_MENTIONS;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
-  const date = sp.get('date');
+  // `GapTopicsRequest.date` is a `common.v1.Date` message — not the string
+  // `target_date` used by brand-topics. Parse an exact `YYYY-MM-DD` snapshot day
+  // (same shape as source-opportunities' `gapSnapshotDate`); omit otherwise so the
+  // upstream uses the latest snapshot rather than failing on a day-less date.
+  const dateRaw = sp.get('date')?.trim();
+  const dm = dateRaw && /^(\d{4})-(\d{2})-(\d{1,2})$/.exec(dateRaw);
+  const snapshotDate = dm
+    ? { year: Number(dm[1]), month: Number(dm[2]), day: Number(dm[3]) }
+    : undefined;
   const { limit, offset } = parseLimitOffset(sp);
 
   const gapKindsRaw = sp.get('gapKinds');
@@ -102,7 +110,7 @@ export async function handleGapTopics(sp, clients) {
         range: { limit, offset },
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
-        target_date: date,
+        ...(snapshotDate ? { date: snapshotDate } : {}),
       },
       PROTO_FROM_JSON,
     );
