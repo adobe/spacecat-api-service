@@ -332,15 +332,16 @@ export function createSerenityTransport({ env, imsToken }) {
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * POST /v2/workspaces/{parent}/subworkspace — create a brand's subworkspace.
-     * v2 takes NO `X-Upload-Receipt` header (v1-only); tier/products inherit
-     * from the parent. `resources.ai` must be non-zero — a zero-`ai.projects`
-     * subworkspace fails publish as a bare nginx 405 (workspace doc §5). The new
-     * workspace settles `not ready → created` in seconds; poll
-     * getWorkspaceStatus before creating projects against it.
+     * POST /v2/workspaces/{parent}/child — create a brand's child (sub-)workspace
+     * under the parent. The route is `/child`, NOT `/subworkspace` (the latter is
+     * unrouted and returns a bare gateway 404; `/child` returns 405 to GET/OPTIONS,
+     * confirming a POST-only route — verified live 2026-06-16 against the LLMO-Dev-2
+     * parent). v2 takes NO `X-Upload-Receipt` header (v1-only); tier/products
+     * inherit from the parent. The new workspace settles `not ready → created` in
+     * seconds; poll getWorkspaceStatus before creating projects against it.
      */
     async createSubworkspace(parentWorkspaceId, title, resources) {
-      const url = `${root}${USERS_API_PREFIX}/v2/workspaces/${enc(parentWorkspaceId)}/subworkspace`;
+      const url = `${root}${USERS_API_PREFIX}/v2/workspaces/${enc(parentWorkspaceId)}/child`;
       return request('POST', url, imsToken, { title, resources });
     },
 

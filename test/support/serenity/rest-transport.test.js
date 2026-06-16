@@ -534,7 +534,7 @@ describe('Semrush REST transport', () => {
   const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
 
   describe('createSubworkspace', () => {
-    it('POSTs { title, resources } to /v2/workspaces/{parent}/subworkspace (no X-Upload-Receipt)', async () => {
+    it('POSTs { title, resources } to /v2/workspaces/{parent}/child (no X-Upload-Receipt)', async () => {
       fetchStub.resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -544,7 +544,7 @@ describe('Semrush REST transport', () => {
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('POST');
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/subworkspace`,
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/child`,
       );
       expect(JSON.parse(init.body)).to.deep.equal({ title: 'Adobe Express', resources });
       expect(init.headers).to.not.have.property('X-Upload-Receipt');
