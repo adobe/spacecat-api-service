@@ -910,6 +910,7 @@ function normalizeRegionsForCompare(regions) {
     return [];
   }
   return regions
+    .filter((r) => r != null)
     .map((r) => (typeof r === 'string' ? r : String(r)).trim().toLowerCase())
     .filter((r) => r.length > 0)
     .sort();
@@ -1005,7 +1006,12 @@ export async function cascadeBrandRegionToPrompts({
       .in('id', chunk)
       .select('id');
     if (updErr) {
-      throw new Error(`Failed to cascade region to prompts: ${updErr.message}`);
+      // Surface partial progress so an operator knows how many prompts were
+      // already rewritten before the failure (chunks before this one committed).
+      throw new Error(
+        `Failed to cascade region to prompts (${updated}/${matchedIds.length} already updated): `
+        + `${updErr.message}`,
+      );
     }
     updated += (rows || []).length;
   }

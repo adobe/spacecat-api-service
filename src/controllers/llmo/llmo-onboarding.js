@@ -1424,18 +1424,19 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           // No collision: proceed with upsert (new brand, existing brand with a
           // null primary site, or a re-onboard of the same site). upsertBrand's
           // own guard keeps an already-set site_id immutable on the last case.
+          // LLMO-5645: seed operator market when supplied; else the 'gl'
+          // placeholder (consistent with the V2 config + brandAliases, both
+          // overwritten by Brandalf's async result).
+          const stubRegions = onboardingStubRegions(region);
           await upsertBrand({
             organizationId: organization.getId(),
             brand: {
               name: brandName.trim(),
               status: 'active',
               baseSiteId: site.getId(),
-              // LLMO-5645: seed operator market when supplied; else the 'gl'
-              // placeholder (consistent with the V2 config + brandAliases, both
-              // overwritten by Brandalf's async result).
-              region: onboardingStubRegions(region),
+              region: stubRegions,
               urls: [{ value: baseURL, type: 'base' }],
-              brandAliases: [{ name: brandName.trim(), regions: onboardingStubRegions(region) }],
+              brandAliases: [{ name: brandName.trim(), regions: stubRegions }],
             },
             postgrestClient,
             updatedBy: 'llmo-onboarding',

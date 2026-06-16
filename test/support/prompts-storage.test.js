@@ -3491,7 +3491,7 @@ describe('prompts-storage', () => {
         oldRegions: ['WW'],
         newRegions: ['US'],
         postgrestClient: client,
-      })).to.be.rejectedWith('Failed to cascade region to prompts: update boom');
+      })).to.be.rejectedWith('Failed to cascade region to prompts (0/1 already updated): update boom');
     });
   });
 });

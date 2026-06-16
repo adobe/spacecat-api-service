@@ -4138,6 +4138,41 @@ describe('LLMO Onboarding Functions', () => {
       );
     });
 
+    it('seeds the operator market when appending a brand to an existing config (LLMO-5645)', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Existing',
+          imsOrgID: 'ABC123@AdobeOrg',
+          brands: [{ id: 'existing-brand', v1SiteId: 'other-site-456', name: 'Other Brand' }],
+        },
+      };
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'New Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        region: 'US',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      const newBrand = result.customer.brands[1];
+      expect(newBrand.regions).to.deep.equal(['US']);
+      expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['US'] }]);
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
+    });
+
     it('deduplicates brand ID when colliding with existing brand', async () => {
       const existingConfig = {
         customer: {

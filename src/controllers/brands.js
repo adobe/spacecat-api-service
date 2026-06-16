@@ -1372,6 +1372,10 @@ function BrandsController(ctx, log, env) {
       // LLMO-5645: capture the brand region BEFORE the update so we can cascade
       // a region change to the brand's prompt regions (the field DRS schedules
       // off). Only read when a region change was actually requested.
+      // Known TOCTOU: a concurrent region edit to the same brand between this
+      // read and the update below could cascade against stale oldRegions. This
+      // is tolerated — the cascade is non-fatal and idempotent, so the next
+      // region edit re-runs it and converges the prompts.
       let oldRegions = null;
       if (updates.region !== undefined) {
         const before = await getBrandById(spaceCatId, brandUuid, postgrestClient);
@@ -1412,7 +1416,10 @@ function BrandsController(ctx, log, env) {
         } catch (cascadeError) {
           // Non-fatal: the brand region was updated. Surface the cascade gap so
           // it can be retried (a follow-up region edit re-runs the cascade).
-          log.error(`Brand ${brandUuid} region updated but prompt cascade failed: ${cascadeError.message}`);
+          log.error(
+            `Brand ${brandUuid} region updated but prompt cascade failed: ${cascadeError.message}`,
+            cascadeError,
+          );
         }
       }
 
