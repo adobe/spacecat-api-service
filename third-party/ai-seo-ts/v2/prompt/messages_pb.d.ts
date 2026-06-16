@@ -1538,3 +1538,24 @@ export declare type PromptsByTopicIDsTotalResponse = Message<"semrush.services.a
  */
 export declare const PromptsByTopicIDsTotalResponseSchema: GenMessage<PromptsByTopicIDsTotalResponse>;
 
+/**
+ * @generated from message semrush.services.ai_seo.v2.prompt.PromptsByTopicIDsExportRequest
+ */
+export declare type PromptsByTopicIDsExportRequest = Message<"semrush.services.ai_seo.v2.prompt.PromptsByTopicIDsExportRequest"> & {
+  /**
+   * @generated from field: semrush.services.ai_seo.v2.prompt.PromptsByTopicIDsRequest request = 1;
+   */
+  request?: PromptsByTopicIDsRequest;
+
+  /**
+   * @generated from field: semrush.services.ai_seo.v2.common.EXPORT_FILE_FORMAT.ENUM format = 2;
+   */
+  format: EXPORT_FILE_FORMAT_ENUM;
+};
+
+/**
+ * Describes the message semrush.services.ai_seo.v2.prompt.PromptsByTopicIDsExportRequest.
+ * Use `create(PromptsByTopicIDsExportRequestSchema)` to create a new message.
+ */
+export declare const PromptsByTopicIDsExportRequestSchema: GenMessage<PromptsByTopicIDsExportRequest>;
+
