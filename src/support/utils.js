@@ -315,20 +315,35 @@ export const triggerAuditForSite = async (
   slackContext,
   lambdaContext,
   auditContext = {},
-) => sendAuditMessage(
-  lambdaContext.sqs,
-  lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
-  auditType,
-  {
-    slackContext: {
-      channelId: slackContext.channelId,
-      threadTs: slackContext.threadTs,
+) => {
+  // Temporary diagnostic — confirms slackContext is being forwarded onto the
+  // audit-worker SQS message. Logs channel + thread presence (not the values
+  // themselves, to avoid leaking IDs into long-lived logs). Remove once the
+  // Slack-from-audit-worker flow is verified working end-to-end.
+  if (lambdaContext?.log?.info) {
+    lambdaContext.log.info('[slack-debug][trigger-audit] dispatching to AUDIT_JOBS_QUEUE_URL', {
+      auditType,
+      siteId: site.getId(),
+      queueUrl: lambdaContext.env?.AUDIT_JOBS_QUEUE_URL,
+      hasChannelId: !!slackContext?.channelId,
+      hasThreadTs: !!slackContext?.threadTs,
+    });
+  }
+  return sendAuditMessage(
+    lambdaContext.sqs,
+    lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
+    auditType,
+    {
+      slackContext: {
+        channelId: slackContext.channelId,
+        threadTs: slackContext.threadTs,
+      },
+      ...auditContext,
     },
-    ...auditContext,
-  },
-  site.getId(),
-  auditData,
-);
+    site.getId(),
+    auditData,
+  );
+};
 
 /**
  * Triggers the A11y codefix flow for an existing opportunity.
