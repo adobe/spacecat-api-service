@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.574.3",
+  "version": "1.575.0",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -86,7 +86,6 @@
     "@adobe/spacecat-shared-brand-client": "1.1.42",
     "@adobe/spacecat-shared-content-client": "1.8.24",
     "@adobe/spacecat-shared-data-access": "3.75.1",
-    "@adobe/spacecat-shared-data-access-v2": "npm:@adobe/spacecat-shared-data-access@2.109.0",
     "@adobe/spacecat-shared-drs-client": "1.12.1",
     "@adobe/spacecat-shared-gpt-client": "1.6.23",
     "@adobe/spacecat-shared-http-utils": "1.29.1",
@@ -154,6 +153,7 @@
     "chai-as-promised": "8.0.2",
     "dotenv": "17.4.2",
     "dynamo-db-local": "^10.3.0",
+    "electrodb": "3.9.0",
     "eslint": "9.39.4",
     "esmock": "2.7.4",
     "form-data": "4.0.5",
