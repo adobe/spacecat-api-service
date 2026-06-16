@@ -3071,7 +3071,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
     });
 
-    it('waitlists when site id is listed in ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS', async () => {
+    it('rejects when site id is listed in ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS', async () => {
       const existingSite = createMockSite({ orgId: DEMO_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -3086,7 +3086,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('REJECTED');
     });
 
     it('treats org as non-internal when ASO_PLG_EXCLUDED_ORGS is not set', async () => {
@@ -5053,9 +5053,18 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
       const refreshedSite = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
-      // first call: initial fetch for fast-track; second call: re-fetch after reassignment
-      mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
-        .onSecondCall().resolves(refreshedSite);
+      // first call: early demo-site check
+      // second call: fast-path fetch
+      // third call: re-fetch after reassignment
+      mockDataAccess.Site.findById
+        .onFirstCall()
+        .resolves(siteInInternalOrg);
+      mockDataAccess.Site.findById
+        .onSecondCall()
+        .resolves(siteInInternalOrg);
+      mockDataAccess.Site.findById
+        .onThirdCall()
+        .resolves(refreshedSite);
 
       mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
       mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
@@ -5103,7 +5112,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('skips reassignment for internal org demo sites', async () => {
+    it('rejects onboarding for preonboarded demo/internal sites before any org resolution', async () => {
       const INTERNAL_ORG_ID = 'internal-org-123';
       const DEMO_SITE_ID = 'demo-site-456';
 
@@ -5125,10 +5134,22 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const response = await controller.onboard(context);
 
       expect(response.status).to.equal(200);
-      // Demo site should NOT be reassigned (stays in internal org)
+      // Demo site should be REJECTED at the top-level check, before org resolution or entitlement
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('REJECTED');
+      expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWith(null);
+      expect(preonboardedOnboarding.setReviews).to.have.been.calledWithMatch(
+        sinon.match((reviews) => reviews.length === 1
+          && reviews[0].reason === null
+          && reviews[0].decision === 'UPHELD'
+          && reviews[0].reviewedBy === 'system'
+          && /demo\/internal site/.test(reviews[0].justification)),
+      );
+      // Site should NOT be reassigned
       expect(demoSite.setOrganizationId).to.not.have.been.called;
-      // PlgOnboarding org is still anchored to the resolved customer org.
-      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      // No org resolution should have happened (createOrFindOrganization not called)
+      expect(createOrFindOrganizationStub).to.not.have.been.called;
+      // No entitlement or enrollment should be created
+      expect(mockDataAccess.SiteEnrollment.create).to.not.have.been.called;
     });
 
     it('waitlists when preonboarded site is in different customer org', async () => {
@@ -5333,6 +5354,43 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockDataAccess.SiteEnrollment.create).to.have.been.calledWith(
         sinon.match({ entitlementId: 'ent-1' }),
       );
+    });
+
+    it('rejects onboarding for demo/internal sites before any org resolution', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-999';
+      const DEMO_SITE_ID = 'demo-site-111';
+
+      // Simulate full onboarding (not PRE_ONBOARDING) — no existing onboarding record
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+
+      // Existing demo site in internal org
+      const demoSite = createMockSite({ id: DEMO_SITE_ID, orgId: INTERNAL_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(demoSite);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = DEMO_SITE_ID;
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      // Demo site should be REJECTED at the top-level check
+      // (mockOnboarding is what PlgOnboarding.create resolves to)
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('REJECTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWith(null);
+      expect(mockOnboarding.setReviews).to.have.been.calledWithMatch(
+        sinon.match((reviews) => reviews.length === 1
+          && reviews[0].reason === null
+          && reviews[0].decision === 'UPHELD'
+          && reviews[0].reviewedBy === 'system'
+          && /demo\/internal site/.test(reviews[0].justification)),
+      );
+      // Site should NOT be reassigned
+      expect(demoSite.setOrganizationId).to.not.have.been.called;
+      // No org resolution should have happened (createOrFindOrganization not called)
+      expect(createOrFindOrganizationStub).to.not.have.been.called;
+      // No entitlement or enrollment should be created
+      expect(mockDataAccess.SiteEnrollment.create).to.not.have.been.called;
     });
   });
 
