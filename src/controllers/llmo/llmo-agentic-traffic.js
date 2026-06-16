@@ -807,7 +807,9 @@ export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) 
         }
         /* c8 ignore next */
         const rows = data ?? [];
-        ctx.log.info(`Agentic traffic hits-by-urls: requested=${urls.length} returned=${rows.length}`);
+        // raw vs valid surfaces caller-side URL-list bugs (entries dropped for
+        // missing host/path); returned is the RPC row count.
+        ctx.log.info(`Agentic traffic hits-by-urls: raw=${rawUrls.length} valid=${urls.length} returned=${rows.length}`);
         return ok({
           rows: rows.map((row) => ({
             url: row.url || '',
@@ -816,7 +818,7 @@ export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) 
             totalHits: Number(row.total_hits ?? 0),
             hitsTrend: Array.isArray(row.hits_trend)
               ? row.hits_trend.map((point) => ({
-                weekStart: point.week_start,
+                weekStart: point.week_start ?? null,
                 value: Number(point.value ?? 0),
               }))
               : [],

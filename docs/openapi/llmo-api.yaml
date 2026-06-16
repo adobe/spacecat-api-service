@@ -2896,8 +2896,10 @@ llmo-agentic-traffic-hits-by-urls:
                 type: array
                 maxItems: 2000
                 items:
+                  # host + urlPath are both expected, but the endpoint is
+                  # lenient: entries missing either are silently ignored rather
+                  # than rejected, so they are not declared `required`.
                   type: object
-                  required: [host, urlPath]
                   properties:
                     host: { type: string }
                     urlPath: { type: string }
