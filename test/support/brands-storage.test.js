@@ -689,6 +689,30 @@ describe('brands-storage', () => {
       expect(brandsUpsert.row).to.not.have.property('site_id');
     });
 
+    it('ignores baseSiteId on a semrush-anchored create (never sets site_id, avoids 409)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        // baseSiteId would coincidentally match an onboarded site already owned by
+        // another brand; a semrush-anchored brand must NOT claim it as site_id.
+        brand: { name: 'Test', status: 'active', baseSiteId: 'collides-with-other-brand' },
+        postgrestClient: client,
+        semrushWorkspaceId: 'ws-1',
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row).to.not.have.property('site_id');
+      expect(brandsUpsert.row.semrush_workspace_id).to.equal('ws-1');
+      expect(brandsUpsert.row.status).to.equal('active');
+    });
+
     it('downgrades to pending when neither site_id nor semrush_workspace_id anchors the brand', async () => {
       const client = createCapturingClient({
         brands: [

@@ -24,6 +24,16 @@ export function resourceAllocation(marketCount) {
   return { ai: { projects, prompts: 500 * projects } };
 }
 
+// Fixed resource allocation carved onto a brand's child workspace at CREATE.
+// A child created with an empty/inherited allocation lands with 0 metered quota,
+// so anything metered (prompt writes, live publish) 405s as a disguised quota
+// rejection (workspace doc §5). Carving a real allocation up front gives the
+// child the quota it needs to take prompts and publish. Flat sizing (1 project,
+// 500 prompts) per the sizing owner; this draws from the parent pool, so a
+// parent without enough free units 422s "insufficient available units".
+// Object.freeze so a caller can't mutate the shared singleton.
+export const CREATE_ALLOCATION = Object.freeze({ ai: { projects: 1, prompts: 500 } });
+
 // "Release everything back to the parent pool" payload. The EXACT shape is a
 // Gate-A live-smoke contract pin (design §6/§11) — release-to-parent is
 // unobservable on the limits-disabled dev parent until verified. Zeroing the
@@ -58,15 +68,20 @@ function assertNotParent(workspaceId, parentWorkspaceId) {
 // NOT unique within an org, so a name-only title would let one brand adopt a
 // different, same-named brand's sub-workspace after a create timeout - and a
 // later deactivate would then decommission the WRONG brand's live markets.
-// Embed the immutable brand id so the title is collision-free and the adoption
-// match is deterministic.
+// Embed (the first 8 chars of) the immutable brand id so the title stays short
+// in the Semrush UI while remaining collision-free for the adoption match: 8 hex
+// chars is 2^32 of space, far more than a single org's brand count, so the
+// name+suffix pair is still effectively unique per brand.
+const ID_SUFFIX_LEN = 8;
+
 function subworkspaceTitle(brand) {
   const name = brand?.getName?.();
   const id = brand?.getId?.();
-  if (hasText(name) && hasText(id)) {
-    return `${name} [${id}]`;
+  const suffix = hasText(id) ? id.slice(0, ID_SUFFIX_LEN) : '';
+  if (hasText(name) && hasText(suffix)) {
+    return `${name} [${suffix}]`;
   }
-  return hasText(id) ? `brand-${id}` : name;
+  return hasText(suffix) ? `brand-${suffix}` : name;
 }
 
 async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
@@ -218,10 +233,14 @@ export async function ensureSubworkspace(
   const title = subworkspaceTitle(brand);
   let created;
   try {
+    // Carve a fixed allocation (CREATE_ALLOCATION) onto the child so it has the
+    // metered quota to take prompts and publish. marketCount does not size the
+    // create — the allocation is flat (1 project, 500 prompts). If the parent
+    // pool can't cover it the create 422s "insufficient available units".
     created = await transport.createSubworkspace(
       parentWorkspaceId,
       title,
-      resourceAllocation(marketCount),
+      CREATE_ALLOCATION,
     );
   } catch (e) {
     // 504 = our transport's timeout signal → ambiguous create, recover by

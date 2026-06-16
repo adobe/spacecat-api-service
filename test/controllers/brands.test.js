@@ -4359,6 +4359,7 @@ describe('Brands Controller', () => {
         name: 'New Brand',
         urls: [{ value: 'https://acme.com/path' }],
         semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a', 'model-b'],
       };
 
       async function buildController({ provisionBrandSubworkspace, upsertBrand }) {
@@ -4391,6 +4392,7 @@ describe('Brands Controller', () => {
         expect(provisionArgs.languageCode).to.equal('en');
         expect(provisionArgs.brandDomain).to.equal('acme.com');
         expect(provisionArgs.brandName).to.equal('New Brand');
+        expect(provisionArgs.modelIds).to.deep.equal(['model-a', 'model-b']);
         // provisioning happens before the row is written, and its outputs are
         // persisted onto the row.
         expect(upsertStub.calledOnce).to.equal(true);
@@ -4429,6 +4431,22 @@ describe('Brands Controller', () => {
           ...context,
           params: { spaceCatId: ORGANIZATION_ID },
           data: { name: 'New Brand', urls: [{ value: 'https://acme.com' }], semrushMarket: { market: 'us' } },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(provisionStub.called).to.equal(false);
+      });
+
+      it('returns 400 when semrushModelIds is missing or empty', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', urls: [{ value: 'https://acme.com' }], semrushMarket: { market: 'us', languageCode: 'en' } },
           dataAccess: mockDataAccess,
           attributes: { authInfo: { profile: { email: 'user@test.com' } } },
         });

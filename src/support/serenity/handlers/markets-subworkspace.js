@@ -13,6 +13,7 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
+import { SerenityTransportError } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import {
@@ -127,6 +128,71 @@ function validateCreateBody(body) {
 }
 
 /**
+ * Classifies a generated prompt as `type:branded` when its text mentions the
+ * brand — i.e. (lower-cased) prompt text contains any of the brand-name/alias
+ * `needles` (already lower-cased + trimmed) as a substring — else
+ * `type:non-branded`. Empty `needles` ⇒ everything is non-branded.
+ */
+function brandedTypeTag(promptText, needles) {
+  const hay = String(promptText).toLowerCase();
+  return needles.some((n) => hay.includes(n)) ? 'type:branded' : 'type:non-branded';
+}
+
+/**
+ * Generates topics + prompts for (domain, country) via the AI-SEO service
+ * (transport.getBrandTopics) and attaches them to the project. Keeps the top
+ * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
+ * `topic:<TopicName>`, the caller's `standardTags`, and a branded/non-branded
+ * `type:` tag derived from `brandNames` (brand name + aliases). Returns the
+ * topic/prompt counts. A generation that yields nothing is a clean no-op (no
+ * upstream write).
+ *
+ * Prompt text is the createTaggedPrompts key, so identical text across topics
+ * collapses to one entry (last tag set wins) — acceptable and rare.
+ */
+async function generateAndAttachPrompts(transport, workspaceId, projectId, {
+  domain, country, topicCap = 0, standardTags = [], brandNames = [],
+}, log) {
+  const raw = await transport.getBrandTopics(workspaceId, { domain, country });
+  let topics = [];
+  if (Array.isArray(raw)) {
+    topics = raw;
+  } else if (Array.isArray(raw?.items)) {
+    topics = raw.items;
+  }
+  const ranked = topics
+    .filter((t) => hasText(t?.topic))
+    .sort((a, b) => (Number(b?.volume) || 0) - (Number(a?.volume) || 0));
+  const selected = topicCap > 0 ? ranked.slice(0, topicCap) : ranked;
+
+  // Brand-name + alias needles for branded classification: lower-cased + trimmed
+  // so the substring match is case-insensitive and whitespace-tolerant.
+  const brandNeedles = (Array.isArray(brandNames) ? brandNames : [])
+    .map((s) => String(s || '').trim().toLowerCase())
+    .filter((s) => s.length > 0);
+
+  const promptsByText = {};
+  selected.forEach((t) => {
+    const topicTag = `topic:${t.topic}`;
+    (Array.isArray(t.prompts) ? t.prompts : []).forEach((p) => {
+      if (hasText(p)) {
+        promptsByText[p] = [topicTag, ...standardTags, brandedTypeTag(p, brandNeedles)];
+      }
+    });
+  });
+
+  const promptCount = Object.keys(promptsByText).length;
+  if (promptCount === 0) {
+    log?.info?.('generateAndAttachPrompts: no prompts generated', {
+      workspaceId, projectId, domain, country,
+    });
+    return { topicCount: 0, promptCount: 0 };
+  }
+  await transport.createTaggedPrompts(workspaceId, projectId, promptsByText);
+  return { topicCount: selected.length, promptCount };
+}
+
+/**
  * POST /serenity/markets (subworkspace, design flow 3) — ensure the subworkspace
  * (lazy-create / re-grant), then create-or-adopt the slice's draft, publish
  * once, and confirm. No mapping write, no rollback: a leftover draft is a
@@ -138,6 +204,25 @@ function validateCreateBody(body) {
  *   and create directly against it. Omitted on the single-market POST path.
  * @param {function|null} [reloadPointer] - lost-update concurrency guard passed
  *   through to ensureSubworkspace on the single-market POST path (see there).
+ * @param {object} [options]
+ * @param {string[]} [options.modelIds=[]] - AI models (LLMs) to attach to the
+ *   project before publishing. A project needs models to track anything.
+ * @param {boolean} [options.generateTopics=false] - generate topics+prompts from
+ *   `body.brandDomain` + `body.market` and attach them, tagged `topic:<NAME>` +
+ *   `standardTags`.
+ * @param {number} [options.topicCap=0] - keep only the top N generated topics by
+ *   search volume (0 = keep all).
+ * @param {string[]} [options.standardTags=[]] - tags added to every generated
+ *   prompt in addition to its `topic:<NAME>` and branded `type:` tag.
+ * @param {string[]} [options.brandAliases=[]] - brand aliases; together with the
+ *   brand name(s) they classify each generated prompt as `type:branded` (text
+ *   contains a name/alias, case-insensitive) or `type:non-branded`.
+ * @param {string[]} [options.projectTags=[]] - project-level tag taxonomy to
+ *   register on the project (via createProjectTags) independent of any prompt.
+ * @param {'require'|'best-effort'|'skip'} [options.publishMode='require'] - how
+ *   to publish: `require` throws on failure (the default markets endpoint);
+ *   `best-effort` swallows a quota 405 (empty-units publish, workspace doc §5)
+ *   and leaves the project a draft; `skip` does not publish at all.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -147,6 +232,15 @@ export async function handleCreateMarketSubworkspace(
   log,
   preResolvedWorkspaceId = null,
   reloadPointer = null,
+  {
+    modelIds = [],
+    generateTopics = false,
+    topicCap = 0,
+    standardTags = [],
+    brandAliases = [],
+    projectTags = [],
+    publishMode = 'require',
+  } = {},
 ) {
   const errors = validateCreateBody(body);
   if (errors.length > 0) {
@@ -197,11 +291,86 @@ export async function handleCreateMarketSubworkspace(
     }
   }
 
-  await transport.publishProject(workspaceId, projectId);
+  // Register the standard tag taxonomy on the project (independent of prompts),
+  // so classification can later apply intent/source/type values per prompt.
+  if (Array.isArray(projectTags) && projectTags.length > 0) {
+    await transport.createProjectTags(workspaceId, projectId, projectTags);
+  }
+
+  // Attach the selected AI models (LLMs) to the project before populating /
+  // publishing — a project with no models can't track anything. Stage only
+  // (publish: false): the single best-effort publish below commits models +
+  // prompts together, so a quota 405 can't escape mid-flow.
+  if (Array.isArray(modelIds) && modelIds.length > 0) {
+    await syncModelsForProject(
+      transport,
+      workspaceId,
+      projectId,
+      modelIds,
+      { geoTargetId: location.geoTargetId, languageCode },
+      log,
+      { publish: false },
+    );
+  }
+
+  // Generate topics+prompts from the brand domain + market and attach them,
+  // tagging each prompt with its `topic:<NAME>` plus the standard tag set.
+  let generated = { topicCount: 0, promptCount: 0 };
+  if (generateTopics) {
+    generated = await generateAndAttachPrompts(
+      transport,
+      workspaceId,
+      projectId,
+      {
+        domain: body.brandDomain,
+        country: body.market,
+        topicCap,
+        standardTags,
+        // Branded classification needles: the brand's own name(s) + caller aliases.
+        brandNames: [
+          ...(Array.isArray(body.brandNames) ? body.brandNames : []),
+          ...brandAliases,
+        ],
+      },
+      log,
+    );
+  }
+
+  // Publish per mode. 'best-effort' swallows a quota 405 (publishing an
+  // empty-units child 405s as a disguised quota rejection, workspace doc §5) and
+  // leaves the project a draft so the brand still succeeds.
+  let published = false;
+  if (publishMode === 'require') {
+    await transport.publishProject(workspaceId, projectId);
+    published = true;
+  } else if (publishMode === 'best-effort') {
+    try {
+      await transport.publishProject(workspaceId, projectId);
+      published = true;
+    } catch (e) {
+      if (e instanceof SerenityTransportError && e.status === 405) {
+        log?.warn?.('handleCreateMarketSubworkspace: publish skipped — quota 405, project left as draft', {
+          workspaceId, projectId,
+        });
+      } else {
+        throw e;
+      }
+    }
+  }
 
   return {
     status: 201,
-    body: { brandId: brand.getId(), geoTargetId: location.geoTargetId, languageCode },
+    body: {
+      brandId: brand.getId(),
+      geoTargetId: location.geoTargetId,
+      languageCode,
+      workspaceId,
+      projectId,
+      published,
+      ...(generateTopics
+        ? { topicCount: generated.topicCount, promptCount: generated.promptCount }
+        : {}),
+    },
   };
 }
 

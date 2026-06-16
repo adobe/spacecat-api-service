@@ -530,6 +530,41 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('createProjectTags', () => {
+    it('POSTs { names } to /v2/workspaces/{ws}/projects/{pid}/aio/tags', async () => {
+      fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'source:ai' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const names = ['source:ai', 'type:branded'];
+      await transport.createProjectTags(WORKSPACE_ID, PROJECT_ID, names);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/tags`,
+      );
+      expect(JSON.parse(init.body)).to.deep.equal({ names });
+    });
+  });
+
+  describe('getBrandTopics', () => {
+    it('GETs /v1/workspaces/{ws}/brand-topics with domain + country query', async () => {
+      fetchStub.resolves(fetchOk([
+        { topic: 'Running', volume: 900, prompts: ['best running shoes'] },
+      ]));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getBrandTopics(WORKSPACE_ID, { domain: 'example.com', country: 'US' });
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/brand-topics?domain=example.com&country=US`,
+      );
+      expect(result[0].topic).to.equal('Running');
+    });
+  });
+
   // ── Sub-workspace lifecycle (serenity dual-mode, subworkspace path) ──────────────
   const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
 

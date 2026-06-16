@@ -35,6 +35,7 @@ import {
   handleListTags,
   handleListModels,
   handleUpdateModels,
+  listGlobalModelCatalog,
 } from '../support/serenity/handlers/markets.js';
 import {
   handleListMarketsSubworkspace,
@@ -602,6 +603,43 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/models — the brand-INDEPENDENT global AI
+   * model catalog. The add-brand wizard needs the catalog before a brand (and
+   * its workspace) exists, so this authorizes at the org level and reads the
+   * workspace-independent `GET /v1/ai_models` catalog. No brand/workspace
+   * resolution, no geo/lang params.
+   */
+  const listOrgModels = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const spaceCatId = ctx?.params?.spaceCatId;
+      if (!isValidUUID(spaceCatId)) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'spaceCatId must be a UUID' },
+          400,
+        );
+      }
+      const Organization = ctx?.dataAccess?.Organization;
+      if (!Organization || typeof Organization.findById !== 'function') {
+        return internalServerError('Organization data-access not available');
+      }
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+      const accessControl = AccessControlUtil.fromContext(ctx);
+      if (!await accessControl.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = await listGlobalModelCatalog(transport);
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   const updateModels = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
@@ -804,6 +842,7 @@ function SerenityController(context, log, env) {
     deleteMarket,
     listTags,
     listModels,
+    listOrgModels,
     updateModels,
     activate,
     deactivate,

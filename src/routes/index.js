@@ -220,6 +220,8 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.listModels,
     'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
+    // Brand-independent global model catalog (add-brand wizard, before a brand exists).
+    'GET /v2/orgs/:spaceCatId/serenity/models': serenityController.listOrgModels,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': serenityController.deactivate,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,

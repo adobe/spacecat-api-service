@@ -257,6 +257,34 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * GET /v1/workspaces/{ws}/brand-topics?domain=&country= — generates the top
+     * brand topics (with up to 100 prompt strings each) for a domain + market,
+     * fetched live from the AI-SEO service. Workspace-scoped, NOT project-scoped.
+     * Returns an array of `{ topic, volume, prompts: string[] }`. Used at
+     * brand-create to seed the new project's prompts (tagged `topic:<NAME>`).
+     */
+    async getBrandTopics(semrushWorkspaceId, { domain, country }) {
+      const params = new URLSearchParams({
+        domain: String(domain ?? ''),
+        country: String(country ?? ''),
+      });
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/brand-topics?${params.toString()}`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * POST /v2/workspaces/{ws}/projects/{pid}/aio/tags — creates project-level
+     * AIO tags (the standard taxonomy: intent/source/type) independent of any
+     * prompt. Body shape: { names: string[] } (model.TreeNodeListRequest; flat —
+     * `parent_id` omitted). Tags already attached to prompts are reused by name,
+     * so pre-creating a tag that a later prompt also carries does not duplicate.
+     */
+    async createProjectTags(semrushWorkspaceId, projectId, names) {
+      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/aio/tags`;
+      return request('POST', url, imsToken, { names });
+    },
+
+    /**
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
      */
     async createProject(semrushWorkspaceId, body) {

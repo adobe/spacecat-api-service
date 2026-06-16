@@ -1356,6 +1356,21 @@ function BrandsController(ctx, log, env) {
         if (!hasText(brandDomain)) {
           return badRequest('A primary URL is required to provision a Semrush brand');
         }
+        // The project needs at least one AI model (LLM) to track. The wizard
+        // collects them; reject a Semrush create that omits them.
+        const modelIds = Array.isArray(brandData.semrushModelIds)
+          ? brandData.semrushModelIds.filter(hasText)
+          : [];
+        if (modelIds.length === 0) {
+          return badRequest('semrushModelIds must list at least one AI model to track');
+        }
+        // Brand aliases drive branded/non-branded prompt classification. Accept
+        // both shapes the create payload may carry: plain strings or {name}.
+        const brandAliases = Array.isArray(brandData.brandAliases)
+          ? brandData.brandAliases
+            .map((a) => (typeof a === 'string' ? a : a?.name))
+            .filter(hasText)
+          : [];
         provisionedBrandId = randomUUID();
         const provisioned = await provisionBrandSubworkspace(context, {
           spaceCatId,
@@ -1364,6 +1379,8 @@ function BrandsController(ctx, log, env) {
           market,
           languageCode,
           brandDomain,
+          modelIds,
+          brandAliases,
         }, log);
         provisionedWorkspaceId = provisioned.semrushWorkspaceId;
       }

@@ -562,14 +562,22 @@ export async function upsertBrand({
     row.semrush_workspace_id = semrushWorkspaceId;
   }
 
+  // A Semrush-anchored create (serenity-first, semrushWorkspaceId set) is NEVER
+  // anchored by a SpaceCat site: its primary URL is the Semrush project domain,
+  // which may coincidentally match an onboarded site. Setting site_id from that
+  // match would collide with the site's existing primary brand (409
+  // brands_base_site_unique) — so ignore baseSiteId entirely on this path.
+  const anchoredBySemrush = hasText(semrushWorkspaceId);
+
   // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
   // when the brand has no site_id yet — re-onboarding/re-upserting an existing
   // brand by name must NOT re-point its primary site (LLMO-5556: this silently
   // overwrote mongodb.com -> learn.mongodb.com and merck.com -> keytruda.com).
-  if (hasText(brand.baseSiteId) && !hasText(existing?.site_id)) {
+  if (!anchoredBySemrush && hasText(brand.baseSiteId) && !hasText(existing?.site_id)) {
     row.site_id = brand.baseSiteId;
   } else if (
-    hasText(brand.baseSiteId)
+    !anchoredBySemrush
+    && hasText(brand.baseSiteId)
     && hasText(existing?.site_id)
     && existing.site_id !== brand.baseSiteId
   ) {

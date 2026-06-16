@@ -802,6 +802,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
+      'GET /v2/orgs/:spaceCatId/serenity/models',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',

@@ -102,6 +102,7 @@ describe('SerenityController', () => {
     handleListTags: sinon.stub(),
     handleListModels: sinon.stub(),
     handleUpdateModels: sinon.stub(),
+    listGlobalModelCatalog: sinon.stub(),
     handleListMarketsSubworkspace: sinon.stub(),
     handleGetMarketSubworkspace: sinon.stub(),
     handleCreateMarketSubworkspace: sinon.stub(),
@@ -178,6 +179,7 @@ describe('SerenityController', () => {
         handleListTags: handlers.handleListTags,
         handleListModels: handlers.handleListModels,
         handleUpdateModels: handlers.handleUpdateModels,
+        listGlobalModelCatalog: handlers.listGlobalModelCatalog,
       },
       '../../src/support/serenity/handlers/markets-subworkspace.js': {
         handleListMarketsSubworkspace: handlers.handleListMarketsSubworkspace,
@@ -599,6 +601,31 @@ describe('SerenityController', () => {
       const response = await controller.listModels(ctx);
       expect(response.status).to.equal(200);
       expect(handlers.handleListModels).to.have.been.calledOnce;
+    });
+
+    it('listOrgModels returns the global catalog (org-level, no brand)', async () => {
+      handlers.listGlobalModelCatalog.resolves({ items: [{ id: 'cat-gpt', key: 'chatgpt' }] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listOrgModels(fakeContext());
+      expect(response.status).to.equal(200);
+      const body = await readBody(response);
+      expect(body.items[0].id).to.equal('cat-gpt');
+      expect(handlers.listGlobalModelCatalog).to.have.been.calledOnce;
+    });
+
+    it('listOrgModels 400s when spaceCatId is not a UUID', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listOrgModels(fakeContext({ params: { spaceCatId: 'not-a-uuid' } }));
+      expect(response.status).to.equal(400);
+      expect(handlers.listGlobalModelCatalog).to.not.have.been.called;
+    });
+
+    it('listOrgModels 403s when the user has no access to the org', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listOrgModels(fakeContext());
+      expect(response.status).to.equal(403);
+      expect(handlers.listGlobalModelCatalog).to.not.have.been.called;
     });
 
     it('updateModels dispatches ctx.data to handleUpdateModels and wraps the result in ok()', async () => {

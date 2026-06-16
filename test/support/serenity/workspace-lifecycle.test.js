@@ -20,6 +20,7 @@ import {
   decommissionBrandWorkspace,
   resourceAllocation,
   RELEASE_ALLOCATION,
+  CREATE_ALLOCATION,
 } from '../../../src/support/serenity/workspace-lifecycle.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 import { clearBrandWorkspaceCache } from '../../../src/support/serenity/workspace-resolver.js';
@@ -29,10 +30,11 @@ use(sinonChai);
 
 const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
 const SUB_WS = 'subworkspace-ws-1';
-const BRAND_ID = 'brand-uuid-1';
-// The sub-workspace title embeds the immutable brand id for per-brand uniqueness
-// (so ambiguous-create recovery cannot adopt a same-named brand's workspace).
-const EXPECTED_TITLE = `Adobe Express [${BRAND_ID}]`;
+const BRAND_ID = 'e48e9db4-3101-4237-8075-a9132333e8c2';
+// The sub-workspace title embeds the first 8 chars of the immutable brand id for
+// per-brand uniqueness (so ambiguous-create recovery cannot adopt a same-named
+// brand's workspace) while keeping the Semrush UI title short.
+const EXPECTED_TITLE = `Adobe Express [${BRAND_ID.slice(0, 8)}]`;
 const NOOP_TIMING = { intervalMs: 0, sleep: () => Promise.resolve() };
 const log = { info: () => {}, error: () => {}, warn: () => {} };
 
@@ -99,8 +101,10 @@ describe('workspace-lifecycle', () => {
       const result = await ensureSubworkspace(transport, brand, PARENT_WS, 2, log, NOOP_TIMING);
 
       expect(result).to.equal(SUB_WS);
+      // Create carves the fixed CREATE_ALLOCATION (1 project, 500 prompts) so the
+      // child has metered quota; marketCount does not size the create.
       expect(transport.createSubworkspace)
-        .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE, resourceAllocation(2));
+        .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE, CREATE_ALLOCATION);
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
       expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(brand.save).to.have.been.calledOnce;
@@ -159,7 +163,7 @@ describe('workspace-lifecycle', () => {
       await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
 
       expect(transport.createSubworkspace)
-        .to.have.been.calledOnceWithExactly(PARENT_WS, 'Adobe Express', resourceAllocation(1));
+        .to.have.been.calledOnceWithExactly(PARENT_WS, 'Adobe Express', CREATE_ALLOCATION);
     });
 
     it('fails with an ambiguousWorkspace alert on multiple family matches', async () => {

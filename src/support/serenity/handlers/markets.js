@@ -821,6 +821,11 @@ export async function handleListModels(
  * but unassigned, leaves already-assigned models untouched. The only thing that
  * differs between modes is how the slice resolved to `projectId`. `logCtx` is
  * spread into the structured logs for diagnosability.
+ *
+ * `publish` (default true) commits the model-set change to the live project. Set
+ * it false when the caller batches its own publish afterwards (brand-create
+ * stages models + prompts and publishes once, best-effort) — otherwise this
+ * inner publish runs on an unpublishable (e.g. unit-less) project and throws.
  */
 export async function syncModelsForProject(
   transport,
@@ -829,6 +834,7 @@ export async function syncModelsForProject(
   modelIds,
   logCtx,
   log,
+  { publish = true } = {},
 ) {
   const ctx = logCtx || {};
   // Fetch current assignments: catalog-id → assignment-id mapping
@@ -898,7 +904,10 @@ export async function syncModelsForProject(
   // handlers frozen" rule — the flat-mode PUT /models never published, a latent
   // bug — and living in the shared core it fixes flat AND subworkspace in one place.
   // Only reached when something actually changed (the no-op path returned above).
-  await transport.publishProject(semrushWorkspaceId, projectId);
+  // Skipped when the caller batches its own publish (brand-create, see jsdoc).
+  if (publish) {
+    await transport.publishProject(semrushWorkspaceId, projectId);
+  }
 
   // Return the refreshed model list
   const updated = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);

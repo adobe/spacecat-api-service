@@ -61,6 +61,7 @@ function makeTransport(overrides = {}) {
     listGlobalAiModels: sinon.stub().resolves({ items: [] }),
     addAiModel: sinon.stub().resolves(null),
     deleteAiModelsByIds: sinon.stub().resolves(null),
+    createProjectTags: sinon.stub().resolves(null),
     ...overrides,
   };
 }
@@ -149,9 +150,128 @@ describe('markets-subworkspace handlers', () => {
       const brand = makeBrand();
       const res = await handleCreateMarketSubworkspace(transport, brand, PARENT, createBody, log);
       expect(res.status).to.equal(201);
-      expect(res.body).to.deep.equal({ brandId: BRAND, geoTargetId: 2840, languageCode: 'en' });
+      expect(res.body).to.deep.equal({
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        workspaceId: WS,
+        projectId: 'new-proj',
+        published: true,
+      });
       expect(transport.createProject).to.have.been.calledOnce;
       expect(transport.publishProject).to.have.been.calledOnce;
+    });
+
+    it('does not publish when publishMode is skip (draft-only)', async () => {
+      const transport = makeTransport();
+      const res = await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'skip' });
+      expect(res.status).to.equal(201);
+      expect(res.body.published).to.equal(false);
+      expect(transport.createProject).to.have.been.calledOnce;
+      expect(transport.publishProject).to.not.have.been.called;
+    });
+
+    it('best-effort publish swallows a quota 405 and keeps the project a draft', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(new SerenityTransportError(405, 'quota')),
+      });
+      const res = await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' });
+      expect(res.status).to.equal(201);
+      expect(res.body.published).to.equal(false);
+      expect(transport.publishProject).to.have.been.calledOnce;
+    });
+
+    it('best-effort publish re-throws a non-405 upstream error', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+      });
+      await expect(handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' })).to.be.rejectedWith(/boom/);
+    });
+
+    it('attaches selected AI models and generated topic-tagged prompts before publish', async () => {
+      const transport = makeTransport({
+        getBrandTopics: sinon.stub().resolves([
+          { topic: 'Running Shoes', volume: 900, prompts: ['best running shoes', 'top trail shoes'] },
+          { topic: 'Sandals', volume: 100, prompts: ['best sandals'] },
+        ]),
+        createTaggedPrompts: sinon.stub().resolves(null),
+        listAiModels: sinon.stub().resolves({ items: [] }),
+      });
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        {
+          modelIds: ['m-1', 'm-2'],
+          generateTopics: true,
+          topicCap: 1,
+          standardTags: ['source:ai'],
+          projectTags: ['intent:informational', 'type:branded'],
+          publishMode: 'require',
+        },
+      );
+      expect(res.status).to.equal(201);
+      // project-level tag taxonomy registered (independent of prompts)
+      expect(transport.createProjectTags).to.have.been.calledOnceWith(WS, 'new-proj', ['intent:informational', 'type:branded']);
+      // models attached
+      expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-1');
+      expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-2');
+      // only the top-1 topic by volume was attached, tagged topic:<name> +
+      // source:ai + a branded type: tag. Brand name is 'B' (needle 'b'):
+      // 'best running shoes' contains 'b' => branded; 'top trail shoes' => not.
+      expect(transport.createTaggedPrompts).to.have.been.calledOnce;
+      const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
+      expect(promptsByText).to.deep.equal({
+        'best running shoes': ['topic:Running Shoes', 'source:ai', 'type:branded'],
+        'top trail shoes': ['topic:Running Shoes', 'source:ai', 'type:non-branded'],
+      });
+      expect(res.body).to.include({ topicCount: 1, promptCount: 2, published: true });
+      // Models are STAGED (no inner publish) — only the single final publish runs,
+      // so a quota 405 can never escape mid-flow from the model-set commit.
+      expect(transport.publishProject).to.have.been.calledOnce;
+    });
+
+    it('tags prompts type:branded when text contains the brand name or an alias (case-insensitive), else type:non-branded', async () => {
+      const transport = makeTransport({
+        getBrandTopics: sinon.stub().resolves([
+          {
+            topic: 'Shoes',
+            volume: 900,
+            prompts: [
+              'Best ACME running shoes', // brand name (different case) => branded
+              'top trail sneakers from zoom', // alias 'Zoom' => branded
+              'most comfortable sandals', // neither => non-branded
+            ],
+          },
+        ]),
+        createTaggedPrompts: sinon.stub().resolves(null),
+      });
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        { ...createBody, brandNames: ['Acme'] },
+        log,
+        null,
+        null,
+        {
+          generateTopics: true,
+          standardTags: ['source:ai'],
+          brandAliases: ['Zoom'],
+          publishMode: 'skip',
+        },
+      );
+      expect(res.status).to.equal(201);
+      const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
+      expect(promptsByText).to.deep.equal({
+        'Best ACME running shoes': ['topic:Shoes', 'source:ai', 'type:branded'],
+        'top trail sneakers from zoom': ['topic:Shoes', 'source:ai', 'type:branded'],
+        'most comfortable sandals': ['topic:Shoes', 'source:ai', 'type:non-branded'],
+      });
     });
 
     it('409s when a LIVE project already exists for the slice', async () => {
