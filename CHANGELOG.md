@@ -1,3 +1,10 @@
+## [1.577.1](https://github.com/adobe/spacecat-api-service/compare/v1.577.0...v1.577.1) (2026-06-16)
+
+
+### Bug Fixes
+
+* **llmo:** plumb operator market into V2 onboarding + cascade region to prompts (LLMO-5645) ([#2619](https://github.com/adobe/spacecat-api-service/issues/2619)) ([9c61331](https://github.com/adobe/spacecat-api-service/commit/9c613318f3a18ca647a8f36cd378e11d1d81d3a0))
+
 # [1.577.0](https://github.com/adobe/spacecat-api-service/compare/v1.576.0...v1.577.0) (2026-06-16)
 
 
