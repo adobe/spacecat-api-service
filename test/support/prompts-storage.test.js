@@ -3361,5 +3361,137 @@ describe('prompts-storage', () => {
         postgrestClient: {},
       })).to.be.rejectedWith('PostgREST client is required');
     });
+
+    it('treats a prompt with non-array regions as empty (no match)', async () => {
+      const { client, updates } = makeCascadeClient([
+        { id: 'p1', regions: null }, // non-array → normalized to [], never matches
+        { id: 'p2', regions: ['WW'] }, // real match
+        { id: 'p3', regions: [42] }, // non-string element → coerced, never matches
+      ]);
+
+      const result = await cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: client,
+      });
+
+      expect(result.updated).to.equal(1);
+      expect(updates[0].ids).to.deep.equal(['p2']);
+    });
+
+    it('returns zero when the read yields null data without error', async () => {
+      const client = {
+        from: () => ({
+          select() { return this; },
+          eq() { return this; },
+          neq() { return this; },
+          limit() { return Promise.resolve({ data: null, error: null }); },
+        }),
+      };
+
+      const result = await cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: client,
+      });
+
+      expect(result).to.deep.equal({ updated: 0, candidates: 0, truncated: false });
+    });
+
+    it('counts zero updated when an update returns null rows', async () => {
+      const client = {
+        from: () => {
+          const chain = {
+            select() { return chain; },
+            update() { return chain; },
+            eq() { return chain; },
+            neq() { return chain; },
+            limit() { return Promise.resolve({ data: [{ id: 'p1', regions: ['WW'] }], error: null }); },
+            in() { return chain; },
+            then(resolve) { return resolve({ data: null, error: null }); },
+          };
+          return chain;
+        },
+      };
+
+      const result = await cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: client,
+      });
+
+      expect(result.candidates).to.equal(1);
+      expect(result.updated).to.equal(0);
+    });
+
+    it('throws when the prompt read fails', async () => {
+      const client = {
+        from: () => ({
+          select() { return this; },
+          eq() { return this; },
+          neq() { return this; },
+          limit() { return Promise.resolve({ data: null, error: { message: 'read boom' } }); },
+        }),
+      };
+
+      await expect(cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: client,
+      })).to.be.rejectedWith('Failed to read prompts for region cascade: read boom');
+    });
+
+    it('warns and reports truncated when the brand exceeds the read cap', async () => {
+      // READ_CAP rows, none on the old region → no updates, but truncated flag + warn.
+      const rows = Array.from({ length: 5000 }, (_, i) => ({ id: `p${i}`, regions: ['DE'] }));
+      const { client } = makeCascadeClient(rows);
+      const warn = sinon.spy();
+
+      const result = await cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: client,
+        log: { warn },
+      });
+
+      expect(result.truncated).to.equal(true);
+      expect(result.updated).to.equal(0);
+      expect(warn.calledOnce).to.equal(true);
+    });
+
+    it('throws when a chunk update fails', async () => {
+      const client = {
+        from: () => {
+          const chain = {
+            select() { return chain; },
+            update() { return chain; },
+            eq() { return chain; },
+            neq() { return chain; },
+            limit() { return Promise.resolve({ data: [{ id: 'p1', regions: ['WW'] }], error: null }); },
+            in() { return chain; },
+            then(resolve) { return resolve({ data: null, error: { message: 'update boom' } }); },
+          };
+          return chain;
+        },
+      };
+
+      await expect(cascadeBrandRegionToPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: client,
+      })).to.be.rejectedWith('Failed to cascade region to prompts: update boom');
+    });
   });
 });
