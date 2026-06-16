@@ -3816,6 +3816,13 @@ Brand:
       description: Read-only. The base URL of the primary site, resolved from baseSiteId.
       type: string
       readOnly: true
+    semrushWorkspaceId:
+      description: >-
+        Read-only. The brand's own Semrush sub-workspace id (dual-mode). Null
+        for brands still in flat mode (no sub-workspace minted yet). Used to
+        scope per-brand Semrush views to the sub-workspace.
+      type: [string, 'null']
+      readOnly: true
     imsOrgId:
       description: The IMS Organization ID of the brand
       $ref: '#/ImsOrganizationId'

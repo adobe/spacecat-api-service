@@ -249,6 +249,26 @@ describe('brands-storage', () => {
       expect(result.earnedContent).to.deep.equal([{ name: 'Blog', url: 'https://blog.example.com', regions: [] }]);
     });
 
+    it('maps semrush_workspace_id to semrushWorkspaceId (sub-workspace), null when absent', async () => {
+      const subWsRow = makeBrandRow({ semrush_workspace_id: 'ws-sub-123' });
+      const subWsQuery = createChainableQuery({ data: subWsRow, error: null });
+      const subWsResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(subWsQuery) },
+      );
+      expect(subWsResult.semrushWorkspaceId).to.equal('ws-sub-123');
+
+      // Flat-mode brand: no sub-workspace column → null.
+      const flatQuery = createChainableQuery({ data: makeBrandRow(), error: null });
+      const flatResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(flatQuery) },
+      );
+      expect(flatResult.semrushWorkspaceId).to.equal(null);
+    });
+
     it('defaults to empty regions when competitor regions is missing', async () => {
       const dbRow = makeBrandRow({
         competitors: [{ name: 'Rival', url: null }], // no regions key — triggers || []
