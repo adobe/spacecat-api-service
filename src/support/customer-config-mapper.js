@@ -166,6 +166,8 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
     origin: 'system',
     region: brandRegions,
     description: '',
+    brandContext: llmoConfig.claims?.brandContext,
+    mentionSentimentGuidance: llmoConfig.claims?.sentimentGuidance,
     updatedAt: primaryAlias.updatedAt || new Date().toISOString(),
     updatedBy: 'system',
     vertical: '',

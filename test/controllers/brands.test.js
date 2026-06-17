@@ -4364,6 +4364,26 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 400 when brand guidance fields have the wrong type', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', brandContext: { text: 'wrong' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand guidance fields are longer than 4000 characters', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', mentionSentimentGuidance: 'x'.repeat(4001) },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 400 when params is undefined', async () => {
       const response = await brandsController.createBrandForOrg({
         ...context,
@@ -4522,6 +4542,26 @@ describe('Brands Controller', () => {
         ...context,
         params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
         data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand guidance update fields have the wrong type', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { mentionSentimentGuidance: ['wrong'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand guidance update fields are longer than 4000 characters', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { brandContext: 'x'.repeat(4001) },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);

@@ -50,6 +50,10 @@ describe('Customer Config Mapper', () => {
             ],
           },
         },
+        claims: {
+          brandContext: 'Photoshop is Adobe creative software.',
+          sentimentGuidance: 'Treat factual price mentions as neutral.',
+        },
       };
 
       const result = convertV1ToV2(llmoConfig, 'Adobe', '1234@AdobeOrg');
@@ -65,6 +69,8 @@ describe('Customer Config Mapper', () => {
       expect(brand.brandAliases).to.have.lengthOf(2);
       expect(brand.competitors).to.have.lengthOf(1);
       expect(brand.prompts).to.have.lengthOf(1);
+      expect(brand.brandContext).to.equal('Photoshop is Adobe creative software.');
+      expect(brand.mentionSentimentGuidance).to.equal('Treat factual price mentions as neutral.');
 
       const prompt = brand.prompts[0];
       expect(prompt.prompt).to.equal('What is the best photo editing software?');
