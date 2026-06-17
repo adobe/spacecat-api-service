@@ -1122,20 +1122,36 @@ ai-visibility-topics-stats:
 ai-visibility-topics-research-prompts:
   get:
     tags: [ai-visibility]
-    summary: Get prompts for a topic research query
+    summary: Get prompts for a topic research query or a specific topic
     description: |
-      Returns prompts associated with a topic full-text search query.
-      All-models queries merge and deduplicate across LLMs; total is
-      the sum of per-LLM totals.
-      Data from `PromptService/PromptsByTopicFTS` and `PromptsByTopicFTSTotals`.
+      Returns prompts for topic research. Two modes:
 
-      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT`, `RELEVANCE_SCORE`, `RELEVANCE_SCORE` (default))
-      and `sortDirection` (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is
-      applied per LLM and the merged page is re-sorted in-process; cross-page ordering is
-      approximate.
+      - **Free-text (default):** provide `searchQuery` to get prompts associated
+        with a topic full-text search. Data from `PromptService/PromptsByTopicFTS`
+        and `PromptsByTopicFTSTotals`.
+      - **By topic:** provide `topicId` to get the prompts for that specific topic.
+        `searchQuery` is then **not required** (and is ignored). Data from
+        `PromptService/PromptsByTopicIDs` and `PromptsByTopicIDsTotal`.
+
+      Exactly one of `searchQuery` or `topicId` must be supplied. All-models queries
+      merge and deduplicate across LLMs; total is the sum of per-LLM totals.
+
+      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT`, `SOURCES_COUNT`,
+      `RELEVANCE_SCORE` (default)) and `sortDirection` (`ASC` / `DESC`, default `DESC`).
+      `RELEVANCE_SCORE` is not supported on the `topicId` path (relevance is topic-level).
+      On the all-engines path, sort is applied per LLM and the merged page is re-sorted
+      in-process; cross-page ordering is approximate.
     operationId: getAiVisibilityTopicsResearchPrompts
     parameters:
-      - *searchQueryParam
+      - name: searchQuery
+        in: query
+        required: false
+        description: |
+          Full-text search query for topic research. Required unless `topicId` is provided.
+        schema:
+          type: string
+          example: coffee
+      - *topicIdOptionalParam
       - *countryParam
       - *regionParam
       - *engineParam
