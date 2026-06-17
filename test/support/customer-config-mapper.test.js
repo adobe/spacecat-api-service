@@ -156,6 +156,26 @@ describe('Customer Config Mapper', () => {
       expect(result.customer.brands[0].mentionSentimentGuidance).to.equal(null);
     });
 
+    it('handles null and non-string legacy claims guidance values', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { name: 'Test Brand', regions: ['US'] },
+          ],
+        },
+        claims: {
+          brandContext: null,
+          sentimentGuidance: { text: 'ignore me' },
+        },
+        categories: {},
+        topics: {},
+      };
+
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(result.customer.brands[0].brandContext).to.equal(null);
+      expect(result.customer.brands[0].mentionSentimentGuidance).to.equal(undefined);
+    });
+
     it('handles brand alias with regions property (array)', () => {
       const llmoConfig = {
         brands: {
