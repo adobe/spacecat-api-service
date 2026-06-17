@@ -1,6 +1,6 @@
 ---
-name: "source-command-diagnose-cwv"
-description: "Diagnose why CWV code patches are not being generated for a site."
+name: "diagnose-cwv"
+description: "Diagnose why CWV code patches are not being generated for a site, site ID, or opportunity."
 ---
 
 # Diagnose CWV
@@ -37,11 +37,15 @@ Run the script and analyze the output. The script checks these pipeline stages:
 7. Fix entities created
 8. CloudWatch error logs
 
-After the script runs, summarize the findings and identify the likely blocker. Common issues:
+After the script runs, summarize the findings and identify the likely blocker.
+Common issues:
 
 - **No guidance**: cwv-auto-suggest not enabled, or Mystique failed to process
-- **Guidance but no patches**: cwv-auto-fix not enabled, or no code repo in S3, or Mystique code fix task failed
-- **Patches but no fix entities**: Mystique or autofix-worker didn't create them
-- **Fix entities in FAILED/ERROR**: Check Mystique or autofix-worker logs for the specific error
+- **Guidance but no patches**: cwv-auto-fix not enabled, no code repo is in S3,
+  or the Mystique code-fix task failed
+- **Patches but no fix entities**: Mystique or autofix-worker did not create them
+- **Fix entities in FAILED/ERROR**: Check Mystique or autofix-worker logs for
+  the specific error
 
-If the script is not available, replicate the checks manually using curl + jq against the SpaceCat API.
+If the script is not available, replicate the checks manually using curl and jq
+against the SpaceCat API.
