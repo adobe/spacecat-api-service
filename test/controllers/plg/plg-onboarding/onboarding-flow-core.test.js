@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import {
   PLG_MODEL_DOMAIN_HELPERS,
+  PLG_PROFILE,
   TEST_DOMAIN,
   TEST_BASE_URL,
   TEST_IMS_ORG_ID,
@@ -37,14 +38,16 @@ import {
 
 use(sinonChai);
 
-describe('PlgOnboardingController', function describePlgOnboarding() {
-  // esmock + extensive sinon stubs make individual tests slower than the 2000ms default.
+// Covers: already ONBOARDED, race condition, error handler resilience, new site (happy path),
+// bot blocker, RUM check, existing site in customer org, existing site in internal org,
+// existing site in different customer org.
+describe('PlgOnboardingController (onboarding-flow-core)', function describePlgOnboarding() {
   this.timeout(10000);
 
   let sandbox;
-  let PlgOnboardingController;
+  // esmock result — loaded once per file, not per test
+  let PlgOnboardingControllerFactory;
 
-  // Stubs for external dependencies
   let rumRetrieveDomainkeyStub;
   let composeBaseURLStub;
   let detectBotBlockerStub;
@@ -69,7 +72,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   let configToDynamoItemStub;
   let updateRumConfigStub;
 
-  // Mock objects
   let mockLog;
   let mockEnv;
   let mockSiteConfig;
@@ -91,9 +93,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     return buildContextShared(sandbox, mockDataAccess, mockLog, mockEnv, data, options);
   }
 
-  beforeEach(async () => {
+  // esmock is expensive — run once per file, not once per test.
+  // The sandbox is kept alive for the whole file; stubs are reset (not recreated)
+  // between tests so esmock's captured references stay valid.
+  before(async () => {
     sandbox = sinon.createSandbox();
-
     const shared = createSharedMocks(sandbox);
     ({
       rumRetrieveDomainkeyStub,
@@ -126,18 +130,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       mockProject,
     } = shared);
 
-    // Default mock site (for new site flow: findByBaseURL returns null)
-    mockSite = createMockSite();
-
-    // PlgOnboarding mock
-    mockOnboarding = createMockOnboarding();
-
-    // DataAccess
-    mockDataAccess = createMockDataAccess(sandbox, {
-      mockSite, mockOrganization, mockProject, mockOnboarding,
-    });
-
-    PlgOnboardingController = (await esmock(
+    PlgOnboardingControllerFactory = (await esmock(
       '../../../../src/controllers/plg/plg-onboarding.js',
       {
         '@adobe/spacecat-shared-utils': {
@@ -245,14 +238,67 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     )).default;
   });
 
-  afterEach(() => {
-    sandbox.restore();
+  // Reset stub call history and default behaviour between tests.
+  // Do NOT restore/recreate the sandbox — esmock captured the original stub references.
+  beforeEach(() => {
+    sandbox.reset(); // clears call history + resets all stub behaviours to defaults
+
+    // Re-apply default behaviours that createSharedMocks set up
+    composeBaseURLStub.returns(TEST_BASE_URL);
+    detectBotBlockerStub.resolves({ crawlable: true });
+    detectLocaleStub.resolves({ language: 'en', region: 'US' });
+    resolveCanonicalUrlStub.resolves(TEST_BASE_URL);
+    rumRetrieveDomainkeyStub.resolves('test-domainkey');
+    updateRumConfigStub.resolves(true);
+    autoResolveAuthorUrlStub.resolves(null);
+    resolveWwwUrlStub.resolves(TEST_DOMAIN);
+    updateCodeConfigStub.resolves();
+    findDeliveryTypeStub.resolves('aem_edge');
+    deriveProjectNameStub.returns('example.com');
+    queueDeliveryConfigWriterStub.resolves({ ok: true });
+    loadProfileConfigStub.returns(PLG_PROFILE);
+    triggerBrandProfileAgentStub.resolves('exec-123');
+    configToDynamoItemStub.returns({ config: 'dynamo' });
+    tierClientCreateEntitlementStub.resolves({
+      entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID, getTier: () => 'PLG' },
+      siteEnrollment: { getId: () => 'enroll-1' },
+    });
+    tierClientCreateForSiteStub.resolves({
+      createEntitlement: tierClientCreateEntitlementStub,
+      checkValidEntitlement: sandbox.stub().resolves({
+        entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID },
+        siteEnrollment: { getId: () => 'enroll-1' },
+      }),
+    });
+    tierClientCreateForOrgStub.returns({
+      createEntitlement: tierClientCreateEntitlementStub,
+      checkValidEntitlement: sandbox.stub().resolves({
+        entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID, getTier: () => 'PLG' },
+      }),
+    });
+    createOrFindOrganizationStub.resolves(mockOrganization);
+    enableAuditsStub.resolves();
+    enableImportsStub.resolves();
+    triggerAuditsStub.resolves();
+    mockOrganization.getId.returns(TEST_ORG_ID);
+    mockOrganization.getImsOrgId.returns(TEST_IMS_ORG_ID);
+    mockOrganization.getName.returns('Test Org');
+    mockSiteConfig.getFetchConfig.returns({});
+    mockSiteConfig.updateFetchConfig.returns(undefined);
+    mockProject.getId.returns(TEST_PROJECT_ID);
+    mockProject.getProjectName.returns('example.com');
+
+    mockSite = createMockSite();
+    mockOnboarding = createMockOnboarding();
+    mockDataAccess = createMockDataAccess(sandbox, {
+      mockSite, mockOrganization, mockProject, mockOnboarding,
+    });
   });
 
   describe('onboard - already ONBOARDED domain', () => {
     let controller;
     beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
     it('returns existing record without calling Site.create when domain is already ONBOARDED', async () => {
@@ -270,14 +316,13 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   describe('onboard - race condition on create', () => {
     let controller;
     beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
     it('resumes when concurrent create causes unique violation', async () => {
       mockDataAccess.PlgOnboarding.create.rejects(
         new Error('unique constraint violation'),
       );
-      // Second findByImsOrgIdAndDomain call returns the record
       mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
         .onFirstCall().resolves(null)
         .onSecondCall().resolves(mockOnboarding);
@@ -322,7 +367,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   describe('onboard - error handler resilience', () => {
     let controller;
     beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
     it('does not swallow original error when save in catch fails', async () => {
@@ -359,7 +404,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   describe('onboard - new site (happy path)', () => {
     let controller;
     beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
     it('onboards a new site successfully', async () => {
@@ -373,7 +418,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(res.value.domain).to.equal(TEST_DOMAIN);
       expect(res.value.baseURL).to.equal(TEST_BASE_URL);
 
-      // Verify imsOrgId derived from token, not body
       expect(mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain)
         .to.have.been.calledWith(TEST_IMS_ORG_ID, TEST_DOMAIN);
       expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
@@ -382,7 +426,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         }),
       );
 
-      // Verify flow
       expect(composeBaseURLStub).to.have.been.calledWith(TEST_DOMAIN);
       expect(loadProfileConfigStub).to.have.been.calledWith('aso_plg');
       expect(createOrFindOrganizationStub).to.have.been.calledWith(TEST_IMS_ORG_ID, context);
@@ -398,7 +441,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(configToDynamoItemStub).to.have.been.called;
       expect(mockSite.save).to.have.been.called;
 
-      // Verify onboarding record updated with final status
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(mockOnboarding.setSiteId).to.have.been.calledWith(TEST_SITE_ID);
@@ -784,7 +826,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(res.status).to.equal(200);
       expect(autoResolveAuthorUrlStub).to.have.been.called;
       expect(mockSite.setDeliveryConfig).to.not.have.been.called;
-      // But RUM host is still passed to updateCodeConfig
       expect(updateCodeConfigStub).to.have.been.calledWith(
         mockSite,
         'main--my-site--adobe.aem.live',
@@ -973,7 +1014,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   describe('onboard - bot blocker', () => {
     let controller;
     beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
     it('returns WAITING_FOR_IP_ALLOWLISTING when bot blocked (new site)', async () => {
@@ -989,7 +1030,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      // Verify onboarding record was updated with bot blocker status
       expect(mockOnboarding.setStatus)
         .to.have.been.calledWith('WAITING_FOR_IP_ALLOWLISTING');
       expect(mockOnboarding.setBotBlocker).to.have.been.calledWith({
@@ -998,7 +1038,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         userAgent: 'SpaceCat/1.0',
       });
       expect(mockOnboarding.save).to.have.been.called;
-      // Should NOT create a site
       expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
 
@@ -1103,7 +1142,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   describe('onboard - RUM check', () => {
     let controller;
     beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
     it('continues onboarding when no RUM data for domain', async () => {
@@ -1114,10 +1153,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      // Should NOT be waitlisted — onboarding continues
       expect(mockOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // Should proceed to bot blocker and site creation
       expect(detectBotBlockerStub).to.have.been.called;
       expect(mockDataAccess.Site.create).to.have.been.called;
     });
@@ -1126,7 +1163,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   describe('onboard - existing site in customer org', () => {
     let controller;
     beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
     it('onboards existing site belonging to customer org', async () => {
@@ -1138,15 +1175,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      // Should NOT reassign org
       expect(existingSite.setOrganizationId).to.not.have.been.called;
-      // Should NOT create a new site
       expect(mockDataAccess.Site.create).to.not.have.been.called;
-      // Should still enable audits, imports, entitlement
       expect(enableAuditsStub).to.have.been.called;
       expect(enableImportsStub).to.have.been.called;
       expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
-      // Verify onboarding record completed
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
   });
@@ -1154,7 +1187,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   describe('onboard - existing site in internal org', () => {
     let controller;
     beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
     it('waitlists when site belongs to DEFAULT_ORGANIZATION_ID', async () => {
@@ -1200,10 +1233,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // Verify site org is reassigned to the new customer org
       expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(existingSite.save).to.have.been.called;
-      // Verify PlgOnboarding org is also updated to match
       expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
     });
 
@@ -1244,7 +1275,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   describe('onboard - existing site in different customer org', () => {
     let controller;
     beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
     it('returns WAITLISTED when site belongs to another customer org', async () => {
@@ -1255,23 +1286,20 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const res = await controller.onboard(context);
       expect(res.status).to.equal(200);
-      // Should NOT modify the site
       expect(existingSite.setOrganizationId).to.not.have.been.called;
       expect(existingSite.save).to.not.have.been.called;
-      // Verify onboarding record was set to WAITLISTED with reason
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/already assigned to another organization/);
       expect(mockOnboarding.setSiteId).to.have.been.calledWith(existingSite.getId());
       expect(mockOnboarding.save).to.have.been.called;
-      // Should NOT proceed to bot blocker or site creation
       expect(detectBotBlockerStub).to.not.have.been.called;
     });
 
     it('uses org ID as fallback in waitlist reason when Organization.findById returns null', async () => {
       const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-      mockDataAccess.Organization.findById.resolves(null); // triggers || existingOrgId fallback
+      mockDataAccess.Organization.findById.resolves(null);
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await controller.onboard(context);
@@ -1280,7 +1308,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/already assigned to another organization/);
-      // Falls back to org UUID in the reason since no org was found
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(new RegExp(OTHER_CUSTOMER_ORG_ID));
     });
@@ -1316,768 +1343,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         .to.have.been.calledWithMatch(/already assigned to another organization/);
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/cannot be moved.*active products/);
-    });
-  });
-
-  describe('onboard - one domain per IMS org', () => {
-    let controller;
-
-    beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
-    });
-
-    it('waitlists domain when another domain is already onboarded for the same IMS org', async () => {
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
-      expect(mockOnboarding.save).to.have.been.called;
-      // Should NOT proceed to org resolution or site creation
-      expect(createOrFindOrganizationStub).to.not.have.been.called;
-      expect(mockDataAccess.Site.create).to.not.have.been.called;
-    });
-
-    it('waitlists and uses org ID as fallback name when Organization.findById returns null for already-onboarded record', async () => {
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        organizationId: OTHER_CUSTOMER_ORG_ID, // has org ID so findById is called
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Organization.findById.resolves(null); // org not found — fallback to org ID
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
-    });
-
-    it('allows onboarding when the same domain is already onboarded (re-onboard)', async () => {
-      const onboardedRecord = createMockOnboarding({
-        domain: TEST_DOMAIN,
-        status: 'ONBOARDED',
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('stamps customer identity as createdBy when request comes from ASO UI', async () => {
-      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
-      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
-      const context = buildContext(
-        { domain: TEST_DOMAIN },
-        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
-      );
-      const res = await controller.onboard(context);
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('customer@example.com');
-    });
-
-    it('does not set createdBy when request is not from ASO UI', async () => {
-      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
-      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
-      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
-      const res = await controller.onboard(context);
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
-    });
-
-    it('does not set createdBy when x-client-type is a different value', async () => {
-      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
-      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
-      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo, headers: { 'x-client-type': 'some-other-client' } });
-      const res = await controller.onboard(context);
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
-    });
-
-    it('does not set createdBy when pathInfo is absent', async () => {
-      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
-      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
-      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
-      delete context.pathInfo;
-      const res = await controller.onboard(context);
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
-    });
-
-    it('does not set createdBy when headers are absent', async () => {
-      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
-      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
-      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
-      context.pathInfo = {};
-      const res = await controller.onboard(context);
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
-    });
-
-    it('allows onboarding when other domains exist but none are onboarded', async () => {
-      const waitlistedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'WAITLISTED',
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('auto-transitions other WAITLISTED records to OUTDATED with CLOSED review on new onboard', async () => {
-      const staleWaitlisted = createMockOnboarding({
-        id: 'stale-waitlisted-id',
-        domain: 'old-domain.com',
-        status: 'WAITLISTED',
-        waitlistReason: 'previous waitlist reason',
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([staleWaitlisted]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-
-      expect(staleWaitlisted.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(staleWaitlisted.setWaitlistReason).to.have.been.calledWith(null);
-      expect(staleWaitlisted.setUpdatedBy).to.have.been.calledWith('system');
-      expect(staleWaitlisted.setReviews).to.have.been.calledOnce;
-      const reviews = staleWaitlisted.setReviews.firstCall.args[0];
-      expect(reviews).to.have.length(1);
-      expect(reviews[0].decision).to.equal('CLOSED');
-      expect(reviews[0].reviewedBy).to.equal('system');
-      expect(reviews[0].reason).to.equal('previous waitlist reason');
-      expect(reviews[0].justification).to.match(/Automatically closed by system/);
-      expect(staleWaitlisted.save).to.have.been.called;
-
-      // The new domain still gets onboarded
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('auto-transitions WAITING_FOR_IP_ALLOWLISTING records to OUTDATED with CLOSED review', async () => {
-      const blockedRecord = createMockOnboarding({
-        id: 'blocked-id',
-        domain: 'blocked-domain.com',
-        status: 'WAITING_FOR_IP_ALLOWLISTING',
-        botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4'] },
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([blockedRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-
-      expect(blockedRecord.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(blockedRecord.setWaitlistReason).to.have.been.calledWith(null);
-      expect(blockedRecord.setUpdatedBy).to.have.been.calledWith('system');
-      const reviews = blockedRecord.setReviews.firstCall.args[0];
-      expect(reviews[0].decision).to.equal('CLOSED');
-
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('auto-transitions multiple pending records to OUTDATED when new onboarding starts', async () => {
-      const record1 = createMockOnboarding({ id: 'r1', domain: 'a.com', status: 'WAITLISTED' });
-      const record2 = createMockOnboarding({ id: 'r2', domain: 'b.com', status: 'WAITING_FOR_IP_ALLOWLISTING' });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([record1, record2]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(record1.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(record2.setStatus).to.have.been.calledWith('OUTDATED');
-    });
-
-    it('logs warn and continues when notification throws during WAITLISTED sweep', async () => {
-      // postPlgOnboardingNotification has its own internal try/catch for postSlackMessage,
-      // so the outer catch at lines 710-711 fires only when something else inside the
-      // function throws unexpectedly. getImsOrgId() is an unprotected call — making it
-      // throw exercises that exact path without needing a separate esmock.
-      const staleRecord = createMockOnboarding({
-        id: 'stale-id',
-        domain: 'stale-domain.com',
-        status: 'WAITLISTED',
-        waitlistReason: 'old reason',
-      });
-      staleRecord.getImsOrgId.throws(new Error('IMS org ID fetch failed'));
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([staleRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      context.env = {
-        ...context.env,
-        SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123',
-        SLACK_BOT_TOKEN: 'xoxb-test',
-      };
-      const res = await controller.onboard(context);
-
-      // Onboarding still succeeds despite notification failure
-      expect(res.status).to.equal(200);
-      // Peer record was saved before notification was attempted
-      expect(staleRecord.save).to.have.been.called;
-      // Notification failure is logged as a warning, not rethrown
-      expect(mockLog.warn).to.have.been.calledWithMatch(
-        /Failed to post OUTDATED notification for domain stale-domain\.com/,
-      );
-      // Main onboarding proceeded normally
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('does not auto-transition the record for the domain being onboarded', async () => {
-      const sameRecord = createMockOnboarding({
-        id: 'same-domain-id',
-        domain: TEST_DOMAIN,
-        status: 'WAITLISTED',
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([sameRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(sameRecord.setStatus).to.not.have.been.calledWith('OUTDATED');
-    });
-
-    it('displaces already-onboarded domain when it has no open PLG suggestions', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
-      const ASO_ENTITLEMENT_ID = 'aso-entitlement-uuid';
-
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-        organizationId: OLD_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no opportunities → no suggestions
-
-      const mockAsoEntitlement = {
-        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
-        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
-        getTier: sandbox.stub().returns('PLG'),
-      };
-      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
-
-      const mockEnrollmentToRevoke = {
-        getId: sandbox.stub().returns('enroll-old-1'),
-        getSiteId: sandbox.stub().returns(OLD_SITE_ID),
-        remove: sandbox.stub().resolves(),
-      };
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollmentToRevoke]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-
-      // Old domain is marked OUTDATED with system OFFBOARDED review
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(onboardedRecord.setWaitlistReason).to.have.been.calledWith(null);
-      expect(onboardedRecord.setReviews).to.have.been.called;
-      const offboardedReviews = onboardedRecord.setReviews.lastCall.args[0];
-      expect(offboardedReviews[offboardedReviews.length - 1].justification).to.match(/Automatically offboarded by system/);
-      expect(onboardedRecord.setUpdatedBy).to.have.been.calledWith('system');
-      expect(onboardedRecord.save).to.have.been.called;
-
-      // Only the ASO enrollment is revoked
-      expect(mockDataAccess.Entitlement.allByOrganizationId).to.have.been.calledWith(OLD_ORG_ID);
-      expect(mockDataAccess.SiteEnrollment.allByEntitlementId)
-        .to.have.been.calledWith(ASO_ENTITLEMENT_ID);
-      expect(mockEnrollmentToRevoke.remove).to.have.been.called;
-
-      // New domain is onboarded
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('logs when Site.findById fails while disabling summit-plg after displacement', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
-      const ASO_ENTITLEMENT_ID = 'aso-entitlement-uuid';
-
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-        organizationId: OLD_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([]);
-
-      const mockAsoEntitlement = {
-        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
-        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
-        getTier: sandbox.stub().returns('PLG'),
-      };
-      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
-
-      mockDataAccess.Site.findById.callsFake((siteId) => {
-        if (siteId === OLD_SITE_ID) {
-          return Promise.reject(new Error('lookup failed'));
-        }
-        return Promise.resolve(null);
-      });
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockLog.warn).to.have.been.calledWithMatch(
-        /Failed to disable summit-plg for displaced site old-site-uuid: lookup failed/,
-      );
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('does not set updatedBy on displaced onboarded record when imsOrgId is missing', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
-      const ASO_ENTITLEMENT_ID = 'aso-entitlement-uuid';
-
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        imsOrgId: '',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-        organizationId: OLD_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([]);
-
-      const mockAsoEntitlement = {
-        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
-        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
-        getTier: sandbox.stub().returns('PLG'),
-      };
-      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
-
-      const res = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
-
-      expect(res.status).to.equal(200);
-      expect(onboardedRecord.setUpdatedBy).to.have.been.calledWith('system');
-    });
-
-    it('waitlists new domain when already-onboarded site has NEW PLG suggestions', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([{
-        getId: sandbox.stub().returns('oppty-1'),
-        getType: sandbox.stub().returns('cwv'),
-        getLastAuditedAt: sandbox.stub().returns(null),
-      }]);
-      mockDataAccess.Suggestion.allByOpportunityId.resolves([
-        { getStatus: sandbox.stub().returns('NEW') },
-      ]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).not.to.have.been.called;
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
-    });
-
-    it('waitlists new domain when already-onboarded site has IN_PROGRESS PLG suggestions', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([{
-        getId: sandbox.stub().returns('oppty-1'),
-        getType: sandbox.stub().returns('alt-text'),
-        getLastAuditedAt: sandbox.stub().returns(null),
-      }]);
-      mockDataAccess.Suggestion.allByOpportunityId.resolves([
-        { getStatus: sandbox.stub().returns('IN_PROGRESS') },
-      ]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).not.to.have.been.called;
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
-    });
-
-    it('waitlists new domain when already-onboarded site has FIXED PLG suggestions', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([{
-        getId: sandbox.stub().returns('oppty-1'),
-        getType: sandbox.stub().returns('broken-backlinks'),
-        getLastAuditedAt: sandbox.stub().returns(null),
-      }]);
-      mockDataAccess.Suggestion.allByOpportunityId.resolves([
-        { getStatus: sandbox.stub().returns('FIXED') },
-      ]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).not.to.have.been.called;
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
-    });
-
-    it('waitlists new domain when already-onboarded site has SKIPPED PLG suggestions', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([{
-        getId: sandbox.stub().returns('oppty-1'),
-        getType: sandbox.stub().returns('cwv'),
-        getLastAuditedAt: sandbox.stub().returns(null),
-      }]);
-      mockDataAccess.Suggestion.allByOpportunityId.resolves([
-        { getStatus: sandbox.stub().returns('SKIPPED') },
-      ]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).not.to.have.been.called;
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
-    });
-
-    it('displaces when all PLG suggestions are PENDING_VALIDATION', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-        organizationId: OTHER_CUSTOMER_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([{
-        getId: sandbox.stub().returns('oppty-1'),
-        getType: sandbox.stub().returns('cwv'),
-        getLastAuditedAt: sandbox.stub().returns(null),
-      }]);
-      mockDataAccess.Suggestion.allByOpportunityId.resolves([
-        { getStatus: sandbox.stub().returns('PENDING_VALIDATION') },
-      ]);
-      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('displaces when all PLG suggestions are OUTDATED', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-        organizationId: OTHER_CUSTOMER_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([{
-        getId: sandbox.stub().returns('oppty-1'),
-        getType: sandbox.stub().returns('cwv'),
-        getLastAuditedAt: sandbox.stub().returns(null),
-      }]);
-      mockDataAccess.Suggestion.allByOpportunityId.resolves([
-        { getStatus: sandbox.stub().returns('OUTDATED') },
-      ]);
-      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('conservatively waitlists new domain when suggestion check throws', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.rejects(new Error('DB unavailable'));
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-
-      // Old domain is NOT displaced
-      expect(onboardedRecord.setStatus).not.to.have.been.called;
-
-      // New domain is waitlisted (conservative fallback)
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
-    });
-
-    it('displaces already-onboarded domain when audit completed with no open suggestions', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
-
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-        organizationId: OLD_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-
-      // Audit ran (lastAuditedAt set) but no open suggestions — nothing left to protect
-      const mockOpportunity = {
-        getId: sandbox.stub().returns('oppty-1'),
-        getType: sandbox.stub().returns('cwv'),
-        getLastAuditedAt: sandbox.stub().returns('2026-04-01T10:00:00.000Z'),
-      };
-      mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
-      mockDataAccess.Suggestion.allByOpportunityId.resolves([]);
-
-      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('waitlists new domain when already-onboarded record has no siteId', async () => {
-      // When the onboarded record has no siteId, displacement is skipped entirely
-      // (canDisplace is false because alreadyOnboardedSiteId is falsy). Opportunity
-      // lookup must not be called with a null/undefined siteId.
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: null,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-
-      // Displacement skipped — Opportunity lookup never called with null siteId
-      expect(mockDataAccess.Opportunity.allBySiteId).not.to.have.been.called;
-      expect(onboardedRecord.setStatus).not.to.have.been.called;
-
-      // New domain is waitlisted
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
-    });
-
-    it('displaces already-onboarded domain when displaced site has no organizationId', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-        organizationId: null, // no org ID
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-
-      // Old domain is displaced (OUTDATED)
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(onboardedRecord.save).to.have.been.called;
-
-      // No enrollment revocation attempted for displaced record (no org ID on old record)
-      expect(mockDataAccess.Entitlement.allByOrganizationId).not.to.have.been.calledWith(null);
-
-      // New domain is onboarded
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('displaces but skips ASO revocation when previous org is internal/demo', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const INTERNAL_OLD_ORG_ID = 'internal-old-org';
-
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-        organizationId: INTERNAL_OLD_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_OLD_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-
-      // Old domain is still waitlisted
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
-
-      // ASO revocation must be SKIPPED — entitlement lookup never runs for internal old org.
-      expect(mockDataAccess.Entitlement.allByOrganizationId)
-        .not.to.have.been.calledWith(INTERNAL_OLD_ORG_ID);
-      expect(mockLog.error).to.have.been.calledWithMatch(
-        /Refusing to revoke ASO enrollment.*previous org .* is internal\/demo/,
-      );
-
-      // New domain is onboarded
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('displaces already-onboarded domain when no ASO entitlement found for old org', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
-      const NON_ASO_ENT_ID = 'non-aso-ent-id';
-
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-        organizationId: OLD_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
-
-      // Entitlement exists but is not ASO — no enrollment revocation should happen for old site
-      mockDataAccess.Entitlement.allByOrganizationId.resolves([
-        { getId: sandbox.stub().returns(NON_ASO_ENT_ID), getProductCode: sandbox.stub().returns('other_product') },
-      ]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-
-      // Displacement proceeds; enrollment for the non-ASO entitlement was never queried
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(mockDataAccess.SiteEnrollment.allByEntitlementId)
-        .not.to.have.been.calledWith(NON_ASO_ENT_ID);
-
-      // New domain is onboarded
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('continues onboarding new domain even when enrollment revocation fails', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
-      const ASO_ENTITLEMENT_ID = 'aso-entitlement-uuid';
-
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-        organizationId: OLD_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
-
-      mockDataAccess.Entitlement.allByOrganizationId.resolves([
-        {
-          getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
-          getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
-          getTier: sandbox.stub().returns('PLG'),
-        },
-      ]);
-
-      // Simulate enrollment revocation failure on the first call (displacement),
-      // but succeed on subsequent calls (normal onboarding flow)
-      mockDataAccess.SiteEnrollment.allByEntitlementId
-        .onFirstCall().rejects(new Error('DB timeout'))
-        .resolves([]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      // Displacement still completes — revocation failure is non-fatal
-      expect(res.status).to.equal(200);
-
-      // Old domain is displaced (OUTDATED)
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
-      expect(onboardedRecord.save).to.have.been.called;
-
-      // Revocation failure was logged as error
-      expect(mockLog.error).to.have.been.calledWithMatch(/Failed to revoke ASO enrollment/);
-
-      // New domain is still onboarded
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
   });
 });
