@@ -17,7 +17,7 @@ import {
   badRequest, internalServerError, notFound, ok, accepted, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { AsyncJob } from '@adobe/spacecat-shared-data-access';
-import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
+import { retrievePageAuthentication, ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../support/access-control-util.js';
 import { PreflightDto } from '../dto/preflight.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
@@ -308,11 +308,21 @@ function PreflightController(ctx, log, env) {
    * Calls Mysticat's POST /v1/preflight/analyze and returns once the request is accepted.
    * Mysticat processes the analysis asynchronously and writes results directly to the AsyncJob
    * identified by scanId.
+   *
+   * Two distinct auth headers are sent (SITES-43236 / mystique-deploy PR #463):
+   *  - `Authorization`: the customer site's page-auth token, forwarded by
+   *    Mysticat to DRS for authenticated page-HTML fetch.
+   *  - `x-ims-authorization`: spacecat-api-service's own IMS service token,
+   *    validated at the Ethos CGW-Flex edge before reaching the Mysticat pod.
+   *    Kept on a dedicated header — not `Authorization` — so the IMS edge gate
+   *    does not collide with the customer's page-auth token above.
+   *
    * @param {string} mysticatBaseUrl - The base URL of the Mystique service (MYSTIQUE_API_BASE_URL).
    * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
    * @param {string} siteId - The site ID.
    * @param {string} url - The page URL to analyze.
-   * @param {string} [authorizationHeader] - Optional auth header forwarded to Mysticat.
+   * @param {string} [authorizationHeader] - Optional customer-site page-auth header.
+   * @param {string} [imsServiceToken] - Optional spacecat IMS v3 service token (raw access_token).
    */
   async function callMysticatAnalyze(
     mysticatBaseUrl,
@@ -320,6 +330,7 @@ function PreflightController(ctx, log, env) {
     siteId,
     url,
     authorizationHeader,
+    imsServiceToken,
   ) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -331,6 +342,7 @@ function PreflightController(ctx, log, env) {
         headers: {
           'Content-Type': 'application/json',
           ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
+          ...(hasText(imsServiceToken) && { 'x-ims-authorization': `Bearer ${imsServiceToken}` }),
         },
         body: JSON.stringify({
           site_id: siteId,
@@ -471,6 +483,65 @@ function PreflightController(ctx, log, env) {
       }
     }
 
+    // Mint a spacecat-api-service IMS v3 service token for the Mystique CGW
+    // edge gate (SITES-43236 / mystique-deploy PR #463). Sent on the dedicated
+    // x-ims-authorization header — separate from `Authorization` above, which
+    // carries the customer site's page-auth token for DRS upstream.
+    //
+    // Constructs a custom-env ImsClient with IMS_SCOPE='system' hardcoded
+    // because the default spacecat IMS client (`aem-project-collab-service`
+    // per Vault `dx_mysticat`) has no `IMS_SCOPE` provisioned for the v3
+    // client_credentials grant — empirically confirmed in dev where the
+    // wrapper-wired `context.imsClient` produced an IMS 400 (invalid_scope).
+    // 'system' is the Adobe IMS mandated scope for v3 service-client tokens
+    // (per ASO team Slack thread, 2026-06-17). This mirrors the existing
+    // pattern in `email-service.js` and `trial-users.js` of overriding IMS
+    // env at construction, but differs in intent: those callers have their
+    // own dedicated IMS clients (LLMO email, etc.) and MUST swap credentials
+    // entirely; we keep the default client and only override scope. That
+    // makes this hardcode a transitional bypass for missing Vault config,
+    // NOT the desired permanent shape.
+    //
+    // Reversibility: if `IMS_SCOPE=system` is provisioned in Vault for
+    // `aem-project-collab-service`, this hardcode can be reverted to the
+    // wrapper-wired `await context.imsClient.getServiceAccessTokenV3()` and
+    // the `imsClient` destructure + `isNonEmptyObject(imsClient)` constructor
+    // guard on `PreflightController` restored alongside (both removed in the
+    // same PR as this hardcode — see git history under `SITES-43236`). The
+    // revert also restores singleton token caching across warm-Lambda
+    // invocations, which this construction loses — accepted cost during the
+    // transition, since per-invocation mint sidesteps the not-expiry-aware
+    // cache concern from the prior review thread on PR #2611.
+    //
+    // Mint before the AsyncJob / Preflight DB writes so a transient IMS
+    // failure doesn't leave orphaned IN_PROGRESS records to clean up.
+    //
+    // Fail-closed in Phase 1 and Phase 2: mint failure returns 500 even
+    // though the Phase 1 edge gate is `optional: true` and could tolerate a
+    // missing header. The load-bearing rationale is symmetry with the Phase
+    // 2 `optional: false` flip — same behavior on both sides of the gate flip
+    // means no new failure modes to surprise callers. IMS reliability makes
+    // this a narrow availability cost in practice.
+    let imsServiceToken;
+    try {
+      const scopedImsClient = ImsClient.createFrom({
+        ...context,
+        env: { ...context.env, IMS_SCOPE: 'system' },
+      });
+      const tokenPayload = await scopedImsClient.getServiceAccessTokenV3();
+      imsServiceToken = tokenPayload?.access_token;
+      // Post-condition: a successful mint must yield a non-empty access_token.
+      // Guards against an SDK shape change (e.g. `{ accessToken }` or `{}`)
+      // silently dropping the header — without this, Phase 2's `optional:
+      // false` edge gate would 401 with no spacecat-side diagnostic trail.
+      if (!hasText(imsServiceToken)) {
+        throw new Error('IMS token payload missing access_token');
+      }
+    } catch (e) {
+      log.error(`Failed to acquire IMS service token for preflight analyze: ${e.message}`, e);
+      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to acquire IMS service token', 500);
+    }
+
     // Build createdBy from the authenticated IMS profile
     const profile = context.attributes?.authInfo?.getProfile?.();
     const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ')
@@ -518,6 +589,7 @@ function PreflightController(ctx, log, env) {
         siteId,
         url,
         authorizationHeader,
+        imsServiceToken,
       );
     } catch (mysticatError) {
       log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);

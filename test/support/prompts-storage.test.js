@@ -28,6 +28,7 @@ import {
   getPromptStats,
   normalizeIntent,
   isMissingIntentColumnError,
+  findPromptsBlockingRegionRemoval,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -3240,6 +3241,131 @@ describe('prompts-storage', () => {
       // Known-unsupported client: intent never set on the patch up front, so the
       // second update's patch carries no `intent` key.
       expect(updateStub.getCall(2).args[0]).to.not.have.property('intent');
+    });
+  });
+
+  describe('findPromptsBlockingRegionRemoval (LLMO-5645)', () => {
+    // Read-only mock: the consistency check fetches non-deleted prompts and
+    // counts, per removed region, how many still reference it.
+    function makeReadClient(promptRows, opts = {}) {
+      return {
+        from: () => ({
+          select() { return this; },
+          eq() { return this; },
+          neq() { return this; },
+          limit() {
+            return Promise.resolve(
+              opts.error ? { data: null, error: opts.error } : { data: promptRows, error: null },
+            );
+          },
+        }),
+      };
+    }
+
+    it('returns empty when no region is removed (new set is a superset)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US'],
+        newRegions: ['US', 'DE'],
+        postgrestClient: makeReadClient([{ id: 'p1', regions: ['US'] }]),
+      });
+      expect(result).to.deep.equal({});
+    });
+
+    it('returns empty when a removed region has no prompts using it', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['US'] },
+          { id: 'p2', regions: ['US'] },
+        ]),
+      });
+      expect(result).to.deep.equal({});
+    });
+
+    it('counts prompts still using a removed region (incl. multi-market prompts)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['US', 'DE'] }, // multi-market → still references DE
+          { id: 'p2', regions: ['DE'] }, // DE-only
+          { id: 'p3', regions: ['de'] }, // case-insensitive
+          { id: 'p4', regions: ['US'] }, // unaffected
+          { id: 'p5', regions: null }, // non-array → normalized to [], ignored
+        ]),
+      });
+      expect(result).to.deep.equal({ de: 3 });
+    });
+
+    it('counts each removed region independently when several are stripped at once', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE', 'FR'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['DE'] },
+          { id: 'p2', regions: ['FR'] },
+          { id: 'p3', regions: ['DE', 'FR'] }, // counts toward both
+        ]),
+      });
+      expect(result).to.deep.equal({ de: 2, fr: 2 });
+    });
+
+    it('treats WW like any other region (strict — blocks WW removal)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['WW'] },
+          { id: 'p2', regions: ['ww'] },
+        ]),
+      });
+      expect(result).to.deep.equal({ ww: 2 });
+    });
+
+    it('throws when the PostgREST client is missing', async () => {
+      await expect(findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: {},
+      })).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('throws when the prompt read fails', async () => {
+      await expect(findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient(null, { error: { message: 'read boom' } }),
+      })).to.be.rejectedWith('Failed to read prompts for region consistency check: read boom');
+    });
+
+    it('warns when the brand exceeds the read cap', async () => {
+      const rows = Array.from({ length: 5000 }, (_, i) => ({ id: `p${i}`, regions: ['US'] }));
+      const warn = sinon.spy();
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient(rows),
+        log: { warn },
+      });
+      expect(result).to.deep.equal({});
+      expect(warn.calledOnce).to.equal(true);
     });
   });
 });

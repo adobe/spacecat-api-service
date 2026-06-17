@@ -56,6 +56,8 @@ describe('brands-storage', () => {
       status: 'active',
       origin: 'human',
       description: null,
+      brand_context: null,
+      mention_sentiment_guidance: null,
       vertical: null,
       regions: [],
       brand_aliases: [],
@@ -100,6 +102,8 @@ describe('brands-storage', () => {
 
       expect(result).to.have.length(1);
       expect(result[0]).to.include({ name: 'TestBrand', status: 'active' });
+      expect(result[0].brandContext).to.equal(null);
+      expect(result[0].mentionSentimentGuidance).to.equal(null);
       expect(result[0].region).to.deep.equal(['US']);
       expect(result[0].brandAliases).to.deep.equal([{ name: 'TB', regions: ['US'] }]);
       expect(result[0].socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test', regions: ['US'] }]);
@@ -210,6 +214,34 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(listBrands(ORG_ID, postgrestClient)).to.be.rejectedWith('Failed to list brands');
+    });
+
+    it('maps brand guidance columns to flat V2 fields', async () => {
+      const dbRow = makeBrandRow({
+        brand_context: 'Context for this brand',
+        mention_sentiment_guidance: 'Sentiment guidance',
+      });
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].brandContext).to.equal('Context for this brand');
+      expect(result[0].mentionSentimentGuidance).to.equal('Sentiment guidance');
+    });
+
+    it('preserves empty string guidance values from the database', async () => {
+      const dbRow = makeBrandRow({
+        brand_context: '',
+        mention_sentiment_guidance: '',
+      });
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].brandContext).to.equal('');
+      expect(result[0].mentionSentimentGuidance).to.equal('');
     });
   });
 
@@ -466,6 +498,43 @@ describe('brands-storage', () => {
     return { from: sinon.stub().callsFake((table) => makeQuery(table)) };
   }
 
+  // Like createTableMockClient, but records rows passed to write methods so
+  // tests can assert exactly what was written.
+  function createCapturingClient(tableMap) {
+    const calls = { upsert: [], update: [] };
+    const callCounts = {};
+    const makeQuery = (table) => {
+      const responses = tableMap[table] || [{ data: null, error: null }];
+      const arr = Array.isArray(responses) ? responses : [responses];
+      callCounts[table] = callCounts[table] || 0;
+      const idx = Math.min(callCounts[table], arr.length - 1);
+      callCounts[table] += 1;
+      const resolveWith = arr[idx];
+      const handler = {
+        get(target, prop) {
+          if (prop === 'then') {
+            return (resolve) => resolve(resolveWith);
+          }
+          if (prop === 'upsert') {
+            return (row, opts) => {
+              calls.upsert.push({ table, row, opts });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'update') {
+            return (row) => {
+              calls.update.push({ table, row });
+              return new Proxy({}, handler);
+            };
+          }
+          return sinon.stub().returns(new Proxy({}, handler));
+        },
+      };
+      return new Proxy({}, handler);
+    };
+    return { from: sinon.stub().callsFake((t) => makeQuery(t)), capturedCalls: calls };
+  }
+
   describe('upsertBrand', () => {
     it('throws when postgrestClient is missing', async () => {
       await expect(upsertBrand({
@@ -479,9 +548,22 @@ describe('brands-storage', () => {
       })).to.be.rejectedWith('Brand name is required');
     });
 
+    it('throws when brand guidance input has the wrong type', async () => {
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', brandContext: ['wrong'] },
+        postgrestClient: createTableMockClient({
+          brands: { data: null, error: null },
+        }),
+      })).to.be.rejectedWith('brandContext must be a string or null');
+    });
+
     it('throws when brands upsert fails', async () => {
       const postgrestClient = createTableMockClient({
-        brands: { data: null, error: { message: 'upsert failed' } },
+        brands: [
+          { data: null, error: null }, // existing lookup OK (no brand)
+          { data: null, error: { message: 'upsert failed' } }, // upsert fails
+        ],
       });
 
       await expect(upsertBrand({
@@ -493,7 +575,10 @@ describe('brands-storage', () => {
 
     it('throws 409 when baseSiteId violates unique constraint on upsert', async () => {
       const postgrestClient = createTableMockClient({
-        brands: { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
+        brands: [
+          { data: null, error: null }, // existing lookup OK (no brand)
+          { data: null, error: { code: '23505', message: 'brands_base_site_unique' } }, // upsert 409
+        ],
       });
 
       const err = await upsertBrand({
@@ -546,6 +631,157 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.include({ id: BRAND_ID, name: 'Test' });
+    });
+
+    it('writes site_id on the upsert row when the brand has no persisted site_id', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'new-site' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.site_id).to.equal('new-site');
+    });
+
+    it('normalizes brand guidance fields in upsert row', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          {
+            data: makeBrandRow({
+              name: 'Test',
+              brand_context: 'Context text',
+              mention_sentiment_guidance: null,
+            }),
+            error: null,
+          },
+        ],
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          brandContext: '  Context text  ',
+          mentionSentimentGuidance: '   ',
+        },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.brand_context).to.equal('Context text');
+      expect(brandsUpsert.row.mention_sentiment_guidance).to.equal(null);
+      expect(result.brandContext).to.equal('Context text');
+      expect(result.mentionSentimentGuidance).to.equal(null);
+    });
+
+    it('omits brand guidance columns in upsert row when fields are omitted', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { site_id: 'existing-site' }, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row).to.not.have.property('brand_context');
+      expect(brandsUpsert.row).to.not.have.property('mention_sentiment_guidance');
+    });
+
+    it('rejects non-string brand guidance with a 400-tagged error', async () => {
+      const client = createCapturingClient({
+        brands: [{ data: null, error: null }],
+      });
+
+      let caught;
+      try {
+        await upsertBrand({
+          organizationId: ORG_ID,
+          brand: { name: 'Test', brandContext: { wrong: true } },
+          postgrestClient: client,
+        });
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).to.be.an('error');
+      expect(caught.message).to.equal('brandContext must be a string or null');
+      expect(caught.status).to.equal(400);
+    });
+
+    it('does NOT overwrite an existing brand site_id and warns (LLMO-5556)', async () => {
+      const log = { warn: sinon.stub(), info: sinon.stub(), error: sinon.stub() };
+      const client = createCapturingClient({
+        brands: [
+          { data: { site_id: 'original-site' }, error: null }, // existing lookup
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test', site_id: 'original-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'different-site' },
+        postgrestClient: client,
+        log,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row).to.not.have.property('site_id');
+      expect(log.warn).to.have.been.calledWithMatch('immutable');
+    });
+
+    it('does not warn when re-upserting with the same site_id', async () => {
+      const log = { warn: sinon.stub(), info: sinon.stub(), error: sinon.stub() };
+      const client = createCapturingClient({
+        brands: [
+          { data: { site_id: 'same-site' }, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test', site_id: 'same-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'same-site' },
+        postgrestClient: client,
+        log,
+      });
+
+      expect(log.warn).to.not.have.been.called;
+    });
+
+    it('fails closed by throwing when the existing-brand lookup errors (LLMO-5556)', async () => {
+      // PostgREST returns { data: null, error } instead of throwing — without the
+      // guard this would let a transient failure overwrite an existing site_id.
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: null, error: { message: 'connection reset' } }, // existing lookup fails
+        ],
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'some-site' },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to look up existing brand "Test": connection reset');
     });
 
     it('successfully upserts a minimal brand with no aliases, competitors, or urls', async () => {
@@ -1343,6 +1579,15 @@ describe('brands-storage', () => {
       expect(result).to.be.null;
     });
 
+    it('throws when brand guidance update input has the wrong type', async () => {
+      await expect(updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { mentionSentimentGuidance: ['wrong'] },
+        postgrestClient: { from: () => {} },
+      })).to.be.rejectedWith('mentionSentimentGuidance must be a string or null');
+    });
+
     it('throws when update query fails', async () => {
       const postgrestClient = createTableMockClient({
         brands: { data: null, error: { message: 'update failed' } },
@@ -1455,6 +1700,64 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.include({ name: 'NewName', status: 'pending' });
+    });
+
+    it('normalizes brand guidance fields in update patch', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          {
+            data: makeBrandRow({
+              brand_context: null,
+              mention_sentiment_guidance: 'Keep this guidance',
+            }),
+            error: null,
+          },
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: {
+          brandContext: null,
+          mentionSentimentGuidance: '  Keep this guidance  ',
+        },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.brand_context).to.equal(null);
+      expect(brandsUpdate.row.mention_sentiment_guidance).to.equal('Keep this guidance');
+      expect(result.brandContext).to.equal(null);
+      expect(result.mentionSentimentGuidance).to.equal('Keep this guidance');
+    });
+
+    it('omits brand guidance columns in update patch when fields are omitted', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          {
+            data: makeBrandRow({
+              description: 'new desc',
+              brand_context: 'Existing context',
+              mention_sentiment_guidance: 'Existing guidance',
+            }),
+            error: null,
+          },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { description: 'new desc' },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row).to.not.have.property('brand_context');
+      expect(brandsUpdate.row).to.not.have.property('mention_sentiment_guidance');
     });
 
     it('successfully updates region and urls', async () => {

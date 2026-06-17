@@ -104,6 +104,7 @@ export async function triggerBrandalfOnboardingJob({
   brandName,
   companyWebsite,
   onboardingMode,
+  region,
   log,
   say = () => {},
 }) {
@@ -124,6 +125,10 @@ export async function triggerBrandalfOnboardingJob({
       prompt_type: 'brandalf',
       name: brandName,
       company_website: companyWebsite,
+      // LLMO-5645: forward the operator-selected market so Brandalf honors it as
+      // the authoritative brand region instead of letting the LLM emit 'WW'.
+      // Omitted → DRS keeps the LLM region and falls back to 'US'.
+      ...(region ? { region } : {}),
       metadata,
     },
   });
@@ -136,20 +141,31 @@ export async function triggerBrandalfOnboardingJob({
 // submitOnboardingPromptGenerationJob removed — prompt generation is now
 // triggered by DRS after Brandalf completes (LLMO-4258, option b).
 
+// LLMO-5645: the initial stub brand uses 'gl' (worldwide) as a placeholder until
+// Brandalf returns the real region. When the operator selected a market we seed
+// it directly so the brand record is correct immediately and stays correct even
+// if Brandalf never completes. `region` is a validated ISO 3166-1 alpha-2 code
+// (e.g. 'US'); absent → keep the 'gl' placeholder that Brandalf overwrites.
+export function onboardingStubRegions(region) {
+  return region ? [region] : ['gl'];
+}
+
 export function buildInitialCustomerConfigV2({
   brandName,
   imsOrgId,
   siteId,
   baseURL,
   overrideBaseURL,
+  region,
   updatedBy = 'system',
 }) {
   const primaryUrl = overrideBaseURL || baseURL;
+  const regions = onboardingStubRegions(region);
   const config = convertV1ToV2({
     brands: {
       aliases: [{
         name: brandName,
-        regions: ['gl'],
+        regions,
         status: 'active',
       }],
     },
@@ -166,7 +182,7 @@ export function buildInitialCustomerConfigV2({
   brand.updatedAt = timestamp;
   brand.updatedBy = updatedBy;
   brand.urls = [{ value: primaryUrl, type: 'base' }];
-  brand.brandAliases = [{ name: brandName, regions: ['gl'] }];
+  brand.brandAliases = [{ name: brandName, regions }];
 
   config.customer.customerName = brandName;
 
@@ -180,6 +196,7 @@ export async function ensureInitialCustomerConfigV2({
   siteId,
   baseURL,
   overrideBaseURL,
+  region,
   context,
 }) {
   const postgrestClient = context.dataAccess?.services?.postgrestClient;
@@ -215,6 +232,7 @@ export async function ensureInitialCustomerConfigV2({
       brandId = `${brandId}-${siteId.slice(0, 8)}`;
     }
 
+    const regions = onboardingStubRegions(region);
     brands.push({
       id: brandId,
       v1SiteId: siteId,
@@ -222,11 +240,11 @@ export async function ensureInitialCustomerConfigV2({
       baseUrl: primaryUrl,
       status: 'active',
       origin: 'system',
-      regions: ['gl'],
+      regions,
       updatedAt: timestamp,
       updatedBy: resolveUpdatedBy(context),
       urls: [{ value: primaryUrl, type: 'base' }],
-      brandAliases: [{ name: trimmedName, regions: ['gl'] }],
+      brandAliases: [{ name: trimmedName, regions }],
     });
 
     await writeCustomerConfigV2ToPostgres(
@@ -245,6 +263,7 @@ export async function ensureInitialCustomerConfigV2({
     siteId,
     baseURL,
     overrideBaseURL,
+    region,
     updatedBy: resolveUpdatedBy(context),
   });
 
@@ -1354,6 +1373,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         siteId: site.getId(),
         baseURL,
         overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
+        region,
         context,
       });
 
@@ -1375,20 +1395,55 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
       // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
       // and would fail the exact-match lookup against the sites table.
+      // LLMO-5556: a second site onboarded under an existing brand name must not
+      // re-point that brand's primary site, nor clobber its URLs/aliases via the
+      // full-replace syncs inside upsertBrand. Detect the collision and skip the
+      // initial-brand write — the brand already exists so DRS sync still resolves
+      // it; a human then decides whether the new site is a sub-brand or a URL.
       try {
-        await upsertBrand({
-          organizationId: organization.getId(),
-          brand: {
-            name: brandName.trim(),
-            status: 'active',
-            baseSiteId: site.getId(),
-            urls: [{ value: baseURL, type: 'base' }],
-            brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
-          },
-          postgrestClient,
-          updatedBy: 'llmo-onboarding',
-        });
-        log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
+        const { data: existingBrand, error: lookupError } = await postgrestClient
+          .from('brands')
+          .select('id, site_id')
+          .eq('organization_id', organization.getId())
+          .eq('name', brandName.trim())
+          .maybeSingle();
+
+        if (lookupError) {
+          // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a
+          // query failure rather than throwing, so without this check a transient
+          // failure would fall through to upsertBrand and could re-point an
+          // existing brand's primary site. Skip the write as a precaution.
+          log.warn(`Skipping initial brand write: failed to look up existing brand "${brandName.trim()}" `
+            + `(org ${organization.getId()}): ${lookupError.message}`);
+        } else if (existingBrand?.site_id && existingBrand.site_id !== site.getId()) {
+          log.warn(`Skipping initial brand write: brand "${brandName.trim()}" `
+            + `(org ${organization.getId()}) already exists with a different primary site `
+            + `(existing=${existingBrand.site_id}, onboarding=${site.getId()}). `
+            + `Add ${baseURL} as a brand URL or onboard under a distinct brand name.`);
+        } else {
+          // No collision: proceed with upsert (new brand, existing brand with a
+          // null primary site, or a re-onboard of the same site). upsertBrand's
+          // own guard keeps an already-set site_id immutable on the last case.
+          // LLMO-5645: seed operator market when supplied; else the 'gl'
+          // placeholder (consistent with the V2 config + brandAliases, both
+          // overwritten by Brandalf's async result).
+          const stubRegions = onboardingStubRegions(region);
+          await upsertBrand({
+            organizationId: organization.getId(),
+            brand: {
+              name: brandName.trim(),
+              status: 'active',
+              baseSiteId: site.getId(),
+              region: stubRegions,
+              urls: [{ value: baseURL, type: 'base' }],
+              brandAliases: [{ name: brandName.trim(), regions: stubRegions }],
+            },
+            postgrestClient,
+            updatedBy: 'llmo-onboarding',
+            log,
+          });
+          log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
+        }
       } catch (brandError) {
         log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
       }
@@ -1407,6 +1462,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
             brandName: brandName.trim(),
             companyWebsite,
             onboardingMode,
+            region,
             log,
             say,
           });

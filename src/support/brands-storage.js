@@ -26,6 +26,24 @@ const BRAND_SELECT = [
   'brand_urls(url)',
 ].join(', ');
 
+function normalizeNullableText(value, fieldName) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    // Tag with a 400 status so callers that reach storage without going through
+    // the controller's validation surface a client error rather than a 500.
+    const error = new Error(`${fieldName} must be a string or null`);
+    error.status = 400;
+    throw error;
+  }
+  const trimmed = value.trim();
+  return hasText(trimmed) ? trimmed : null;
+}
+
 /**
  * Splits a full URL string into its base URL and path.
  * e.g. "https://example.com/products" -> { base: "https://example.com", path: "/products" }
@@ -120,6 +138,8 @@ function mapDbBrandToV2(row) {
     status: row.status || 'active',
     origin: row.origin || 'human',
     description: row.description || null,
+    brandContext: row.brand_context ?? null,
+    mentionSentimentGuidance: row.mention_sentiment_guidance ?? null,
     vertical: row.vertical || null,
     region: row.regions || [],
     urls,
@@ -482,6 +502,7 @@ export async function upsertBrand({
   brand,
   postgrestClient,
   updatedBy = 'system',
+  log = console,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -496,12 +517,21 @@ export async function upsertBrand({
   // Check if the brand already exists with a base site set.
   // This prevents silently downgrading an active brand to pending when a caller
   // re-upserts by name without passing baseSiteId.
-  const { data: existing } = await postgrestClient
+  const { data: existing, error: existingError } = await postgrestClient
     .from('brands')
     .select('site_id')
     .eq('organization_id', organizationId)
     .eq('name', brand.name)
     .maybeSingle();
+
+  // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a query
+  // failure instead of throwing. If we ignored the error, `existing` would be
+  // null and the immutability guard below would treat the brand as new — letting
+  // a transient failure overwrite an existing primary site. Surface the error
+  // instead so the caller (and SQS retry) handles it rather than guessing.
+  if (existingError) {
+    throw new Error(`Failed to look up existing brand "${brand.name}": ${existingError.message}`);
+  }
 
   // A brand cannot be active without a base site ID — but respect persisted state
   // on the update path (the DB row may already have site_id set).
@@ -524,9 +554,33 @@ export async function upsertBrand({
     updated_by: updatedBy,
   };
 
-  // Set base site ID if provided.
-  if (hasText(brand.baseSiteId)) {
+  const brandContext = normalizeNullableText(brand.brandContext, 'brandContext');
+  if (brandContext !== undefined) {
+    row.brand_context = brandContext;
+  }
+
+  const mentionSentimentGuidance = normalizeNullableText(
+    brand.mentionSentimentGuidance,
+    'mentionSentimentGuidance',
+  );
+  if (mentionSentimentGuidance !== undefined) {
+    row.mention_sentiment_guidance = mentionSentimentGuidance;
+  }
+
+  // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
+  // when the brand has no site_id yet — re-onboarding/re-upserting an existing
+  // brand by name must NOT re-point its primary site (LLMO-5556: this silently
+  // overwrote mongodb.com -> learn.mongodb.com and merck.com -> keytruda.com).
+  if (hasText(brand.baseSiteId) && !hasText(existing?.site_id)) {
     row.site_id = brand.baseSiteId;
+  } else if (
+    hasText(brand.baseSiteId)
+    && hasText(existing?.site_id)
+    && existing.site_id !== brand.baseSiteId
+  ) {
+    log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
+      + `(org ${organizationId}) — primary site is immutable `
+      + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
   }
 
   const { data: upserted, error } = await postgrestClient
@@ -598,6 +652,15 @@ export async function updateBrand({
   }
   if (updates.description !== undefined) {
     patch.description = updates.description;
+  }
+  if (updates.brandContext !== undefined) {
+    patch.brand_context = normalizeNullableText(updates.brandContext, 'brandContext');
+  }
+  if (updates.mentionSentimentGuidance !== undefined) {
+    patch.mention_sentiment_guidance = normalizeNullableText(
+      updates.mentionSentimentGuidance,
+      'mentionSentimentGuidance',
+    );
   }
   if (updates.vertical !== undefined) {
     patch.vertical = updates.vertical;
