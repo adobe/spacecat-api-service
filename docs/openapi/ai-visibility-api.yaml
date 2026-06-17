@@ -367,7 +367,7 @@ x-ai-vis-fts-prompts-sort-by: &ftsPromptsSortByParam
   required: false
   description: |
     `PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY` for Semrush v2 `PromptsByTopicFTSRequest.order.by`.
-    Default when omitted: `RELEVANCE_SCORE`. Returns `400 invalid_sort_by` for any other value.
+    Default when omitted: `MENTIONED_BRANDS_COUNT`. Returns `400 invalid_sort_by` for any other value.
 
     Note: on the all-engines path (no `engine` query param) the sort is applied
     server-side per LLM and the merged page is re-sorted in-process, so ordering
@@ -375,7 +375,7 @@ x-ai-vis-fts-prompts-sort-by: &ftsPromptsSortByParam
   schema:
     type: string
     enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT, RELEVANCE_SCORE]
-    default: RELEVANCE_SCORE
+    default: MENTIONED_BRANDS_COUNT
 
 x-ai-vis-fts-brands-sort-by: &ftsBrandsSortByParam
   name: sortBy
@@ -1136,8 +1136,8 @@ ai-visibility-topics-research-prompts:
       Exactly one of `searchQuery` or `topicId` must be supplied. All-models queries
       merge and deduplicate across LLMs; total is the sum of per-LLM totals.
 
-      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT`, `SOURCES_COUNT`,
-      `RELEVANCE_SCORE` (default)) and `sortDirection` (`ASC` / `DESC`, default `DESC`).
+      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT` (default), `SOURCES_COUNT`,
+      `RELEVANCE_SCORE`) and `sortDirection` (`ASC` / `DESC`, default `DESC`).
       `RELEVANCE_SCORE` is not supported on the `topicId` path (relevance is topic-level).
       On the all-engines path, sort is applied per LLM and the merged page is re-sorted
       in-process; cross-page ordering is approximate.
