@@ -55,6 +55,7 @@ describe('RunAuditCommand', () => {
     dataAccessStub = {
       Configuration: { findLatest: sinon.stub() },
       Site: { findByBaseURL: sinon.stub() },
+      Opportunity: { allBySiteId: sinon.stub().resolves([]) },
     };
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
@@ -83,7 +84,7 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
-      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. Use `product-metatags` for Product Detail Page (PDP) analysis of commerce sites.');
+      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for current-tab suggestions missing an AI summary. CSV uploads are batched at 320 URLs.');
     });
   });
 
@@ -228,6 +229,35 @@ describe('RunAuditCommand', () => {
         ],
       });
       expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 2 URLs.');
+    });
+
+    it('sends batch-wise Slack messages for large prerender CSV', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO']));
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      // Generate 500 valid URLs → should produce 2 batches (320 + 180)
+      const urls = Array.from({ length: 500 }, (_, i) => `https://valid.site/page-${i + 1}`);
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, urls.join('\n'));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledTwice;
+      // First batch: 320 URLs
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.have.length(320);
+      // Second batch: 180 URLs
+      expect(sqsStub.sendMessage.secondCall.args[1].auditContext.urls).to.have.length(180);
+      // Batch-wise Slack messages
+      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 320 URLs (batch 1/2).');
+      expect(slackContext.say.thirdCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 180 URLs (batch 2/2).');
     });
 
     it('warns when a prerender CSV has no valid URLs', async () => {
@@ -694,6 +724,409 @@ describe('RunAuditCommand', () => {
         'date-start': '2025-09-07',
         source: 'test-source',
       });
+    });
+  });
+
+  describe('Prerender Modes', () => {
+    const makeSuggestion = (url, status, extraData = {}) => ({
+      getStatus: () => status,
+      getData: () => ({ url, ...extraData }),
+    });
+
+    const makeOpportunity = (type, suggestions) => ({
+      getType: () => type,
+      getSuggestions: sinon.stub().resolves(suggestions),
+    });
+
+    beforeEach(() => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'siteId' });
+      dataAccessStub.Configuration.findLatest.resolves(
+        createDefaultConfigurationMock('prerender', ['LLMO']),
+      );
+    });
+
+    it('mode:all fetches NEW/FIXED suggestions and triggers prerender audit', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'NEW'),
+          makeSuggestion('https://site.com/page-2', 'FIXED'),
+          makeSuggestion('https://site.com/page-3', 'OUTDATED'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
+      const { urls, mode } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.deep.equal(['https://site.com/page-1', 'https://site.com/page-2']);
+      expect(mode).to.be.undefined;
+    });
+
+    it('mode:ai-only fetches suggestions and passes mode in data field', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'NEW'),
+          makeSuggestion('https://site.com/page-2', 'FIXED'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only');
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.be.undefined;
+    });
+
+    it('deduplicates URLs across multiple prerender opportunities', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'NEW'),
+        ]),
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'FIXED'),
+          makeSuggestion('https://site.com/page-2', 'NEW'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
+
+      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.have.length(2);
+      expect(urls).to.include('https://site.com/page-1');
+      expect(urls).to.include('https://site.com/page-2');
+    });
+
+    it('filters out wildcard and invalid URLs from suggestions', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'NEW'),
+          makeSuggestion('https://site.com/wildcard/*', 'NEW'),
+          makeSuggestion('invalid-url', 'NEW'),
+          makeSuggestion(null, 'NEW'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
+
+      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.deep.equal(['https://site.com/page-1']);
+    });
+
+    it('reports nothing to audit when no NEW/FIXED suggestions exist', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'OUTDATED'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
+    });
+
+    it('reports nothing to audit when no prerender opportunities exist', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('broken-backlinks', [
+          makeSuggestion('https://site.com/page-1', 'NEW'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
+    });
+
+    it('shows site-not-found for suggestion-based mode when site does not exist', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['unknownsite.com', 'audit:prerender', 'mode:all'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(':x: No site found with base URL \'https://unknownsite.com\'.');
+    });
+
+    it('merges mode into data field alongside other keyword args', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'NEW'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only', 'source:test'], slackContext);
+
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only');
+      expect(msgData.source).to.equal('test');
+    });
+
+    it('runs normal prerender when no mode is provided', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:prerender'], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering prerender audit for https://validsite.com');
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
+    });
+
+    it('CSV with mode:ai-only passes mode in data field', async () => {
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1\nhttps://valid.site/page-2');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only');
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.be.undefined;
+    });
+
+    it('CSV without mode does not include mode in data', async () => {
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1].data).to.be.undefined;
+    });
+
+    it('sends batch-wise Slack messages for suggestion-based mode', async () => {
+      const suggestions = Array.from({ length: 500 }, (_, i) => makeSuggestion(`https://site.com/page-${i + 1}`, i % 2 === 0 ? 'NEW' : 'FIXED'));
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', suggestions),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledTwice;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.have.length(320);
+      expect(sqsStub.sendMessage.secondCall.args[1].auditContext.urls).to.have.length(180);
+      expect(slackContext.say).to.have.been.calledWithMatch(/320 URLs \(batch 1\/2\)/);
+      expect(slackContext.say).to.have.been.calledWithMatch(/180 URLs \(batch 2\/2\)/);
+    });
+
+    it('mode:ai-only-current fetches only current-tab suggestions', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/current', 'NEW'),
+          makeSuggestion('https://site.com/covered', 'NEW', { coveredByDomainWide: true }),
+          makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
+          makeSuggestion('https://site.com/pattern', 'NEW', { coveredByPattern: true }),
+          makeSuggestion('https://site.com/fixed', 'FIXED'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-current'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.deep.equal(['https://site.com/current']);
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only');
+    });
+
+    it('mode:ai-only-current filters out wildcard and null URLs', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/valid', 'NEW'),
+          makeSuggestion('https://site.com/wildcard/*', 'NEW'),
+          makeSuggestion(null, 'NEW'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-current'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.deep.equal(['https://site.com/valid']);
+    });
+
+    it('mode:ai-only-current reports nothing when all suggestions are filtered out', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/covered', 'NEW', { coveredByDomainWide: true }),
+          makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-current'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
+    });
+
+    it('mode:ai-only-missing fetches current-tab suggestions missing an aiSummary', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/no-summary', 'NEW'),
+          makeSuggestion('https://site.com/has-summary', 'NEW', { aiSummary: 'some AI text' }),
+          makeSuggestion('https://site.com/covered', 'NEW', { coveredByDomainWide: true }),
+          makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
+          makeSuggestion('https://site.com/pattern', 'NEW', { coveredByPattern: true }),
+          makeSuggestion('https://site.com/fixed', 'FIXED'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.deep.equal(['https://site.com/no-summary']);
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only');
+    });
+
+    it('mode:ai-only-missing filters out wildcard and null URLs', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/valid', 'NEW'),
+          makeSuggestion('https://site.com/wildcard/*', 'NEW'),
+          makeSuggestion(null, 'NEW'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.deep.equal(['https://site.com/valid']);
+    });
+
+    it('mode:ai-only-missing treats empty-string aiSummary as missing', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/empty-summary', 'NEW', { aiSummary: '' }),
+          makeSuggestion('https://site.com/has-summary', 'NEW', { aiSummary: 'some AI text' }),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.deep.equal(['https://site.com/empty-summary']);
+    });
+
+    it('mode:ai-only-missing reports nothing when all current-tab suggestions already have an aiSummary', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'NEW', { aiSummary: 'summary for page 1' }),
+          makeSuggestion('https://site.com/page-2', 'NEW', { aiSummary: 'summary for page 2' }),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
+      expect(slackContext.say).to.have.been.calledWithMatch(/missing AI summary/);
+    });
+
+    it('mode:ai-only-missing reports nothing when all suggestions are covered or filtered', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/covered', 'NEW', { coveredByDomainWide: true }),
+          makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
+    });
+
+    it('mode:ai-only-missing deduplicates URLs across multiple opportunities', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'NEW'),
+        ]),
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'NEW'),
+          makeSuggestion('https://site.com/page-2', 'NEW'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
+
+      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
+      expect(urls).to.have.length(2);
+      expect(urls).to.include('https://site.com/page-1');
+      expect(urls).to.include('https://site.com/page-2');
+    });
+
+    it('mode:ai-only-missing sends batch-wise Slack messages for large result sets', async () => {
+      const suggestions = Array.from(
+        { length: 500 },
+        (_, i) => makeSuggestion(`https://site.com/page-${i + 1}`, 'NEW'),
+      );
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', suggestions),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledTwice;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.have.length(320);
+      expect(sqsStub.sendMessage.secondCall.args[1].auditContext.urls).to.have.length(180);
+      expect(slackContext.say).to.have.been.calledWithMatch(/320 URLs \(batch 1\/2\)/);
+      expect(slackContext.say).to.have.been.calledWithMatch(/180 URLs \(batch 2\/2\)/);
+    });
+
+    it('mode:ai-only-missing merges mode into data field alongside other keyword args', async () => {
+      dataAccessStub.Opportunity.allBySiteId.resolves([
+        makeOpportunity('prerender', [
+          makeSuggestion('https://site.com/page-1', 'NEW'),
+        ]),
+      ]);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing', 'source:test'], slackContext);
+
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only');
+      expect(msgData.source).to.equal('test');
     });
   });
 

@@ -100,7 +100,6 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/filter-dimensions',
   'GET /sites/:siteId/agentic-traffic/weeks',
   'GET /sites/:siteId/agentic-traffic/movers',
-  'GET /sites/:siteId/agentic-traffic/has-data',
   'POST /sites/:siteId/agentic-traffic/urls/export',
   'GET /sites/:siteId/agentic-traffic/urls/export/:exportId',
 
@@ -222,8 +221,10 @@ const routeRequiredCapabilities = {
   // Audits
   'GET /audits/latest/:auditType': 'audit:read',
 
-  // Consent Banner
-  'POST /consent-banner': 'organization:write',
+  // Consent Banner — POST is a screenshot *scrape* trigger, so it's gated like
+  // the sibling `/tools/scrape/jobs` POST (scrapeJob:write) rather than
+  // organization:write, letting S2S scrape consumers (e.g. Mystique) trigger it.
+  'POST /consent-banner': 'scrapeJob:write',
   'GET /consent-banner/:jobId': 'organization:read',
 
   // Configuration
@@ -368,6 +369,9 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/url-store': 'site:write',
   'PATCH /sites/:siteId/url-store': 'site:write',
   'POST /sites/:siteId/url-store/delete': 'site:write',
+
+  // Agentic traffic
+  'GET /sites/:siteId/agentic-traffic/has-data': 'site:read',
 
   // Agentic URL classification rules
   'GET /sites/:siteId/agentic-categories': 'site:read',
@@ -613,6 +617,9 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'report:read',
+  'GET /llmo/ai-visibility/v1/meta/meta': 'report:read',
 
   // User Activities
   'GET /sites/:siteId/user-activities': 'trialUser:read',

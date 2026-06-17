@@ -1,3 +1,107 @@
+## [1.577.1](https://github.com/adobe/spacecat-api-service/compare/v1.577.0...v1.577.1) (2026-06-16)
+
+
+### Bug Fixes
+
+* **llmo:** plumb operator market into V2 onboarding + cascade region to prompts (LLMO-5645) ([#2619](https://github.com/adobe/spacecat-api-service/issues/2619)) ([9c61331](https://github.com/adobe/spacecat-api-service/commit/9c613318f3a18ca647a8f36cd378e11d1d81d3a0))
+
+# [1.577.0](https://github.com/adobe/spacecat-api-service/compare/v1.576.0...v1.577.0) (2026-06-16)
+
+
+### Features
+
+* LLMO-5652 bump ai-seo-ts ([#2620](https://github.com/adobe/spacecat-api-service/issues/2620)) ([618fe1d](https://github.com/adobe/spacecat-api-service/commit/618fe1dfd5ff49247fa94fd35b0d216571309400))
+
+# [1.576.0](https://github.com/adobe/spacecat-api-service/compare/v1.575.0...v1.576.0) (2026-06-16)
+
+
+### Bug Fixes
+
+* **it:** bump pinned data-service image to v5.38.0 ([#2618](https://github.com/adobe/spacecat-api-service/issues/2618)) ([5e9b5c6](https://github.com/adobe/spacecat-api-service/commit/5e9b5c60c15fafa95316359c513fbc6a1e6f70c6))
+* remove dormant data-access-v2 fallback (drops electrodb/jsonschema, fixes DEP0169 log noise) ([#2617](https://github.com/adobe/spacecat-api-service/issues/2617)) ([4fca1c5](https://github.com/adobe/spacecat-api-service/commit/4fca1c553cf337f80566999135a6a2837935a618))
+
+
+### Features
+
+* **llmo:** support claims guidance config ([#2600](https://github.com/adobe/spacecat-api-service/issues/2600)) ([7761717](https://github.com/adobe/spacecat-api-service/commit/77617172794b197745462e347ef913906d7c8747))
+* **preflight:** attach IMS service token on x-ims-authorization for Mysticat call (SITES-43236) ([#2611](https://github.com/adobe/spacecat-api-service/issues/2611)) ([1e45798](https://github.com/adobe/spacecat-api-service/commit/1e45798423f7fe583b27bf22f28d6ce4cfa3e36c)), closes [#463](https://github.com/adobe/spacecat-api-service/issues/463) [#463](https://github.com/adobe/spacecat-api-service/issues/463) [#463](https://github.com/adobe/spacecat-api-service/issues/463) [#463](https://github.com/adobe/spacecat-api-service/issues/463)
+
+# [1.575.0](https://github.com/adobe/spacecat-api-service/compare/v1.574.3...v1.575.0) (2026-06-16)
+
+
+### Features
+
+* server-side search and sort for competitor gap endpoints | LLMO-5609 ([#2609](https://github.com/adobe/spacecat-api-service/issues/2609)) ([0c3c0df](https://github.com/adobe/spacecat-api-service/commit/0c3c0dfe01b8d1df8d60421235b5a75758b06787))
+
+## [1.574.3](https://github.com/adobe/spacecat-api-service/compare/v1.574.2...v1.574.3) (2026-06-15)
+
+
+### Bug Fixes
+
+* reject malformed detectedCdn on PATCH + re-pin shared deps for recoverable log-level fixes ([#2612](https://github.com/adobe/spacecat-api-service/issues/2612)) ([d5b01e2](https://github.com/adobe/spacecat-api-service/commit/d5b01e2f8c2e21a1a3bcea4f4074b3430e92801e)), closes [adobe/spacecat-shared#1681](https://github.com/adobe/spacecat-shared/issues/1681)
+
+## [1.574.2](https://github.com/adobe/spacecat-api-service/compare/v1.574.1...v1.574.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* **brands:** make baseSiteId immutable in upsertBrand (LLMO-5556) ([#2593](https://github.com/adobe/spacecat-api-service/issues/2593)) ([27354bf](https://github.com/adobe/spacecat-api-service/commit/27354bf8ceb37206fa37dba4365917800c27fa93))
+* edge deploy api - support domain wide deployment ([#2605](https://github.com/adobe/spacecat-api-service/issues/2605)) ([bd5c6ce](https://github.com/adobe/spacecat-api-service/commit/bd5c6ce62a9486aa4c046f7548dff7d734ca2ccb))
+
+## [1.574.1](https://github.com/adobe/spacecat-api-service/compare/v1.574.0...v1.574.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* consume launchdarkly-client log-noise fix and dedupe nested copy ([#2606](https://github.com/adobe/spacecat-api-service/issues/2606)) ([e4e641d](https://github.com/adobe/spacecat-api-service/commit/e4e641dfa7f27105b7166b0530a2a04a612bdee7))
+
+# [1.574.0](https://github.com/adobe/spacecat-api-service/compare/v1.573.0...v1.574.0) (2026-06-13)
+
+
+### Features
+
+* **slack:** add mode:ai-only-missing for prerender suggestions without AI summary ([#2604](https://github.com/adobe/spacecat-api-service/issues/2604)) ([055039f](https://github.com/adobe/spacecat-api-service/commit/055039f797b44117d19cbca375eaa4184d6405c7))
+
+# [1.573.0](https://github.com/adobe/spacecat-api-service/compare/v1.572.0...v1.573.0) (2026-06-12)
+
+
+### Features
+
+* enable money-pages audit in paid onboarding profile ([#2601](https://github.com/adobe/spacecat-api-service/issues/2601)) ([b9cc4dd](https://github.com/adobe/spacecat-api-service/commit/b9cc4dd152a08f94bd9541e0369279a1ad8e1ae9))
+
+# [1.572.0](https://github.com/adobe/spacecat-api-service/compare/v1.571.1...v1.572.0) (2026-06-12)
+
+
+### Features
+
+* ai visibility brand data ([#2577](https://github.com/adobe/spacecat-api-service/issues/2577)) ([1099575](https://github.com/adobe/spacecat-api-service/commit/109957510b357137be74555d6b85aba196f97559))
+
+## [1.571.1](https://github.com/adobe/spacecat-api-service/compare/v1.571.0...v1.571.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* edge-deploy API increase createschedule api timeout ([#2599](https://github.com/adobe/spacecat-api-service/issues/2599)) ([7edd7b6](https://github.com/adobe/spacecat-api-service/commit/7edd7b6aa205c42ece3909000fd66f053632c72c))
+
+# [1.571.0](https://github.com/adobe/spacecat-api-service/compare/v1.570.0...v1.571.0) (2026-06-12)
+
+
+### Features
+
+* **slack:** add prerender modes (full/ai-only) and CSV batching to run-audit command ([#2598](https://github.com/adobe/spacecat-api-service/issues/2598)) ([a057e87](https://github.com/adobe/spacecat-api-service/commit/a057e87d6db58e00c91a3fc70a21b36d506234bf))
+
+# [1.570.0](https://github.com/adobe/spacecat-api-service/compare/v1.569.0...v1.570.0) (2026-06-12)
+
+
+### Bug Fixes
+
+* **consent-banner:** gate POST /consent-banner on scrapeJob:write ([#2597](https://github.com/adobe/spacecat-api-service/issues/2597)) ([8e559e4](https://github.com/adobe/spacecat-api-service/commit/8e559e4b212a57834abaf8d077a04d991fb272a4))
+
+
+### Features
+
+* expose GET /sites/:siteId/agentic-traffic/has-data to S2S consumers ([#2596](https://github.com/adobe/spacecat-api-service/issues/2596)) ([88d8bc8](https://github.com/adobe/spacecat-api-service/commit/88d8bc805715d3aac36dbc9789655d4136bdaebb))
+
 # [1.569.0](https://github.com/adobe/spacecat-api-service/compare/v1.568.1...v1.569.0) (2026-06-11)
 
 

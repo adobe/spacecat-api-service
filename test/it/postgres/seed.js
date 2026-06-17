@@ -116,7 +116,6 @@ async function seed() {
     insertRows('projects', projects),
     insertRows('entitlements', entitlements),
     insertRows('trial_users', trialUsers),
-    insertRows('brands', brands),
   ]);
 
   // Level 1b: depend on projects
@@ -124,6 +123,7 @@ async function seed() {
 
   // Level 2: depend on sites
   await Promise.all([
+    insertRows('brands', brands),
     insertRows('audits', audits),
     insertRows('opportunities', opportunities),
     insertRows('site_enrollments', siteEnrollments),

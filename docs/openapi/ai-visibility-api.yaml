@@ -1,4 +1,4 @@
-# AI Visibility (Semrush gRPC proxy) – 28 GET endpoints
+# AI Visibility (Semrush gRPC proxy) – GET endpoints
 # All endpoints live under /llmo/ai-visibility/* and proxy to Semrush gRPC.
 # Responses include an srFilters block with available markets and models.
 
@@ -78,6 +78,26 @@ x-ai-vis-date: &dateParam
   schema:
     type: string
     example: '2026-01-15'
+
+x-ai-vis-date-from: &dateFromParam
+  name: dateFrom
+  in: query
+  required: false
+  description: Start of the requested period, forwarded to Semrush as `date_from` (`YYYY-MM` or `YYYY-MM-DD`)
+  schema:
+    type: string
+    pattern: '^\d{4}-\d{2}(-\d{2})?$'
+    example: '2026-01'
+
+x-ai-vis-date-to: &dateToParam
+  name: dateTo
+  in: query
+  required: false
+  description: End of the requested period, forwarded to Semrush as `date_to` (`YYYY-MM` or `YYYY-MM-DD`)
+  schema:
+    type: string
+    pattern: '^\d{4}-\d{2}(-\d{2})?$'
+    example: '2026-04'
 
 x-ai-vis-window-months: &windowMonthsParam
   name: windowMonths
@@ -734,6 +754,26 @@ ai-visibility-competitors-gap-topics:
       - *engineParam
       - *limitParam
       - *offsetParam
+      - name: searchQuery
+        in: query
+        required: false
+        description: |
+          Server-side search. Pushed to Semrush `GapTopicsRequest.dimension_filter_ql`
+          (and `GapTopicsTotals`) as `topic CONTAINS "<searchQuery>"`, so the returned
+          `total` reflects the filtered set. Quotes and backslashes are escaped.
+        schema:
+          type: string
+          example: running shoes
+      - name: sortBy
+        in: query
+        required: false
+        description: |
+          `TOPICS_REQUEST_ORDER_BY` for Semrush `order.by`. Unknown or omitted values fall
+          back to the default. Default: `MENTIONED_COMPETITORS`.
+        schema:
+          type: string
+          enum: [NAME, VISIBILITY, DIFFICULTY, MENTIONS, VOLUME, MENTIONS_COUNT_BY_BRAND, MENTIONED_COMPETITORS, TOTAL_COMPETITOR_MENTIONS]
+      - *sortDirectionParam
       - name: gapKinds
         in: query
         required: false
@@ -768,6 +808,26 @@ ai-visibility-competitors-gap-source-domains:
       - *engineParam
       - *limitParam
       - *offsetParam
+      - name: searchQuery
+        in: query
+        required: false
+        description: |
+          Server-side search. Pushed to Semrush `GapSourceDomainsRequest.dimension_filter_ql`
+          (and `GapSourceDomainsTotals`) as `domain CONTAINS "<searchQuery>"`, so the returned
+          `total` reflects the filtered set. Quotes and backslashes are escaped.
+        schema:
+          type: string
+          example: cdn.example.com
+      - name: sortBy
+        in: query
+        required: false
+        description: |
+          `DOMAINS_REQUEST_ORDER_BY` for Semrush `order.by`. Unknown or omitted values fall
+          back to the default. Default: `ORGANIC_TRAFFIC`.
+        schema:
+          type: string
+          enum: [DOMAIN, MENTIONS, SOURCES_COUNT, PROMPTS_COUNT, ORGANIC_TRAFFIC, MENTIONS_COUNT_BY_BRAND, MENTIONED_COMPETITORS, TOTAL_COMPETITOR_MENTIONS]
+      - *sortDirectionParam
       - name: gapKinds
         in: query
         required: false
@@ -804,6 +864,36 @@ ai-visibility-competitors-gap-prompts:
       - *engineParam
       - *limitParam
       - *offsetParam
+      - name: searchQuery
+        in: query
+        required: false
+        description: |
+          Server-side search. Pushed to Semrush `GapPromptsRequest.dimension_filter_ql`
+          (and `GapPromptsTotals`) as `prompt CONTAINS "<searchQuery>"`, so the returned
+          `total` reflects the filtered set. Quotes and backslashes are escaped.
+        schema:
+          type: string
+          example: best running shoes
+      - name: sortBy
+        in: query
+        required: false
+        description: |
+          `GAP_PROMPTS_REQUEST_ORDER_BY` for Semrush `order.by`. Unknown or omitted values fall
+          back to the default. Default: `MENTIONED_BRANDS_COUNT`.
+        schema:
+          type: string
+          enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT, TOPIC_VOLUME]
+      - *sortDirectionParam
+      - name: topicId
+        in: query
+        required: false
+        description: |
+          When set, restricts gap prompts to this topic hash (sent to Semrush as
+          `GapPromptsRequest.topic_hash`, applied to both the list and `GapPromptsTotals`
+          calls). Enables the topic → prompts drill-down. Non-numeric values are ignored.
+        schema:
+          type: string
+          example: '12345'
       - name: gapKinds
         in: query
         required: false
@@ -851,6 +941,29 @@ ai-visibility-meta:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityMeta'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-meta-meta:
+  get:
+    tags: [ai-visibility]
+    summary: Get AI Visibility metadata (Meta v1 JSON)
+    description: |
+      Returns Semrush `cr.v1 Meta/Meta` protobuf JSON using proto field names.
+      The response appends a computed `WORLDWIDE` country entry: 
+      daily dates are the intersection across countries with daily snapshots, 
+      and monthly dates are the union up to the minimum latest
+      monthly snapshot available across countries.
+    operationId: getAiVisibilityV1MetaMeta
+    parameters: []
+    responses:
+      '200':
+        description: Metadata retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1Meta'
       <<: *errorResponses
     security:
       - api_key: []
@@ -1107,6 +1220,64 @@ ai-visibility-topics-research-source-domains:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilitySourceDomainsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-brand-stats-by-llm:
+  get:
+    tags: [ai-visibility]
+    summary: Get brand statistics by LLM (Brand v2 JSON)
+    description: |
+      Returns brand statistics by model and date using Semrush `BrandService` v2
+      `StatsByLLM`. The response is native protobuf JSON (camelCase), with the
+      Semrush `llm` array containing rows for each LLM/date combination and
+      aggregate rows where `llm` is `UNSPECIFIED`.
+
+      Optional `dateFrom` and `dateTo` are forwarded as Semrush `date_from` and
+      `date_to`. Semrush requires both dates to be omitted or both dates to be
+      present, using the same `YYYY-MM` or `YYYY-MM-DD` format.
+    operationId: getAiVisibilityV1BrandStatsByLlm
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *dateFromParam
+      - *dateToParam
+    responses:
+      '200':
+        description: Brand statistics by LLM retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1BrandStatsByLLMResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-brand-stats-by-country:
+  get:
+    tags: [ai-visibility]
+    summary: Get brand statistics by country (Brand v2 JSON)
+    description: |
+      Returns brand statistics grouped by country using Semrush `BrandService` v2
+      `StatsByCountry`. The response is native protobuf JSON (camelCase), with the
+      Semrush `byCountry` array containing one row per market.
+
+      Optional `engine` is forwarded as Semrush `llm`; omit it or use `all` to request
+      all models. Optional `date` is forwarded as Semrush `target_date`.
+    operationId: getAiVisibilityV1BrandStatsByCountry
+    parameters:
+      - *domainParam
+      - *engineParam
+      - *dateParam
+    responses:
+      '200':
+        description: Brand statistics by country retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1BrandStatsByCountryResponse'
       <<: *errorResponses
     security:
       - api_key: []

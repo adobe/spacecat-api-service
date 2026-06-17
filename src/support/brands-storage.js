@@ -493,6 +493,7 @@ export async function upsertBrand({
   brand,
   postgrestClient,
   updatedBy = 'system',
+  log = console,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -507,12 +508,21 @@ export async function upsertBrand({
   // Check if the brand already exists with a base site set.
   // This prevents silently downgrading an active brand to pending when a caller
   // re-upserts by name without passing baseSiteId.
-  const { data: existing } = await postgrestClient
+  const { data: existing, error: existingError } = await postgrestClient
     .from('brands')
     .select('site_id')
     .eq('organization_id', organizationId)
     .eq('name', brand.name)
     .maybeSingle();
+
+  // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a query
+  // failure instead of throwing. If we ignored the error, `existing` would be
+  // null and the immutability guard below would treat the brand as new — letting
+  // a transient failure overwrite an existing primary site. Surface the error
+  // instead so the caller (and SQS retry) handles it rather than guessing.
+  if (existingError) {
+    throw new Error(`Failed to look up existing brand "${brand.name}": ${existingError.message}`);
+  }
 
   // LLMO-5494: the base site is the brand's stable identity; the name is
   // mutable (the brandalf write-back refines it, sometimes to a different
@@ -558,9 +568,20 @@ export async function upsertBrand({
     updated_by: updatedBy,
   };
 
-  // Set base site ID if provided.
-  if (hasText(brand.baseSiteId)) {
+  // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
+  // when the brand has no site_id yet — re-onboarding/re-upserting an existing
+  // brand by name must NOT re-point its primary site (LLMO-5556: this silently
+  // overwrote mongodb.com -> learn.mongodb.com and merck.com -> keytruda.com).
+  if (hasText(brand.baseSiteId) && !hasText(existing?.site_id)) {
     row.site_id = brand.baseSiteId;
+  } else if (
+    hasText(brand.baseSiteId)
+    && hasText(existing?.site_id)
+    && existing.site_id !== brand.baseSiteId
+  ) {
+    log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
+      + `(org ${organizationId}) — primary site is immutable `
+      + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
   }
 
   let upserted;

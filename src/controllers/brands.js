@@ -40,6 +40,7 @@ import {
   checkPromptsExist,
   getPromptStats,
   resolveBrandUuid,
+  findPromptsBlockingRegionRemoval,
 } from '../support/prompts-storage.js';
 import {
   listBrands,
@@ -1320,6 +1321,7 @@ function BrandsController(ctx, log, env) {
         brand: brandData,
         postgrestClient,
         updatedBy,
+        log,
       });
 
       return createResponse(created, 201);
@@ -1368,6 +1370,39 @@ function BrandsController(ctx, log, env) {
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
 
+      // LLMO-5645: a region must not be removed from a brand while prompts still
+      // use it — DRS schedules off each prompt's `regions`, so dropping a brand
+      // region would orphan those prompts on a market the brand no longer
+      // covers. Reject the change and have the operator relocate the prompts
+      // first (consistency guard, enforced before the brand is mutated).
+      //
+      // Best-effort, NOT transactional: there is a TOCTOU window between this
+      // check and the update below — a prompt created in the removed region in
+      // between could slip past. Acceptable given how infrequent brand-region
+      // edits are, and the next edit re-checks; a prompt added later still can't
+      // be scheduled for a region the brand lacks.
+      if (updates.region !== undefined) {
+        const before = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        const blocking = await findPromptsBlockingRegionRemoval({
+          organizationId: spaceCatId,
+          brandUuid,
+          oldRegions: before?.region || [],
+          newRegions: updates.region || [],
+          postgrestClient,
+          log,
+        });
+        const blockedRegions = Object.keys(blocking).sort();
+        if (blockedRegions.length > 0) {
+          const detail = blockedRegions
+            .map((r) => `${r.toUpperCase()} (${blocking[r]} prompt${blocking[r] === 1 ? '' : 's'})`)
+            .join(', ');
+          return badRequest(
+            `Cannot remove region(s) still used by prompts: ${detail}. `
+            + 'Reassign or delete those prompts first, then retry the region change.',
+          );
+        }
+      }
+
       const updated = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -1379,6 +1414,7 @@ function BrandsController(ctx, log, env) {
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
       return ok(updated);
     } catch (error) {
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
