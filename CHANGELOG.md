@@ -1,3 +1,10 @@
+## [1.578.1](https://github.com/adobe/spacecat-api-service/compare/v1.578.0...v1.578.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* **preflight:** construct custom-env ImsClient with IMS_SCOPE=system at the call site (SITES-43236 follow-up) ([#2627](https://github.com/adobe/spacecat-api-service/issues/2627)) ([0fbe049](https://github.com/adobe/spacecat-api-service/commit/0fbe0493fcc0e78921564bf6d72798e81f01828d)), closes [#2611](https://github.com/adobe/spacecat-api-service/issues/2611) [#2611](https://github.com/adobe/spacecat-api-service/issues/2611)
+
 # [1.578.0](https://github.com/adobe/spacecat-api-service/compare/v1.577.1...v1.578.0) (2026-06-17)
 
 
