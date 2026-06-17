@@ -1133,8 +1133,9 @@ ai-visibility-topics-research-prompts:
         `searchQuery` is then **not required** (and is ignored). Data from
         `PromptService/PromptsByTopicIDs` and `PromptsByTopicIDsTotal`.
 
-      Exactly one of `searchQuery` or `topicId` must be supplied. All-models queries
-      merge and deduplicate across LLMs; total is the sum of per-LLM totals.
+      At least one of `searchQuery` or `topicId` is required; if both are sent, `topicId`
+      wins and `searchQuery` is ignored. All-models queries merge and deduplicate across
+      LLMs; total is the sum of per-LLM totals.
 
       Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT` (default), `SOURCES_COUNT`,
       `RELEVANCE_SCORE`) and `sortDirection` (`ASC` / `DESC`, default `DESC`).
