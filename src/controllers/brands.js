@@ -68,6 +68,8 @@ import {
 } from '../support/topics-storage.js';
 
 const HEADER_ERROR = 'x-error';
+const BRAND_GUIDANCE_MAX_LENGTH = 4000;
+const BRAND_GUIDANCE_FIELDS = ['brandContext', 'mentionSentimentGuidance'];
 
 /**
  * BrandsController. Provides methods to read brands and brand guidelines.
@@ -160,6 +162,23 @@ function BrandsController(ctx, log, env) {
       });
     }
     return internalServerError(error.message);
+  }
+
+  function validateBrandGuidanceFields(brandData = {}) {
+    for (const field of BRAND_GUIDANCE_FIELDS) {
+      const value = brandData[field];
+      if (value !== undefined && value !== null) {
+        if (typeof value !== 'string') {
+          return badRequest(`${field} must be a string or null`);
+        }
+        // Validate the trimmed length: storage trims before persisting, so this
+        // mirrors what is actually stored (and the schema's maxLength).
+        if (value.trim().length > BRAND_GUIDANCE_MAX_LENGTH) {
+          return badRequest(`${field} must be at most ${BRAND_GUIDANCE_MAX_LENGTH} characters`);
+        }
+      }
+    }
+    return null;
   }
 
   /**
@@ -1298,6 +1317,10 @@ function BrandsController(ctx, log, env) {
       if (!hasText(brandData.name)) {
         return badRequest('Brand name is required');
       }
+      const invalidGuidance = validateBrandGuidanceFields(brandData);
+      if (invalidGuidance) {
+        return invalidGuidance;
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
       if (organization.status) {
@@ -1343,6 +1366,10 @@ function BrandsController(ctx, log, env) {
       }
       if (!hasText(brandId)) {
         return badRequest('Brand ID required');
+      }
+      const invalidGuidance = validateBrandGuidanceFields(updates);
+      if (invalidGuidance) {
+        return invalidGuidance;
       }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);

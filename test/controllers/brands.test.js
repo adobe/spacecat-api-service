@@ -4364,6 +4364,40 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 400 when brand guidance fields have the wrong type', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', brandContext: { text: 'wrong' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand guidance fields are longer than 4000 characters', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', mentionSentimentGuidance: 'x'.repeat(4001) },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('accepts brand guidance that trims to within the limit despite surrounding whitespace', async () => {
+      // 4004 raw characters, but 4000 after trim — storage trims before persisting,
+      // so the controller validates the trimmed length and must not reject this.
+      const padded = `  ${'x'.repeat(4000)}  `;
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', brandContext: padded },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(201);
+    });
+
     it('returns 400 when params is undefined', async () => {
       const response = await brandsController.createBrandForOrg({
         ...context,
@@ -4522,6 +4556,26 @@ describe('Brands Controller', () => {
         ...context,
         params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
         data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand guidance update fields have the wrong type', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { mentionSentimentGuidance: ['wrong'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand guidance update fields are longer than 4000 characters', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { brandContext: 'x'.repeat(4001) },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
