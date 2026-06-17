@@ -1,5 +1,5 @@
 ---
-name: "diagnose-cwv"
+name: diagnose-cwv
 description: "Diagnose why CWV code patches are not being generated for a site, site ID, or opportunity."
 ---
 
@@ -23,7 +23,7 @@ arguments provided by the user.
 Before running, check that the required environment variables are set:
 
 - `API_KEY` or `SESSION_TOKEN` must be set in the shell; if neither is set, ask
-  the user to export one before continuing
+  the user to run `! export API_KEY=<key>;` before continuing
 - For AWS log checks, `AWS_PROFILE` should be set
 
 Run the script and analyze the output. The script checks these pipeline stages:
