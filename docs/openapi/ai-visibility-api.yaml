@@ -1152,6 +1152,21 @@ ai-visibility-topics-research-prompts:
           type: string
           example: coffee
       - *topicIdOptionalParam
+      - name: topicIds
+        in: query
+        required: false
+        description: |
+          Batch form of `topicId`: repeat the param to fetch prompts for several topics at once
+          (e.g. `?topicIds=12345&topicIds=67890`). Singular `topicId` is the common case; values
+          from both are combined. Digits only. Capped at 50 ids per request.
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+            pattern: '^\d+$'
+            example: '12345'
       - *countryParam
       - *regionParam
       - *engineParam
