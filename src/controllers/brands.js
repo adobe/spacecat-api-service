@@ -49,8 +49,15 @@ import {
   deleteBrand,
   getBrandById,
   getBrandBySite,
+  getBrandCompetitors,
 } from '../support/brands-storage.js';
 import { provisionBrandSubworkspace } from '../support/serenity/brand-provisioning.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
+import {
+  removedCompetitorDomains,
+  syncCiCompetitorsAcrossMarkets,
+} from '../support/serenity/ci-competitors.js';
 import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
@@ -1371,6 +1378,14 @@ function BrandsController(ctx, log, env) {
             .map((a) => (typeof a === 'string' ? a : a?.name))
             .filter(hasText)
           : [];
+        // Brand URLs (own sites + social + earned) are pushed onto the initial
+        // market's project benchmark. The row isn't written yet, so they come
+        // straight from the create payload (same V2 shape upsertBrand persists).
+        const brandUrlSources = {
+          urls: brandData.urls,
+          socialAccounts: brandData.socialAccounts,
+          earnedContent: brandData.earnedContent,
+        };
         provisionedBrandId = randomUUID();
         const provisioned = await provisionBrandSubworkspace(context, {
           spaceCatId,
@@ -1381,6 +1396,11 @@ function BrandsController(ctx, log, env) {
           brandDomain,
           modelIds,
           brandAliases,
+          brandUrlSources,
+          // Competitors ("other brands to track") are merged into the initial
+          // market's CI competitor list. Like URLs, they come from the create
+          // payload (the brand row isn't written yet).
+          competitors: brandData.competitors,
         }, log);
         provisionedWorkspaceId = provisioned.semrushWorkspaceId;
       }
@@ -1441,6 +1461,14 @@ function BrandsController(ctx, log, env) {
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
 
+      // Capture the competitor list BEFORE the update so the Semrush re-sync can
+      // compute which competitors were removed (old − new) — the only ones it
+      // deletes upstream (Semrush-auto-generated ones are never in our list).
+      const competitorsTouched = updates.competitors !== undefined;
+      const oldCompetitors = competitorsTouched
+        ? await getBrandCompetitors(brandUuid, postgrestClient)
+        : [];
+
       const updated = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -1452,6 +1480,42 @@ function BrandsController(ctx, log, env) {
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
+      // Brand-level Semrush re-sync: when an edit changes URL sources or
+      // competitors and the brand is in sub-workspace mode, propagate the change
+      // onto every market/project (region-filtered per market). Skipped for
+      // flat-mode brands and unrelated edits. Hard-fail so the brand never drifts
+      // out of sync silently. One transport for both syncs.
+      const urlsTouched = updates.urls !== undefined
+        || updates.socialAccounts !== undefined
+        || updates.earnedContent !== undefined;
+      if ((urlsTouched || competitorsTouched) && hasText(updated.semrushWorkspaceId)) {
+        const imsToken = getImsUserToken(context);
+        const transport = createSerenityTransport({ env: context.env, imsToken });
+        if (urlsTouched) {
+          await syncBrandUrlsAcrossMarkets(
+            transport,
+            {
+              urls: updated.urls,
+              socialAccounts: updated.socialAccounts,
+              earnedContent: updated.earnedContent,
+            },
+            updated.semrushWorkspaceId,
+            log,
+          );
+        }
+        if (competitorsTouched) {
+          const removed = removedCompetitorDomains(oldCompetitors, updated.competitors);
+          await syncCiCompetitorsAcrossMarkets(
+            transport,
+            updated.competitors,
+            removed,
+            updated.semrushWorkspaceId,
+            log,
+          );
+        }
+      }
+
       return ok(updated);
     } catch (error) {
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);

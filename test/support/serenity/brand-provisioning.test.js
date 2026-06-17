@@ -108,6 +108,8 @@ describe('provisionBrandSubworkspace', () => {
       standardTags: STANDARD_PROMPT_TAGS,
       brandAliases: [],
       projectTags: PROJECT_STANDARD_TAGS,
+      brandUrlSources: null,
+      competitors: [],
       publishMode: 'require',
     });
     // The stub drives the sub-workspace title off the brand's name + id.
@@ -125,6 +127,18 @@ describe('provisionBrandSubworkspace', () => {
     });
     const [, , , , , , , options] = handleCreateMarketSubworkspace.firstCall.args;
     expect(options.brandAliases).to.deep.equal(['Acme Inc', 'ACME Corp']);
+  });
+
+  it('forwards brandUrlSources to the handler for benchmark URL attachment', async () => {
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const brandUrlSources = {
+      urls: [{ value: 'https://acme.com' }], socialAccounts: [], earnedContent: [],
+    };
+    await provisionBrandSubworkspace(buildContext(), { ...baseParams, brandUrlSources });
+    const [, , , , , , , options] = handleCreateMarketSubworkspace.firstCall.args;
+    expect(options.brandUrlSources).to.deep.equal(brandUrlSources);
   });
 
   it('throws 400 when the organization has no parent workspace', async () => {

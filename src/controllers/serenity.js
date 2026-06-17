@@ -55,6 +55,9 @@ import {
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
+import {
+  getBrandAliasNames, getBrandUrlSources, getBrandCompetitors,
+} from '../support/brands-storage.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 
 const MAX_ERR_MSG_LEN = 500;
@@ -493,6 +496,23 @@ function SerenityController(context, log, env) {
       let result;
       if (auth.mode === 'subworkspace') {
         const brand = await loadBrand(ctx, auth.brandUuid);
+        // Brand aliases are brand-level: every market/project carries them in
+        // its Semrush brand_names.
+        const brandAliases = await getBrandAliasNames(
+          auth.brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        // Brand URLs (own sites + social + earned) are brand-level too: read the
+        // persisted set and push it (region-filtered) onto the new market.
+        const brandUrlSources = await getBrandUrlSources(
+          auth.brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        // Competitors ("other brands to track") merge into the new market's CI list.
+        const competitors = await getBrandCompetitors(
+          auth.brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
         result = await handleCreateMarketSubworkspace(
           transport,
           brand,
@@ -501,6 +521,7 @@ function SerenityController(context, log, env) {
           log,
           null,
           brandPointerReloader(ctx, auth.brandUuid),
+          { brandAliases, brandUrlSources, competitors },
         );
       } else {
         result = await handleCreateMarket(
@@ -686,6 +707,22 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const brand = await loadBrand(ctx, auth.brandUuid);
+      // Brand aliases are brand-level: read once and apply to every market's
+      // project (Semrush brand_names) in this batch.
+      const brandAliases = await getBrandAliasNames(
+        auth.brandUuid,
+        ctx.dataAccess.services.postgrestClient,
+      );
+      // Brand URLs are brand-level: read once, push (region-filtered) per market.
+      const brandUrlSources = await getBrandUrlSources(
+        auth.brandUuid,
+        ctx.dataAccess.services.postgrestClient,
+      );
+      // Competitors are brand-level too: read once, merge (region-filtered) per market.
+      const competitors = await getBrandCompetitors(
+        auth.brandUuid,
+        ctx.dataAccess.services.postgrestClient,
+      );
 
       // Ensure the sub-workspace ONCE for the whole batch, sized to the real
       // market count, then create each market against the resolved workspace.
@@ -723,6 +760,8 @@ function SerenityController(context, log, env) {
             createBody,
             log,
             workspaceId,
+            null,
+            { brandAliases, brandUrlSources, competitors },
           );
         } catch (e) {
           // A single market failing must NOT abort the batch: markets already

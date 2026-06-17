@@ -122,6 +122,9 @@ describe('SerenityController', () => {
   let resolveBrandWorkspaceStub;
   let createTransportStub;
   let resolveBrandUuidStub;
+  let getBrandAliasNamesStub;
+  let getBrandUrlSourcesStub;
+  let getBrandCompetitorsStub;
   let accessControlHasAccessStub;
   let MockTransportError;
   let SerenityController;
@@ -139,6 +142,10 @@ describe('SerenityController', () => {
     clearBrandWorkspaceCacheStub = sinon.stub();
     createTransportStub = sinon.stub().returns({ name: 'transport' });
     resolveBrandUuidStub = sinon.stub().resolves(BRAND);
+    getBrandAliasNamesStub = sinon.stub().resolves([]);
+    getBrandUrlSourcesStub = sinon.stub()
+      .resolves({ urls: [], socialAccounts: [], earnedContent: [] });
+    getBrandCompetitorsStub = sinon.stub().resolves([]);
     accessControlHasAccessStub = sinon.stub().resolves(true);
     MockTransportError = class extends Error {
       constructor(status, message, body) {
@@ -203,6 +210,11 @@ describe('SerenityController', () => {
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
         resolveBrandUuid: resolveBrandUuidStub,
+      },
+      '../../src/support/brands-storage.js': {
+        getBrandAliasNames: getBrandAliasNamesStub,
+        getBrandUrlSources: getBrandUrlSourcesStub,
+        getBrandCompetitors: getBrandCompetitorsStub,
       },
     })).default;
   });
@@ -765,6 +777,62 @@ describe('SerenityController', () => {
       expect(args[2]).to.equal(WORKSPACE); // parentWorkspaceId
     });
 
+    it('createMarket forwards the brand aliases so the project carries them', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      getBrandAliasNamesStub.resolves(['Acme Inc', 'ACME']);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(201);
+      expect(getBrandAliasNamesStub).to.have.been.calledOnceWith(BRAND);
+      // options object is the 8th arg (index 7).
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[7])
+        .to.deep.equal({
+          brandAliases: ['Acme Inc', 'ACME'],
+          brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
+          competitors: [],
+        });
+    });
+
+    it('createMarket forwards the brand URL sources so the project carries them', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      const sources = {
+        urls: [{ value: 'https://x.com' }],
+        socialAccounts: [{ url: 'https://t.com/x', regions: ['us'] }],
+        earnedContent: [],
+      };
+      getBrandUrlSourcesStub.resolves(sources);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(201);
+      expect(getBrandUrlSourcesStub).to.have.been.calledOnceWith(BRAND);
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[7].brandUrlSources)
+        .to.deep.equal(sources);
+    });
+
+    it('createMarket forwards the brand competitors so the CI list carries them', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      const competitors = [{ url: 'https://rival.com', regions: ['us'] }];
+      getBrandCompetitorsStub.resolves(competitors);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(201);
+      expect(getBrandCompetitorsStub).to.have.been.calledOnceWith(BRAND);
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[7].competitors)
+        .to.deep.equal(competitors);
+    });
+
     it('deleteMarket routes to the subworkspace handler in subworkspace mode', async () => {
       handlers.handleDeleteMarketSubworkspace.resolves({ status: 204 });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -892,6 +960,60 @@ describe('SerenityController', () => {
       expect(handlers.handleCreateMarketSubworkspace.secondCall.args[5]).to.equal(SUBWS);
       expect(brand.setStatus).to.have.been.calledWith('active');
       expect(brand.save).to.have.been.called;
+    });
+
+    it('activate reads the brand aliases once and applies them to every market', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      getBrandAliasNamesStub.resolves(['Acme Inc']);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand: makeBrandModel(),
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
+      }));
+      expect(response.status).to.equal(200);
+      // Read once for the whole batch, not per market.
+      expect(getBrandAliasNamesStub).to.have.been.calledOnceWith(BRAND);
+      // Both market creates receive the same aliases in their options arg (index 7).
+      const expectedOpts = {
+        brandAliases: ['Acme Inc'],
+        brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
+        competitors: [],
+      };
+      const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
+      expect(firstCall.args[7]).to.deep.equal(expectedOpts);
+      expect(secondCall.args[7]).to.deep.equal(expectedOpts);
+    });
+
+    it('activate reads the brand URL sources once and applies them to every market', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const sources = { urls: [{ value: 'https://x.com' }], socialAccounts: [], earnedContent: [] };
+      getBrandUrlSourcesStub.resolves(sources);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand: makeBrandModel(),
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(getBrandUrlSourcesStub).to.have.been.calledOnceWith(BRAND);
+      const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
+      expect(firstCall.args[7].brandUrlSources).to.deep.equal(sources);
+      expect(secondCall.args[7].brandUrlSources).to.deep.equal(sources);
+    });
+
+    it('activate reads the brand competitors once and applies them to every market', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const competitors = [{ url: 'https://rival.com' }];
+      getBrandCompetitorsStub.resolves(competitors);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand: makeBrandModel(),
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(getBrandCompetitorsStub).to.have.been.calledOnceWith(BRAND);
+      const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
+      expect(firstCall.args[7].competitors).to.deep.equal(competitors);
+      expect(secondCall.args[7].competitors).to.deep.equal(competitors);
     });
 
     it('activate 400s on an empty markets array', async () => {

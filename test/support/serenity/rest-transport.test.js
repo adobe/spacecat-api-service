@@ -370,6 +370,96 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('brand URLs', () => {
+    const BENCHMARK_ID = 'bench-9';
+
+    it('listBenchmarks GETs /v1/.../ai_models/benchmarks', async () => {
+      fetchStub.resolves(fetchOk({ aio_benchmarks: [{ id: BENCHMARK_ID, main_brand: true }] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listBenchmarks(WORKSPACE_ID, PROJECT_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.match(/\/projects\/proj-xyz\/ai_models\/benchmarks$/);
+      expect(init.body).to.equal(undefined);
+    });
+
+    it('listBrandUrls GETs /v2/.../benchmarks/{bid}/brand_urls', async () => {
+      fetchStub.resolves(fetchOk({ brand_urls: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listBrandUrls(WORKSPACE_ID, PROJECT_ID, BENCHMARK_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls$/);
+    });
+
+    it('createBrandUrls POSTs the entries array as the body', async () => {
+      fetchStub.resolves(fetchOk({ ids: ['u1'], existing_count: 0 }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const entries = [{ url: 'https://acme.com', type: 'website' }];
+      await transport.createBrandUrls(WORKSPACE_ID, PROJECT_ID, BENCHMARK_ID, entries);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls$/);
+      expect(JSON.parse(init.body)).to.deep.equal(entries);
+    });
+
+    it('deleteBrandUrls DELETEs with body { ids }', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.deleteBrandUrls(WORKSPACE_ID, PROJECT_ID, BENCHMARK_ID, ['u1', 'u2']);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('DELETE');
+      expect(url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls$/);
+      expect(JSON.parse(init.body)).to.deep.equal({ ids: ['u1', 'u2'] });
+    });
+  });
+
+  describe('CI competitors', () => {
+    it('getProject GETs the project with required draft + type=ai query', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID, settings: { ci: { competitors: [] } } }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.getProject(WORKSPACE_ID, PROJECT_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.include(`/v1/workspaces/${WORKSPACE_ID}/projects/proj-xyz?`);
+      expect(url).to.include('draft=true');
+      expect(url).to.include('type=ai');
+    });
+
+    it('getProject honors an explicit draft=false', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.getProject(WORKSPACE_ID, PROJECT_ID, { draft: false });
+
+      const [url] = fetchStub.firstCall.args;
+      expect(url).to.include('draft=false');
+    });
+
+    it('updateCiCompetitors PUTs ci/competitors with { ci_competitors }', async () => {
+      fetchStub.resolves(fetchOk({ ci_competitors: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const list = [{ domain: 'a.com', color: '#111' }, { domain: 'b.com' }];
+      await transport.updateCiCompetitors(WORKSPACE_ID, PROJECT_ID, list);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('PUT');
+      expect(url).to.match(/\/projects\/proj-xyz\/ci\/competitors$/);
+      expect(JSON.parse(init.body)).to.deep.equal({ ci_competitors: list });
+    });
+  });
+
   describe('publishProject', () => {
     it('POSTs to /v1/workspaces/{ws}/projects/{pid}/publish with no body', async () => {
       fetchStub.resolves(fetchOk({ status: 'accepted' }));

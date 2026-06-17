@@ -4402,6 +4402,51 @@ describe('Brands Controller', () => {
         expect(upsertArgs.semrushWorkspaceId).to.equal('ws-1');
       });
 
+      it('forwards the brand URL sources (urls + social + earned) to provisioning', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const social = [{ url: 'https://x.com/acme', regions: ['us'] }];
+        const earned = [{ name: 'News', url: 'https://news/acme', regions: [] }];
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData, socialAccounts: social, earnedContent: earned },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.firstCall.args[1].brandUrlSources).to.deep.equal({
+          urls: semrushData.urls,
+          socialAccounts: social,
+          earnedContent: earned,
+        });
+      });
+
+      it('forwards the brand competitors to provisioning', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const competitors = [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }];
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData, competitors },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.firstCall.args[1].competitors).to.deep.equal(competitors);
+      });
+
       it('returns the provisioning error and does NOT create the brand on failure', async () => {
         const err = new Error('Organization has no Semrush workspace configured');
         err.status = 400;
@@ -4629,6 +4674,205 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(200);
+    });
+
+    async function buildUpdateController({
+      updateBrand,
+      syncBrandUrlsAcrossMarkets = sinon.stub().resolves({}),
+      createSerenityTransport,
+      syncCiCompetitorsAcrossMarkets = sinon.stub().resolves({}),
+      getBrandCompetitors = sinon.stub().resolves([]),
+    }) {
+      const Mocked = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/brands-storage.js': { updateBrand, getBrandCompetitors },
+        '../../src/support/prompts-storage.js': { resolveBrandUuid: sinon.stub().resolves(BRAND_UUID) },
+        '../../src/support/serenity/rest-transport.js': { createSerenityTransport },
+        '../../src/support/serenity/brand-urls.js': { syncBrandUrlsAcrossMarkets },
+        // removedCompetitorDomains is left REAL so the diff logic is exercised.
+        '../../src/support/serenity/ci-competitors.js': { syncCiCompetitorsAcrossMarkets },
+      });
+      return Mocked.default(context, loggerStub, mockEnv);
+    }
+
+    it('re-syncs brand URLs across markets when a URL field changes on a sub-workspace brand', async () => {
+      const updated = {
+        id: BRAND_UUID,
+        name: 'Updated Brand',
+        semrushWorkspaceId: 'ws-9',
+        urls: [{ value: 'https://acme.com' }],
+        socialAccounts: [],
+        earnedContent: [],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const syncStub = sinon.stub().resolves({ markets: 1, created: 1, deleted: 0 });
+      const transport = { name: 't' };
+      const createTransportStub = sinon.stub().returns(transport);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: createTransportStub,
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { socialAccounts: [{ url: 'https://x.com/acme', regions: ['us'] }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(createTransportStub).to.have.been.calledOnce;
+      expect(syncStub).to.have.been.calledOnceWith(
+        transport,
+        { urls: [{ value: 'https://acme.com' }], socialAccounts: [], earnedContent: [] },
+        'ws-9',
+      );
+    });
+
+    it('does NOT re-sync when the edit touches no URL field', async () => {
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: 'ws-9' });
+      const syncStub = sinon.stub().resolves({});
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub(),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { description: 'just a description change' },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(syncStub).to.not.have.been.called;
+    });
+
+    it('does NOT re-sync a flat-mode brand (no sub-workspace) even when URLs change', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: null, urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const syncStub = sinon.stub().resolves({});
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub(),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(syncStub).to.not.have.been.called;
+    });
+
+    it('hard-fails the edit when the brand-URL re-sync fails', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const err = new Error('upstream boom');
+      err.status = 502;
+      const syncStub = sinon.stub().rejects(err);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(502);
+      expect(syncStub).to.have.been.calledOnce;
+    });
+
+    it('re-syncs CI competitors (with removed domains) when competitors change on a sub-workspace brand', async () => {
+      const updated = {
+        id: BRAND_UUID,
+        name: 'Updated Brand',
+        semrushWorkspaceId: 'ws-9',
+        competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const ciSyncStub = sinon.stub().resolves({ markets: 1, changed: 1 });
+      const transport = { name: 't' };
+      const createTransportStub = sinon.stub().returns(transport);
+      // Old list had an extra competitor that is now gone → it must be reported removed.
+      const getBrandCompetitorsStub = sinon.stub().resolves([
+        { url: 'https://rival.com', regions: ['us'] },
+        { url: 'https://gone.com', regions: ['us'] },
+      ]);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        createSerenityTransport: createTransportStub,
+        syncCiCompetitorsAcrossMarkets: ciSyncStub,
+        getBrandCompetitors: getBrandCompetitorsStub,
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      // old competitors read BEFORE the update to compute removals.
+      expect(getBrandCompetitorsStub).to.have.been.calledOnceWith(BRAND_UUID);
+      expect(getBrandCompetitorsStub).to.have.been.calledBefore(updateBrandStub);
+      // sync gets the NEW competitor list, the removed domain, and the workspace.
+      expect(ciSyncStub).to.have.been.calledOnceWith(
+        transport,
+        updated.competitors,
+        ['gone.com'],
+        'ws-9',
+      );
+    });
+
+    it('does NOT re-sync competitors when the edit leaves them untouched', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const ciSyncStub = sinon.stub().resolves({});
+      const getBrandCompetitorsStub = sinon.stub().resolves([]);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+        syncCiCompetitorsAcrossMarkets: ciSyncStub,
+        getBrandCompetitors: getBrandCompetitorsStub,
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(getBrandCompetitorsStub).to.not.have.been.called;
+      expect(ciSyncStub).to.not.have.been.called;
     });
 
     it('returns 400 when brandId is missing', async () => {

@@ -18,6 +18,9 @@ import chaiAsPromised from 'chai-as-promised';
 import {
   listBrands,
   getBrandById,
+  getBrandAliasNames,
+  getBrandUrlSources,
+  getBrandCompetitors,
   getBrandBySite,
   upsertBrand,
   updateBrand,
@@ -334,6 +337,138 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(getBrandById(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to get brand');
+    });
+  });
+
+  describe('getBrandAliasNames', () => {
+    it('returns [] when postgrestClient is missing', async () => {
+      expect(await getBrandAliasNames(BRAND_ID, null)).to.deep.equal([]);
+    });
+
+    it('returns [] when brandId is empty', async () => {
+      expect(await getBrandAliasNames('', { from: () => {} })).to.deep.equal([]);
+    });
+
+    it('returns de-duplicated, non-empty alias names', async () => {
+      const query = createChainableQuery({
+        data: [
+          { alias: 'Acme Inc' },
+          { alias: 'ACME' },
+          { alias: 'Acme Inc' }, // exact duplicate dropped
+          { alias: '' }, // empty dropped (hasText)
+          { alias: null }, // null dropped
+        ],
+        error: null,
+      });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      const result = await getBrandAliasNames(BRAND_ID, postgrestClient);
+      expect(postgrestClient.from).to.have.been.calledOnceWith('brand_aliases');
+      expect(result).to.deep.equal(['Acme Inc', 'ACME']);
+    });
+
+    it('returns [] when the brand has no aliases (null data)', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandAliasNames(BRAND_ID, postgrestClient)).to.deep.equal([]);
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(getBrandAliasNames(BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand aliases');
+    });
+  });
+
+  describe('getBrandUrlSources', () => {
+    const EMPTY = { urls: [], socialAccounts: [], earnedContent: [] };
+
+    it('returns empty collections when postgrestClient is missing', async () => {
+      expect(await getBrandUrlSources(BRAND_ID, null)).to.deep.equal(EMPTY);
+    });
+
+    it('returns empty collections when brandId is empty', async () => {
+      expect(await getBrandUrlSources('', { from: () => {} })).to.deep.equal(EMPTY);
+    });
+
+    it('maps the brand URL sources to the V2 shape', async () => {
+      const query = createChainableQuery({
+        data: {
+          brand_urls: [{ url: 'https://acme.com' }, { url: 'https://blog.acme.com' }],
+          brand_social_accounts: [{ url: 'https://x.com/acme', regions: ['us'] }],
+          brand_earned_sources: [{ url: 'https://news.example/acme', regions: null }],
+        },
+        error: null,
+      });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      const result = await getBrandUrlSources(BRAND_ID, postgrestClient);
+      expect(postgrestClient.from).to.have.been.calledOnceWith('brands');
+      expect(result).to.deep.equal({
+        urls: [{ value: 'https://acme.com' }, { value: 'https://blog.acme.com' }],
+        socialAccounts: [{ url: 'https://x.com/acme', regions: ['us'] }],
+        earnedContent: [{ url: 'https://news.example/acme', regions: [] }],
+      });
+    });
+
+    it('returns empty collections when the brand row is not found (null data)', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandUrlSources(BRAND_ID, postgrestClient)).to.deep.equal(EMPTY);
+    });
+
+    it('defaults missing child arrays to empty', async () => {
+      const query = createChainableQuery({ data: {}, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandUrlSources(BRAND_ID, postgrestClient)).to.deep.equal(EMPTY);
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(getBrandUrlSources(BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand URL sources');
+    });
+  });
+
+  describe('getBrandCompetitors', () => {
+    it('returns [] when postgrestClient is missing', async () => {
+      expect(await getBrandCompetitors(BRAND_ID, null)).to.deep.equal([]);
+    });
+
+    it('returns [] when brandId is empty', async () => {
+      expect(await getBrandCompetitors('', { from: () => {} })).to.deep.equal([]);
+    });
+
+    it('returns url + regions, skipping url-less competitors', async () => {
+      const query = createChainableQuery({
+        data: [
+          { url: 'https://a.com', regions: ['us'] },
+          { url: 'https://b.com', regions: null },
+          { url: '', regions: [] }, // skipped (no url)
+          { name: 'no-url', regions: [] }, // skipped (no url)
+        ],
+        error: null,
+      });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      const result = await getBrandCompetitors(BRAND_ID, postgrestClient);
+      expect(postgrestClient.from).to.have.been.calledOnceWith('competitors');
+      expect(result).to.deep.equal([
+        { url: 'https://a.com', regions: ['us'] },
+        { url: 'https://b.com', regions: [] },
+      ]);
+    });
+
+    it('returns [] when null data', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandCompetitors(BRAND_ID, postgrestClient)).to.deep.equal([]);
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(getBrandCompetitors(BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand competitors');
     });
   });
 

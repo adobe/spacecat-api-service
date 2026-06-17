@@ -16,35 +16,17 @@ import { ErrorWithStatusCode, getImsUserToken } from '../utils.js';
 import { createSerenityTransport, SerenityTransportError } from './rest-transport.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
+import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from './prompt-tags.js';
+
+// Re-exported for callers/tests that drive brand provisioning. The tag
+// vocabularies themselves live in `prompt-tags.js` (single source of truth).
+export { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS };
 
 // Brand-create generation policy (tunable). Keep the top N generated topics by
 // search volume; brand-topics returns up to 10 topics x up to 100 prompts each,
 // so an uncapped attach could be ~1000 prompts — cap keeps the project focused
 // and the synchronous create within budget.
 export const MAX_TOPICS_ON_CREATE = 5;
-
-// Tags added to EVERY generated prompt on top of its `topic:<NAME>` tag. The
-// generated prompts are AI-authored, so they carry `source:ai`. Intent and type
-// cannot be determined at generation time and are classified later (the empty
-// taxonomy values for those dimensions exist on the project — see below).
-export const STANDARD_PROMPT_TAGS = Object.freeze(['source:ai']);
-
-// The standard tag TAXONOMY registered on EVERY project (not on every prompt):
-// the full intent / source / type vocabulary, so classification can later apply
-// the right value per prompt. Created via createProjectTags after the project
-// exists; `source:ai` is also applied to prompts now (reused by name, no dup).
-export const PROJECT_STANDARD_TAGS = Object.freeze([
-  'intent:informational',
-  'intent:instructional',
-  'intent:comparative',
-  'intent:transactional',
-  'intent:planning',
-  'intent:delegation',
-  'source:ai',
-  'source:human',
-  'type:branded',
-  'type:non-branded',
-]);
 
 /**
  * Initial-market project name convention: "REGION - LANG" — uppercase ISO-2
@@ -84,6 +66,13 @@ export function marketProjectName(market, languageCode) {
  * @param {string[]} params.modelIds - AI models (LLMs) to attach to the project.
  * @param {string[]} [params.brandAliases] - brand aliases; with the brand name
  *   they classify each generated prompt as `type:branded` / `type:non-branded`.
+ * @param {object} [params.brandUrlSources] - the brand's URL sources
+ *   ({ urls, socialAccounts, earnedContent }) pushed onto the initial market's
+ *   project benchmark (own sites + social + earned). A failed push hard-fails
+ *   provisioning (the brand row is then not written).
+ * @param {object[]} [params.competitors] - the brand's competitors ("other
+ *   brands to track") merged into the initial market's project CI competitor
+ *   list (region-filtered, domain-only). A failed sync hard-fails provisioning.
  * @param {object} [log]
  * @returns {Promise<{semrushWorkspaceId: string, published: boolean}>} the new
  *   sub-workspace id and whether the initial market was published (best-effort:
@@ -92,7 +81,7 @@ export function marketProjectName(market, languageCode) {
  */
 export async function provisionBrandSubworkspace(context, {
   spaceCatId, brandId, brandName, market, languageCode, brandDomain,
-  modelIds = [], brandAliases = [],
+  modelIds = [], brandAliases = [], brandUrlSources = null, competitors = [],
 }, log = console) {
   if (!hasText(brandName)) {
     throw new ErrorWithStatusCode('brandName is required for Semrush provisioning', 400);
@@ -153,6 +142,8 @@ export async function provisionBrandSubworkspace(context, {
         standardTags: STANDARD_PROMPT_TAGS,
         brandAliases,
         projectTags: PROJECT_STANDARD_TAGS,
+        brandUrlSources,
+        competitors,
         publishMode: 'require',
       },
     );

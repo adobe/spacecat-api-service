@@ -167,6 +167,10 @@ function aioPromptsPath(semrushWorkspaceId, projectId, suffix) {
   return `${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/aio/prompts${suffix}`;
 }
 
+function aioBrandUrlsPath(semrushWorkspaceId, projectId, benchmarkId) {
+  return `${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/aio/benchmarks/${enc(benchmarkId)}/brand_urls`;
+}
+
 /**
  * Creates the Semrush HTTP client. Each request is authenticated with the
  * caller's IMS bearer token; the Adobe gateway exchanges it server-side for
@@ -440,6 +444,33 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * GET /v1/workspaces/{ws}/projects/{pid}?draft=&type=ai — a single project
+     * with its full settings (`settings.ci.competitors`, `settings.ai…`). The
+     * `draft` query is REQUIRED upstream; we read the draft view (draft=true) so
+     * pre-publish edits and Semrush's auto-generated CI competitors are both
+     * visible. Used by the CI-competitor sync to read the current list before the
+     * destructive PUT.
+     */
+    async getProject(workspaceId, projectId, { draft = true } = {}) {
+      const params = new URLSearchParams({ draft: String(draft), type: 'ai' });
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}?${params.toString()}`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * PUT /v1/workspaces/{ws}/projects/{pid}/ci/competitors — FULL replace of the
+     * project's CI competitor list (deletes all, inserts exactly the body).
+     * Body: { ci_competitors: [{ domain, color? }] }. Because it is destructive
+     * and Semrush auto-generates its own competitors, callers must read-merge
+     * (getProject → merge → put) rather than send only our list. Returns the
+     * resulting { ci_competitors: [...] }.
+     */
+    async updateCiCompetitors(workspaceId, projectId, ciCompetitors) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ci/competitors`;
+      return request('PUT', url, imsToken, { ci_competitors: ciCompetitors });
+    },
+
+    /**
      * GET /v1/workspaces/{ws}/projects/{pid}/aio/init_status — AIO readiness
      * for a live project (`{ initialized: bool }`). Surfaced on the single
      * market-detail read only, never per-item in the list (would be N+1).
@@ -447,6 +478,56 @@ export function createSerenityTransport({ env, imsToken }) {
     async getInitStatus(workspaceId, projectId) {
       const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/aio/init_status`;
       return request('GET', url, imsToken, undefined);
+    },
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Brand URLs (project benchmarks). A project's "main brand" benchmark is
+    // auto-created from the project's brand_name_display/brand_names/domain;
+    // brand URLs (own site, social, earned) attach to that benchmark. URLs are
+    // unique per PROJECT — a duplicate create is silently skipped upstream and
+    // reported via `existing_count`. Used to push brand-level URLs onto every
+    // market/project in the brand (mirrors brand_names/alias propagation).
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * GET /v1/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — list the
+     * project's benchmarks (the project's own brand plus competitors). The own
+     * brand carries `main_brand: true`; its `id` is the `benchmark_id` the brand
+     * URL endpoints require. Returns `{ aio_benchmarks: [...] }`.
+     */
+    async listBenchmarks(workspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models/benchmarks`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * GET /v2/.../aio/benchmarks/{bid}/brand_urls — list a benchmark's brand
+     * URLs. Returns `{ brand_urls: [{ id, url, type, ... }] }`. Used by the
+     * brand-edit re-sync to diff the live set before adding/removing.
+     */
+    async listBrandUrls(workspaceId, projectId, benchmarkId) {
+      const url = `${root}${aioBrandUrlsPath(workspaceId, projectId, benchmarkId)}`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * POST /v2/.../aio/benchmarks/{bid}/brand_urls — batch-create brand URLs
+     * under a benchmark. Body is an ARRAY of `{ url, type }` (url must be https,
+     * type ≤ 32 chars). URLs already present in the project are skipped (not
+     * duplicated) and counted in the response `existing_count`.
+     */
+    async createBrandUrls(workspaceId, projectId, benchmarkId, entries) {
+      const url = `${root}${aioBrandUrlsPath(workspaceId, projectId, benchmarkId)}`;
+      return request('POST', url, imsToken, entries);
+    },
+
+    /**
+     * DELETE /v2/.../aio/benchmarks/{bid}/brand_urls — batch-delete brand URLs
+     * by id. Body `{ ids: [...] }`. Ids not in this benchmark are ignored.
+     */
+    async deleteBrandUrls(workspaceId, projectId, benchmarkId, ids) {
+      const url = `${root}${aioBrandUrlsPath(workspaceId, projectId, benchmarkId)}`;
+      return request('DELETE', url, imsToken, { ids });
     },
   };
 }

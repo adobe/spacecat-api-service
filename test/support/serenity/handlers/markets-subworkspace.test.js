@@ -62,6 +62,10 @@ function makeTransport(overrides = {}) {
     addAiModel: sinon.stub().resolves(null),
     deleteAiModelsByIds: sinon.stub().resolves(null),
     createProjectTags: sinon.stub().resolves(null),
+    listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
+    createBrandUrls: sinon.stub().resolves({ ids: [], existing_count: 0 }),
+    getProject: sinon.stub().resolves({ settings: { ci: { competitors: [] } } }),
+    updateCiCompetitors: sinon.stub().resolves({ ci_competitors: [] }),
     ...overrides,
   };
 }
@@ -160,6 +164,139 @@ describe('markets-subworkspace handlers', () => {
       });
       expect(transport.createProject).to.have.been.calledOnce;
       expect(transport.publishProject).to.have.been.calledOnce;
+    });
+
+    it('defaults the project brand_names to just the primary brand name when no aliases', async () => {
+      const transport = makeTransport();
+      await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
+      const projectBody = transport.createProject.firstCall.args[1];
+      expect(projectBody.brand_name_display).to.equal('B');
+      expect(projectBody.brand_names).to.deep.equal(['B']);
+    });
+
+    it('adds the brand aliases to the project brand_names (case-insensitive dedupe)', async () => {
+      const transport = makeTransport();
+      await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { brandAliases: ['Bee', 'B', 'Acme'] },
+      );
+      const projectBody = transport.createProject.firstCall.args[1];
+      // display stays the primary; brand_names = primary + aliases, with the
+      // duplicate 'B' dropped case-insensitively.
+      expect(projectBody.brand_name_display).to.equal('B');
+      expect(projectBody.brand_names).to.deep.equal(['B', 'Bee', 'Acme']);
+    });
+
+    it('pushes region-filtered brand URLs onto the main benchmark before publishing', async () => {
+      const transport = makeTransport();
+      const brandUrlSources = {
+        urls: ['https://b.com', 'http://insecure.com'],
+        socialAccounts: [
+          { url: 'https://x.com/us', regions: ['us'] },
+          { url: 'https://x.com/de', regions: ['de'] },
+        ],
+        earnedContent: [{ url: 'https://news/b', regions: [] }],
+      };
+      await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { brandUrlSources },
+      );
+      expect(transport.listBenchmarks).to.have.been.calledOnceWith(WS, 'new-proj');
+      // http:// dropped; de-region social dropped; us social + region-less earned kept.
+      expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'new-proj', 'bench-1', [
+        { url: 'https://b.com', type: 'website' },
+        { url: 'https://x.com/us', type: 'social' },
+        { url: 'https://news/b', type: 'earned' },
+      ]);
+      expect(transport.createBrandUrls).to.have.been.calledBefore(transport.publishProject);
+    });
+
+    it('merges region-filtered competitors into the project CI list before publishing', async () => {
+      const transport = makeTransport({
+        getProject: sinon.stub().resolves({
+          settings: { ci: { competitors: [{ domain: 'auto.com', color: '#111' }] } },
+        }),
+      });
+      const competitors = [
+        { url: 'https://rival.com', regions: ['us'] },
+        { url: 'https://other-region.com', regions: ['de'] }, // filtered out for us market
+      ];
+      await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { competitors },
+      );
+      // Semrush-auto entry preserved; our us competitor added; de one excluded.
+      expect(transport.updateCiCompetitors).to.have.been.calledOnceWith(WS, 'new-proj', [
+        { domain: 'auto.com', color: '#111' },
+        { domain: 'rival.com' },
+      ]);
+      expect(transport.updateCiCompetitors).to.have.been.calledBefore(transport.publishProject);
+    });
+
+    it('does not touch the CI competitor API when there are no competitors', async () => {
+      const transport = makeTransport();
+      await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
+      expect(transport.getProject).to.not.have.been.called;
+      expect(transport.updateCiCompetitors).to.not.have.been.called;
+    });
+
+    it('hard-fails the create when the CI competitor sync fails', async () => {
+      const transport = makeTransport({
+        updateCiCompetitors: sinon.stub().rejects(new SerenityTransportError(500, 'ci boom')),
+      });
+      await expect(handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { competitors: [{ url: 'https://rival.com' }] },
+      )).to.be.rejectedWith(/ci boom/);
+      expect(transport.publishProject).to.not.have.been.called;
+    });
+
+    it('does not touch the brand-URL API when there are no sources', async () => {
+      const transport = makeTransport();
+      await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
+      expect(transport.listBenchmarks).to.not.have.been.called;
+      expect(transport.createBrandUrls).to.not.have.been.called;
+    });
+
+    it('hard-fails the create when the brand-URL push fails', async () => {
+      const transport = makeTransport({
+        createBrandUrls: sinon.stub().rejects(new SerenityTransportError(400, 'bad url')),
+      });
+      await expect(handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { brandUrlSources: { urls: ['https://b.com'] } },
+      )).to.be.rejectedWith(/bad url/);
+      expect(transport.publishProject).to.not.have.been.called;
     });
 
     it('does not publish when publishMode is skip (draft-only)', async () => {

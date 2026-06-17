@@ -30,6 +30,9 @@ import {
   listMarkets, resolveProject, mapPublishStatus, projectToSlice,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
+import { TYPE_TAG, topicTag } from '../prompt-tags.js';
+import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
+import { collectCompetitorDomains, syncCiCompetitorsForProject } from '../ci-competitors.js';
 
 /**
  * Subworkspace-mode market handlers (serenity design §3/§5). The brand has its own
@@ -91,13 +94,37 @@ export async function handleGetMarketSubworkspace(
   return { ...slice, initialized };
 }
 
-function buildCreateProjectBody(body, location, languageId) {
+// De-duplicates name strings case-insensitively (trim + lowercase key),
+// preserving first-seen order. Used to build a project's brand_names from the
+// primary brand name(s) plus the brand's aliases without repeating a value.
+function dedupeNames(names) {
+  const seen = new Set();
+  return names
+    .filter(hasText)
+    .filter((n) => {
+      const key = n.trim().toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function buildCreateProjectBody(body, location, languageId, brandAliases = []) {
   const name = hasText(body?.name) ? String(body.name) : defaultMarketName(body.brandDisplayName);
+  // A Semrush project's brand is described by a display name plus the full set
+  // of names it is known by (`brand_names`). Brand aliases are brand-level, so
+  // every project/market in the brand carries them alongside the primary name.
+  const brandNames = dedupeNames([
+    ...(Array.isArray(body.brandNames) ? body.brandNames : []),
+    ...(Array.isArray(brandAliases) ? brandAliases : []),
+  ]);
   return {
     name,
     type: 'ai',
     brand_name_display: body.brandNames[0],
-    brand_names: body.brandNames,
+    brand_names: brandNames,
     domain: body.brandDomain,
     country_code: body.market.toLowerCase(),
     location_id: location.geoTargetId,
@@ -135,7 +162,7 @@ function validateCreateBody(body) {
  */
 function brandedTypeTag(promptText, needles) {
   const hay = String(promptText).toLowerCase();
-  return needles.some((n) => hay.includes(n)) ? 'type:branded' : 'type:non-branded';
+  return needles.some((n) => hay.includes(n)) ? TYPE_TAG.BRANDED : TYPE_TAG.NON_BRANDED;
 }
 
 /**
@@ -173,10 +200,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
 
   const promptsByText = {};
   selected.forEach((t) => {
-    const topicTag = `topic:${t.topic}`;
+    const topic = topicTag(t.topic);
     (Array.isArray(t.prompts) ? t.prompts : []).forEach((p) => {
       if (hasText(p)) {
-        promptsByText[p] = [topicTag, ...standardTags, brandedTypeTag(p, brandNeedles)];
+        promptsByText[p] = [topic, ...standardTags, brandedTypeTag(p, brandNeedles)];
       }
     });
   });
@@ -214,11 +241,24 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   search volume (0 = keep all).
  * @param {string[]} [options.standardTags=[]] - tags added to every generated
  *   prompt in addition to its `topic:<NAME>` and branded `type:` tag.
- * @param {string[]} [options.brandAliases=[]] - brand aliases; together with the
- *   brand name(s) they classify each generated prompt as `type:branded` (text
- *   contains a name/alias, case-insensitive) or `type:non-branded`.
+ * @param {string[]} [options.brandAliases=[]] - brand aliases; brand-level names
+ *   the brand is also known by. Added to the project's `brand_names` (alongside
+ *   the primary name) so every market/project in the brand carries them, and —
+ *   together with the brand name(s) — used to classify each generated prompt as
+ *   `type:branded` (text contains a name/alias, case-insensitive) or
+ *   `type:non-branded`.
  * @param {string[]} [options.projectTags=[]] - project-level tag taxonomy to
  *   register on the project (via createProjectTags) independent of any prompt.
+ * @param {object} [options.brandUrlSources=null] - the brand's URL sources
+ *   ({ urls, socialAccounts, earnedContent }, V2 shape) to push onto this
+ *   market's project benchmark. Brand `urls` go to every market; social/earned
+ *   are filtered to this market's region. Same brand-level set is passed for
+ *   every market. A failed push hard-fails the create (URLs are part of a valid
+ *   project's setup).
+ * @param {object[]} [options.competitors=[]] - the brand's competitors ("other
+ *   brands to track", { url, regions }) to merge into this market's project CI
+ *   competitor list (region-filtered, domain-only). Read-merged with Semrush's
+ *   existing/auto-generated list before publish; a failed sync hard-fails.
  * @param {'require'|'best-effort'|'skip'} [options.publishMode='require'] - how
  *   to publish: `require` throws on failure (the default markets endpoint);
  *   `best-effort` swallows a quota 405 (empty-units publish, workspace doc §5)
@@ -239,6 +279,8 @@ export async function handleCreateMarketSubworkspace(
     standardTags = [],
     brandAliases = [],
     projectTags = [],
+    brandUrlSources = null,
+    competitors = [],
     publishMode = 'require',
   } = {},
 ) {
@@ -283,7 +325,7 @@ export async function handleCreateMarketSubworkspace(
     }
     const createResp = await transport.createProject(
       workspaceId,
-      buildCreateProjectBody(body, location, languageId),
+      buildCreateProjectBody(body, location, languageId, brandAliases),
     );
     projectId = String(createResp?.id || '');
     if (!hasText(projectId)) {
@@ -332,6 +374,28 @@ export async function handleCreateMarketSubworkspace(
           ...brandAliases,
         ],
       },
+      log,
+    );
+  }
+
+  // Push the brand's URLs (own sites + social + earned) onto this market's
+  // main-brand benchmark, region-filtered to the market. Done before publish so
+  // the URLs are part of the same published version. Hard-fail on error.
+  const brandUrlEntries = collectBrandUrlEntries(brandUrlSources, body.market);
+  await attachBrandUrlsToProject(transport, workspaceId, projectId, brandUrlEntries, log);
+
+  // Merge the brand's competitors ("other brands to track") into the project's
+  // CI competitor list (region-filtered, domain-only) before publish. Read-merge
+  // so Semrush's existing/auto-generated competitors are preserved. Creation
+  // adds only — there is nothing of ours to remove yet (removedDomains = []).
+  const competitorDomains = collectCompetitorDomains(competitors, body.market);
+  if (competitorDomains.length > 0) {
+    await syncCiCompetitorsForProject(
+      transport,
+      workspaceId,
+      projectId,
+      competitorDomains,
+      [],
       log,
     );
   }

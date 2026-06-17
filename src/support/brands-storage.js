@@ -416,6 +416,97 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
 }
 
 /**
+ * Reads a brand's alias names (the `brand_aliases.alias` values) — the extra
+ * names the brand is known by, beyond its display name. Returned as a
+ * de-duplicated array of non-empty strings (empty when the brand has none),
+ * suitable for a Semrush project's `brand_names`. Brand aliases are brand-level,
+ * so the same set applies to every market/project created for the brand.
+ *
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<string[]>} alias names (empty array when none).
+ */
+export async function getBrandAliasNames(brandId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return [];
+  }
+  const { data, error } = await postgrestClient
+    .from('brand_aliases')
+    .select('alias')
+    .eq('brand_id', brandId);
+  if (error) {
+    throw new Error(`Failed to get brand aliases: ${error.message}`);
+  }
+  const seen = new Set();
+  return (data || [])
+    .map((row) => row.alias)
+    .filter((alias) => hasText(alias) && !seen.has(alias) && seen.add(alias));
+}
+
+/**
+ * Reads a brand's URL sources — the user-submitted brand URLs, social accounts,
+ * and earned-content sources — for propagation to the brand's Semrush projects.
+ * Returned in the same V2 shape the create payload carries, so the same
+ * `collectBrandUrlEntries` helper handles both the create body and a persisted
+ * brand. `urls` carry no region (they apply to every market); social/earned
+ * carry `regions` for per-market filtering. Empty arrays when the brand has none.
+ *
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<{urls: object[], socialAccounts: object[], earnedContent: object[]}>}
+ */
+export async function getBrandUrlSources(brandId, postgrestClient) {
+  const empty = { urls: [], socialAccounts: [], earnedContent: [] };
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return empty;
+  }
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select('brand_urls(url), brand_social_accounts(url, regions), brand_earned_sources(url, regions)')
+    .eq('id', brandId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to get brand URL sources: ${error.message}`);
+  }
+  if (!data) {
+    return empty;
+  }
+  return {
+    urls: (data.brand_urls || []).map((u) => ({ value: u.url })),
+    socialAccounts: (data.brand_social_accounts || [])
+      .map((s) => ({ url: s.url, regions: s.regions || [] })),
+    earnedContent: (data.brand_earned_sources || [])
+      .map((e) => ({ url: e.url, regions: e.regions || [] })),
+  };
+}
+
+/**
+ * Reads a brand's competitors ("other brands to track") for propagation to the
+ * brand's Semrush projects' CI competitor lists. Returns `{ url, regions }` per
+ * competitor (the only fields the CI sync needs — Semrush competitors are
+ * domain-only). Empty array when the brand has none.
+ *
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<{url: string, regions: string[]}[]>}
+ */
+export async function getBrandCompetitors(brandId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return [];
+  }
+  const { data, error } = await postgrestClient
+    .from('competitors')
+    .select('url, regions')
+    .eq('brand_id', brandId);
+  if (error) {
+    throw new Error(`Failed to get brand competitors: ${error.message}`);
+  }
+  return (data || [])
+    .filter((c) => hasText(c?.url))
+    .map((c) => ({ url: c.url, regions: c.regions || [] }));
+}
+
+/**
  * Resolves the single active brand for a given (organization, site) pair.
  *
  * Lookup is `brands.site_id === siteId` AND `status === 'active'` AND
