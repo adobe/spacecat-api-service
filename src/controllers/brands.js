@@ -41,6 +41,7 @@ import {
   checkPromptsExist,
   getPromptStats,
   resolveBrandUuid,
+  findPromptsBlockingRegionRemoval,
 } from '../support/prompts-storage.js';
 import {
   listBrands,
@@ -77,6 +78,8 @@ import {
 } from '../support/topics-storage.js';
 
 const HEADER_ERROR = 'x-error';
+const BRAND_GUIDANCE_MAX_LENGTH = 4000;
+const BRAND_GUIDANCE_FIELDS = ['brandContext', 'mentionSentimentGuidance'];
 
 /**
  * Derives the brand domain (hostname) from a brand-create payload's URLs, used as
@@ -200,6 +203,23 @@ function BrandsController(ctx, log, env) {
       });
     }
     return internalServerError(error.message);
+  }
+
+  function validateBrandGuidanceFields(brandData = {}) {
+    for (const field of BRAND_GUIDANCE_FIELDS) {
+      const value = brandData[field];
+      if (value !== undefined && value !== null) {
+        if (typeof value !== 'string') {
+          return badRequest(`${field} must be a string or null`);
+        }
+        // Validate the trimmed length: storage trims before persisting, so this
+        // mirrors what is actually stored (and the schema's maxLength).
+        if (value.trim().length > BRAND_GUIDANCE_MAX_LENGTH) {
+          return badRequest(`${field} must be at most ${BRAND_GUIDANCE_MAX_LENGTH} characters`);
+        }
+      }
+    }
+    return null;
   }
 
   /**
@@ -1343,6 +1363,10 @@ function BrandsController(ctx, log, env) {
       if (!hasText(brandData.name)) {
         return badRequest('Brand name is required');
       }
+      const invalidGuidance = validateBrandGuidanceFields(brandData);
+      if (invalidGuidance) {
+        return invalidGuidance;
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
       if (organization.status) {
@@ -1459,6 +1483,10 @@ function BrandsController(ctx, log, env) {
       if (!hasText(brandId)) {
         return badRequest('Brand ID required');
       }
+      const invalidGuidance = validateBrandGuidanceFields(updates);
+      if (invalidGuidance) {
+        return invalidGuidance;
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
       if (organization.status) {
@@ -1491,6 +1519,39 @@ function BrandsController(ctx, log, env) {
       const oldCompetitors = competitorsTouched
         ? await getBrandCompetitors(brandUuid, postgrestClient)
         : [];
+
+      // LLMO-5645: a region must not be removed from a brand while prompts still
+      // use it — DRS schedules off each prompt's `regions`, so dropping a brand
+      // region would orphan those prompts on a market the brand no longer
+      // covers. Reject the change and have the operator relocate the prompts
+      // first (consistency guard, enforced before the brand is mutated).
+      //
+      // Best-effort, NOT transactional: there is a TOCTOU window between this
+      // check and the update below — a prompt created in the removed region in
+      // between could slip past. Acceptable given how infrequent brand-region
+      // edits are, and the next edit re-checks; a prompt added later still can't
+      // be scheduled for a region the brand lacks.
+      if (updates.region !== undefined) {
+        const before = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        const blocking = await findPromptsBlockingRegionRemoval({
+          organizationId: spaceCatId,
+          brandUuid,
+          oldRegions: before?.region || [],
+          newRegions: updates.region || [],
+          postgrestClient,
+          log,
+        });
+        const blockedRegions = Object.keys(blocking).sort();
+        if (blockedRegions.length > 0) {
+          const detail = blockedRegions
+            .map((r) => `${r.toUpperCase()} (${blocking[r]} prompt${blocking[r] === 1 ? '' : 's'})`)
+            .join(', ');
+          return badRequest(
+            `Cannot remove region(s) still used by prompts: ${detail}. `
+            + 'Reassign or delete those prompts first, then retry the region change.',
+          );
+        }
+      }
 
       const updated = await updateBrand({
         organizationId: spaceCatId,

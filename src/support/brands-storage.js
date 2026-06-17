@@ -26,6 +26,24 @@ const BRAND_SELECT = [
   'brand_urls(url)',
 ].join(', ');
 
+function normalizeNullableText(value, fieldName) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    // Tag with a 400 status so callers that reach storage without going through
+    // the controller's validation surface a client error rather than a 500.
+    const error = new Error(`${fieldName} must be a string or null`);
+    error.status = 400;
+    throw error;
+  }
+  const trimmed = value.trim();
+  return hasText(trimmed) ? trimmed : null;
+}
+
 /**
  * Splits a full URL string into its base URL and path.
  * e.g. "https://example.com/products" -> { base: "https://example.com", path: "/products" }
@@ -124,6 +142,8 @@ function mapDbBrandToV2(row) {
     status: row.status || 'active',
     origin: row.origin || 'human',
     description: row.description || null,
+    brandContext: row.brand_context ?? null,
+    mentionSentimentGuidance: row.mention_sentiment_guidance ?? null,
     vertical: row.vertical || null,
     region: row.regions || [],
     urls,
@@ -653,6 +673,19 @@ export async function upsertBrand({
     row.semrush_workspace_id = semrushWorkspaceId;
   }
 
+  const brandContext = normalizeNullableText(brand.brandContext, 'brandContext');
+  if (brandContext !== undefined) {
+    row.brand_context = brandContext;
+  }
+
+  const mentionSentimentGuidance = normalizeNullableText(
+    brand.mentionSentimentGuidance,
+    'mentionSentimentGuidance',
+  );
+  if (mentionSentimentGuidance !== undefined) {
+    row.mention_sentiment_guidance = mentionSentimentGuidance;
+  }
+
   // A Semrush-anchored create (serenity-first, semrushWorkspaceId set) is NEVER
   // anchored by a SpaceCat site: its primary URL is the Semrush project domain,
   // which may coincidentally match an onboarded site. Setting site_id from that
@@ -746,6 +779,15 @@ export async function updateBrand({
   }
   if (updates.description !== undefined) {
     patch.description = updates.description;
+  }
+  if (updates.brandContext !== undefined) {
+    patch.brand_context = normalizeNullableText(updates.brandContext, 'brandContext');
+  }
+  if (updates.mentionSentimentGuidance !== undefined) {
+    patch.mention_sentiment_guidance = normalizeNullableText(
+      updates.mentionSentimentGuidance,
+      'mentionSentimentGuidance',
+    );
   }
   if (updates.vertical !== undefined) {
     patch.vertical = updates.vertical;

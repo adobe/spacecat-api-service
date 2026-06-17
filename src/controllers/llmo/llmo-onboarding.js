@@ -104,6 +104,7 @@ export async function triggerBrandalfOnboardingJob({
   brandName,
   companyWebsite,
   onboardingMode,
+  region,
   log,
   say = () => {},
 }) {
@@ -124,6 +125,10 @@ export async function triggerBrandalfOnboardingJob({
       prompt_type: 'brandalf',
       name: brandName,
       company_website: companyWebsite,
+      // LLMO-5645: forward the operator-selected market so Brandalf honors it as
+      // the authoritative brand region instead of letting the LLM emit 'WW'.
+      // Omitted → DRS keeps the LLM region and falls back to 'US'.
+      ...(region ? { region } : {}),
       metadata,
     },
   });
@@ -136,20 +141,31 @@ export async function triggerBrandalfOnboardingJob({
 // submitOnboardingPromptGenerationJob removed — prompt generation is now
 // triggered by DRS after Brandalf completes (LLMO-4258, option b).
 
+// LLMO-5645: the initial stub brand uses 'gl' (worldwide) as a placeholder until
+// Brandalf returns the real region. When the operator selected a market we seed
+// it directly so the brand record is correct immediately and stays correct even
+// if Brandalf never completes. `region` is a validated ISO 3166-1 alpha-2 code
+// (e.g. 'US'); absent → keep the 'gl' placeholder that Brandalf overwrites.
+export function onboardingStubRegions(region) {
+  return region ? [region] : ['gl'];
+}
+
 export function buildInitialCustomerConfigV2({
   brandName,
   imsOrgId,
   siteId,
   baseURL,
   overrideBaseURL,
+  region,
   updatedBy = 'system',
 }) {
   const primaryUrl = overrideBaseURL || baseURL;
+  const regions = onboardingStubRegions(region);
   const config = convertV1ToV2({
     brands: {
       aliases: [{
         name: brandName,
-        regions: ['gl'],
+        regions,
         status: 'active',
       }],
     },
@@ -166,7 +182,7 @@ export function buildInitialCustomerConfigV2({
   brand.updatedAt = timestamp;
   brand.updatedBy = updatedBy;
   brand.urls = [{ value: primaryUrl, type: 'base' }];
-  brand.brandAliases = [{ name: brandName, regions: ['gl'] }];
+  brand.brandAliases = [{ name: brandName, regions }];
 
   config.customer.customerName = brandName;
 
@@ -180,6 +196,7 @@ export async function ensureInitialCustomerConfigV2({
   siteId,
   baseURL,
   overrideBaseURL,
+  region,
   context,
 }) {
   const postgrestClient = context.dataAccess?.services?.postgrestClient;
@@ -215,6 +232,7 @@ export async function ensureInitialCustomerConfigV2({
       brandId = `${brandId}-${siteId.slice(0, 8)}`;
     }
 
+    const regions = onboardingStubRegions(region);
     brands.push({
       id: brandId,
       v1SiteId: siteId,
@@ -222,11 +240,11 @@ export async function ensureInitialCustomerConfigV2({
       baseUrl: primaryUrl,
       status: 'active',
       origin: 'system',
-      regions: ['gl'],
+      regions,
       updatedAt: timestamp,
       updatedBy: resolveUpdatedBy(context),
       urls: [{ value: primaryUrl, type: 'base' }],
-      brandAliases: [{ name: trimmedName, regions: ['gl'] }],
+      brandAliases: [{ name: trimmedName, regions }],
     });
 
     await writeCustomerConfigV2ToPostgres(
@@ -245,6 +263,7 @@ export async function ensureInitialCustomerConfigV2({
     siteId,
     baseURL,
     overrideBaseURL,
+    region,
     updatedBy: resolveUpdatedBy(context),
   });
 
@@ -1354,6 +1373,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         siteId: site.getId(),
         baseURL,
         overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
+        region,
         context,
       });
 
@@ -1404,14 +1424,19 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           // No collision: proceed with upsert (new brand, existing brand with a
           // null primary site, or a re-onboard of the same site). upsertBrand's
           // own guard keeps an already-set site_id immutable on the last case.
+          // LLMO-5645: seed operator market when supplied; else the 'gl'
+          // placeholder (consistent with the V2 config + brandAliases, both
+          // overwritten by Brandalf's async result).
+          const stubRegions = onboardingStubRegions(region);
           await upsertBrand({
             organizationId: organization.getId(),
             brand: {
               name: brandName.trim(),
               status: 'active',
               baseSiteId: site.getId(),
+              region: stubRegions,
               urls: [{ value: baseURL, type: 'base' }],
-              brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
+              brandAliases: [{ name: brandName.trim(), regions: stubRegions }],
             },
             postgrestClient,
             updatedBy: 'llmo-onboarding',
@@ -1437,6 +1462,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
             brandName: brandName.trim(),
             companyWebsite,
             onboardingMode,
+            region,
             log,
             say,
           });
