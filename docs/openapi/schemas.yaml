@@ -10624,7 +10624,11 @@ SerenityActivateRequest:
     markets:
       type: array
       minItems: 1
-      description: Markets to bring live for this brand.
+      maxItems: 50
+      description: |
+        Markets to bring live for this brand. Capped at 50 per request: each
+        market drives sequential upstream create+publish calls, so a larger
+        array is rejected with 400 (rather than risking a Lambda timeout).
       items:
         type: object
         required: [market, languageCode]
@@ -10753,6 +10757,25 @@ SerenityModelListResponse:
     items:
       type: array
       items: { $ref: '#/SerenityModel' }
+
+SerenityLanguage:
+  type: object
+  required: [name]
+  properties:
+    id:
+      type: [string, 'null']
+      description: Semrush language catalog id (null when the catalog omits it).
+    name:
+      type: string
+      description: English language name as Semrush spells it (the match key).
+
+SerenityLanguageListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityLanguage' }
 
 SerenityUpdateModelsRequest:
   type: object

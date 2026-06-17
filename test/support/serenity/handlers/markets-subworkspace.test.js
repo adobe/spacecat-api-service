@@ -372,6 +372,44 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.calledOnce;
     });
 
+    it('propagates a fatal model-attach failure (NOT best-effort like URL/competitor enrichment)', async () => {
+      // Model attach is a core correctness step: a failure must abort the create
+      // (a half-provisioned project must never be reported as success).
+      const transport = makeTransport({
+        listAiModels: sinon.stub().resolves({ items: [] }),
+        addAiModel: sinon.stub().rejects(new SerenityTransportError(502, 'model attach boom')),
+      });
+      await expect(handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { modelIds: ['m-1'], publishMode: 'require' },
+      )).to.be.rejectedWith(/model attach boom/);
+    });
+
+    it('propagates a fatal topic-generation failure (getBrandTopics throw aborts the create)', async () => {
+      const transport = makeTransport({
+        listAiModels: sinon.stub().resolves({ items: [] }),
+        getBrandTopics: sinon.stub().rejects(new SerenityTransportError(502, 'topics boom')),
+      });
+      await expect(handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        {
+          generateTopics: true, topicCap: 1, standardTags: ['source:ai'], publishMode: 'require',
+        },
+      )).to.be.rejectedWith(/topics boom/);
+    });
+
     it('tags prompts type:branded when text contains the brand name or an alias (case-insensitive), else type:non-branded', async () => {
       const transport = makeTransport({
         getBrandTopics: sinon.stub().resolves([

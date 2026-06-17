@@ -163,9 +163,12 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.skipped[0].reason).to.match(/required/);
     });
 
-    it('records an upstream createTaggedPrompts failure per input', async () => {
+    it('records an upstream createTaggedPrompts failure per input and redacts the gateway URL', async () => {
+      // The transport error message embeds the internal gateway URL + UUIDs;
+      // the per-item failed.message must be redacted, never echoed to the client.
+      const leak = 'Semrush POST https://gw.internal/workspaces/ws/projects/p/prompts failed: 500';
       const transport = makeTransport({
-        createTaggedPrompts: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+        createTaggedPrompts: sinon.stub().rejects(new SerenityTransportError(500, leak)),
       });
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
@@ -175,6 +178,8 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.created).to.have.length(0);
       expect(result.failed).to.have.length(1);
       expect(result.failed[0].status).to.equal(500);
+      expect(result.failed[0].message).to.equal('Upstream request failed');
+      expect(result.failed[0].message).to.not.contain('gw.internal');
     });
 
     it('defaults a statusless create failure to status 500', async () => {

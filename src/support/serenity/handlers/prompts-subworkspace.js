@@ -28,6 +28,7 @@ import {
   BULK_PROMPTS_MAX_ITEMS,
 } from './prompts.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
+import { redactUpstreamMessage } from '../rest-transport.js';
 
 /**
  * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
@@ -163,7 +164,7 @@ export async function handleCreatePromptsSubworkspace(transport, workspaceId, bo
           geoTargetId: input.geoTargetId,
           languageCode: input.languageCode,
           status: e.status || 500,
-          message: e.message,
+          message: redactUpstreamMessage(e),
         },
       };
     }
@@ -360,7 +361,7 @@ export async function handleBulkDeletePromptsSubworkspace(transport, workspaceId
           geoTargetId: t.geoTargetId,
           languageCode: t.languageCode,
           status: e.status || 500,
-          message: e.message,
+          message: redactUpstreamMessage(e),
         });
       });
     }

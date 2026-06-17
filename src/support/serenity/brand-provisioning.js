@@ -12,7 +12,7 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode, getImsUserToken } from '../utils.js';
+import { ErrorWithStatusCode, getImsUserToken, getImsUserTokenStrict } from '../utils.js';
 import { createSerenityTransport, SerenityTransportError } from './rest-transport.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { RELEASE_ALLOCATION } from './workspace-lifecycle.js';
@@ -76,8 +76,9 @@ export function marketProjectName(market, languageCode) {
  *   Best-effort: a failed sync is logged and skipped, never aborts provisioning.
  * @param {object} [log]
  * @returns {Promise<{semrushWorkspaceId: string, published: boolean}>} the new
- *   sub-workspace id and whether the initial market was published (best-effort:
- *   a quota 405 leaves it a draft).
+ *   sub-workspace id and whether the initial market was published. Publish is
+ *   required (`publishMode: 'require'`): a quota 405 does NOT return a draft, it
+ *   throws (surfaced as 409 "Quota exceeded").
  * @throws {ErrorWithStatusCode} on workspace/project create or publish failure
  *   (the caller then skips the brand write). URL and competitor propagation are
  *   best-effort and never throw.
@@ -104,15 +105,11 @@ export async function provisionBrandSubworkspace(context, {
     throw new ErrorWithStatusCode('Organization has no Semrush workspace configured', 400);
   }
 
-  // Match the /serenity/* IMS-only contract (requireImsBearer): the upstream
-  // gateway only understands IMS user tokens, so refuse to forward anything
-  // else. POST /brands is organization:write and thus S2S-reachable; without
-  // this guard an S2S consumer's non-IMS bearer would be proxied upstream.
-  const authInfo = context?.attributes?.authInfo;
-  if (authInfo?.getType && authInfo.getType() !== 'ims') {
-    throw new ErrorWithStatusCode('Semrush provisioning requires IMS authentication', 401);
-  }
-  const imsToken = getImsUserToken(context);
+  // Match the /serenity/* IMS-only contract: the upstream gateway only
+  // understands IMS user tokens, so refuse to forward anything else. POST
+  // /brands is organization:write and thus S2S-reachable; getImsUserTokenStrict
+  // 401s a non-IMS bearer before it can be proxied upstream.
+  const imsToken = getImsUserTokenStrict(context);
   const transport = createSerenityTransport({ env: context.env, imsToken });
 
   let capturedWorkspaceId = null;
@@ -122,6 +119,30 @@ export async function provisionBrandSubworkspace(context, {
     getSemrushWorkspaceId: () => undefined,
     setSemrushWorkspaceId: (id) => { capturedWorkspaceId = id; },
     save: async () => {},
+  };
+
+  // If provisioning fails AFTER ensureSubworkspace already created the
+  // sub-workspace (captured via the stub) — e.g. a publish 405, a 4xx project
+  // result, or any later throw — release its allocation back to the parent pool.
+  // Otherwise a resourced, unreferenced sub-workspace leaks: the brand row is
+  // never written (so the caller's `provisionedWorkspaceId` stays null and its
+  // compensation can't fire), and repeated failed creates would drain the pool.
+  // Best-effort; never masks the original error.
+  const releaseCapturedOnFailure = async () => {
+    if (!hasText(capturedWorkspaceId)) {
+      return;
+    }
+    try {
+      await transport.transferWorkspaceResources(capturedWorkspaceId, RELEASE_ALLOCATION);
+      log?.info?.('serenity: released sub-workspace allocation after failed brand provisioning', {
+        semrushWorkspaceId: capturedWorkspaceId,
+      });
+    } catch (releaseErr) {
+      log?.error?.('serenity: failed to release sub-workspace allocation after failed provisioning', {
+        semrushWorkspaceId: capturedWorkspaceId,
+        error: releaseErr?.message,
+      });
+    }
   };
 
   let result;
@@ -159,6 +180,7 @@ export async function provisionBrandSubworkspace(context, {
       },
     );
   } catch (e) {
+    await releaseCapturedOnFailure();
     // A bare upstream 405 is Semrush's disguised quota rejection (a prompt write
     // or publish that exceeds the child's metered quota — workspace doc §5).
     // Surface it as a clear "Quota exceeded" instead of the cryptic 405/nginx body.
@@ -169,6 +191,7 @@ export async function provisionBrandSubworkspace(context, {
   }
 
   if (result?.status >= 400) {
+    await releaseCapturedOnFailure();
     throw new ErrorWithStatusCode(
       result.body?.message || 'Failed to provision Semrush sub-workspace',
       result.status,

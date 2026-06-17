@@ -23,6 +23,7 @@ import sinon, { stub } from 'sinon';
 import esmock from 'esmock';
 
 import BrandsController from '../../src/controllers/brands.js';
+import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -4832,6 +4833,64 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(502);
       expect(syncStub).to.have.been.calledOnce;
+    });
+
+    it('rejects a non-IMS caller on the brand-edit re-sync (never forwards the bearer upstream)', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const syncStub = sinon.stub().resolves({});
+      const createTransportStub = sinon.stub().returns({ name: 't' });
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: createTransportStub,
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer s2s-tok' } },
+        attributes: { authInfo: { getType: () => 'jwt', profile: { email: 'svc@test.com' } } },
+      });
+
+      expect(response.status).to.equal(401);
+      // A non-IMS bearer is never built into a transport nor forwarded to Semrush.
+      expect(createTransportStub).to.not.have.been.called;
+      expect(syncStub).to.not.have.been.called;
+    });
+
+    it('redacts the gateway URL from a Semrush upstream error on brand-edit re-sync', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
+      const syncStub = sinon.stub().rejects(
+        new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, {}),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(502);
+      const body = await response.json();
+      expect(body.message).to.equal('Upstream request failed');
+      expect(JSON.stringify(body)).to.not.contain('gw.internal');
+      // ...and not via the x-error header either.
+      expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
     });
 
     it('re-syncs CI competitors (with removed domains) when competitors change on a sub-workspace brand', async () => {

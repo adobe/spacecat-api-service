@@ -1054,6 +1054,15 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('activate 400s when the markets array exceeds the cap (and does not provision)', async () => {
+      const markets = Array.from({ length: 51 }, (_, i) => ({ market: 'us', languageCode: `l${i}` }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({ data: { markets } }));
+      expect(response.status).to.equal(400);
+      // Bounded before any upstream work — never reaches ensureSubworkspace.
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+    });
+
     it('activate records a thrown market as failed and keeps the published one live (no abort)', async () => {
       // Market 1 publishes (201, live upstream); market 2 throws. The batch must
       // NOT abort - the brand goes active (≥1 live) but the HTTP status is 207
@@ -1215,6 +1224,20 @@ describe('SerenityController', () => {
       expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
       // cache was invalidated BEFORE the save threw.
       expect(clearBrandWorkspaceCacheStub).to.have.been.called;
+    });
+
+    it('deactivate surfaces a decommission failure without clearing the pointer or status', async () => {
+      // decommission throws mid-flow (e.g. a non-404 delete error): the brand
+      // must NOT be disconnected (pointer kept) and NOT set pending, so the
+      // partial-failure state is recoverable rather than silently half-applied.
+      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      decommissionStub.rejects(new ErrorWithStatusCode('upstream delete failed', 502));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(fakeContext({ brand }));
+      expect(response.status).to.equal(502);
+      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.setStatus).to.not.have.been.called;
+      expect(brand.save).to.not.have.been.called;
     });
   });
 

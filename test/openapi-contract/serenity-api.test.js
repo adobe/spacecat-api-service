@@ -243,6 +243,24 @@ const FIXTURES = {
     handlerName: 'decommissionBrandWorkspace',
     handlerResult: undefined,
   },
+  listSerenityOrgModels: {
+    expectedStatus: 200,
+    controllerMethod: 'listOrgModels',
+    handlerName: 'listGlobalModelCatalog',
+    handlerResult: {
+      items: [{
+        id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: 'icon-url',
+      }],
+    },
+  },
+  listSerenityOrgLanguages: {
+    expectedStatus: 200,
+    controllerMethod: 'listOrgLanguages',
+    handlerName: 'listLanguageCatalog',
+    handlerResult: {
+      items: [{ id: 'lang-en', name: 'English' }],
+    },
+  },
 };
 
 function makeAjv() {
@@ -301,6 +319,8 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreateMarketSubworkspace: sinon.stub(),
         ensureSubworkspace: sinon.stub().resolves(WORKSPACE),
         decommissionBrandWorkspace: sinon.stub(),
+        listGlobalModelCatalog: sinon.stub(),
+        listLanguageCatalog: sinon.stub(),
       };
       handlerStubs[fx.handlerName].resolves(fx.handlerResult);
 
@@ -337,6 +357,8 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleListTags: handlerStubs.handleListTags,
             handleListModels: handlerStubs.handleListModels,
             handleUpdateModels: handlerStubs.handleUpdateModels,
+            listGlobalModelCatalog: handlerStubs.listGlobalModelCatalog,
+            listLanguageCatalog: handlerStubs.listLanguageCatalog,
           },
           '../../src/support/serenity/handlers/markets-subworkspace.js': {
             handleListMarketsSubworkspace: sinon.stub(),
@@ -356,6 +378,15 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/workspace-lifecycle.js': {
             ensureSubworkspace: handlerStubs.ensureSubworkspace,
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
+          },
+          // activate reads brand-level aliases/URLs/competitors once per batch;
+          // stub them so the contract test doesn't hit the fake postgrest client.
+          '../../src/support/brands-storage.js': {
+            getBrandAliasNames: () => Promise.resolve([]),
+            getBrandUrlSources: () => Promise.resolve({
+              urls: [], socialAccounts: [], earnedContent: [],
+            }),
+            getBrandCompetitors: () => Promise.resolve([]),
           },
         },
       )).default;

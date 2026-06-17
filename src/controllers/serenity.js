@@ -63,6 +63,10 @@ import { ErrorWithStatusCode } from '../support/utils.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
+// Upper bound on markets per activate request. Each market drives sequential
+// upstream create+publish calls in the request thread, so an unbounded array
+// could pin the Lambda (same rationale as MAX_MODEL_IDS on PUT /serenity/models).
+const MAX_MARKETS = 50;
 
 /**
  * Strips characters HTTP headers can't carry (CR/LF/non-ASCII) and caps length.
@@ -745,6 +749,9 @@ function SerenityController(context, log, env) {
       if (markets.length === 0) {
         throw new ErrorWithStatusCode('markets must be a non-empty array', 400);
       }
+      if (markets.length > MAX_MARKETS) {
+        throw new ErrorWithStatusCode(`markets must not exceed ${MAX_MARKETS} entries`, 400);
+      }
       const transport = buildTransport(ctx, imsToken);
       const brand = await loadBrand(ctx, auth.brandUuid);
       // Brand aliases are brand-level: read once and apply to every market's
@@ -842,6 +849,16 @@ function SerenityController(context, log, env) {
         brand.setStatus('active');
         await brand.save();
       }
+      // Success-level summary so a completed activation can be correlated with
+      // upstream state during incident investigation (counts + workspace).
+      log.info('serenity activate: completed', {
+        brandId: auth.brandUuid,
+        semrushWorkspaceId: workspaceId,
+        status: anyLive ? 'active' : 'pending',
+        marketsTotal: results.length,
+        marketsLive: results.filter((r) => r.status === 201 || r.status === 409).length,
+        marketsFailed: results.filter((r) => !(r.status === 201 || r.status === 409)).length,
+      });
       // 207 Multi-Status whenever ANY market failed (even if others went live),
       // so a caller keying off the HTTP status sees the partial failure instead
       // of a bare 200. 200 only when every market is live.
@@ -904,6 +921,11 @@ function SerenityController(context, log, env) {
       if (typeof brand.save === 'function') {
         await brand.save();
       }
+      log.info('serenity deactivate: completed', {
+        brandId: auth.brandUuid,
+        decommissionedWorkspaceId: hasText(subworkspaceId) ? subworkspaceId : null,
+        status: 'pending',
+      });
       return ok({ brandId: auth.brandUuid, status: 'pending' });
     } catch (e) {
       return mapError(e, log);

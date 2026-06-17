@@ -41,6 +41,22 @@ export class SerenityTransportError extends Error {
 }
 
 /**
+ * Returns a client-safe message for an error that may be a SerenityTransportError.
+ * A SerenityTransportError's message embeds the gateway URL (internal host +
+ * workspace/project UUIDs), so it must never be echoed to clients (response
+ * bodies, per-item `failed[].message`). App-level errors carry safe messages and
+ * pass through unchanged.
+ */
+export function redactUpstreamMessage(e) {
+  if (e instanceof SerenityTransportError) {
+    return (e.status === 401 || e.status === 403)
+      ? 'Upstream authorization failed'
+      : 'Upstream request failed';
+  }
+  return e?.message;
+}
+
+/**
  * Resolves and validates the upstream base URL. The URL is required and must
  * arrive via `env.SEMRUSH_PROJECTS_BASE_URL` — sourced from Vault
  * (`dx_mysticat/<env>/api-service`) and injected through AWS Secrets Manager.

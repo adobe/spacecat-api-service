@@ -662,3 +662,75 @@ v2-serenity-models:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-org-models:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List the global AI-model catalog (org-level)
+    description: |
+      Returns the global catalog of ALL AI models available for tracking
+      (`GET /v1/ai_models`, not workspace-scoped) — the brand-independent
+      catalog used to populate "available models" selectors before any brand or
+      market is configured. Falls back to an empty list if the upstream endpoint
+      is unavailable. Org access is enforced; IMS authentication is required.
+    operationId: listSerenityOrgModels
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Models retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityModelListResponse' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-org-languages:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List the supported Semrush language catalog (org-level)
+    description: |
+      Returns the languages Semrush AIO supports (`GET /v1/languages`), so the
+      UI only offers languages the gateway accepts (an unsupported language is
+      rejected at create time). Each item carries the catalog `id` (nullable)
+      and the English `name` used as the resolution key. Tolerates a 404/405
+      from the upstream by returning an empty list. Org access is enforced; IMS
+      authentication is required.
+    operationId: listSerenityOrgLanguages
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Languages retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityLanguageListResponse' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found.
+      '500': { $ref: './responses.yaml#/500' }

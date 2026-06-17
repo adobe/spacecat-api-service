@@ -26,7 +26,7 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode, getImsUserToken } from '../support/utils.js';
+import { ErrorWithStatusCode, getImsUserToken, getImsUserTokenStrict } from '../support/utils.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -52,7 +52,7 @@ import {
   getBrandCompetitors,
 } from '../support/brands-storage.js';
 import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
-import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import {
   removedCompetitorDomains,
@@ -185,6 +185,15 @@ function BrandsController(ctx, log, env) {
   }
 
   function createErrorResponse(error) {
+    // A Semrush upstream error's message embeds the gateway URL (internal host +
+    // workspace/project UUIDs); never echo it to the client (body or x-error
+    // header). Return a generic message and keep the detail to the log. Mirrors
+    // the serenity controller's mapError hygiene.
+    if (error instanceof SerenityTransportError) {
+      const status = (error.status === 401 || error.status === 403) ? error.status : 502;
+      const message = status === 502 ? 'Upstream request failed' : 'Upstream authorization failed';
+      return createResponse({ message }, status, { [HEADER_ERROR]: message });
+    }
     if (error.status) {
       return createResponse({ message: error.message }, error.status, {
         [HEADER_ERROR]: error.message,
@@ -1504,29 +1513,47 @@ function BrandsController(ctx, log, env) {
         || updates.socialAccounts !== undefined
         || updates.earnedContent !== undefined;
       if ((urlsTouched || competitorsTouched) && hasText(updated.semrushWorkspaceId)) {
-        const imsToken = getImsUserToken(context);
+        // Forward only an IMS user token upstream (matches the create path +
+        // the rest of /serenity/*): PATCH /brands is organization:write and thus
+        // S2S-reachable, so refuse a non-IMS bearer rather than proxy it.
+        const imsToken = getImsUserTokenStrict(context);
         const transport = createSerenityTransport({ env: context.env, imsToken });
-        if (urlsTouched) {
-          await syncBrandUrlsAcrossMarkets(
-            transport,
-            {
-              urls: updated.urls,
-              socialAccounts: updated.socialAccounts,
-              earnedContent: updated.earnedContent,
-            },
-            updated.semrushWorkspaceId,
-            log,
-          );
-        }
-        if (competitorsTouched) {
-          const removed = removedCompetitorDomains(oldCompetitors, updated.competitors);
-          await syncCompetitorBenchmarksAcrossMarkets(
-            transport,
-            updated.competitors,
-            removed,
-            updated.semrushWorkspaceId,
-            log,
-          );
+        try {
+          if (urlsTouched) {
+            await syncBrandUrlsAcrossMarkets(
+              transport,
+              {
+                urls: updated.urls,
+                socialAccounts: updated.socialAccounts,
+                earnedContent: updated.earnedContent,
+              },
+              updated.semrushWorkspaceId,
+              log,
+            );
+          }
+          if (competitorsTouched) {
+            const removed = removedCompetitorDomains(oldCompetitors, updated.competitors);
+            await syncCompetitorBenchmarksAcrossMarkets(
+              transport,
+              updated.competitors,
+              removed,
+              updated.semrushWorkspaceId,
+              log,
+            );
+          }
+        } catch (syncError) {
+          // The brand row is already committed; re-sync hard-fails (the brand
+          // must not silently drift out of sync with Semrush). Log the upstream
+          // context (workspace + which sync) so the DB/Semrush divergence is
+          // diagnosable, then rethrow to the handler's catch.
+          log.error('serenity: brand-edit Semrush re-sync failed after row commit', {
+            brandId,
+            semrushWorkspaceId: updated.semrushWorkspaceId,
+            urlsTouched,
+            competitorsTouched,
+            status: syncError?.status,
+          });
+          throw syncError;
         }
       }
 

@@ -13,6 +13,7 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
+import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
@@ -168,7 +169,7 @@ export async function publishAffected(transport, semrushWorkspaceId, projectIds,
       await transport.publishProject(semrushWorkspaceId, pid);
     } catch (e) {
       log?.warn?.('publishProject failed', { projectId: pid, error: e.message });
-      errors.push({ projectId: pid, message: e.message });
+      errors.push({ projectId: pid, message: redactUpstreamMessage(e) });
     }
   }));
   return errors;
@@ -286,7 +287,7 @@ export async function handleCreatePrompts(
           geoTargetId: input.geoTargetId,
           languageCode: input.languageCode,
           status: e.status || 500,
-          message: e.message,
+          message: redactUpstreamMessage(e),
         },
       };
     }
@@ -540,7 +541,7 @@ export async function handleBulkDeletePrompts(
           geoTargetId: t.geoTargetId,
           languageCode: t.languageCode,
           status: e.status || 500,
-          message: e.message,
+          message: redactUpstreamMessage(e),
         });
       });
     }

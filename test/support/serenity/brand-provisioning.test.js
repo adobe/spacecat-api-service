@@ -251,6 +251,65 @@ describe('provisionBrandSubworkspace', () => {
     // never proxied to the Semrush gateway.
     expect(handleCreateMarketSubworkspace.called).to.equal(false);
   });
+
+  it('releases the created sub-workspace allocation when provisioning throws after creation', async () => {
+    // ensureSubworkspace creates the workspace (captured via the stub) and THEN
+    // a later step returns a 4xx — provisioning throws, and the orphaned
+    // allocation must be released back to the parent pool (else it leaks: the
+    // brand row is never written, so the caller's compensation can't fire).
+    const transfer = sinon.stub().resolves({});
+    const handler = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushWorkspaceId(NEW_WS);
+      return { status: 502, body: { message: 'upstream blew up' } };
+    });
+    const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
+      '../../../src/support/serenity/workspace-resolver.js': {
+        resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
+      },
+      '../../../src/support/serenity/rest-transport.js': {
+        createSerenityTransport: () => ({ transferWorkspaceResources: transfer }),
+        SerenityTransportError,
+      },
+      '../../../src/support/serenity/handlers/markets-subworkspace.js': {
+        handleCreateMarketSubworkspace: handler,
+      },
+    });
+    try {
+      await mod.provisionBrandSubworkspace(buildContext(), baseParams);
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e.status).to.equal(502);
+    }
+    expect(transfer.calledOnce).to.equal(true);
+    expect(transfer.firstCall.args[0]).to.equal(NEW_WS);
+    expect(transfer.firstCall.args[1]).to.deep.equal({ ai: { projects: 0, prompts: 0 } });
+  });
+
+  it('does NOT attempt a release when provisioning fails before the workspace is created', async () => {
+    // ensureSubworkspace never set the workspace id (e.g. parent-workspace
+    // lookup failed inside the handler) → nothing to release.
+    const transfer = sinon.stub().resolves({});
+    const handler = sinon.stub().rejects(new SerenityTransportError(500, 'early boom'));
+    const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
+      '../../../src/support/serenity/workspace-resolver.js': {
+        resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
+      },
+      '../../../src/support/serenity/rest-transport.js': {
+        createSerenityTransport: () => ({ transferWorkspaceResources: transfer }),
+        SerenityTransportError,
+      },
+      '../../../src/support/serenity/handlers/markets-subworkspace.js': {
+        handleCreateMarketSubworkspace: handler,
+      },
+    });
+    try {
+      await mod.provisionBrandSubworkspace(buildContext(), baseParams);
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e.status).to.equal(500);
+    }
+    expect(transfer.called).to.equal(false);
+  });
 });
 
 describe('releaseProvisionedWorkspace', () => {
