@@ -19,7 +19,7 @@ import {
   BRAND_URL_TYPE,
   regionApplies,
   collectBrandUrlEntries,
-  resolveMainBenchmarkId,
+  ensureOwnBrandBenchmark,
   attachBrandUrlsToProject,
   syncBrandUrlsAcrossMarkets,
 } from '../../../src/support/serenity/brand-urls.js';
@@ -118,62 +118,144 @@ describe('brand-urls helpers', () => {
     });
   });
 
-  describe('resolveMainBenchmarkId', () => {
-    it('returns the main_brand benchmark id', async () => {
+  describe('ensureOwnBrandBenchmark', () => {
+    const BRAND = { name: 'Acme', domain: 'https://acme.com', aliases: ['acme inc'] };
+
+    it('returns the existing main_brand benchmark without creating', async () => {
       const transport = {
         listBenchmarks: sandbox.stub().resolves({
           aio_benchmarks: [
-            { id: 'comp-1', main_brand: false },
+            { id: 'comp-1', main_brand: false, domain: 'x.com' },
             { id: 'main-1', main_brand: true },
           ],
         }),
+        createBenchmarks: sandbox.stub(),
       };
-      expect(await resolveMainBenchmarkId(transport, WS, PID)).to.equal('main-1');
+      expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined)).to.equal('main-1');
+      expect(transport.createBenchmarks).to.not.have.been.called;
     });
 
-    it('falls back to the first benchmark when none is flagged main', async () => {
+    it('reuses an existing benchmark matched by the brand domain (idempotent)', async () => {
       const transport = {
         listBenchmarks: sandbox.stub().resolves({
-          aio_benchmarks: [{ id: 'first' }, { id: 'second' }],
+          aio_benchmarks: [{ id: 'own-1', main_brand: false, domain: 'https://www.acme.com/x' }],
         }),
+        createBenchmarks: sandbox.stub(),
       };
-      expect(await resolveMainBenchmarkId(transport, WS, PID)).to.equal('first');
+      expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined)).to.equal('own-1');
+      expect(transport.createBenchmarks).to.not.have.been.called;
     });
 
-    it('throws 502 when the project has no benchmarks', async () => {
-      const transport = { listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }) };
-      await expect(resolveMainBenchmarkId(transport, WS, PID))
-        .to.be.rejectedWith('No main-brand benchmark');
+    it('creates the own-brand benchmark when the project has none', async () => {
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['new-1'], existing_count: 0 }),
+      };
+      expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined)).to.equal('new-1');
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Acme', domain: 'https://acme.com', brand_aliases: ['acme inc'] },
+      ]);
+    });
+
+    it('re-lists and matches by domain when create returns no id (already existed)', async () => {
+      const transport = {
+        listBenchmarks: sandbox.stub(),
+        createBenchmarks: sandbox.stub().resolves({ ids: [], existing_count: 1 }),
+      };
+      transport.listBenchmarks.onFirstCall().resolves({ aio_benchmarks: [] });
+      transport.listBenchmarks.onSecondCall().resolves({
+        aio_benchmarks: [{ id: 'own-2', domain: 'acme.com' }],
+      });
+      expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined)).to.equal('own-2');
+    });
+
+    it('recovers from a 409 (duplicate) by re-listing and matching by domain', async () => {
+      const transport = {
+        listBenchmarks: sandbox.stub(),
+        createBenchmarks: sandbox.stub().rejects(new SerenityTransportError(409, 'duplicate')),
+      };
+      transport.listBenchmarks.onFirstCall().resolves({ aio_benchmarks: [] });
+      transport.listBenchmarks.onSecondCall().resolves({
+        aio_benchmarks: [{ id: 'own-3', domain: 'acme.com' }],
+      });
+      expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined)).to.equal('own-3');
+    });
+
+    it('returns null when there is no benchmark and no usable domain', async () => {
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub(),
+      };
+      const r = await ensureOwnBrandBenchmark(transport, WS, PID, { name: 'Acme', domain: '' }, undefined);
+      expect(r).to.equal(null);
+      expect(transport.createBenchmarks).to.not.have.been.called;
+    });
+
+    it('propagates a non-409 create error', async () => {
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub().rejects(new SerenityTransportError(500, 'boom')),
+      };
+      await expect(ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined))
+        .to.be.rejectedWith('boom');
     });
   });
 
   describe('attachBrandUrlsToProject', () => {
+    const BRAND = { name: 'Acme', domain: 'https://acme.com' };
+
     it('is a no-op when there are no entries', async () => {
       const transport = { listBenchmarks: sandbox.stub(), createBrandUrls: sandbox.stub() };
-      const result = await attachBrandUrlsToProject(transport, WS, PID, [], undefined);
+      const result = await attachBrandUrlsToProject(transport, WS, PID, [], BRAND, undefined);
       expect(result).to.deep.equal({ created: 0 });
       expect(transport.listBenchmarks).to.not.have.been.called;
       expect(transport.createBrandUrls).to.not.have.been.called;
     });
 
-    it('resolves the main benchmark and creates the URLs', async () => {
+    it('ensures the benchmark and creates the URLs', async () => {
       const transport = {
         listBenchmarks: sandbox.stub().resolves(benchOk()),
+        createBenchmarks: sandbox.stub(),
         createBrandUrls: sandbox.stub().resolves({ ids: ['a'], existing_count: 0 }),
       };
       const entries = [{ url: 'https://acme.com', type: 'website' }];
-      const result = await attachBrandUrlsToProject(transport, WS, PID, entries, undefined);
+      const result = await attachBrandUrlsToProject(transport, WS, PID, entries, BRAND, undefined);
       expect(result).to.deep.equal({ created: 1 });
       expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, PID, BID, entries);
     });
 
-    it('propagates a create failure (hard-fail)', async () => {
+    it('creates the benchmark first when the project has none, then attaches', async () => {
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['new-1'], existing_count: 0 }),
+        createBrandUrls: sandbox.stub().resolves({ ids: ['a'], existing_count: 0 }),
+      };
+      const entries = [{ url: 'https://acme.com', type: 'website' }];
+      const result = await attachBrandUrlsToProject(transport, WS, PID, entries, BRAND, undefined);
+      expect(result).to.deep.equal({ created: 1 });
+      expect(transport.createBenchmarks).to.have.been.calledOnce;
+      expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, PID, 'new-1', entries);
+    });
+
+    it('skips (no throw) when no benchmark can be resolved or created', async () => {
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub(),
+        createBrandUrls: sandbox.stub(),
+      };
+      const entries = [{ url: 'https://acme.com', type: 'website' }];
+      const result = await attachBrandUrlsToProject(transport, WS, PID, entries, { name: 'Acme', domain: '' }, undefined);
+      expect(result).to.deep.equal({ created: 0, skipped: true });
+      expect(transport.createBrandUrls).to.not.have.been.called;
+    });
+
+    it('propagates a create-URL failure', async () => {
       const transport = {
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         createBrandUrls: sandbox.stub().rejects(new SerenityTransportError(400, 'bad url')),
       };
       await expect(
-        attachBrandUrlsToProject(transport, WS, PID, [{ url: 'https://x', type: 'website' }]),
+        attachBrandUrlsToProject(transport, WS, PID, [{ url: 'https://x', type: 'website' }], BRAND, undefined),
       ).to.be.rejectedWith('bad url');
     });
   });

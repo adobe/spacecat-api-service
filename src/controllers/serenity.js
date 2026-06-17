@@ -36,6 +36,7 @@ import {
   handleListModels,
   handleUpdateModels,
   listGlobalModelCatalog,
+  listLanguageCatalog,
 } from '../support/serenity/handlers/markets.js';
 import {
   handleListMarketsSubworkspace,
@@ -661,6 +662,42 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/languages — the brand-INDEPENDENT catalog
+   * of languages Semrush AIO supports. The add-brand wizard needs it before a
+   * brand (and its workspace) exists to limit the language picker to codes that
+   * will actually resolve (org-level auth, no brand/workspace resolution).
+   */
+  const listOrgLanguages = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const spaceCatId = ctx?.params?.spaceCatId;
+      if (!isValidUUID(spaceCatId)) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'spaceCatId must be a UUID' },
+          400,
+        );
+      }
+      const Organization = ctx?.dataAccess?.Organization;
+      if (!Organization || typeof Organization.findById !== 'function') {
+        return internalServerError('Organization data-access not available');
+      }
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+      const accessControl = AccessControlUtil.fromContext(ctx);
+      if (!await accessControl.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = await listLanguageCatalog(transport);
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   const updateModels = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
@@ -882,6 +919,7 @@ function SerenityController(context, log, env) {
     listTags,
     listModels,
     listOrgModels,
+    listOrgLanguages,
     updateModels,
     activate,
     deactivate,

@@ -56,8 +56,8 @@ import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import {
   removedCompetitorDomains,
-  syncCiCompetitorsAcrossMarkets,
-} from '../support/serenity/ci-competitors.js';
+  syncCompetitorBenchmarksAcrossMarkets,
+} from '../support/serenity/competitor-benchmarks.js';
 import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
@@ -1506,7 +1506,7 @@ function BrandsController(ctx, log, env) {
         }
         if (competitorsTouched) {
           const removed = removedCompetitorDomains(oldCompetitors, updated.competitors);
-          await syncCiCompetitorsAcrossMarkets(
+          await syncCompetitorBenchmarksAcrossMarkets(
             transport,
             updated.competitors,
             removed,

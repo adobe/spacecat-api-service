@@ -23,6 +23,7 @@ import {
   handleListTags,
   handleListModels,
   handleUpdateModels,
+  listLanguageCatalog,
   resolveLocation,
   clearLanguageCache,
   clearTagCache,
@@ -1488,5 +1489,38 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.deleteAiModelsByIds).not.to.have.been.called;
     expect(result.items).to.have.length(1);
     expect(result.items[0].id).to.equal('cat-a');
+  });
+});
+
+describe('listLanguageCatalog', () => {
+  it('returns the Semrush language catalog, name-sorted, dropping nameless rows', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'l-fr', name: 'French' },
+          { id: 'l-en', name: 'English' },
+          { id: 'l-bad' }, // no name → dropped
+        ],
+      }),
+    };
+    const result = await listLanguageCatalog(transport);
+    expect(result.items).to.deep.equal([
+      { id: 'l-en', name: 'English' },
+      { id: 'l-fr', name: 'French' },
+    ]);
+  });
+
+  it('tolerates a 404/405 catalog by returning an empty list', async () => {
+    const transport = {
+      listLanguages: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
+    };
+    expect(await listLanguageCatalog(transport)).to.deep.equal({ items: [] });
+  });
+
+  it('propagates a non-404/405 catalog error', async () => {
+    const transport = {
+      listLanguages: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+    };
+    await expect(listLanguageCatalog(transport)).to.be.rejectedWith('boom');
   });
 });

@@ -12,7 +12,6 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode } from '../utils.js';
 import { SerenityTransportError } from './rest-transport.js';
 
 /**
@@ -105,38 +104,122 @@ export function collectBrandUrlEntries(sources, market) {
   });
 }
 
-/**
- * Resolves a project's main-brand benchmark id — the `benchmark_id` the brand
- * URL endpoints require. The main brand carries `main_brand: true`; we fall back
- * to the first benchmark if the flag is absent (older projects). Throws a 502
- * when the project has no benchmarks at all (it should always have its own).
- */
-export async function resolveMainBenchmarkId(transport, workspaceId, projectId) {
-  const resp = await transport.listBenchmarks(workspaceId, projectId);
-  const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
-  const main = benchmarks.find((b) => b?.main_brand === true) || benchmarks[0];
-  if (!main || !hasText(main.id)) {
-    throw new ErrorWithStatusCode(
-      `No main-brand benchmark for project ${projectId}`,
-      502,
-    );
+// Normalizes a benchmark/brand domain for identity comparison: lowercase host,
+// no scheme, no leading `www.`, no path. Null when unparseable. Used to match an
+// existing own-brand benchmark across runs (idempotent ensure) and shared by the
+// competitor-benchmark sync to match/dedupe competitors by domain.
+export function normalizeBenchmarkDomain(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) {
+    return null;
   }
-  return String(main.id);
+  try {
+    const u = new URL(raw.includes('://') ? raw : `https://${raw}`);
+    return u.hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Pushes the given brand-URL entries onto a project's main-brand benchmark.
- * A no-op when there are no entries. Errors propagate (the caller hard-fails the
- * surrounding create) — the upstream silently skips URLs already present in the
- * project, so a re-attach is naturally idempotent.
+ * Ensures the project has a benchmark to hang brand URLs on, and returns its id.
  *
- * @returns {Promise<{created: number}>} count of entries submitted (0 on no-op).
+ * Brand URLs can only be created *under a benchmark*. Semrush is meant to
+ * auto-provision the project's own-brand (`main_brand: true`) benchmark from the
+ * project's `brand_names`/`domain`, but some tenants don't — leaving the project
+ * with zero benchmarks and nowhere to attach URLs. So we resolve the own-brand
+ * benchmark, creating it when absent:
+ *   1. an existing `main_brand: true` benchmark (the system one) always wins;
+ *   2. else an existing benchmark whose domain matches the brand's own domain
+ *      (the one a previous run created — keeps the ensure idempotent);
+ *   3. else create it from the brand's name + domain + aliases.
+ *
+ * A benchmark we create is NOT `main_brand` (the create API can't set it), but
+ * brand URLs attach to any benchmark, so that does not affect URL sync. Returns
+ * `null` only when there is no benchmark to reuse AND no usable domain to create
+ * one with — callers then skip the URL attach (never a hard failure).
+ *
+ * @param {object} brand - { name, domain, aliases? } identity of the own brand.
  */
-export async function attachBrandUrlsToProject(transport, workspaceId, projectId, entries, log) {
+export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId, brand, log) {
+  const resp = await transport.listBenchmarks(workspaceId, projectId);
+  const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
+  const ownDomain = normalizeBenchmarkDomain(brand?.domain);
+  const matchesOwn = (b) => hasText(b?.id) && ownDomain !== null
+    && normalizeBenchmarkDomain(b?.domain) === ownDomain;
+
+  const existing = benchmarks.find((b) => b?.main_brand === true && hasText(b?.id))
+    || benchmarks.find(matchesOwn);
+  if (existing) {
+    return String(existing.id);
+  }
+
+  // Nothing to reuse — create the own-brand benchmark. Needs a name + domain.
+  if (!hasText(brand?.name) || ownDomain === null) {
+    return null;
+  }
+  const body = [{
+    brand_name: brand.name,
+    domain: brand.domain,
+    ...(Array.isArray(brand.aliases) && brand.aliases.length
+      ? { brand_aliases: brand.aliases }
+      : {}),
+  }];
+  try {
+    const created = await transport.createBenchmarks(workspaceId, projectId, body);
+    const id = Array.isArray(created?.ids) && created.ids.length ? created.ids[0] : null;
+    if (hasText(id)) {
+      log?.info?.('brand-urls: created own-brand benchmark', {
+        workspaceId, projectId, benchmarkId: id,
+      });
+      return String(id);
+    }
+  } catch (e) {
+    // 409 = the benchmark already exists (race / duplicate brand name). Fall
+    // through to re-list + match rather than failing the URL attach.
+    if (!(e instanceof SerenityTransportError && e.status === 409)) {
+      throw e;
+    }
+  }
+  // Create returned no id (existing_count) or 409'd — re-list and match by domain.
+  const after = await transport.listBenchmarks(workspaceId, projectId);
+  const afterList = Array.isArray(after?.aio_benchmarks) ? after.aio_benchmarks : [];
+  const found = afterList.find(matchesOwn);
+  return found ? String(found.id) : null;
+}
+
+/**
+ * Pushes the given brand-URL entries onto the project's own-brand benchmark,
+ * creating that benchmark first when the project has none (see
+ * {@link ensureOwnBrandBenchmark}). A no-op when there are no entries. When no
+ * benchmark can be resolved or created (no usable brand domain), the attach is
+ * skipped with a warning instead of failing. An upstream push error still
+ * propagates; the upstream silently skips URLs already present, so a re-attach
+ * is idempotent.
+ *
+ * @param {object} brand - { name, domain, aliases? } of the project's own brand,
+ *   used to find-or-create the benchmark the URLs attach to.
+ * @returns {Promise<{created: number, skipped?: boolean}>} count submitted
+ *   (0 on no-op or when skipped for a missing benchmark).
+ */
+export async function attachBrandUrlsToProject(
+  transport,
+  workspaceId,
+  projectId,
+  entries,
+  brand,
+  log,
+) {
   if (!Array.isArray(entries) || entries.length === 0) {
     return { created: 0 };
   }
-  const benchmarkId = await resolveMainBenchmarkId(transport, workspaceId, projectId);
+  const benchmarkId = await ensureOwnBrandBenchmark(transport, workspaceId, projectId, brand, log);
+  if (benchmarkId === null) {
+    log?.warn?.('brand-urls: no benchmark available — skipping URL attach', {
+      workspaceId, projectId, count: entries.length,
+    });
+    return { created: 0, skipped: true };
+  }
   await transport.createBrandUrls(workspaceId, projectId, benchmarkId, entries);
   log?.info?.('brand-urls: attached to project benchmark', {
     workspaceId, projectId, benchmarkId, count: entries.length,
@@ -200,8 +283,33 @@ export async function syncBrandUrlsAcrossMarkets(transport, sources, workspaceId
     markets += 1;
 
     const desired = collectBrandUrlEntries(sources, market);
+    // Own-brand identity for the benchmark comes from the project itself: its
+    // domain plus the brand_names (display name first, the rest are aliases).
+    const ai = project?.settings?.ai || {};
+    const brandNames = Array.isArray(ai.brand_names) ? ai.brand_names : [];
+    const brand = {
+      name: hasText(ai.brand_name_display) ? ai.brand_name_display : brandNames[0],
+      domain: project?.domain,
+      aliases: hasText(ai.brand_name_display) ? brandNames : brandNames.slice(1),
+    };
     // eslint-disable-next-line no-await-in-loop
-    const benchmarkId = await resolveMainBenchmarkId(transport, workspaceId, projectId);
+    const benchmarkId = await ensureOwnBrandBenchmark(
+      transport,
+      workspaceId,
+      projectId,
+      brand,
+      log,
+    );
+    if (benchmarkId === null) {
+      // No benchmark and none creatable for this project — skip (warn) instead
+      // of failing the whole edit re-sync.
+      log?.warn?.('brand-urls: no benchmark available — skipping market', {
+        workspaceId, projectId,
+      });
+      markets -= 1;
+      // eslint-disable-next-line no-continue
+      continue;
+    }
     // eslint-disable-next-line no-await-in-loop
     const existingResp = await transport.listBrandUrls(workspaceId, projectId, benchmarkId);
     const existing = Array.isArray(existingResp?.brand_urls) ? existingResp.brand_urls : [];

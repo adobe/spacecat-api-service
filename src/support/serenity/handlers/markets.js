@@ -770,6 +770,38 @@ export async function listGlobalModelCatalog(transport) {
 }
 
 /**
+ * Brand-independent catalog of the languages Semrush AIO supports — the source
+ * of truth for which BCP-47 codes a market may use. Backs the add-brand wizard
+ * (and the brand-config Markets tab) so they only offer languages that will
+ * resolve (a code whose English name is not in this catalog hard-fails at
+ * createProject — e.g. Croatian 'hr', which Semrush does not carry).
+ *
+ * Returns `{ items: [{ id, name }] }` straight from Semrush's `GET /v1/languages`
+ * (English language names; the consumer maps them to its own code list, mirroring
+ * how `resolveLanguageId` matches by English name). Tolerant of a 404/405 catalog
+ * (returns an empty list) so a transient upstream gap degrades to "no filter"
+ * rather than an error.
+ */
+export async function listLanguageCatalog(transport) {
+  let rawItems = [];
+  try {
+    const resp = await transport.listLanguages();
+    rawItems = Array.isArray(resp?.items) ? resp.items : [];
+  } catch (e) {
+    if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+      rawItems = [];
+    } else {
+      throw e;
+    }
+  }
+  const items = rawItems
+    .filter((l) => l && typeof l === 'object' && hasText(l.name))
+    .map((l) => ({ id: hasText(l.id) ? String(l.id) : null, name: String(l.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { items };
+}
+
+/**
  * Models configured on one upstream project. Shared by the flat and subworkspace
  * slice-models handlers (the only difference upstream is which projectId the
  * slice resolved to).

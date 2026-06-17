@@ -64,8 +64,8 @@ function makeTransport(overrides = {}) {
     createProjectTags: sinon.stub().resolves(null),
     listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
     createBrandUrls: sinon.stub().resolves({ ids: [], existing_count: 0 }),
-    getProject: sinon.stub().resolves({ settings: { ci: { competitors: [] } } }),
-    updateCiCompetitors: sinon.stub().resolves({ ci_competitors: [] }),
+    createBenchmarks: sinon.stub().resolves({ ids: ['bm-new'], existing_count: 0 }),
+    deleteBenchmarks: sinon.stub().resolves(null),
     ...overrides,
   };
 }
@@ -223,15 +223,11 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.createBrandUrls).to.have.been.calledBefore(transport.publishProject);
     });
 
-    it('merges region-filtered competitors into the project CI list before publishing', async () => {
-      const transport = makeTransport({
-        getProject: sinon.stub().resolves({
-          settings: { ci: { competitors: [{ domain: 'auto.com', color: '#111' }] } },
-        }),
-      });
+    it('tracks region-filtered competitors as benchmarks before publishing', async () => {
+      const transport = makeTransport();
       const competitors = [
-        { url: 'https://rival.com', regions: ['us'] },
-        { url: 'https://other-region.com', regions: ['de'] }, // filtered out for us market
+        { name: 'Rival', url: 'https://rival.com', regions: ['us'] },
+        { name: 'Other', url: 'https://other-region.com', regions: ['de'] }, // filtered out for us
       ];
       await handleCreateMarketSubworkspace(
         transport,
@@ -243,26 +239,25 @@ describe('markets-subworkspace handlers', () => {
         null,
         { competitors },
       );
-      // Semrush-auto entry preserved; our us competitor added; de one excluded.
-      expect(transport.updateCiCompetitors).to.have.been.calledOnceWith(WS, 'new-proj', [
-        { domain: 'auto.com', color: '#111' },
-        { domain: 'rival.com' },
+      // Our us competitor becomes a benchmark; the de one is excluded.
+      expect(transport.createBenchmarks).to.have.been.calledWith(WS, 'new-proj', [
+        { brand_name: 'Rival', domain: 'rival.com' },
       ]);
-      expect(transport.updateCiCompetitors).to.have.been.calledBefore(transport.publishProject);
+      expect(transport.createBenchmarks).to.have.been.calledBefore(transport.publishProject);
     });
 
-    it('does not touch the CI competitor API when there are no competitors', async () => {
+    it('does not create competitor benchmarks when there are no competitors', async () => {
       const transport = makeTransport();
       await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
-      expect(transport.getProject).to.not.have.been.called;
-      expect(transport.updateCiCompetitors).to.not.have.been.called;
+      // No brand URLs and no competitors → no benchmark creation at all.
+      expect(transport.createBenchmarks).to.not.have.been.called;
     });
 
-    it('hard-fails the create when the CI competitor sync fails', async () => {
+    it('does NOT fail the create when the competitor benchmark sync fails (best-effort)', async () => {
       const transport = makeTransport({
-        updateCiCompetitors: sinon.stub().rejects(new SerenityTransportError(500, 'ci boom')),
+        createBenchmarks: sinon.stub().rejects(new SerenityTransportError(500, 'bench boom')),
       });
-      await expect(handleCreateMarketSubworkspace(
+      const result = await handleCreateMarketSubworkspace(
         transport,
         makeBrand(),
         PARENT,
@@ -270,9 +265,11 @@ describe('markets-subworkspace handlers', () => {
         log,
         null,
         null,
-        { competitors: [{ url: 'https://rival.com' }] },
-      )).to.be.rejectedWith(/ci boom/);
-      expect(transport.publishProject).to.not.have.been.called;
+        { competitors: [{ name: 'Rival', url: 'https://rival.com' }] },
+      );
+      // Competitor sync is best-effort — the create still publishes and succeeds.
+      expect(result.status).to.equal(201);
+      expect(transport.publishProject).to.have.been.called;
     });
 
     it('does not touch the brand-URL API when there are no sources', async () => {
@@ -282,11 +279,11 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.createBrandUrls).to.not.have.been.called;
     });
 
-    it('hard-fails the create when the brand-URL push fails', async () => {
+    it('does NOT fail the create when the brand-URL push fails (best-effort)', async () => {
       const transport = makeTransport({
         createBrandUrls: sinon.stub().rejects(new SerenityTransportError(400, 'bad url')),
       });
-      await expect(handleCreateMarketSubworkspace(
+      const result = await handleCreateMarketSubworkspace(
         transport,
         makeBrand(),
         PARENT,
@@ -295,8 +292,11 @@ describe('markets-subworkspace handlers', () => {
         null,
         null,
         { brandUrlSources: { urls: ['https://b.com'] } },
-      )).to.be.rejectedWith(/bad url/);
-      expect(transport.publishProject).to.not.have.been.called;
+      );
+      // URL enrichment is best-effort — a push failure is logged, not propagated;
+      // the create still publishes and succeeds.
+      expect(result.status).to.equal(201);
+      expect(transport.publishProject).to.have.been.called;
     });
 
     it('does not publish when publishMode is skip (draft-only)', async () => {

@@ -40,10 +40,12 @@ export const CREATE_ALLOCATION = Object.freeze({ ai: { projects: 1, prompts: 500
 // ai allocation is the documented intent; adjust here once Gate-A pins it.
 export const RELEASE_ALLOCATION = Object.freeze({ ai: { projects: 0, prompts: 0 } });
 
-// Workspace create settles `not ready → created` in seconds (workspace doc §4).
-// Bounded poll so a stuck create surfaces as a clean error rather than pinning
-// the Lambda. Timing is injectable so unit tests run without real delays.
-const DEFAULT_POLL_ATTEMPTS = 10;
+// Workspace create normally settles `not ready → created` in seconds (workspace
+// doc §4), but a busy upstream can take noticeably longer — so we poll up to ~30s
+// (30 × 1s) before giving up. Still bounded so a genuinely stuck create surfaces
+// as a clean error rather than pinning the Lambda. Timing is injectable so unit
+// tests run without real delays.
+const DEFAULT_POLL_ATTEMPTS = 30;
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const defaultSleep = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);

@@ -4680,7 +4680,7 @@ describe('Brands Controller', () => {
       updateBrand,
       syncBrandUrlsAcrossMarkets = sinon.stub().resolves({}),
       createSerenityTransport,
-      syncCiCompetitorsAcrossMarkets = sinon.stub().resolves({}),
+      syncCompetitorBenchmarksAcrossMarkets = sinon.stub().resolves({}),
       getBrandCompetitors = sinon.stub().resolves([]),
     }) {
       const Mocked = await esmock('../../src/controllers/brands.js', {
@@ -4689,7 +4689,7 @@ describe('Brands Controller', () => {
         '../../src/support/serenity/rest-transport.js': { createSerenityTransport },
         '../../src/support/serenity/brand-urls.js': { syncBrandUrlsAcrossMarkets },
         // removedCompetitorDomains is left REAL so the diff logic is exercised.
-        '../../src/support/serenity/ci-competitors.js': { syncCiCompetitorsAcrossMarkets },
+        '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
       });
       return Mocked.default(context, loggerStub, mockEnv);
     }
@@ -4822,7 +4822,7 @@ describe('Brands Controller', () => {
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
         createSerenityTransport: createTransportStub,
-        syncCiCompetitorsAcrossMarkets: ciSyncStub,
+        syncCompetitorBenchmarksAcrossMarkets: ciSyncStub,
         getBrandCompetitors: getBrandCompetitorsStub,
       });
 
@@ -4857,7 +4857,7 @@ describe('Brands Controller', () => {
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
         createSerenityTransport: sinon.stub().returns({ name: 't' }),
-        syncCiCompetitorsAcrossMarkets: ciSyncStub,
+        syncCompetitorBenchmarksAcrossMarkets: ciSyncStub,
         getBrandCompetitors: getBrandCompetitorsStub,
       });
 

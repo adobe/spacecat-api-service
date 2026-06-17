@@ -32,7 +32,7 @@ import {
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { TYPE_TAG, topicTag } from '../prompt-tags.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
-import { collectCompetitorDomains, syncCiCompetitorsForProject } from '../ci-competitors.js';
+import { syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 
 /**
  * Subworkspace-mode market handlers (serenity design §3/§5). The brand has its own
@@ -379,25 +379,46 @@ export async function handleCreateMarketSubworkspace(
   }
 
   // Push the brand's URLs (own sites + social + earned) onto this market's
-  // main-brand benchmark, region-filtered to the market. Done before publish so
-  // the URLs are part of the same published version. Hard-fail on error.
+  // own-brand benchmark (created on demand when Semrush hasn't provisioned one),
+  // region-filtered to the market. Done before publish so the URLs are part of
+  // the same published version. Best-effort: URL enrichment must never abort the
+  // brand create — a benchmark/URL hiccup is logged and skipped, not propagated.
   const brandUrlEntries = collectBrandUrlEntries(brandUrlSources, body.market);
-  await attachBrandUrlsToProject(transport, workspaceId, projectId, brandUrlEntries, log);
-
-  // Merge the brand's competitors ("other brands to track") into the project's
-  // CI competitor list (region-filtered, domain-only) before publish. Read-merge
-  // so Semrush's existing/auto-generated competitors are preserved. Creation
-  // adds only — there is nothing of ours to remove yet (removedDomains = []).
-  const competitorDomains = collectCompetitorDomains(competitors, body.market);
-  if (competitorDomains.length > 0) {
-    await syncCiCompetitorsForProject(
+  try {
+    await attachBrandUrlsToProject(
       transport,
       workspaceId,
       projectId,
-      competitorDomains,
-      [],
+      brandUrlEntries,
+      { name: body.brandDisplayName, domain: body.brandDomain, aliases: brandAliases },
       log,
     );
+  } catch (e) {
+    log?.warn?.('handleCreateMarketSubworkspace: brand-URL attach failed (non-fatal)', {
+      workspaceId, projectId, error: e?.message,
+    });
+  }
+
+  // Track the brand's competitors ("other brands to track") as project benchmarks
+  // (region-filtered), before publish. Competitors live as benchmarks in an AIO
+  // project — the same surface as the own-brand benchmark and brand URLs (settings.ci
+  // is a CI-project feature AIO projects don't have). Create-only here (nothing of
+  // ours to remove yet). Best-effort: a competitor-sync hiccup must not abort the
+  // brand create.
+  try {
+    await syncCompetitorBenchmarksForProject(
+      transport,
+      workspaceId,
+      projectId,
+      competitors,
+      [],
+      body.market,
+      log,
+    );
+  } catch (e) {
+    log?.warn?.('handleCreateMarketSubworkspace: competitor benchmark sync failed (non-fatal)', {
+      workspaceId, projectId, error: e?.message,
+    });
   }
 
   // Publish per mode. 'best-effort' swallows a quota 405 (publishing an

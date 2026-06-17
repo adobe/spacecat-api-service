@@ -103,6 +103,7 @@ describe('SerenityController', () => {
     handleListModels: sinon.stub(),
     handleUpdateModels: sinon.stub(),
     listGlobalModelCatalog: sinon.stub(),
+    listLanguageCatalog: sinon.stub(),
     handleListMarketsSubworkspace: sinon.stub(),
     handleGetMarketSubworkspace: sinon.stub(),
     handleCreateMarketSubworkspace: sinon.stub(),
@@ -187,6 +188,7 @@ describe('SerenityController', () => {
         handleListModels: handlers.handleListModels,
         handleUpdateModels: handlers.handleUpdateModels,
         listGlobalModelCatalog: handlers.listGlobalModelCatalog,
+        listLanguageCatalog: handlers.listLanguageCatalog,
       },
       '../../src/support/serenity/handlers/markets-subworkspace.js': {
         handleListMarketsSubworkspace: handlers.handleListMarketsSubworkspace,
@@ -638,6 +640,31 @@ describe('SerenityController', () => {
       const response = await controller.listOrgModels(fakeContext());
       expect(response.status).to.equal(403);
       expect(handlers.listGlobalModelCatalog).to.not.have.been.called;
+    });
+
+    it('listOrgLanguages returns the language catalog (org-level, no brand)', async () => {
+      handlers.listLanguageCatalog.resolves({ items: [{ id: 'lng-en', name: 'English' }] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listOrgLanguages(fakeContext());
+      expect(response.status).to.equal(200);
+      const body = await readBody(response);
+      expect(body.items[0].name).to.equal('English');
+      expect(handlers.listLanguageCatalog).to.have.been.calledOnce;
+    });
+
+    it('listOrgLanguages 400s when spaceCatId is not a UUID', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listOrgLanguages(fakeContext({ params: { spaceCatId: 'nope' } }));
+      expect(response.status).to.equal(400);
+      expect(handlers.listLanguageCatalog).to.not.have.been.called;
+    });
+
+    it('listOrgLanguages 403s when the user has no access to the org', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listOrgLanguages(fakeContext());
+      expect(response.status).to.equal(403);
+      expect(handlers.listLanguageCatalog).to.not.have.been.called;
     });
 
     it('updateModels dispatches ctx.data to handleUpdateModels and wraps the result in ok()', async () => {

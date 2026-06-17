@@ -501,6 +501,30 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * POST /v2/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — batch-create
+     * benchmarks. Body is an ARRAY of `{ brand_name, domain, brand_aliases?,
+     * color? }`. The API cannot set `main_brand` (system-managed); a created
+     * benchmark is a regular tracked brand. Returns `{ ids: [...], existing_count }`.
+     * We use it to create the project's own-brand benchmark when Semrush has not
+     * auto-provisioned one (the `benchmark_id` brand URLs must attach to).
+     */
+    async createBenchmarks(workspaceId, projectId, benchmarks) {
+      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models/benchmarks`;
+      return request('POST', url, imsToken, benchmarks);
+    },
+
+    /**
+     * DELETE /v1/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — batch-delete
+     * benchmarks by id (body `{ ids: [...] }`). The main-brand benchmark cannot be
+     * deleted (409). Used by the competitor-benchmark edit re-sync to drop a
+     * competitor that was removed from the brand.
+     */
+    async deleteBenchmarks(workspaceId, projectId, ids) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models/benchmarks`;
+      return request('DELETE', url, imsToken, { ids });
+    },
+
+    /**
      * GET /v2/.../aio/benchmarks/{bid}/brand_urls — list a benchmark's brand
      * URLs. Returns `{ brand_urls: [{ id, url, type, ... }] }`. Used by the
      * brand-edit re-sync to diff the live set before adding/removing.
