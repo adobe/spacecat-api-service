@@ -1116,6 +1116,7 @@ describe('Preflight Controller', () => {
     let CreatePreflightController;
     let hasAccessStub;
     let mockImsClient;
+    let createFromStub;
 
     beforeEach(async () => {
       if (!global.fetch) {
@@ -1144,6 +1145,11 @@ describe('Preflight Controller', () => {
           expires_in: 3600,
         }),
       };
+      // Stub-ify ImsClient.createFrom so tests can assert that the source
+      // passes IMS_SCOPE='system' through to the factory (the load-bearing
+      // contract of the hardcode; if a future refactor accidentally drops
+      // the override, this stub's call args won't match and assertions fail).
+      createFromStub = sandbox.stub().returns(mockImsClient);
 
       // SITES-46202: createPreflight no longer consults Configuration / TierClient
       // for eligibility — Mysticat owns that decision. The controller is mocked
@@ -1151,7 +1157,7 @@ describe('Preflight Controller', () => {
       // factory (for the custom-env mint), and the standard dataAccess stubs.
       CreatePreflightController = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
-          ImsClient: { createFrom: () => mockImsClient },
+          ImsClient: { createFrom: createFromStub },
           retrievePageAuthentication: sandbox.stub().resolves('default-page-token'),
         },
         '../../src/support/access-control-util.js': {
@@ -1595,6 +1601,14 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(202);
       expect(mockImsClient.getServiceAccessTokenV3).to.have.been.calledOnce;
+      // Load-bearing contract of this PR: the custom-env ImsClient construction
+      // MUST pass IMS_SCOPE='system' through to ImsClient.createFrom — that's
+      // the hardcoded scope value that lets the v3 client_credentials grant
+      // succeed against `aem-project-collab-service` (per SITES-43236). If a
+      // future refactor accidentally drops the override, this assertion fails.
+      expect(createFromStub).to.have.been.calledWith(
+        sinon.match({ env: sinon.match({ IMS_SCOPE: 'system' }) }),
+      );
       const [, calledOptions] = fetchStub.secondCall.args;
       // Bearer prefix mirrors the v3-token convention; verified against the
       // mystique-deploy CGW-Flex validator (Authorization on /v1/apply uses

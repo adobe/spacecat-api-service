@@ -507,7 +507,11 @@ function PreflightController(ctx, log, env) {
     // wrapper-wired `await context.imsClient.getServiceAccessTokenV3()` and
     // the `imsClient` destructure + `isNonEmptyObject(imsClient)` constructor
     // guard on `PreflightController` restored alongside (both removed in the
-    // same PR as this hardcode — see git history under `SITES-43236`).
+    // same PR as this hardcode — see git history under `SITES-43236`). The
+    // revert also restores singleton token caching across warm-Lambda
+    // invocations, which this construction loses — accepted cost during the
+    // transition, since per-invocation mint sidesteps the not-expiry-aware
+    // cache concern from the prior review thread on PR #2611.
     //
     // Mint before the AsyncJob / Preflight DB writes so a transient IMS
     // failure doesn't leave orphaned IN_PROGRESS records to clean up.
