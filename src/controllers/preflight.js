@@ -496,7 +496,18 @@ function PreflightController(ctx, log, env) {
     // 'system' is the Adobe IMS mandated scope for v3 service-client tokens
     // (per ASO team Slack thread, 2026-06-17). This mirrors the existing
     // pattern in `email-service.js` and `trial-users.js` of overriding IMS
-    // env at construction.
+    // env at construction, but differs in intent: those callers have their
+    // own dedicated IMS clients (LLMO email, etc.) and MUST swap credentials
+    // entirely; we keep the default client and only override scope. That
+    // makes this hardcode a transitional bypass for missing Vault config,
+    // NOT the desired permanent shape.
+    //
+    // TODO: once `IMS_SCOPE=system` gets provisioned in Vault for
+    // `aem-project-collab-service`, revert this block to the wrapper-wired
+    //   `await context.imsClient.getServiceAccessTokenV3()`
+    // and restore the `imsClient` destructure + `isNonEmptyObject(imsClient)`
+    // constructor guard on `PreflightController` (removed alongside this
+    // hardcode in the same PR — search git history for `SITES-43236`).
     //
     // Mint before the AsyncJob / Preflight DB writes so a transient IMS
     // failure doesn't leave orphaned IN_PROGRESS records to clean up.
