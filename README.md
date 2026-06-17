@@ -4,6 +4,8 @@
 
 ## HTTP API Doc
 
+Test fix
+
 https://opensource.adobe.com/spacecat-api-service/
 
 ### Semrush proxy (`/serenity/*`)
