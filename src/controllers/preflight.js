@@ -502,12 +502,12 @@ function PreflightController(ctx, log, env) {
     // makes this hardcode a transitional bypass for missing Vault config,
     // NOT the desired permanent shape.
     //
-    // TODO: once `IMS_SCOPE=system` gets provisioned in Vault for
-    // `aem-project-collab-service`, revert this block to the wrapper-wired
-    //   `await context.imsClient.getServiceAccessTokenV3()`
-    // and restore the `imsClient` destructure + `isNonEmptyObject(imsClient)`
-    // constructor guard on `PreflightController` (removed alongside this
-    // hardcode in the same PR — search git history for `SITES-43236`).
+    // Reversibility: if `IMS_SCOPE=system` is provisioned in Vault for
+    // `aem-project-collab-service`, this hardcode can be reverted to the
+    // wrapper-wired `await context.imsClient.getServiceAccessTokenV3()` and
+    // the `imsClient` destructure + `isNonEmptyObject(imsClient)` constructor
+    // guard on `PreflightController` restored alongside (both removed in the
+    // same PR as this hardcode — see git history under `SITES-43236`).
     //
     // Mint before the AsyncJob / Preflight DB writes so a transient IMS
     // failure doesn't leave orphaned IN_PROGRESS records to clean up.
