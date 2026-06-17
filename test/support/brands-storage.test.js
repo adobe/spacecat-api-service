@@ -229,6 +229,20 @@ describe('brands-storage', () => {
       expect(result[0].brandContext).to.equal('Context for this brand');
       expect(result[0].mentionSentimentGuidance).to.equal('Sentiment guidance');
     });
+
+    it('preserves empty string guidance values from the database', async () => {
+      const dbRow = makeBrandRow({
+        brand_context: '',
+        mention_sentiment_guidance: '',
+      });
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].brandContext).to.equal('');
+      expect(result[0].mentionSentimentGuidance).to.equal('');
+    });
   });
 
   describe('getBrandById', () => {
@@ -534,6 +548,16 @@ describe('brands-storage', () => {
       })).to.be.rejectedWith('Brand name is required');
     });
 
+    it('throws when brand guidance input has the wrong type', async () => {
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', brandContext: ['wrong'] },
+        postgrestClient: createTableMockClient({
+          brands: { data: null, error: null },
+        }),
+      })).to.be.rejectedWith('brandContext must be a string or null');
+    });
+
     it('throws when brands upsert fails', async () => {
       const postgrestClient = createTableMockClient({
         brands: [
@@ -679,6 +703,27 @@ describe('brands-storage', () => {
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row).to.not.have.property('brand_context');
       expect(brandsUpsert.row).to.not.have.property('mention_sentiment_guidance');
+    });
+
+    it('rejects non-string brand guidance with a 400-tagged error', async () => {
+      const client = createCapturingClient({
+        brands: [{ data: null, error: null }],
+      });
+
+      let caught;
+      try {
+        await upsertBrand({
+          organizationId: ORG_ID,
+          brand: { name: 'Test', brandContext: { wrong: true } },
+          postgrestClient: client,
+        });
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).to.be.an('error');
+      expect(caught.message).to.equal('brandContext must be a string or null');
+      expect(caught.status).to.equal(400);
     });
 
     it('does NOT overwrite an existing brand site_id and warns (LLMO-5556)', async () => {
@@ -1532,6 +1577,15 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.be.null;
+    });
+
+    it('throws when brand guidance update input has the wrong type', async () => {
+      await expect(updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { mentionSentimentGuidance: ['wrong'] },
+        postgrestClient: { from: () => {} },
+      })).to.be.rejectedWith('mentionSentimentGuidance must be a string or null');
     });
 
     it('throws when update query fails', async () => {

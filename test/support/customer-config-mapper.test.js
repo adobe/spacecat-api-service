@@ -135,6 +135,27 @@ describe('Customer Config Mapper', () => {
       expect(result.customer.brands[0].region).to.include('us');
     });
 
+    it('normalizes legacy claims guidance for the v2 brand shape', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { name: 'Test Brand', regions: ['US'] },
+          ],
+        },
+        claims: {
+          brandContext: `  ${'a'.repeat(4001)}  `,
+          sentimentGuidance: '   ',
+        },
+        categories: {},
+        topics: {},
+      };
+
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(result.customer.brands[0].brandContext).to.have.lengthOf(4000);
+      expect(result.customer.brands[0].brandContext).to.equal('a'.repeat(4000));
+      expect(result.customer.brands[0].mentionSentimentGuidance).to.equal(null);
+    });
+
     it('handles brand alias with regions property (array)', () => {
       const llmoConfig = {
         brands: {

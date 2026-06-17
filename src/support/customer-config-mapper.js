@@ -42,6 +42,27 @@ const DEFAULT_VERTICALS = [
   'Government & Public Services',
 ];
 
+const BRAND_GUIDANCE_MAX_LENGTH = 4000;
+
+function normalizeBrandGuidance(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!hasText(trimmed)) {
+    return null;
+  }
+  return trimmed.length > BRAND_GUIDANCE_MAX_LENGTH
+    ? trimmed.slice(0, BRAND_GUIDANCE_MAX_LENGTH)
+    : trimmed;
+}
+
 /**
  * Generates a deterministic hash from a string.
  * @param {string} input - Input string to hash
@@ -166,8 +187,8 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
     origin: 'system',
     region: brandRegions,
     description: '',
-    brandContext: llmoConfig.claims?.brandContext,
-    mentionSentimentGuidance: llmoConfig.claims?.sentimentGuidance,
+    brandContext: normalizeBrandGuidance(llmoConfig.claims?.brandContext),
+    mentionSentimentGuidance: normalizeBrandGuidance(llmoConfig.claims?.sentimentGuidance),
     updatedAt: primaryAlias.updatedAt || new Date().toISOString(),
     updatedBy: 'system',
     vertical: '',

@@ -34,7 +34,11 @@ function normalizeNullableText(value, fieldName) {
     return null;
   }
   if (typeof value !== 'string') {
-    throw new Error(`${fieldName} must be a string or null`);
+    // Tag with a 400 status so callers that reach storage without going through
+    // the controller's validation surface a client error rather than a 500.
+    const error = new Error(`${fieldName} must be a string or null`);
+    error.status = 400;
+    throw error;
   }
   const trimmed = value.trim();
   return hasText(trimmed) ? trimmed : null;
@@ -134,8 +138,8 @@ function mapDbBrandToV2(row) {
     status: row.status || 'active',
     origin: row.origin || 'human',
     description: row.description || null,
-    brandContext: row.brand_context || null,
-    mentionSentimentGuidance: row.mention_sentiment_guidance || null,
+    brandContext: row.brand_context ?? null,
+    mentionSentimentGuidance: row.mention_sentiment_guidance ?? null,
     vertical: row.vertical || null,
     region: row.regions || [],
     urls,

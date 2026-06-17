@@ -171,7 +171,9 @@ function BrandsController(ctx, log, env) {
         if (typeof value !== 'string') {
           return badRequest(`${field} must be a string or null`);
         }
-        if (value.length > BRAND_GUIDANCE_MAX_LENGTH) {
+        // Validate the trimmed length: storage trims before persisting, so this
+        // mirrors what is actually stored (and the schema's maxLength).
+        if (value.trim().length > BRAND_GUIDANCE_MAX_LENGTH) {
           return badRequest(`${field} must be at most ${BRAND_GUIDANCE_MAX_LENGTH} characters`);
         }
       }
