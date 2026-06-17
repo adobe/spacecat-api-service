@@ -199,4 +199,166 @@ describe('competitor-benchmarks helpers', () => {
       expect(result).to.deep.equal({ markets: 1, created: 0, deleted: 0 });
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Defensive branch coverage — falsy-path and missing-property variants
+  // ---------------------------------------------------------------------------
+
+  describe('removedCompetitorDomains — non-array inputs', () => {
+    it('treats null oldCompetitors as an empty list', () => {
+      // Exercises `Array.isArray(oldCompetitors) ? ... : []` at line 67 (else branch).
+      // No old entries -> nothing removed.
+      expect(removedCompetitorDomains(null, [{ url: 'https://a.com' }])).to.deep.equal([]);
+    });
+
+    it('treats null newCompetitors as an empty list', () => {
+      // Exercises `Array.isArray(newCompetitors) ? ... : []` at line 68 (else branch).
+      // No new entries -> everything in old is considered removed.
+      expect(removedCompetitorDomains([{ url: 'https://a.com' }], null)).to.deep.equal(['a.com']);
+    });
+
+    it('treats undefined oldCompetitors as an empty list', () => {
+      expect(removedCompetitorDomains(undefined, [{ url: 'https://b.com' }])).to.deep.equal([]);
+    });
+
+    it('treats undefined newCompetitors as an empty list', () => {
+      const old = [{ url: 'https://a.com' }, { url: 'https://b.com' }];
+      const result = removedCompetitorDomains(old, undefined);
+      expect(result).to.have.members(['a.com', 'b.com']);
+    });
+  });
+
+  describe('syncCompetitorBenchmarksForProject — defensive branch coverage', () => {
+    it('returns early (no benchmark read) when both desired and removed sets are empty', async () => {
+      // Exercises the `if (desired.length === 0 && removedSet.size === 0)` early-return
+      // path at line 108/109. No competitors and no removed domains -> skip listBenchmarks.
+      const transport = {
+        listBenchmarks: sandbox.stub(),
+        createBenchmarks: sandbox.stub(),
+        deleteBenchmarks: sandbox.stub(),
+      };
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, [], [], 'us', undefined);
+      expect(result).to.deep.equal({ created: 0, deleted: 0, changed: false });
+      expect(transport.listBenchmarks).to.not.have.been.called;
+    });
+
+    it('treats non-array removedDomains as empty (else branch at line 103)', async () => {
+      // Exercises `Array.isArray(removedDomains) ? removedDomains : []` at line 103.
+      // With null removedDomains, removedSet is empty; desired is non-empty so
+      // listBenchmarks IS called (no early return).
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['new'], existing_count: 0 }),
+        deleteBenchmarks: sandbox.stub().resolves(null),
+      };
+      const result = await syncCompetitorBenchmarksForProject(
+        transport,
+        WS,
+        PID,
+        [{ name: 'Duck', url: 'https://duckduckgo.com', regions: ['us'] }],
+        null,
+        'us',
+        undefined,
+      );
+      expect(result.created).to.equal(1);
+      expect(transport.deleteBenchmarks).to.not.have.been.called;
+    });
+
+    it('treats a non-array listBenchmarks response as an empty benchmark list', async () => {
+      // Exercises `Array.isArray(resp?.aio_benchmarks) ? ... : []` at line 113
+      // when listBenchmarks resolves {} (no aio_benchmarks property).
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({}),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['new'], existing_count: 0 }),
+        deleteBenchmarks: sandbox.stub().resolves(null),
+      };
+      const result = await syncCompetitorBenchmarksForProject(
+        transport,
+        WS,
+        PID,
+        [{ name: 'Duck', url: 'https://duckduckgo.com', regions: ['us'] }],
+        [],
+        'us',
+        undefined,
+      );
+      // benchmarks=[] -> Duck not present -> created.
+      expect(result.created).to.equal(1);
+      expect(transport.createBenchmarks).to.have.been.calledOnce;
+    });
+
+    it('skips benchmarks whose domain normalizes to null (continue at line 120)', async () => {
+      // Exercises `if (domain === null) continue` at line 120.
+      // A benchmark with an empty/unparseable domain produces null from
+      // normalizeBenchmarkDomain and is skipped without being added to presentDomains.
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({
+          aio_benchmarks: [
+            { id: 'bad', main_brand: false, domain: '' }, // null domain -> skip
+            { id: 'good', main_brand: false, domain: 'bing.com' },
+          ],
+        }),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['x'], existing_count: 0 }),
+        deleteBenchmarks: sandbox.stub().resolves(null),
+      };
+      const result = await syncCompetitorBenchmarksForProject(
+        transport,
+        WS,
+        PID,
+        [
+          { name: 'Bing', url: 'https://bing.com', regions: ['us'] }, // already present
+          { name: 'Duck', url: 'https://duckduckgo.com', regions: ['us'] }, // new
+        ],
+        [],
+        'us',
+        undefined,
+      );
+      // bing.com is in presentDomains -> not created. Duck -> created.
+      expect(result.created).to.equal(1);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Duck', domain: 'duckduckgo.com' },
+      ]);
+    });
+  });
+
+  describe('syncCompetitorBenchmarksAcrossMarkets — defensive branch coverage', () => {
+    it('treats a non-array listProjects response as an empty project list', async () => {
+      // Exercises `Array.isArray(listing?.items) ? ... : []` at line 172
+      // when listProjects resolves {} (no items property).
+      const transport = {
+        listProjects: sandbox.stub().resolves({}),
+        listBenchmarks: sandbox.stub(),
+        createBenchmarks: sandbox.stub(),
+        deleteBenchmarks: sandbox.stub(),
+        publishProject: sandbox.stub(),
+      };
+      const result = await syncCompetitorBenchmarksAcrossMarkets(transport, [], [], WS, undefined);
+      expect(result).to.deep.equal({ markets: 0, created: 0, deleted: 0 });
+      expect(transport.listBenchmarks).to.not.have.been.called;
+    });
+
+    it('skips a project whose id is missing (projectId null -> continue at line 181)', async () => {
+      // Exercises `hasText(project?.id) ? String(project.id) : null` else branch at line 179:
+      // when a project has no id, projectId is null and the project is skipped.
+      const transport = {
+        listProjects: sandbox.stub().resolves({
+          items: [
+            { settings: { ai: { country: { code: 'us' } } } }, // no id -> skipped
+          ],
+        }),
+        listBenchmarks: sandbox.stub(),
+        createBenchmarks: sandbox.stub(),
+        deleteBenchmarks: sandbox.stub(),
+        publishProject: sandbox.stub(),
+      };
+      const result = await syncCompetitorBenchmarksAcrossMarkets(
+        transport,
+        [{ name: 'Duck', url: 'https://duckduckgo.com', regions: ['us'] }],
+        [],
+        WS,
+        undefined,
+      );
+      expect(result).to.deep.equal({ markets: 0, created: 0, deleted: 0 });
+      expect(transport.listBenchmarks).to.not.have.been.called;
+    });
+  });
 });

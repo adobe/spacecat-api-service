@@ -156,14 +156,16 @@ describe('workspace-lifecycle', () => {
       expect(transport.listProjects).to.not.have.been.called;
     });
 
-    it('falls back to a name-only title when the brand has no id', async () => {
+    it('hard-fails (never builds a non-unique title) when the brand has no id', async () => {
+      // The id-suffix is the collision-free adoption key; without it the title
+      // would not be unique per brand, so provisioning must refuse rather than
+      // fall back to a name-only title that adoption could later mis-match.
       const transport = makeTransport();
       const brand = makeBrand({ id: null });
 
-      await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
-
-      expect(transport.createSubworkspace)
-        .to.have.been.calledOnceWithExactly(PARENT_WS, 'Adobe Express', CREATE_ALLOCATION);
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+        .to.be.rejectedWith(/requires a brand id/);
+      expect(transport.createSubworkspace).to.not.have.been.called;
     });
 
     it('fails with an ambiguousWorkspace alert on multiple family matches', async () => {
@@ -463,6 +465,121 @@ describe('workspace-lifecycle', () => {
       expect(transport.listWorkspaceFamily).to.not.have.been.called;
       expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
       expect(transport.transferWorkspaceResources).to.have.been.calledOnce;
+    });
+  });
+  describe('defensive branch coverage', () => {
+    describe('ensureSubworkspace - subworkspaceTitle else branch (brand with id but no name)', () => {
+      it('creates a workspace titled brand-<suffix> when the brand has no name', async () => {
+        // subworkspaceTitle: hasText(name) is false -> uses the brand-<suffix> template (line 94).
+        const transport = makeTransport();
+        const brand = makeBrand({ name: null });
+
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+
+        expect(result).to.equal(SUB_WS);
+        const [, actualTitle] = transport.createSubworkspace.firstCall.args;
+        expect(actualTitle).to.equal(`brand-${BRAND_ID.slice(0, 8)}`);
+      });
+
+      it('creates a workspace titled brand-<suffix> when the brand name is empty string', async () => {
+        const transport = makeTransport();
+        const brand = makeBrand({ name: '' });
+
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+
+        expect(result).to.equal(SUB_WS);
+        const [, actualTitle] = transport.createSubworkspace.firstCall.args;
+        expect(actualTitle).to.equal(`brand-${BRAND_ID.slice(0, 8)}`);
+      });
+    });
+
+    describe('adoptFromFamily - listWorkspaceFamily resolves non-array', () => {
+      it('throws when listWorkspaceFamily returns {} (items not array)', async () => {
+        // Line 121: Array.isArray false branch in adoptFromFamily.
+        const transport = makeTransport({
+          createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+          listWorkspaceFamily: sinon.stub().resolves({}),
+        });
+        const brand = makeBrand();
+
+        await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+          .to.be.rejectedWith(/no family match to adopt/);
+      });
+    });
+
+    describe('adoptFromFamily adopt path - listProjects resolves non-array', () => {
+      it('adopts the empty match when listProjects returns {} (projectCount = 0)', async () => {
+        // Line 156: Array.isArray false branch -> projectCount = 0 -> adopts.
+        const transport = makeTransport({
+          createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+          listWorkspaceFamily: sinon.stub().resolves({
+            items: [{ id: 'adopted-ws', title: EXPECTED_TITLE }],
+          }),
+          listProjects: sinon.stub().resolves({}),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+
+        expect(result).to.equal('adopted-ws');
+        expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('adopted-ws');
+      });
+    });
+
+    describe('decommissionBrandWorkspace - listWorkspaceFamily resolves non-array (guard enabled)', () => {
+      it('treats {} response as empty children list and proceeds with decommission', async () => {
+        // Line 377: Array.isArray false branch -> children = [] -> guard passes.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves({}),
+          listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
+        });
+
+        await decommissionBrandWorkspace(
+          transport,
+          SUB_WS,
+          log,
+          PARENT_WS,
+          { enforceLinkedGuard: true },
+        );
+
+        expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
+        expect(transport.transferWorkspaceResources).to.have.been.calledOnce;
+      });
+    });
+
+    describe('decommissionBrandWorkspace - listProjects resolves non-array', () => {
+      it('treats {} listing as no projects and releases allocation without deleting', async () => {
+        // Line 390: Array.isArray false branch -> projects = [] -> no deletes.
+        const transport = makeTransport({
+          listProjects: sinon.stub().resolves({}),
+        });
+
+        await decommissionBrandWorkspace(transport, SUB_WS, log);
+
+        expect(transport.deleteProject).to.not.have.been.called;
+        expect(transport.transferWorkspaceResources)
+          .to.have.been.calledOnceWithExactly(SUB_WS, RELEASE_ALLOCATION);
+      });
+    });
+    describe('poll timing defaults (intervalMs and sleep fallbacks)', () => {
+      it('uses DEFAULT_POLL_INTERVAL_MS when intervalMs is absent from timing', async () => {
+        // Line 215: timing.intervalMs ?? DEFAULT_POLL_INTERVAL_MS right branch.
+        // Pass timing without intervalMs; getWorkspaceStatus immediately returns
+        // 'created' so sleep is never called and no real delay occurs.
+        const transport = makeTransport();
+        const brand = makeBrand({ workspaceId: SUB_WS });
+
+        const result = await ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          1,
+          log,
+          { attempts: 1, sleep: () => Promise.resolve() },
+        );
+
+        expect(result).to.equal(SUB_WS);
+      });
     });
   });
 });

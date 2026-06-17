@@ -12,7 +12,7 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode, getImsUserToken, getImsUserTokenStrict } from '../utils.js';
+import { ErrorWithStatusCode, getImsUserTokenStrict } from '../utils.js';
 import { createSerenityTransport, SerenityTransportError } from './rest-transport.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { RELEASE_ALLOCATION } from './workspace-lifecycle.js';
@@ -34,7 +34,7 @@ export const MAX_TOPICS_ON_CREATE = 5;
  * country code + uppercase primary language subtag (e.g. "US - EN", "CH - DE").
  * Matches the names existing sub-workspace projects already carry.
  */
-export function marketProjectName(market, languageCode) {
+export function initialMarketProjectName(market, languageCode) {
   const region = String(market || '').toUpperCase();
   const lang = String(languageCode || '').split('-')[0].toUpperCase();
   return `${region} - ${lang}`;
@@ -157,7 +157,7 @@ export async function provisionBrandSubworkspace(context, {
         brandDomain,
         brandNames: [brandName],
         brandDisplayName: brandName,
-        name: marketProjectName(market, languageCode),
+        name: initialMarketProjectName(market, languageCode),
       },
       log,
       // preResolvedWorkspaceId / reloadPointer: defaults (single-create path).
@@ -223,7 +223,10 @@ export async function releaseProvisionedWorkspace(context, workspaceId, log = co
     return;
   }
   try {
-    const imsToken = getImsUserToken(context);
+    // Use the strict IMS-type guard, matching every other Semrush-transport
+    // call site — keeps the IMS-only forwarding invariant uniform even though
+    // this helper is only reachable after provisioning already passed it.
+    const imsToken = getImsUserTokenStrict(context);
     const transport = createSerenityTransport({ env: context.env, imsToken });
     await transport.transferWorkspaceResources(workspaceId, RELEASE_ALLOCATION);
     log?.info?.('serenity: released orphaned subworkspace allocation back to parent pool', {

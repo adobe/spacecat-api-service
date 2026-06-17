@@ -919,7 +919,25 @@ function SerenityController(context, log, env) {
       }
       brand.setStatus?.('pending');
       if (typeof brand.save === 'function') {
-        await brand.save();
+        try {
+          await brand.save();
+        } catch (saveError) {
+          // Non-atomic seam: the sub-workspace was already decommissioned
+          // (emptied + allocation released) upstream, but persisting the
+          // cleared pointer / pending status failed. The state is divergent —
+          // brands.semrush_workspace_id still points at the now-empty
+          // sub-workspace and status is not 'pending'. A re-activate converges
+          // (the re-grant path re-uses the emptied workspace), so this
+          // self-heals, but emit a DISTINCT, greppable token so the orphan is
+          // alertable rather than indistinguishable from an ordinary upstream
+          // error. Re-throw to mapError after recording it.
+          log.error('serenity deactivate: SERENITY_DEACTIVATE_SAVE_DIVERGENCE — decommissioned upstream but failed to persist pointer/status', {
+            brandId: auth.brandUuid,
+            decommissionedWorkspaceId: hasText(subworkspaceId) ? subworkspaceId : null,
+            error: saveError?.message,
+          });
+          throw saveError;
+        }
       }
       log.info('serenity deactivate: completed', {
         brandId: auth.brandUuid,

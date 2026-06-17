@@ -253,12 +253,13 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   ({ urls, socialAccounts, earnedContent }, V2 shape) to push onto this
  *   market's project benchmark. Brand `urls` go to every market; social/earned
  *   are filtered to this market's region. Same brand-level set is passed for
- *   every market. A failed push hard-fails the create (URLs are part of a valid
- *   project's setup).
+ *   every market. Best-effort: a failed push is logged (non-fatal) and never
+ *   aborts the create — URL enrichment must not strand a half-provisioned brand.
  * @param {object[]} [options.competitors=[]] - the brand's competitors ("other
  *   brands to track", { url, regions }) to merge into this market's project CI
  *   competitor list (region-filtered, domain-only). Read-merged with Semrush's
- *   existing/auto-generated list before publish; a failed sync hard-fails.
+ *   existing/auto-generated list before publish. Best-effort: a failed sync is
+ *   logged (non-fatal) and never aborts the create.
  * @param {'require'|'best-effort'|'skip'} [options.publishMode='require'] - how
  *   to publish: `require` throws on failure (the default markets endpoint);
  *   `best-effort` swallows a quota 405 (empty-units publish, workspace doc §5)

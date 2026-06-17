@@ -190,8 +190,10 @@ export async function handleCreatePromptsSubworkspace(transport, workspaceId, bo
   }
 
   const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);
-  for (const e of publishErrors) {
-    failed.push({ text: '', status: 502, message: `publish: ${e.message}` });
+  // publishAffected returns { projectId, message } records whose message is
+  // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
+  for (const pubErr of publishErrors) {
+    failed.push({ text: '', status: 502, message: `publish: ${pubErr.message}` });
   }
 
   return { created, skipped, failed };
@@ -377,8 +379,9 @@ export async function handleBulkDeletePromptsSubworkspace(transport, workspaceId
     Array.from(projectsToPublish),
     log,
   );
-  publishErrors.forEach((e) => {
-    failed.push({ semrushPromptId: '', status: 502, message: `publish: ${e.message}` });
+  // pubErr is an already-redacted { projectId, message } record (see above).
+  publishErrors.forEach((pubErr) => {
+    failed.push({ semrushPromptId: '', status: 502, message: `publish: ${pubErr.message}` });
   });
 
   return { deleted, failed };

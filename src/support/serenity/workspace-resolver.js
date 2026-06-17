@@ -36,6 +36,16 @@ import { hasText } from '@adobe/spacecat-shared-utils';
  */
 export const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — positive
 export const NEG_TTL_MS = 30 * 1000; // 30 seconds — negative
+// Brand-subworkspace positive TTL is deliberately short. A brand's mode can
+// flip at runtime (activate binds a sub-workspace; deactivate clears it), and
+// this cache is process-local: clearBrandWorkspaceCache() only evicts the
+// calling Lambda container, so every OTHER warm container keeps routing the
+// brand in its stale mode until its own entry expires. Bounding the positive
+// TTL to a few seconds caps that cross-instance staleness window — after a
+// flip, a sibling instance re-reads the pointer within ~BRAND_CACHE_TTL_MS
+// instead of up to CACHE_TTL_MS. The flips are rare and low-QPS, so the extra
+// Brand.findById reads are negligible.
+export const BRAND_CACHE_TTL_MS = 10 * 1000; // 10 seconds — positive (brand subworkspace)
 export const MAX_ENTRIES = 1024;
 
 const cache = new Map();
@@ -102,6 +112,12 @@ export async function resolveWorkspaceId(ctx, spaceCatId) {
  * resolveWorkspaceId (itself cached), so a parent change can never go stale
  * behind a brand entry.
  *
+ * Positive entries use the short BRAND_CACHE_TTL_MS (not CACHE_TTL_MS) because
+ * a brand's mode can flip at runtime and this Map is process-local: an
+ * activate/deactivate on one container clears only that container's entry, so
+ * a sibling container can keep routing the brand in its stale mode until its
+ * own entry expires. The short TTL bounds that cross-instance staleness window.
+ *
  * Exported for unit tests; production code should not call clearBrandWorkspaceCache.
  */
 const brandCache = new Map();
@@ -144,7 +160,7 @@ async function resolveBrandSubworkspaceId(ctx, brandId) {
 
   brandCache.delete(brandId);
   evictBrandIfNeeded();
-  const ttl = subworkspaceId === null ? NEG_TTL_MS : CACHE_TTL_MS;
+  const ttl = subworkspaceId === null ? NEG_TTL_MS : BRAND_CACHE_TTL_MS;
   brandCache.set(brandId, { value: subworkspaceId, expiresAt: now + ttl });
   return subworkspaceId;
 }
@@ -170,8 +186,12 @@ async function resolveBrandSubworkspaceId(ctx, brandId) {
  *   parentWorkspaceId: string|null}>}
  */
 export async function resolveBrandWorkspace(ctx, spaceCatId, brandId) {
-  const subworkspaceId = await resolveBrandSubworkspaceId(ctx, brandId);
-  const parentWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
+  // Independent reads (brand subworkspace + org parent) — resolve concurrently
+  // so a cold cache costs one round-trip, not two, on this hot-path predicate.
+  const [subworkspaceId, parentWorkspaceId] = await Promise.all([
+    resolveBrandSubworkspaceId(ctx, brandId),
+    resolveWorkspaceId(ctx, spaceCatId),
+  ]);
   if (hasText(subworkspaceId)) {
     return { mode: 'subworkspace', workspaceId: subworkspaceId, parentWorkspaceId };
   }

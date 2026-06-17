@@ -441,4 +441,233 @@ describe('brand-urls helpers', () => {
         .to.be.rejectedWith('boom');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Defensive branch coverage — falsy-path and missing-property variants
+  // ---------------------------------------------------------------------------
+
+  describe('regionApplies — falsy market and falsy region entry', () => {
+    it('returns false when market is null and a region list has no ww entry', () => {
+      // Exercises `String(market || '')` -> '' at line 45: target is '', length 0,
+      // so no non-ww code can match.
+      expect(regionApplies(['us'], null)).to.equal(false);
+    });
+
+    it('returns false when market is empty string and no matching region', () => {
+      // Second falsy-market variant: String('' || '') -> ''.
+      expect(regionApplies(['us'], '')).to.equal(false);
+    });
+
+    it('still matches ww even when market is null', () => {
+      // ww applies regardless of target length, so even null market matches ww.
+      expect(regionApplies(['ww'], null)).to.equal(true);
+    });
+
+    it('handles a null entry in the regions array without throwing', () => {
+      // Exercises `String(r || '')` -> '' at line 47: the null entry produces
+      // code='', which is neither ww nor matches target — skipped. 'us' still matches.
+      expect(regionApplies([null, 'us'], 'us')).to.equal(true);
+    });
+
+    it('returns false when all region entries are null', () => {
+      // Every entry produces code='', none match ww or the target.
+      expect(regionApplies([null, null], 'us')).to.equal(false);
+    });
+  });
+
+  describe('collectBrandUrlEntries — non-string url in source list', () => {
+    it('drops a numeric url entry (toEntry else branch -> empty string -> filtered out)', () => {
+      // Exercises the `typeof url === 'string' ? url.trim() : ''` else at line 56.
+      // A number is not a string; toEntry returns null; entry is filtered out.
+      const sources = {
+        urls: [42, { value: 'https://valid.com' }],
+      };
+      expect(collectBrandUrlEntries(sources, 'us')).to.deep.equal([
+        { url: 'https://valid.com', type: BRAND_URL_TYPE.WEBSITE },
+      ]);
+    });
+
+    it('drops a plain-object url entry that has no value property', () => {
+      // Another non-string variant reaching the toEntry else branch: the url
+      // property extracted from a social entry is passed directly and is undefined.
+      const sources = {
+        socialAccounts: [{ regions: [] }],
+      };
+      // s?.url is undefined — typeof undefined !== 'string' -> else branch.
+      expect(collectBrandUrlEntries(sources, 'us')).to.deep.equal([]);
+    });
+  });
+
+  describe('ensureOwnBrandBenchmark — defensive branch coverage', () => {
+    const BRAND = { name: 'Acme', domain: 'https://acme.com' };
+
+    it('treats a non-array listBenchmarks response as an empty benchmark list', async () => {
+      // Exercises `Array.isArray(resp?.aio_benchmarks) ? ... : []` at line 146
+      // when listBenchmarks resolves {} (no aio_benchmarks property).
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({}),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['new-1'] }),
+      };
+      const id = await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined);
+      expect(id).to.equal('new-1');
+      expect(transport.createBenchmarks).to.have.been.calledOnce;
+    });
+
+    it('returns null when re-list after create returns no array and no domain match', async () => {
+      // Exercises line 186 `Array.isArray(after?.aio_benchmarks) ? ... : []` -> []
+      // and line 188 `found ? String(found.id) : null` -> null.
+      // Path: first list = [] -> create -> ids=[] (no id) -> re-list returns {} ->
+      // afterList=[] -> found=undefined -> returns null.
+      const transport = {
+        listBenchmarks: sandbox.stub(),
+        createBenchmarks: sandbox.stub().resolves({ ids: [] }),
+      };
+      transport.listBenchmarks.onFirstCall().resolves({ aio_benchmarks: [] });
+      transport.listBenchmarks.onSecondCall().resolves({});
+      const id = await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined);
+      expect(id).to.equal(null);
+    });
+  });
+
+  describe('attachBrandUrlsToProject — log.info branch on successful attach', () => {
+    const BRAND = { name: 'Acme', domain: 'https://acme.com' };
+
+    it('calls log.info after a successful URL attach when a logger is supplied', async () => {
+      // Exercises `log?.info?.(...)` at line 224 — previously only tested with
+      // undefined logger, leaving the truthy log?.info path uncovered.
+      const info = sandbox.stub();
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        createBrandUrls: sandbox.stub().resolves({}),
+      };
+      const entries = [{ url: 'https://acme.com', type: 'website' }];
+      const log = { info, warn: () => {} };
+      const result = await attachBrandUrlsToProject(transport, WS, PID, entries, BRAND, log);
+      expect(result).to.deep.equal({ created: 1 });
+      expect(info).to.have.been.calledWithMatch(
+        'brand-urls: attached to project benchmark',
+        sinon.match({ benchmarkId: BID, count: 1 }),
+      );
+    });
+  });
+
+  describe('syncBrandUrlsAcrossMarkets — defensive branch coverage', () => {
+    it('treats a non-array listProjects response as an empty project list', async () => {
+      // Exercises `Array.isArray(listing?.items) ? ... : []` at line 270
+      // when listProjects resolves {} (no items property).
+      const transport = {
+        listProjects: sandbox.stub().resolves({}),
+        listBenchmarks: sandbox.stub(),
+        listBrandUrls: sandbox.stub(),
+        createBrandUrls: sandbox.stub(),
+        deleteBrandUrls: sandbox.stub(),
+        publishProject: sandbox.stub(),
+      };
+      const result = await syncBrandUrlsAcrossMarkets(transport, { urls: ['https://acme.com'] }, WS, undefined);
+      expect(result).to.deep.equal({ markets: 0, created: 0, deleted: 0 });
+      expect(transport.listBenchmarks).to.not.have.been.called;
+    });
+
+    it('uses {} for ai when settings.ai is absent, brand_names defaults to []', async () => {
+      // Exercises `project?.settings?.ai || {}` -> {} at line 288 and
+      // `Array.isArray(ai.brand_names) ? ai.brand_names : []` -> [] at line 289.
+      // The project has a country code but settings has no ai sub-object at all.
+      const transport = {
+        listProjects: sandbox.stub().resolves({
+          items: [{
+            id: 'p-us',
+            settings: { ai: { country: { code: 'us' } } },
+          }],
+        }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      // With no brand_name_display and no brand_names, brand.name=undefined.
+      // The main_brand benchmark is found so no create needed.
+      const result = await syncBrandUrlsAcrossMarkets(transport, { urls: [] }, WS, undefined);
+      expect(result.markets).to.equal(1);
+      expect(transport.listBenchmarks).to.have.been.calledOnce;
+    });
+
+    it('builds brand from brandNames[0] and slice(1) when brand_name_display is absent', async () => {
+      // Exercises `hasText(ai.brand_name_display) ? ai.brand_name_display : brandNames[0]`
+      // false branch at line 291 and `? brandNames : brandNames.slice(1)` false branch
+      // at line 293: display is absent so name=brandNames[0], aliases=brandNames.slice(1).
+      const transport = {
+        listProjects: sandbox.stub().resolves({
+          items: [{
+            id: 'p-us',
+            domain: 'https://acme.com',
+            settings: {
+              ai: {
+                country: { code: 'us' },
+                brand_names: ['Acme', 'Acme Inc'],
+              },
+            },
+          }],
+        }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncBrandUrlsAcrossMarkets(transport, { urls: ['https://acme.com'] }, WS, undefined);
+      expect(result.markets).to.equal(1);
+      expect(transport.listBenchmarks).to.have.been.calledOnce;
+    });
+
+    it('uses brand_name_display as name and all brand_names as aliases when display is set', async () => {
+      // Exercises the truthy branch of `hasText(ai.brand_name_display)` at lines 291 and 293:
+      // name=ai.brand_name_display, aliases=brandNames (the full array).
+      const transport = {
+        listProjects: sandbox.stub().resolves({
+          items: [{
+            id: 'p-us',
+            domain: 'https://acme.com',
+            settings: {
+              ai: {
+                country: { code: 'us' },
+                brand_name_display: 'Acme Corp',
+                brand_names: ['Acme', 'Acme Inc'],
+              },
+            },
+          }],
+        }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncBrandUrlsAcrossMarkets(transport, { urls: ['https://acme.com'] }, WS, undefined);
+      expect(result.markets).to.equal(1);
+      expect(transport.listBenchmarks).to.have.been.calledOnce;
+    });
+
+    it('treats a non-array listBrandUrls response as an empty existing list', async () => {
+      // Exercises `Array.isArray(existingResp?.brand_urls) ? ... : []` at line 315
+      // when listBrandUrls resolves {} (no brand_urls property).
+      // existing treated as [], so all desired entries become toCreate.
+      const transport = {
+        listProjects: sandbox.stub().resolves({
+          items: [{
+            id: 'p-us',
+            settings: { ai: { country: { code: 'us' } } },
+          }],
+        }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({}),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncBrandUrlsAcrossMarkets(transport, { urls: ['https://acme.com'] }, WS, undefined);
+      expect(result.created).to.equal(1);
+      expect(transport.createBrandUrls).to.have.been.calledOnce;
+    });
+  });
 });

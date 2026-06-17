@@ -18,6 +18,7 @@ import sinonChai from 'sinon-chai';
 import {
   createSerenityTransport,
   SerenityTransportError,
+  redactUpstreamMessage,
 } from '../../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
@@ -819,6 +820,66 @@ describe('Semrush REST transport', () => {
         `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/init_status`,
       );
       expect(result.initialized).to.equal(false);
+    });
+  });
+  describe('defensive branch coverage', () => {
+    describe('redactUpstreamMessage', () => {
+      it('returns "Upstream authorization failed" for 401 SerenityTransportError', () => {
+        const e = new SerenityTransportError(401, 'internal auth fail');
+        expect(redactUpstreamMessage(e)).to.equal('Upstream authorization failed');
+      });
+
+      it('returns "Upstream authorization failed" for 403 SerenityTransportError', () => {
+        const e = new SerenityTransportError(403, 'internal auth fail');
+        expect(redactUpstreamMessage(e)).to.equal('Upstream authorization failed');
+      });
+
+      it('returns "Upstream request failed" for a non-auth SerenityTransportError (e.g. 500)', () => {
+        const e = new SerenityTransportError(500, 'boom');
+        expect(redactUpstreamMessage(e)).to.equal('Upstream request failed');
+      });
+
+      it('returns e.message unchanged for a plain (non-transport) Error', () => {
+        const e = new Error('safe app error message');
+        expect(redactUpstreamMessage(e)).to.equal('safe app error message');
+      });
+
+      it('returns undefined when called with null (e?.message is undefined)', () => {
+        expect(redactUpstreamMessage(null)).to.equal(undefined);
+      });
+    });
+
+    describe('enc nullish path via listProjects with undefined workspaceId', () => {
+      it('encodes undefined workspaceId as empty string (String(undefined ?? ""))', async () => {
+        // enc(undefined) -> String(undefined ?? '') = '' -> encodeURIComponent('') = ''
+        fetchStub.resolves(fetchOk({ items: [] }));
+        const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+        await transport.listProjects(undefined);
+
+        const [url] = fetchStub.firstCall.args;
+        // The workspaceId segment is encoded as empty string, so the URL has //
+        // between /workspaces/ and /projects (empty segment).
+        expect(url).to.include('/workspaces//projects?type=ai');
+      });
+    });
+
+    describe('getBrandTopics with undefined domain and country', () => {
+      it('falls back to empty string for undefined domain and country (String(?? "") branches)', async () => {
+        // Lines 288-289: String(domain ?? '') and String(country ?? '') right-side branches.
+        fetchStub.resolves(fetchOk([]));
+        const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+        await transport.getBrandTopics(WORKSPACE_ID, { domain: undefined, country: undefined });
+
+        const [url] = fetchStub.firstCall.args;
+        expect(url).to.include('domain=');
+        expect(url).to.include('country=');
+        // Both params present but with empty values.
+        const params = new URL(url).searchParams;
+        expect(params.get('domain')).to.equal('');
+        expect(params.get('country')).to.equal('');
+      });
     });
   });
 });

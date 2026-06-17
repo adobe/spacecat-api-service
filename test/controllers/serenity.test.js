@@ -1023,6 +1023,25 @@ describe('SerenityController', () => {
   });
 
   describe('activate / deactivate', () => {
+    it('activate 401s (IMS-only) before any provisioning when the caller is not IMS-authenticated', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        authType: 'jwt',
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(401);
+      // pins the security-load-bearing IMS-only invariant: no transport, no ensure.
+      expect(ensureSubworkspaceStub).to.not.have.been.called;
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+    });
+
+    it('deactivate 401s (IMS-only) before any decommission when the caller is not IMS-authenticated', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(fakeContext({ authType: 'jwt' }));
+      expect(response.status).to.equal(401);
+      expect(decommissionStub).to.not.have.been.called;
+    });
+
     it('activate ensures the subworkspace ONCE for the batch and creates each market against it', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const brand = makeBrandModel();
@@ -1262,18 +1281,22 @@ describe('SerenityController', () => {
       expect(brand.setStatus).to.have.been.calledWith('pending');
     });
 
-    it('deactivate clears the resolver cache even when the brand save fails', async () => {
+    it('deactivate clears the resolver cache and logs a greppable divergence token when the brand save fails', async () => {
       // The upstream is already emptied by decommission; a failed save must not
-      // leave the resolver routing to the emptied sub-workspace for the TTL.
+      // leave the resolver routing to the emptied sub-workspace for the TTL, and
+      // the non-atomic seam must emit a distinct, alertable marker.
       const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
       brand.save = sinon.stub().rejects(new Error('db down'));
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(500);
       expect(decommissionStub).to.have.been.called;
       expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
       // cache was invalidated BEFORE the save threw.
       expect(clearBrandWorkspaceCacheStub).to.have.been.called;
+      // distinct, greppable token so the orphaned state is alertable.
+      expect(log.error).to.have.been.calledWithMatch('SERENITY_DEACTIVATE_SAVE_DIVERGENCE');
     });
 
     it('deactivate surfaces a decommission failure without clearing the pointer or status', async () => {
@@ -1389,6 +1412,324 @@ describe('SerenityController', () => {
         const response = await controller[method](ctx);
         expect(response.status).to.equal(403);
       });
+    });
+  });
+
+  describe('defensive branch coverage', () => {
+    // Line 365-372: createPrompts flat-mode dispatch. The default
+    // resolveBrandWorkspaceStub returns flat mode, so this reaches handleCreatePrompts.
+    it('createPrompts routes to handleCreatePrompts in flat mode and returns ok(result)', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createPrompts(fakeContext({
+        data: { prompts: [{ text: 'What is your return policy?', region: 'us' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
+      expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
+    });
+
+    // Line 382: updatePrompt — `ctx?.params || {}` fallback. When ctx.params is
+    // null the destructure yields `semrushPromptId = undefined`, which fails the
+    // hasText check and throws a 400 before authorize() is reached. The `|| {}`
+    // guard IS exercised on this path (it fires before the throw).
+    it('updatePrompt falls back to {} when ctx.params is null (semrushPromptId missing → 400)', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.params = null;
+      const response = await controller.updatePrompt(ctx);
+      expect(response.status).to.equal(400);
+    });
+
+    // Lines 396, 405: updatePrompt — `ctx.data || {}` in both subworkspace and flat
+    // mode. The subworkspace-mode branch (396) fires first when auth.mode is
+    // 'subworkspace'; flat mode (405) fires when it is 'flat'. Test both with
+    // ctx.data absent to cover the {} fallback on each side.
+    it('updatePrompt passes {} body to subworkspace handler when ctx.data is absent', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
+      });
+      handlers.handleUpdatePromptSubworkspace.resolves({ status: 200, body: {} });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { semrushPromptId: 'sem-1' } });
+      ctx.data = undefined;
+      const response = await controller.updatePrompt(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdatePromptSubworkspace.firstCall.args[3]).to.deep.equal({});
+    });
+
+    it('updatePrompt passes {} body to flat handler when ctx.data is absent', async () => {
+      handlers.handleUpdatePrompt.resolves({ status: 200, body: {} });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { semrushPromptId: 'sem-1' } });
+      ctx.data = undefined;
+      const response = await controller.updatePrompt(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdatePrompt.firstCall.args[5]).to.deep.equal({});
+    });
+
+    // Lines 426-434: bulkDeletePrompts — `ctx.data || {}` in both subworkspace and
+    // flat mode. Cover the {} fallback in subworkspace mode (flat mode is exercised
+    // by the existing flat-mode test which passes ctx.data).
+    it('bulkDeletePrompts passes {} body to subworkspace handler when ctx.data is absent', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
+      });
+      handlers.handleBulkDeletePromptsSubworkspace.resolves({ deleted: 0, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.data = undefined;
+      const response = await controller.bulkDeletePrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleBulkDeletePromptsSubworkspace.firstCall.args[2]).to.deep.equal({});
+    });
+
+    // Lines 475, 478: getMarket — `ctx?.params || {}` and `pGeo || ''`. When
+    // ctx.params is null, authorize() fires first (uses ctx?.params?.brandId →
+    // undefined → invalid UUID → 400). So null-params is NOT a reachable path for
+    // reaching line 475 post-authorize. The '|| {}' and 'pGeo || ''' guards at
+    // line 475/478 are structurally unreachable after a successful authorize() —
+    // authorize uses the same params object and rejects if it's absent.
+    // NOTE: line 478's /^\d+$/ false branch IS covered by the existing
+    // 'null-routes a non-digit geoTargetId' test, and pLang→null by the
+    // 'forwards null for an empty languageCode' test. The '|| {}' at 475 and
+    // 'pGeo || ''' at 478 are genuinely unreachable post-authorize.
+
+    // Line 528, 540: createMarket — `ctx.data || {}` in both subworkspace and flat
+    // mode. A missing ctx.data must pass {} to the handler.
+    it('createMarket passes {} body to flat handler when ctx.data is absent', async () => {
+      handlers.handleCreateMarket.resolves({ status: 200, body: {} });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.data = undefined;
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreateMarket.firstCall.args[4]).to.deep.equal({});
+    });
+
+    // Line 557: deleteMarket — `ctx?.params || {}`. Same structural reasoning as
+    // getMarket (line 475): authorize() rejects when ctx.params is absent, so
+    // line 557 is only reached with a truthy ctx.params and the '|| {}' branch
+    // cannot fire post-authorize. Genuinely unreachable.
+
+    // Line 717: updateModels — `ctx.data || {}` in subworkspace mode.
+    it('updateModels passes {} body to subworkspace handler when ctx.data is absent', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
+      });
+      handlers.handleUpdateModelsSubworkspace.resolves({ items: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.data = undefined;
+      const response = await controller.updateModels(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdateModelsSubworkspace.firstCall.args[2]).to.deep.equal({});
+    });
+
+    // Lines 747-748: activate — `ctx.data || {}` fallback and
+    // `Array.isArray(body.markets) ? ... : []` else-branch when markets is not an
+    // array. Both paths produce markets.length === 0 → 400.
+    it('activate falls back to {} body when ctx.data is absent (markets empty → 400)', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.data = undefined;
+      const response = await controller.activate(ctx);
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.match(/markets must be a non-empty array/);
+    });
+
+    it('activate treats a non-array markets value as empty and returns 400', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({ data: { markets: 'not-an-array' } }));
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.match(/markets must be a non-empty array/);
+    });
+
+    // Line 907: deactivate — `(ctx.env || env)?` — the env fallback fires when
+    // ctx.env is absent. SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD is then read
+    // from the controller-level env.
+    it('deactivate reads SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD from controller env when ctx.env is absent', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'sub-ws', parentWorkspaceId: WORKSPACE,
+      });
+      decommissionStub.resolves();
+      const controllerEnv = { SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD: 'true' };
+      const controller = SerenityController({ env: {} }, fakeLog(), controllerEnv);
+      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'sub-ws' });
+      const ctx = fakeContext({ brand });
+      delete ctx.env; // forces the || env fallback at line 907
+      const response = await controller.deactivate(ctx);
+      expect(response.status).to.equal(200);
+      expect(decommissionStub.firstCall.args[4]).to.deep.include({ enforceLinkedGuard: true });
+    });
+
+    // Line 936 (truthy side): deactivate save-divergence. The subworkspaceId null
+    // branch at line 936 is structurally unreachable — the catch block is only
+    // entered from inside `if (hasText(subworkspaceId))` where subworkspaceId must
+    // be truthy. The truthy side IS covered here.
+    it('deactivate emits SERENITY_DEACTIVATE_SAVE_DIVERGENCE and 500s when brand.save() throws after decommission', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'sub-ws', parentWorkspaceId: WORKSPACE,
+      });
+      decommissionStub.resolves();
+      const saveError = new Error('DB connection lost');
+      const brand = makeBrandModel({
+        getSemrushWorkspaceId: () => 'sub-ws',
+        save: sinon.stub().rejects(saveError),
+      });
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.deactivate(fakeContext({ brand }));
+      expect(response.status).to.equal(500);
+      expect(log.error).to.have.been.calledWithMatch(
+        'serenity deactivate: SERENITY_DEACTIVATE_SAVE_DIVERGENCE',
+      );
+    });
+
+    // Lines 130-131: errorTokenForStatus — switch cases 409 (conflict) and 503
+    // (configurationError). These are reached through mapError when a handler
+    // throws an ErrorWithStatusCode with those status codes.
+    it('mapError maps ErrorWithStatusCode 409 to the conflict error token', async () => {
+      handlers.handleListMarkets.rejects(
+        new ErrorWithStatusCode('Slice already exists', 409),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(409);
+      const body = await readBody(response);
+      expect(body.error).to.equal('conflict');
+    });
+
+    it('mapError maps ErrorWithStatusCode 503 to the configurationError token', async () => {
+      handlers.handleListMarkets.rejects(
+        new ErrorWithStatusCode('Service unavailable', 503),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(503);
+      const body = await readBody(response);
+      expect(body.error).to.equal('configurationError');
+    });
+
+    // Line 138: mapError — `Number.isInteger(e.status) ? e.status : 400` fallback.
+    // When an ErrorWithStatusCode is constructed with a non-integer status (e.g. a
+    // string), the ternary falls through to 400.
+    it('mapError defaults to 400 when ErrorWithStatusCode carries a non-integer status', async () => {
+      const err = new ErrorWithStatusCode('bad request', 'not-a-number');
+      handlers.handleListMarkets.rejects(err);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(400);
+    });
+
+    // Line 364: createPrompts — `ctx.data || {}` in the subworkspace branch. The
+    // {} fallback fires when ctx.data is absent in subworkspace mode.
+    it('createPrompts passes {} body to subworkspace handler when ctx.data is absent', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
+      });
+      handlers.handleCreatePromptsSubworkspace.resolves({ created: 0 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.data = undefined;
+      const response = await controller.createPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePromptsSubworkspace.firstCall.args[2]).to.deep.equal({});
+    });
+
+    // Line 434: bulkDeletePrompts — `ctx.data || {}` in the flat branch. The {}
+    // fallback fires when ctx.data is absent in flat mode.
+    it('bulkDeletePrompts passes {} body to flat handler when ctx.data is absent', async () => {
+      handlers.handleBulkDeletePrompts.resolves({ deleted: 0, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.data = undefined;
+      const response = await controller.bulkDeletePrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleBulkDeletePrompts.firstCall.args[4]).to.deep.equal({});
+    });
+
+    // Line 528: createMarket — `ctx.data || {}` in the subworkspace branch. The {}
+    // fallback fires when ctx.data is absent in subworkspace mode.
+    it('createMarket passes {} body to subworkspace handler when ctx.data is absent', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
+      });
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 200, body: {} });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.data = undefined;
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3]).to.deep.equal({});
+    });
+
+    // Line 370: createPrompts — `ctx.data || {}` in the flat-mode branch. The {}
+    // fallback fires when ctx.data is absent in flat mode.
+    it('createPrompts passes {} body to flat handler when ctx.data is absent', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 0, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.data = undefined;
+      const response = await controller.createPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePrompts.firstCall.args[4]).to.deep.equal({});
+    });
+
+    // Line 76: safeError — `msg || ''` — the '' fallback fires when msg is falsy.
+    // Reached through mapError when an ErrorWithStatusCode has no message (undefined).
+    it('mapError handles an ErrorWithStatusCode with an undefined message (safeError || fallback)', async () => {
+      const err = new ErrorWithStatusCode(undefined, 400);
+      handlers.handleListMarkets.rejects(err);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      // The response must still be a valid JSON envelope with a string message.
+      expect(response.status).to.equal(400);
+      const body = await readBody(response);
+      expect(body.message).to.equal('');
+    });
+
+    // Line 102: extractQuery try-catch — fires when context.request.url is not a
+    // valid URL and `new URL(...)` throws. The catch returns {} so parsedQuery
+    // returns {}.
+    it('parsedQuery returns {} when context.request.url is unparseable (extractQuery catch branch)', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = { url: 'not a valid url \x00' };
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(200);
+      // No query params parsed — handler gets an empty query object.
+      const queryArg = handlers.handleListPrompts.firstCall.args[4];
+      expect(queryArg).to.deep.equal({});
+    });
+
+    // Lines 112, 116: parsedQuery — `Number.isFinite(n) ? n : null` null branch for
+    // geoTargetId and page when the query value is non-numeric.
+    it('parsedQuery coerces an unparseable geoTargetId to null (line 112 null branch)', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = { url: 'https://x/prompts?geoTargetId=not-a-number' };
+      await controller.listPrompts(ctx);
+      expect(handlers.handleListPrompts.firstCall.args[4].geoTargetId).to.equal(null);
+    });
+
+    it('parsedQuery coerces an unparseable page to null (line 116 null branch)', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = { url: 'https://x/prompts?page=xyz' };
+      await controller.listPrompts(ctx);
+      expect(handlers.handleListPrompts.firstCall.args[4].page).to.equal(null);
     });
   });
 });

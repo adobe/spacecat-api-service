@@ -4927,6 +4927,41 @@ describe('Brands Controller', () => {
       expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
     });
 
+    // createErrorResponse lines 196-197: a SerenityTransportError whose status IS
+    // 401/403 is passed through as that status with the 'Upstream authorization
+    // failed' message (the true side of the status ternary and the false side of
+    // the message ternary; the 502 sides are covered by the redaction test above).
+    it('maps a 401 Semrush upstream error to HTTP 401 + generic auth message', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
+      const syncStub = sinon.stub().rejects(
+        new SerenityTransportError(401, `Semrush POST ${leakUrl} failed: 401`, {}),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(401);
+      const body = await response.json();
+      expect(body.message).to.equal('Upstream authorization failed');
+      // The internal gateway URL must not leak via body or header.
+      expect(JSON.stringify(body)).to.not.contain('gw.internal');
+      expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+    });
+
     it('re-syncs CI competitors (with removed domains) when competitors change on a sub-workspace brand', async () => {
       const updated = {
         id: BRAND_UUID,
@@ -5456,5 +5491,327 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
     expect(body.message).to.contain('US (5 prompts)');
     expect(body.message).to.contain('DE (2 prompts)');
     expect(updateStub).to.not.have.been.called;
+  });
+});
+
+describe('Brands Controller — defensive branch coverage', () => {
+  const ORG_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
+  const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+  const loggerStub = {
+    info: stub(), error: stub(), warn: stub(), debug: stub(),
+  };
+  const mockEnv = {
+    BRAND_IMS_HOST: 'https://ims-na1.adobelogin.com',
+    BRAND_IMS_CLIENT_ID: 'client',
+    BRAND_IMS_CLIENT_CODE: 'code',
+    BRAND_IMS_CLIENT_SECRET: 'secret',
+  };
+
+  function buildContext() {
+    return {
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+      dataAccess: {
+        Organization: { findById: stub().resolves({ getId: () => ORG_ID }) },
+        services: {
+          postgrestClient: {
+            from: stub().callsFake(() => ({
+              select: stub().returnsThis(),
+              eq: stub().returnsThis(),
+              maybeSingle: stub().resolves({
+                data: { id: BRAND_UUID, name: 'New Brand' },
+                error: null,
+              }),
+              single: stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+            })),
+          },
+        },
+      },
+    };
+  }
+
+  async function mountController({
+    provisionBrandSubworkspace = stub().resolves({ semrushWorkspaceId: 'ws-1' }),
+    upsertBrand = stub().resolves({ id: BRAND_UUID, name: 'New Brand' }),
+  } = {}) {
+    const Mocked = await esmock('../../src/controllers/brands.js', {
+      '../../src/support/serenity/brand-provisioning.js': { provisionBrandSubworkspace },
+      '../../src/support/brands-storage.js': { upsertBrand },
+    });
+    const ctx = buildContext();
+    return { controller: Mocked.default(ctx, loggerStub, mockEnv), ctx };
+  }
+
+  // Lines 102-103: brandDomainFromPayload catch block. The URL constructor throws
+  // when the string is structurally invalid even after the 'https://' prefix is
+  // prepended — for example a bare space is not a valid hostname.
+  it('brandDomainFromPayload catch: returns 400 when the first URL is structurally invalid (new URL throws)', async () => {
+    const { controller, ctx } = await mountController();
+
+    // A semrushMarket create requires a parseable domain. Supplying a bare space
+    // as the url value means `new URL('https:// ')` throws → brandDomainFromPayload
+    // returns null → controller returns 400 "primary URL required".
+    const response = await controller.createBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID },
+      data: {
+        name: 'Brand X',
+        urls: [{ value: ' ' }], // space is not a valid hostname → URL throws
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a'],
+      },
+      dataAccess: ctx.dataAccess,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.match(/primary URL is required/i);
+  });
+
+  // Lines 1415-1416: brandAliases map — `typeof a === 'string' ? a : a?.name`.
+  // When the alias array contains object entries ({name}) the a?.name branch fires.
+  // When an entry is neither a string nor has a name, hasText filters it out.
+  it('brandAliases with object entries: extracts name from {name} objects and filters blanks', async () => {
+    const provisionStub = stub().resolves({ semrushWorkspaceId: 'ws-1' });
+    const upsertStub = stub().resolves({ id: BRAND_UUID, name: 'New Brand' });
+    const { controller, ctx } = await mountController({
+      provisionBrandSubworkspace: provisionStub,
+      upsertBrand: upsertStub,
+    });
+
+    const response = await controller.createBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID },
+      data: {
+        name: 'Brand X',
+        urls: [{ value: 'https://x.com' }],
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a'],
+        brandAliases: [
+          { name: 'Brand Alias Co' }, // object entry — a?.name fires (line 1416)
+          'plain string alias', // string entry — the string branch (line 1415)
+          { noName: true }, // object with no name → hasText filters out
+        ],
+      },
+      dataAccess: ctx.dataAccess,
+      attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+    });
+
+    expect(response.status).to.equal(201);
+    // The provisioning call must have received the extracted aliases (object→name,
+    // string→string, no-name object→filtered).
+    const provisionArgs = provisionStub.firstCall.args[1];
+    expect(provisionArgs.brandAliases).to.deep.equal(['Brand Alias Co', 'plain string alias']);
+  });
+
+  // Line 91 else: `Array.isArray(brandData?.urls) ? brandData.urls : []` — fires
+  // when urls is absent or not an array. brandDomainFromPayload then finds no first
+  // URL and returns null → controller returns 400 "primary URL required".
+  it('brandDomainFromPayload else-branch: treats absent urls as empty (no-array fallback → 400)', async () => {
+    const { controller, ctx } = await mountController();
+
+    const response = await controller.createBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID },
+      data: {
+        name: 'Brand X',
+        // urls is a string (not an array) — triggers the `[]` else branch at line 91
+        urls: 'https://x.com',
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a'],
+      },
+      dataAccess: ctx.dataAccess,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.match(/primary URL is required/i);
+  });
+
+  // Line 93 object-value branch: `typeof u === 'string' ? u : u?.value` — fires
+  // when a URL entry is an object like {value: '...'}. Already covered by the catch
+  // test above (space URL is an object entry). Adding an explicit test where the
+  // object yields a valid hostname to cover the non-throw path of line 93.
+  it('brandDomainFromPayload object-url: extracts hostname from {value} entry (line 93 u?.value branch)', async () => {
+    const provisionStub = stub().resolves({ semrushWorkspaceId: 'ws-1' });
+    const upsertStub = stub().resolves({ id: BRAND_UUID, name: 'New Brand' });
+    const { controller, ctx } = await mountController({
+      provisionBrandSubworkspace: provisionStub,
+      upsertBrand: upsertStub,
+    });
+
+    const response = await controller.createBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID },
+      data: {
+        name: 'Brand X',
+        urls: [{ value: 'https://brand.example.com' }], // object entry → u?.value branch
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a'],
+      },
+      dataAccess: ctx.dataAccess,
+      attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+    });
+
+    expect(response.status).to.equal(201);
+    expect(provisionStub.firstCall.args[1].brandDomain).to.equal('brand.example.com');
+  });
+
+  // Line 100: `url.hostname || null` — the null branch fires when URL parsing
+  // succeeds but yields an empty hostname. `file:///path` contains '://' so it is
+  // used as-is in new URL(...); file URLs have an empty hostname → || null fires →
+  // returns null → controller returns 400 "primary URL required".
+  it('brandDomainFromPayload null-hostname: file:// URL has empty hostname → null → 400', async () => {
+    const { controller, ctx } = await mountController();
+
+    const response = await controller.createBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID },
+      data: {
+        name: 'Brand X',
+        // file:///path contains '://' so it bypasses the https:// prefix, but
+        // new URL('file:///path').hostname is '' → url.hostname || null → null.
+        urls: ['file:///local/path'],
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a'],
+      },
+      dataAccess: ctx.dataAccess,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.match(/primary URL is required/i);
+  });
+
+  // Line 684: checkPromptsByBrand — `context.data || {}` — fires when context.data
+  // is undefined. The handler then extracts `prompts` from {}, finds no array, and
+  // returns 400.
+  it('checkPromptsByBrand: falls back to {} when context.data is absent', async () => {
+    const Mocked = await esmock('../../src/controllers/brands.js', {
+      '../../src/support/access-control-util.js': {
+        default: {
+          fromContext: () => ({ hasAccess: async () => true, hasAdminAccess: () => true }),
+        },
+      },
+      '../../src/support/prompts-storage.js': {
+        resolveBrandUuid: stub().resolves(BRAND_UUID),
+        checkPromptsExist: stub().resolves([]),
+        listPrompts: stub().resolves({ data: [], count: 0 }),
+        getPromptById: stub().resolves(null),
+        upsertPrompts: stub().resolves({}),
+        updatePromptById: stub().resolves(null),
+        deletePromptById: stub().resolves(false),
+        bulkDeletePrompts: stub().resolves({}),
+        getPromptStats: stub().resolves({}),
+        findPromptsBlockingRegionRemoval: stub().resolves({}),
+      },
+    });
+    const ctx = buildContext();
+    const controller = Mocked.default(ctx, loggerStub, mockEnv);
+
+    const response = await controller.checkPromptsByBrand({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: undefined, // exercises context.data || {} at line 684
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.match(/prompts.*array required/i);
+  });
+
+  // Line 737: getPromptStatsByBrand — `context.params || {}` — fires when
+  // context.params is undefined. spaceCatId and brandId are both undefined →
+  // first validation check returns 400.
+  it('getPromptStatsByBrand: falls back to {} when context.params is absent', async () => {
+    const Mocked = await esmock('../../src/controllers/brands.js', {
+      '../../src/support/access-control-util.js': {
+        default: {
+          fromContext: () => ({ hasAccess: async () => true, hasAdminAccess: () => true }),
+        },
+      },
+      '../../src/support/prompts-storage.js': {
+        resolveBrandUuid: stub().resolves(BRAND_UUID),
+        checkPromptsExist: stub().resolves([]),
+        listPrompts: stub().resolves({ data: [], count: 0 }),
+        getPromptById: stub().resolves(null),
+        upsertPrompts: stub().resolves({}),
+        updatePromptById: stub().resolves(null),
+        deletePromptById: stub().resolves(false),
+        bulkDeletePrompts: stub().resolves({}),
+        getPromptStats: stub().resolves({}),
+        findPromptsBlockingRegionRemoval: stub().resolves({}),
+      },
+    });
+    const ctx = buildContext();
+    const controller = Mocked.default(ctx, loggerStub, mockEnv);
+
+    const response = await controller.getPromptStatsByBrand({
+      ...ctx,
+      params: undefined, // exercises context.params || {} at line 737
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.match(/Organization ID required/i);
+  });
+
+  // Lines 1539-1540: updateBrandForOrg — `before?.region || []` and
+  // `updates.region || []`. These fire when the before-brand has no region field
+  // and the updates payload has no region (null/undefined/not set). In practice
+  // `updates.region` is undefined when the caller sets region to something; here
+  // we test the [] fallback.
+  it('updateBrandForOrg: before.region || [] and updates.region || [] fallback when both are absent', async () => {
+    const findPromptsStub = stub().resolves({});
+    const updateBrandStubLocal = stub().resolves({ id: BRAND_UUID });
+    const Mocked = await esmock('../../src/controllers/brands.js', {
+      '../../src/support/access-control-util.js': {
+        default: {
+          fromContext: () => ({ hasAccess: async () => true, hasAdminAccess: () => true }),
+        },
+      },
+      '../../src/support/prompts-storage.js': {
+        resolveBrandUuid: stub().resolves(BRAND_UUID),
+        findPromptsBlockingRegionRemoval: findPromptsStub,
+        listPrompts: stub().resolves({ data: [], count: 0 }),
+        getPromptById: stub().resolves(null),
+        upsertPrompts: stub().resolves({}),
+        updatePromptById: stub().resolves(null),
+        deletePromptById: stub().resolves(false),
+        bulkDeletePrompts: stub().resolves({}),
+        checkPromptsExist: stub().resolves([]),
+        getPromptStats: stub().resolves({}),
+      },
+      '../../src/support/brands-storage.js': {
+        getBrandById: stub().resolves({ id: BRAND_UUID }), // no region field → undefined
+        updateBrand: updateBrandStubLocal,
+        getBrandCompetitors: stub().resolves([]),
+        listBrands: stub().resolves([]),
+        upsertBrand: stub().resolves({}),
+        deleteBrand: stub().resolves(true),
+        getBrandBySite: stub().resolves(null),
+      },
+    });
+    const ctx = buildContext();
+    const controller = Mocked.default(ctx, loggerStub, mockEnv);
+
+    await controller.updateBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: { region: null }, // sets updates.region to null → || [] fires at line 1540
+    });
+
+    // The brand row returned null (not found) → 404; the important thing is
+    // that both || [] branches were exercised on the way to findPromptsBlockingRegionRemoval.
+    expect(findPromptsStub).to.have.been.calledOnce;
+    const arg = findPromptsStub.firstCall.args[0];
+    expect(arg.oldRegions).to.deep.equal([]); // before?.region was undefined → line 1539
+    expect(arg.newRegions).to.deep.equal([]); // updates.region was null → line 1540
   });
 });

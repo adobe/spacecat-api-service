@@ -21,6 +21,7 @@ import {
   clearWorkspaceCache,
   clearBrandWorkspaceCache,
   CACHE_TTL_MS,
+  BRAND_CACHE_TTL_MS,
   NEG_TTL_MS,
   MAX_ENTRIES,
 } from '../../../src/support/serenity/workspace-resolver.js';
@@ -264,25 +265,25 @@ describe('resolveBrandWorkspace', () => {
     });
   });
 
-  it('caches the subworkspace lookup over the positive TTL window', async () => {
+  it('caches the subworkspace lookup over the (short) brand positive TTL window', async () => {
     clock = sinon.useFakeTimers({ now: 0, toFake: ['Date'] });
     const brandFindById = sandbox.stub().resolves(makeBrand(SUB_WS));
     const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub() });
 
     await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
-    clock.tick(CACHE_TTL_MS - 1);
+    clock.tick(BRAND_CACHE_TTL_MS - 1);
     await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
 
     expect(brandFindById).to.have.been.calledOnce;
   });
 
-  it('re-reads the brand after the positive TTL expires', async () => {
+  it('re-reads the brand after the short brand positive TTL expires (bounds cross-instance staleness)', async () => {
     clock = sinon.useFakeTimers({ now: 0, toFake: ['Date'] });
     const brandFindById = sandbox.stub().resolves(makeBrand(SUB_WS));
     const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub() });
 
     await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
-    clock.tick(CACHE_TTL_MS + 1);
+    clock.tick(BRAND_CACHE_TTL_MS + 1);
     await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
 
     expect(brandFindById).to.have.been.calledTwice;

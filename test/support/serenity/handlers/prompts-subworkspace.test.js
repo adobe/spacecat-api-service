@@ -370,3 +370,206 @@ describe('prompts-subworkspace handlers', () => {
     });
   });
 });
+
+describe('prompts-subworkspace — defensive branch coverage', () => {
+  afterEach(() => sinon.restore());
+
+  // Lines 61/65: page and search defensive defaults in handleListPromptsSubworkspace.
+  // query.page not an integer (string) → defaults to 1.
+  // query.page <= 0 → also defaults to 1.
+  // query without search → search stays undefined.
+  it('handleListPromptsSubworkspace: non-integer page defaults to 1, absent search stays undefined', async () => {
+    const transport = makeTransport({
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    });
+    // page is a string (not integer) → defaults to 1; no search field.
+    const result = await handleListPromptsSubworkspace(
+      transport,
+      WS,
+      { geoTargetId: 2840, languageCode: 'en', page: 'bad' },
+      log,
+    );
+    expect(result.page).to.equal(1);
+    const [, , body] = transport.listPromptsByTags.firstCall.args;
+    expect(body.page).to.equal(1);
+    expect(body.search).to.equal(undefined);
+  });
+
+  it('handleListPromptsSubworkspace: page <= 0 defaults to 1', async () => {
+    const transport = makeTransport({
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    });
+    const result = await handleListPromptsSubworkspace(
+      transport,
+      WS,
+      { geoTargetId: 2840, languageCode: 'en', page: 0 },
+      log,
+    );
+    expect(result.page).to.equal(1);
+  });
+
+  // Line 67 truthy: query.tagIds IS an array — cover the truthy side if it
+  // lacks coverage (the else side produces [] which existing tests exercise).
+  it('handleListPromptsSubworkspace: tagIds array is forwarded to listPromptsByTags', async () => {
+    const transport = makeTransport({
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    });
+    await handleListPromptsSubworkspace(
+      transport,
+      WS,
+      { geoTargetId: 2840, languageCode: 'en', tagIds: ['uuid-1', 'uuid-2'] },
+      log,
+    );
+    const [, , body] = transport.listPromptsByTags.firstCall.args;
+    expect(body.tag_ids).to.deep.equal(['uuid-1', 'uuid-2']);
+  });
+
+  // Line 86: `Array.isArray(resp?.items)?resp.items:[]` — transport.listPromptsByTags
+  // resolves with `{}` (no items field) → defensive fallback to [].
+  it('handleListPromptsSubworkspace: survives upstream listPromptsByTags returning {} (no items)', async () => {
+    const transport = makeTransport({
+      listPromptsByTags: sinon.stub().resolves({}),
+    });
+    const result = await handleListPromptsSubworkspace(
+      transport,
+      WS,
+      { geoTargetId: 2840, languageCode: 'en' },
+      log,
+    );
+    expect(result.items).to.deep.equal([]);
+    expect(result.total).to.equal(0);
+  });
+
+  // Line 91: `Number.isFinite(resp?.total)?resp.total:items.length` else branch —
+  // fires when items.length >= limit (full page) AND resp.total is missing/non-finite.
+  it('handleListPromptsSubworkspace: falls back to items.length when total is missing and page is full', async () => {
+    // Return exactly 1 item and set limit to 1 — a full page. resp has no total.
+    const transport = makeTransport({
+      listPromptsByTags: sinon.stub().resolves({
+        items: [{ id: 'q1', name: 'a prompt', tags: [] }],
+        // total intentionally absent
+      }),
+    });
+    const result = await handleListPromptsSubworkspace(
+      transport,
+      WS,
+      { geoTargetId: 2840, languageCode: 'en', limit: 1 },
+      log,
+    );
+    // items.length (1) is NOT < limit (1), so total path falls through to else.
+    // Number.isFinite(undefined) is false → total = items.length = 1.
+    expect(result.total).to.equal(1);
+  });
+
+  // Line 109: `Array.isArray(body?.prompts)?body.prompts:[]` else —
+  // body.prompts is not an array so [] is used, then the empty-array 400 fires.
+  it('handleCreatePromptsSubworkspace: 400s when body.prompts is not an array', async () => {
+    await expect(
+      handleCreatePromptsSubworkspace(makeTransport(), WS, { prompts: 'notanarray' }, log),
+    ).to.be.rejectedWith(/non-empty/);
+  });
+
+  // Line 149: `Array.isArray(resp?.ids)&&resp.ids.length>0?String(resp.ids[0]):''` else —
+  // transport.createTaggedPrompts resolves with {} (no ids) → semrushPromptId = ''.
+  it('handleCreatePromptsSubworkspace: semrushPromptId is empty string when createTaggedPrompts returns no ids', async () => {
+    const transport = makeTransport({
+      createTaggedPrompts: sinon.stub().resolves({}),
+    });
+    const result = await handleCreatePromptsSubworkspace(transport, WS, {
+      prompts: [{
+        text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+      }],
+    }, log);
+    expect(result.created).to.have.length(1);
+    expect(result.created[0].semrushPromptId).to.equal('');
+  });
+
+  // Lines 246-247: in handleUpdatePromptSubworkspace, `body.tags` is not an array
+  // — the else `[]` fallback fires for the nextTags assignment.
+  it('handleUpdatePromptSubworkspace: non-array body.tags coerces to []', async () => {
+    const transport = makeTransport({
+      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-id'] }),
+    });
+    const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+      text: 'next',
+      tags: null,
+      geoTargetId: 2840,
+      languageCode: 'en',
+    }, log);
+    expect(result.status).to.equal(200);
+    expect(result.body.tags).to.deep.equal([]);
+  });
+
+  // Line 275: `Array.isArray(resp?.ids)&&resp.ids.length>0?String(resp.ids[0]):''` else
+  // on the update path — createTaggedPrompts returns {} so newSemrushPromptId = ''.
+  it('handleUpdatePromptSubworkspace: empty semrushPromptId when createTaggedPrompts returns no ids', async () => {
+    const transport = makeTransport({
+      createTaggedPrompts: sinon.stub().resolves({}),
+    });
+    const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+      text: 'next',
+      tags: ['t'],
+      geoTargetId: 2840,
+      languageCode: 'en',
+    }, log);
+    expect(result.status).to.equal(200);
+    expect(result.body.semrushPromptId).to.equal('');
+  });
+
+  // Line 299: `Array.isArray(body?.prompts)?body.prompts:[]` else —
+  // body.prompts is not an array so [] is used, then the empty-array 400 fires.
+  it('handleBulkDeletePromptsSubworkspace: 400s when body.prompts is not an array', async () => {
+    await expect(
+      handleBulkDeletePromptsSubworkspace(makeTransport(), WS, { prompts: 'bad' }, log),
+    ).to.be.rejectedWith(/non-empty/);
+  });
+
+  // Line 61 true branch: query.page IS a positive integer — the ternary uses it directly.
+  // All existing tests omit page (defaults to 1 via the else), so this side was uncovered.
+  it('handleListPromptsSubworkspace: valid integer page > 0 is forwarded to listPromptsByTags', async () => {
+    const transport = makeTransport({
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    });
+    const result = await handleListPromptsSubworkspace(
+      transport,
+      WS,
+      { geoTargetId: 2840, languageCode: 'en', page: 3 },
+      log,
+    );
+    expect(result.page).to.equal(3);
+    const [, , body] = transport.listPromptsByTags.firstCall.args;
+    expect(body.page).to.equal(3);
+  });
+
+  // Line 65 true branch: query.search has text — the truthy path trims and returns the string.
+  it('handleListPromptsSubworkspace: search string is trimmed and forwarded when provided', async () => {
+    const transport = makeTransport({
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    });
+    await handleListPromptsSubworkspace(
+      transport,
+      WS,
+      { geoTargetId: 2840, languageCode: 'en', search: '  shoes  ' },
+      log,
+    );
+    const [, , body] = transport.listPromptsByTags.firstCall.args;
+    expect(body.search).to.equal('shoes');
+  });
+
+  // Line 246 inner falsy branch: body.tags IS an array but contains a falsy element
+  // (null or empty string). The `String(t || \'\').trim()` coerces it to \'\' which
+  // filter(Boolean) then drops. This is distinct from the else branch (non-array tags).
+  it('handleUpdatePromptSubworkspace: falsy tag elements in body.tags are coerced and filtered', async () => {
+    const transport = makeTransport({
+      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-id'] }),
+    });
+    const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+      text: 'next',
+      tags: ['keep', null, ''],
+      geoTargetId: 2840,
+      languageCode: 'en',
+    }, log);
+    expect(result.status).to.equal(200);
+    expect(result.body.tags).to.deep.equal(['keep']);
+  });
+});

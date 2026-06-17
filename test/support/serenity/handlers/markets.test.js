@@ -1524,3 +1524,92 @@ describe('listLanguageCatalog', () => {
     await expect(listLanguageCatalog(transport)).to.be.rejectedWith('boom');
   });
 });
+
+describe('handlers/markets.js — defensive branch coverage', () => {
+  beforeEach(() => {
+    clearLanguageCache();
+    clearTagCache();
+  });
+
+  // Line 615: `...(logCtx || {})` — the `|| {}` else branch fires when logCtx
+  // is undefined. listTagsForProject reaches this only when the truncation
+  // ceiling is hit AND logCtx was not supplied.
+  it('listTagsForProject spreads empty object when logCtx is undefined (truncation warn path)', async () => {
+    // Re-import so we can call listTagsForProject directly with logCtx omitted.
+    const { listTagsForProject: ltp, clearTagCache: ctc } = await import(
+      '../../../../src/support/serenity/handlers/markets.js'
+    );
+    ctc();
+    // Return a full page (200 items) on every call so the loop hits TAG_PAGE_LIMIT
+    // (50) without short-circuiting. This is the only path that reaches the
+    // `...(logCtx || {})` spread in the truncation warn.
+    const fullPage = Array.from({ length: 200 }, (_, i) => ({
+      id: `p${i}`, name: `q${i}`, tags: [`tag-${i}`],
+    }));
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: fullPage }),
+    };
+    const log = fakeLog();
+    // Call without logCtx (fourth arg omitted → undefined).
+    const result = await ltp(transport, WORKSPACE, 'proj-test', undefined, log);
+    // The warn fired; no logCtx keys in the spread means the warn object
+    // only has the five built-in keys (semrushWorkspaceId, projectId, …).
+    expect(log.warn).to.have.been.calledOnce;
+    expect(result.items.length).to.be.greaterThan(0);
+  });
+
+  // Line 799: `id: hasText(l.id)?String(l.id):null` — the null branch fires
+  // when a language item has a blank or missing `id` field. listLanguageCatalog
+  // keeps such rows (they have a valid name) and maps id to null.
+  it('listLanguageCatalog maps a language item with missing id to null', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { name: 'English' }, // no id at all
+          { id: '', name: 'French' }, // blank id — hasText('') is false
+          { id: 'l-de', name: 'German' }, // normal
+        ],
+      }),
+    };
+    const result = await listLanguageCatalog(transport);
+    // All three have names so none are dropped. id-less/blank-id rows get null.
+    const english = result.items.find((l) => l.name === 'English');
+    const french = result.items.find((l) => l.name === 'French');
+    const german = result.items.find((l) => l.name === 'German');
+    expect(english.id).to.equal(null);
+    expect(french.id).to.equal(null);
+    expect(german.id).to.equal('l-de');
+  });
+
+  // Line 871: `const ctx = logCtx || {}` in syncModelsForProject — the `|| {}`
+  // else branch fires when logCtx is undefined. handleUpdateModels always passes
+  // a logCtx object, so we call syncModelsForProject directly to omit it.
+  it('syncModelsForProject uses empty ctx when logCtx is undefined (no spread error)', async () => {
+    const { syncModelsForProject: smp, clearTagCache: ctc } = await import(
+      '../../../../src/support/serenity/handlers/markets.js'
+    );
+    ctc();
+    // Need to trigger a real change (toAdd/toRemove non-empty) so the log
+    // paths that spread `...ctx` are reached.
+    const transport = {
+      listAiModels: sinon.stub()
+        .onFirstCall().resolves({ items: [] })
+        .onSecondCall()
+        .resolves({
+          items: [{
+            id: 'assign-1',
+            model: { id: 'cat-x', key: 'key-x', name: null },
+          }],
+        }),
+      addAiModel: sinon.stub().resolves({}),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+    // logCtx omitted (undefined) — the `logCtx || {}` branch fires.
+    const result = await smp(transport, WORKSPACE, 'proj-1', ['cat-x'], undefined, log);
+    expect(result.items).to.have.length(1);
+    expect(result.items[0].id).to.equal('cat-x');
+    // info log fires with `...ctx` spread; no TypeError means || {} worked.
+    expect(log.info).to.have.been.calledWithMatch('handleUpdateModels: sync complete');
+  });
+});

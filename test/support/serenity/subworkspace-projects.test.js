@@ -287,4 +287,116 @@ describe('subworkspace-projects', () => {
       expect(alert).to.have.been.calledOnce;
     });
   });
+  describe('defensive branch coverage', () => {
+    describe('orderKey via resolveProject duplicate sort', () => {
+      it('fires both nullish fallbacks when projects have no created_at and no id', async () => {
+        // Both created_at and id absent: String(undefined ?? '') = '' for both fields.
+        // The duplicate-slice sort in resolveProject exercises orderKey on each project.
+        const mkNoId = () => ({
+          publish_status: 'draft',
+          settings: { ai: { location: { id: 2276 }, language: { name: 'de' } } },
+        });
+        const transport = {
+          listProjects: sinon.stub().resolves({ items: [mkNoId(), mkNoId()] }),
+        };
+        const alert = sinon.spy();
+        // Two identical sort keys => tie; either element is valid, must not throw.
+        const p = await resolveProject(transport, WS, 2276, 'de', { error: alert });
+        expect(p).to.be.an('object');
+        expect(alert).to.have.been.calledOnce;
+      });
+
+      it('fires both nullish fallbacks in buildSliceProjectMap duplicate sort', async () => {
+        const mkNoId = () => ({
+          publish_status: 'draft',
+          settings: { ai: { location: { id: 2840 }, language: { name: 'en' } } },
+        });
+        const transport = {
+          listProjects: sinon.stub().resolves({ items: [mkNoId(), mkNoId()] }),
+        };
+        const alert = sinon.spy();
+        const map = await buildSliceProjectMap(transport, WS, { error: alert });
+        expect(map.size).to.equal(1);
+        expect(alert).to.have.been.calledOnce;
+      });
+    });
+
+    describe('projectToSlice defensive branches', () => {
+      it('updatedAt picks published_at when updated_at is absent (middle ?? branch)', () => {
+        // No updated_at but has published_at -> hits the middle ?? operand on line 103.
+        const p = {
+          id: 'p2',
+          publish_status: 'draft',
+          published_at: '2026-06-10T00:00:00Z',
+          settings: { ai: { location: { id: 2276 }, language: { name: 'de' } } },
+        };
+        const s = projectToSlice(p, BRAND);
+        expect(s.updatedAt).to.equal('2026-06-10T00:00:00Z');
+      });
+
+      it('updatedAt is null when both updated_at and published_at are absent (null branch)', () => {
+        // Neither updated_at nor published_at -> hits the trailing ?? null on line 103.
+        const p = {
+          id: 'p3',
+          publish_status: 'draft',
+          settings: { ai: { location: { id: 2276 }, language: { name: 'de' } } },
+        };
+        const s = projectToSlice(p, BRAND);
+        expect(s.updatedAt).to.equal(null);
+      });
+
+      it('semrushProjectId is null when id is absent or blank (else branch)', () => {
+        // hasText(undefined) and hasText('') are both false -> null else on line 105.
+        const noId = {
+          publish_status: 'draft',
+          settings: { ai: { location: { id: 2276 }, language: { name: 'de' } } },
+        };
+        expect(projectToSlice(noId, BRAND).semrushProjectId).to.equal(null);
+        const blankId = { ...noId, id: '' };
+        expect(projectToSlice(blankId, BRAND).semrushProjectId).to.equal(null);
+      });
+    });
+
+    describe('buildSliceProjectMap with non-array listing', () => {
+      it('treats listing {} (no items array) as empty and returns an empty Map', async () => {
+        // Exercises the Array.isArray false branch on line 138.
+        const transport = { listProjects: sinon.stub().resolves({}) };
+        const map = await buildSliceProjectMap(transport, WS, log);
+        expect(map.size).to.equal(0);
+      });
+    });
+
+    describe('resolveProject with non-array listing and falsy languageCode', () => {
+      it('returns null when listing has no items array', async () => {
+        // Exercises the Array.isArray false branch on line 176.
+        const transport = { listProjects: sinon.stub().resolves({}) };
+        const result = await resolveProject(transport, WS, 2276, 'de', log);
+        expect(result).to.equal(null);
+      });
+
+      it('uses null as wantLang when languageCode is undefined (falsy else branch)', async () => {
+        // hasText(undefined) is false -> wantLang = null on line 177; a project
+        // with no language (langOf returns null) then matches.
+        const transport = {
+          listProjects: sinon.stub().resolves({
+            items: [project({ location: 2276, language: null })],
+          }),
+        };
+        const result = await resolveProject(transport, WS, 2276, undefined, log);
+        expect(result).to.not.equal(null);
+        expect(result.settings.ai.language).to.equal(null);
+      });
+
+      it('uses null as wantLang when languageCode is empty string (falsy else branch)', async () => {
+        // hasText('') is false -> wantLang = null on line 177.
+        const transport = {
+          listProjects: sinon.stub().resolves({
+            items: [project({ location: 2276, language: null })],
+          }),
+        };
+        const result = await resolveProject(transport, WS, 2276, '', log);
+        expect(result).to.not.equal(null);
+      });
+    });
+  });
 });

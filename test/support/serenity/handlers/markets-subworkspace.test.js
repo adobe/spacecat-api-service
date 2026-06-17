@@ -767,3 +767,152 @@ describe('markets-subworkspace handlers', () => {
     });
   });
 });
+
+describe('markets-subworkspace — defensive branch coverage', () => {
+  afterEach(() => {
+    sinon.restore();
+    clearTagCache();
+  });
+
+  // Line 86: `status?.initialized ?? null` — the `?? null` branch fires when
+  // transport.getInitStatus resolves with an object that has no `initialized`
+  // field (e.g. `{}`). The existing test "tolerates an init_status read failure"
+  // covers the catch path; this covers the success path with a missing key.
+  it('handleGetMarketSubworkspace: initialized is null when getInitStatus returns {} (no initialized field)', async () => {
+    const transport = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [proj()] }),
+      getInitStatus: sinon.stub().resolves({}),
+    });
+    const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log);
+    expect(result.initialized).to.equal(null);
+  });
+
+  // Line 115: `hasText(body?.name)?String(body.name):defaultMarketName(body.brandDisplayName)` else
+  // — body without a `name` field so defaultMarketName is called.
+  // Note: the existing test "defaults the project brand_names to just the primary brand name when
+  // no aliases" already passes a body without `name`, but does not assert the generated name
+  // pattern. This test locks the else branch explicitly by asserting the random-suffix shape.
+  it('buildCreateProjectBody: uses defaultMarketName when body has no name field', async () => {
+    const transport = makeTransport();
+    const brand = makeBrand();
+    const bodyNoName = {
+      market: 'us',
+      languageCode: 'en',
+      brandDomain: 'example.com',
+      brandNames: ['B'],
+      brandDisplayName: 'MyBrand',
+    };
+    const res = await handleCreateMarketSubworkspace(transport, brand, PARENT, bodyNoName, log);
+    expect(res.status).to.equal(201);
+    const projectBody = transport.createProject.firstCall.args[1];
+    // defaultMarketName produces "<brandDisplayName>-<6hex>".
+    expect(projectBody.name).to.match(/^MyBrand-[0-9a-f]{6}$/);
+  });
+
+  // Line 121: `...(Array.isArray(brandAliases)?brandAliases:[])` else branch fires
+  // when brandAliases is null (default is [] but null bypasses the default).
+  // With generateTopics: false the unguarded `...brandAliases` at line 375 is
+  // never reached, so the null is safely handled by line 121's guard instead.
+  it('buildCreateProjectBody: falls back to [] when brandAliases is null', async () => {
+    const transport = makeTransport();
+    const brand = makeBrand();
+    const res = await handleCreateMarketSubworkspace(
+      transport,
+      brand,
+      PARENT,
+      { ...createBody, brandNames: ['BrandX'] },
+      log,
+      null,
+      null,
+      { brandAliases: null },
+    );
+    expect(res.status).to.equal(201);
+    const projectBody = transport.createProject.firstCall.args[1];
+    // With null brandAliases the else fires and produces []; dedupeNames(['BrandX']) = ['BrandX'].
+    expect(projectBody.brand_names).to.deep.equal(['BrandX']);
+  });
+
+  // Line 192: `.sort((a,b)=>(Number(b?.volume)||0)-(Number(a?.volume)||0))`
+  // Both `||0` branches fire when volume is missing/non-numeric on the topics.
+  // generateAndAttachPrompts is reached when generateTopics: true.
+  it('generateAndAttachPrompts: handles topics with missing volume (both ||0 branches)', async () => {
+    const transport = makeTransport({
+      getBrandTopics: sinon.stub().resolves([
+        // Neither topic has a volume field — Number(undefined)||0 fires on both
+        // sides of the sort comparator.
+        { topic: 'Alpha', prompts: ['alpha prompt'] },
+        { topic: 'Beta', prompts: ['beta prompt'] },
+      ]),
+      createTaggedPrompts: sinon.stub().resolves(null),
+    });
+    const brand = makeBrand();
+    const res = await handleCreateMarketSubworkspace(
+      transport,
+      brand,
+      PARENT,
+      createBody,
+      log,
+      null,
+      null,
+      { generateTopics: true, standardTags: [], publishMode: 'skip' },
+    );
+    expect(res.status).to.equal(201);
+    // Both prompts are attached — no crash from the sort comparator.
+    expect(transport.createTaggedPrompts).to.have.been.calledOnce;
+  });
+
+  // Line 198: `String(s || '')` — the `|| ''` branch fires for a falsy element
+  // in the brandAliases array (e.g. an empty string or null element).
+  // When an element is falsy, `s || ''` coerces to '' which is then trimmed and
+  // filtered out by `.filter((s) => s.length > 0)`, so it produces no needle.
+  it('generateAndAttachPrompts: falsy element in brandAliases is coerced and filtered out (s||"" branch)', async () => {
+    const transport = makeTransport({
+      getBrandTopics: sinon.stub().resolves([
+        { topic: 'T', volume: 10, prompts: ['adobe shoes'] },
+      ]),
+      createTaggedPrompts: sinon.stub().resolves(null),
+    });
+    const brand = makeBrand();
+    const res = await handleCreateMarketSubworkspace(
+      transport,
+      brand,
+      PARENT,
+      // brandNames contains 'adobe'; aliases contains a null/empty element.
+      { ...createBody, brandNames: ['adobe'] },
+      log,
+      null,
+      null,
+      {
+        generateTopics: true,
+        standardTags: [],
+        // null element → String(null || '') = '' → trimmed → filtered out.
+        brandAliases: [null, 'AdobeSub'],
+        publishMode: 'skip',
+      },
+    );
+    expect(res.status).to.equal(201);
+    const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
+    // 'adobe shoes' contains 'adobe' → branded (null alias was dropped, not used).
+    expect(promptsByText['adobe shoes']).to.include('type:branded');
+  });
+
+  // Line 115 truthy branch: body.name is provided and valid — String(body.name) is used
+  // directly instead of defaultMarketName. All existing tests use createBody (no name
+  // field), so this side was never exercised.
+  it('buildCreateProjectBody: uses body.name directly when a valid name is provided', async () => {
+    const transport = makeTransport();
+    const brand = makeBrand();
+    const bodyWithName = {
+      name: 'explicit-project-name',
+      market: 'us',
+      languageCode: 'en',
+      brandDomain: 'example.com',
+      brandNames: ['B'],
+      brandDisplayName: 'B',
+    };
+    const res = await handleCreateMarketSubworkspace(transport, brand, PARENT, bodyWithName, log);
+    expect(res.status).to.equal(201);
+    const projectBody = transport.createProject.firstCall.args[1];
+    expect(projectBody.name).to.equal('explicit-project-name');
+  });
+});

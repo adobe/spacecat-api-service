@@ -80,10 +80,18 @@ function subworkspaceTitle(brand) {
   const name = brand?.getName?.();
   const id = brand?.getId?.();
   const suffix = hasText(id) ? id.slice(0, ID_SUFFIX_LEN) : '';
-  if (hasText(name) && hasText(suffix)) {
-    return `${name} [${suffix}]`;
+  // The id-suffix is the collision-free key the adoption match depends on (see
+  // the block comment above). Without it the title would not be unique per
+  // brand, so a missing brand id is a hard error, NOT a silent fallback to a
+  // non-unique title that adoption could later mis-match. brandId is always a
+  // UUID on every path that reaches here, so this is defensive-only.
+  if (!hasText(suffix)) {
+    throw new ErrorWithStatusCode(
+      'Brand sub-workspace title requires a brand id (none resolved)',
+      500,
+    );
   }
-  return hasText(suffix) ? `brand-${suffix}` : name;
+  return hasText(name) ? `${name} [${suffix}]` : `brand-${suffix}`;
 }
 
 async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {

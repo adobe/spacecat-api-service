@@ -1570,6 +1570,12 @@ function BrandsController(ctx, log, env) {
       // onto every market/project (region-filtered per market). Skipped for
       // flat-mode brands and unrelated edits. Hard-fail so the brand never drifts
       // out of sync silently. One transport for both syncs.
+      //
+      // NOTE (intentional asymmetry vs create): the SAME URL/competitor
+      // propagation is BEST-EFFORT on the create path (handleCreateMarket-
+      // Subworkspace swallows a benchmark hiccup so it cannot strand a
+      // half-provisioned brand) but HARD-FAIL here on edit — an already-live
+      // brand must not silently diverge from Semrush after a row commit.
       const urlsTouched = updates.urls !== undefined
         || updates.socialAccounts !== undefined
         || updates.earnedContent !== undefined;

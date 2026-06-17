@@ -322,11 +322,13 @@ export async function handleCreatePrompts(
     affectedProjectIds,
     log,
   );
-  for (const e of publishErrors) {
+  // publishAffected returns already-redacted { projectId, message } records;
+  // pubErr is a record, not a raw error, so pubErr.message is safe to surface.
+  for (const pubErr of publishErrors) {
     failed.push({
       text: '',
       status: 502,
-      message: `publish: ${e.message}`,
+      message: `publish: ${pubErr.message}`,
     });
   }
 
@@ -560,11 +562,12 @@ export async function handleBulkDeletePrompts(
     Array.from(projectsToPublish),
     log,
   );
-  publishErrors.forEach((e) => {
+  // pubErr is an already-redacted { projectId, message } record (see above).
+  publishErrors.forEach((pubErr) => {
     failed.push({
       semrushPromptId: '',
       status: 502,
-      message: `publish: ${e.message}`,
+      message: `publish: ${pubErr.message}`,
     });
   });
 
