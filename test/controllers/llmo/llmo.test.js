@@ -3088,6 +3088,37 @@ describe('LlmoController', () => {
       });
     });
 
+    it('should return bad request when brandName is whitespace-only', async () => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: () => 'dev/example-com',
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => `https://${domain}`,
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+      const ctx = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, brandName: '   ' },
+      };
+      const result = await testController.onboardCustomer(ctx);
+      expect(result.status).to.equal(400);
+    });
+
     it('should return bad request when validation fails', async () => {
       validateSiteNotOnboardedStub.reset();
       validateSiteNotOnboardedStub.resolves({
@@ -3571,6 +3602,342 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody.imsOrgId).to.equal(upperCaseImsOrgId);
+    });
+
+    // Helper shared by markets[] tests below
+    const makeOnboardController = async (perfStub) => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          performLlmoOnboarding: perfStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const name = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? name : `dev/${name}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      return LlmoControllerOnboard(mockContext);
+    };
+
+    it('should forward markets[] to performLlmoOnboarding when supplied (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: {
+          ...onboardingContext.data,
+          markets: [{ market: 'US', languageCode: 'en' }, { market: 'DE', languageCode: 'de' }],
+        },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
+        { market: 'US', languageCode: 'en' },
+        { market: 'DE', languageCode: 'de' },
+      ]);
+    });
+
+    it('should synthesize markets from region when markets is absent (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = { ...onboardingContext, data: { ...onboardingContext.data, region: 'IN' } };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
+        { market: 'IN', languageCode: 'en' },
+      ]);
+    });
+
+    it('should use markets and ignore region when both are supplied (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: {
+          ...onboardingContext.data,
+          region: 'IN',
+          markets: [{ market: 'US', languageCode: 'en' }],
+        },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
+        { market: 'US', languageCode: 'en' },
+      ]);
+    });
+
+    it('should return 400 for invalid market code in markets[] (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{ market: 'usa', languageCode: 'en' }] },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 for invalid language in markets[] (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{ market: 'US', languageCode: 'EN' }] },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 for empty markets array (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = { ...onboardingContext, data: { ...onboardingContext.data, markets: [] } };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 for non-object entry in markets[] (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      for (const bad of [null, 'US', 42]) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await ctrl.onboardCustomer({
+          ...onboardingContext,
+          data: { ...onboardingContext.data, markets: [bad] },
+        });
+        expect(result.status).to.equal(400);
+      }
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 for an object entry missing market (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{ languageCode: 'en' }] },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 with [invalid type] when market is a non-string (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      for (const bad of [42, { code: 'US' }, ['US'], true]) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await ctrl.onboardCustomer({
+          ...onboardingContext,
+          data: { ...onboardingContext.data, markets: [{ market: bad, languageCode: 'en' }] },
+        });
+        expect(result.status).to.equal(400);
+        // eslint-disable-next-line no-await-in-loop
+        const body = await result.json();
+        expect(body.message).to.include('[invalid type]');
+      }
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 with [invalid type] when language is a non-string (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      for (const bad of [99, { tag: 'en' }, ['en'], false]) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await ctrl.onboardCustomer({
+          ...onboardingContext,
+          data: { ...onboardingContext.data, markets: [{ market: 'US', languageCode: bad }] },
+        });
+        expect(result.status).to.equal(400);
+        // eslint-disable-next-line no-await-in-loop
+        const body = await result.json();
+        expect(body.message).to.include('[invalid type]');
+      }
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should truncate market values longer than 16 chars in the 400 message', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const longMarket = 'TOOLONGMARKETCODE'; // 17 chars — over the 16-char display cap
+      const result = await ctrl.onboardCustomer({
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{ market: longMarket, languageCode: 'en' }] },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('TOOLONGMARKETCO'); // first 16 chars
+      expect(body.message).to.not.include(longMarket);
+    });
+
+    it('should truncate language values longer than 16 chars in the 400 message', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const longLang = 'toolonglanguagetag'; // 18 chars — over the 16-char display cap
+      const result = await ctrl.onboardCustomer({
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{ market: 'US', languageCode: longLang }] },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('toolonglanguaget'); // first 16 chars
+      expect(body.message).to.not.include(longLang);
+    });
+
+    it('should return 400 with [invalid type] when entry is an empty object {}', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const result = await ctrl.onboardCustomer({
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: [{}] },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('[invalid type]');
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 when markets[] exceeds the cap (LLMO-5204)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      // 51 valid, distinct tuples (> MAX_MARKETS = 50) so the 400 is the cap,
+      // not incidental per-entry validation. Markets AA, AB, … BY.
+      const many = Array.from({ length: 51 }, (_, i) => ({
+        market: `${String.fromCharCode(65 + Math.floor(i / 26))}${String.fromCharCode(65 + (i % 26))}`,
+        languageCode: 'en',
+      }));
+      const result = await ctrl.onboardCustomer({
+        ...onboardingContext,
+        data: { ...onboardingContext.data, markets: many },
+      });
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should collapse duplicate market tuples before forwarding and log the count (LLMO-5204)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const ctx = {
+        ...onboardingContext,
+        data: {
+          ...onboardingContext.data,
+          markets: [
+            { market: 'US', languageCode: 'en' },
+            { market: 'US', languageCode: 'en' },
+            { market: 'DE', languageCode: 'de' },
+          ],
+        },
+      };
+      const result = await ctrl.onboardCustomer(ctx);
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub.firstCall.args[0].markets).to.deep.equal([
+        { market: 'US', languageCode: 'en' },
+        { market: 'DE', languageCode: 'de' },
+      ]);
+      expect(onboardingContext.log.info).to.have.been.calledWithMatch(/collapsed 1 duplicate/);
+    });
+
+    it('should not set markets when neither markets nor region is supplied (LLMO-5202)', async () => {
+      const ctrl = await makeOnboardController(performLlmoOnboardingStub);
+      const result = await ctrl.onboardCustomer(onboardingContext);
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub.firstCall.args[0]).to.not.have.property('markets');
+    });
+
+    it('should return 404 when performLlmoOnboarding reports a missing Semrush workspace (LLMO-5203)', async () => {
+      const workspaceError = new Error(
+        'Semrush workspace not bound to org org-1. Run PATCH /organizations/org-1 with { semrushWorkspaceId: ... } then retry onboarding.',
+      );
+      workspaceError.status = 404;
+      workspaceError.preflight = true;
+      const failingStub = sinon.stub().rejects(workspaceError);
+      const ctrl = await makeOnboardController(failingStub);
+
+      const result = await ctrl.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.match(/Semrush workspace not bound to org org-1/);
+    });
+
+    it('should NOT map an incidental downstream 404 (no preflight) to notFound (LLMO-5203)', async () => {
+      // A dependency that throws a bare status-404 must stay a 400, not be
+      // reshaped into a notFound that leaks its message.
+      const downstream = new Error('some dependency 404');
+      downstream.status = 404;
+      const failingStub = sinon.stub().rejects(downstream);
+      const ctrl = await makeOnboardController(failingStub);
+
+      const result = await ctrl.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('should return 207 when some Semrush projects failed to provision (LLMO-5205)', async () => {
+      const stub = sinon.stub().resolves({
+        siteId: 'new-site-id',
+        organizationId: 'new-org-id',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO onboarding completed successfully',
+        serenity: {
+          requested: [{ market: 'US', languageCode: 'en' }, { market: 'DE', languageCode: 'de' }],
+          succeeded: [{
+            market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+          }],
+          failed: [{
+            market: 'DE', languageCode: 'de', status: 502, error: 'semrushUpstreamError',
+          }],
+        },
+      });
+      const ctrl = await makeOnboardController(stub);
+
+      const result = await ctrl.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(207);
+      const body = await result.json();
+      // Carries the standard onboarding fields plus the per-tuple arrays.
+      expect(body.siteId).to.equal('new-site-id');
+      expect(body.status).to.equal('completed');
+      expect(body.requested).to.have.length(2);
+      expect(body.succeeded).to.deep.equal([{
+        market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+      }]);
+      expect(body.failed).to.deep.equal([{
+        market: 'DE', languageCode: 'de', status: 502, error: 'semrushUpstreamError',
+      }]);
+    });
+
+    it('should return 200 with the provisioning arrays when all Semrush projects succeeded (LLMO-5205)', async () => {
+      const stub = sinon.stub().resolves({
+        siteId: 'new-site-id',
+        organizationId: 'new-org-id',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO onboarding completed successfully',
+        serenity: {
+          requested: [{ market: 'US', languageCode: 'en' }],
+          succeeded: [{
+            market: 'US', languageCode: 'en', semrushProjectId: 'p-us', geoTargetId: 2840,
+          }],
+          failed: [],
+        },
+      });
+      const ctrl = await makeOnboardController(stub);
+
+      const result = await ctrl.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.failed).to.deep.equal([]);
+      expect(body.succeeded).to.have.length(1);
+      expect(body.status).to.equal('completed');
     });
   });
 

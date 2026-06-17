@@ -88,6 +88,7 @@ import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
+import { LANGUAGE_TAG_REGEX } from '../../support/serenity/validation.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
@@ -95,6 +96,72 @@ const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
 const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
+const ISO_ALPHA2_UPPER_REGEX = /^[A-Z]{2}$/;
+
+// Best-effort primary language per ISO-3166-1 alpha-2 country code.
+// Used when synthesizing markets[] from a legacy `region` field.
+// Mirrors the client-side getLanguageForMarket — both are heuristics.
+// Multilingual markets (CH/BE/CA) get one language; callers that need
+// precision should use markets[] directly instead of the legacy region field.
+const REGION_PRIMARY_LANGUAGE = {
+  US: 'en',
+  GB: 'en',
+  CA: 'en',
+  AU: 'en',
+  IE: 'en',
+  NZ: 'en',
+  SG: 'en',
+  ZA: 'en',
+  NG: 'en',
+  PH: 'en',
+  IN: 'en',
+  DE: 'de',
+  AT: 'de',
+  CH: 'de',
+  FR: 'fr',
+  LU: 'fr',
+  IT: 'it',
+  ES: 'es',
+  MX: 'es',
+  AR: 'es',
+  CL: 'es',
+  CO: 'es',
+  PE: 'es',
+  PT: 'pt',
+  BR: 'pt',
+  NL: 'nl',
+  BE: 'nl',
+  SE: 'sv',
+  NO: 'no',
+  DK: 'da',
+  FI: 'fi',
+  JP: 'ja',
+  KR: 'ko',
+  CN: 'zh',
+  HK: 'zh',
+  TW: 'zh',
+  RU: 'ru',
+  TR: 'tr',
+  PL: 'pl',
+  CZ: 'cs',
+  HU: 'hu',
+  RO: 'ro',
+  GR: 'el',
+  EG: 'ar',
+  SA: 'ar',
+  AE: 'ar',
+  IL: 'he',
+  TH: 'th',
+  MY: 'ms',
+  ID: 'id',
+  VN: 'vi',
+};
+const DEFAULT_REGION_LANGUAGE = 'en';
+// Upper bound on markets[] (LLMO-5204). The fan-out is sequential — one upstream
+// create+publish+DB write per tuple on a single synchronous request — so an
+// unbounded array would blow the Lambda timeout. 50 covers adobe.com's ~19
+// tuples with headroom.
+const MAX_MARKETS = 50;
 
 /** Site IDs for which HLX `brandpresence` sheet data is blocked (PG migration). */
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
@@ -945,11 +1012,11 @@ function LlmoController(ctx) {
       }
 
       const {
-        domain, brandName, imsOrgId: payloadImsOrgId, cadence, region,
+        domain, brandName, imsOrgId: payloadImsOrgId, cadence, region, markets,
       } = data;
       const tempOnboarding = data['temp-onboarding'] === true;
 
-      if (!domain || !brandName) {
+      if (!domain || !hasText(brandName)) {
         return badRequest('domain and brandName are required');
       }
 
@@ -960,8 +1027,60 @@ function LlmoController(ctx) {
       // LLMO-4683: optional ISO 3166-1 alpha-2 region for V1 prompt generation.
       // Forwarded to DRS so the GPT prompt-gen job conditions on the brand's market.
       // Omitted → DRS client default ('US') applies, preserving prior behavior.
-      if (region !== undefined && !/^[A-Z]{2}$/.test(region)) {
+      if (region !== undefined && !ISO_ALPHA2_UPPER_REGEX.test(region)) {
         return badRequest('Invalid region. Must be an ISO 3166-1 alpha-2 country code (e.g. US, IN, BR)');
+      }
+
+      // LLMO-5007: optional markets array for Semrush project fan-out.
+      // Each entry maps to one Semrush project. Controller enforces uppercase market
+      // codes (stricter than the AIO Proxy which accepts case-insensitive — intentional).
+      // Backward-compat: if markets is absent but region is present, synthesize a
+      // single-entry markets array so the serenity path has something to fan-out.
+      let resolvedMarkets;
+      if (markets !== undefined) {
+        if (!Array.isArray(markets) || markets.length === 0) {
+          return badRequest('markets must be a non-empty array');
+        }
+        if (markets.length > MAX_MARKETS) {
+          return badRequest(`markets must contain at most ${MAX_MARKETS} entries`);
+        }
+        for (const entry of markets) {
+          if (!entry || typeof entry !== 'object') {
+            return badRequest('Each markets entry must be an object with market and languageCode');
+          }
+          if (typeof entry.market !== 'string' || !ISO_ALPHA2_UPPER_REGEX.test(entry.market)) {
+            const displayMarket = typeof entry.market === 'string' ? entry.market.slice(0, 16) : '[invalid type]';
+            return badRequest(`Invalid market "${displayMarket}". Must be an ISO 3166-1 alpha-2 uppercase code (e.g. US, DE)`);
+          }
+          if (typeof entry.languageCode !== 'string' || !LANGUAGE_TAG_REGEX.test(entry.languageCode)) {
+            const displayLanguage = typeof entry.languageCode === 'string' ? entry.languageCode.slice(0, 16) : '[invalid type]';
+            return badRequest(`Invalid languageCode "${displayLanguage}". Must be a BCP-47 lowercase language tag (e.g. en, de, zh-hans)`);
+          }
+        }
+        if (region !== undefined) {
+          log.warn(`LLMO onboarding: both markets and region supplied for domain ${domain} — markets wins, region ignored`);
+        }
+        // Collapse duplicate (market, languageCode) tuples — otherwise the second
+        // hits the proxy's 409 and the M8 read-back emits a duplicate succeeded
+        // entry for the same slice.
+        const seenTuples = new Set();
+        resolvedMarkets = markets.filter(({ market, languageCode }) => {
+          const key = `${market}::${languageCode}`;
+          if (seenTuples.has(key)) {
+            return false;
+          }
+          seenTuples.add(key);
+          return true;
+        });
+        if (resolvedMarkets.length !== markets.length) {
+          log.info(`LLMO onboarding: collapsed ${markets.length - resolvedMarkets.length} duplicate market tuple(s) for domain ${domain}`);
+        }
+      } else if (region !== undefined) {
+        log.debug(`LLMO onboarding: markets absent, synthesizing from region "${region}" for domain ${domain}`);
+        resolvedMarkets = [{
+          market: region,
+          languageCode: REGION_PRIMARY_LANGUAGE[region] ?? DEFAULT_REGION_LANGUAGE,
+        }];
       }
 
       let imsOrgId;
@@ -1015,6 +1134,7 @@ function LlmoController(ctx) {
           cadence,
           tempOnboarding,
           ...(region ? { region } : {}),
+          ...(resolvedMarkets ? { markets: resolvedMarkets } : {}),
         },
         context,
       );
@@ -1035,7 +1155,7 @@ function LlmoController(ctx) {
 
       log.info(`LLMO onboarding completed successfully for domain ${domain}`);
 
-      return ok({
+      const responseBody = {
         message: result.message,
         domain,
         brandName,
@@ -1048,10 +1168,34 @@ function LlmoController(ctx) {
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
-        ...(region ? { region } : {}),
-      });
+        // Echo region only when it was actually used — not when markets[] was
+        // supplied and region was ignored in favour of it.
+        ...(region !== undefined && !Array.isArray(markets) ? { region } : {}),
+      };
+
+      // M8 (LLMO-5205): for cohort onboardings, surface the per-tuple Semrush
+      // provisioning outcome. A non-empty `failed` is a partial success → 207
+      // Multi-Status; successful tuples are never rolled back. Re-invoking with
+      // the same markets[] is safe (the proxy 409-dedupes already-created slices).
+      if (result.serenity) {
+        const { requested, succeeded, failed } = result.serenity;
+        const serenityBody = {
+          ...responseBody, requested, succeeded, failed,
+        };
+        return failed.length > 0
+          ? createResponse(serenityBody, 207)
+          : ok(serenityBody);
+      }
+
+      return ok(responseBody);
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
+      // M5 (LLMO-5203): the missing-workspace pre-flight throw is tagged
+      // `preflight` + status 404. Key on that marker (not a bare status) so an
+      // incidental downstream 404 from a dependency isn't reshaped/leaked here.
+      if (error.preflight && error.status === 404) {
+        return notFound(cleanupHeaderValue(error.message));
+      }
       return badRequest(cleanupHeaderValue(error.message));
     }
   };

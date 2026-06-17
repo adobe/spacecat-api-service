@@ -24,6 +24,7 @@ import {
   handleListModels,
   handleUpdateModels,
   resolveLocation,
+  marketFromGeoTargetId,
   clearLanguageCache,
   clearTagCache,
 } from '../../../../src/support/serenity/handlers/markets.js';
@@ -106,6 +107,7 @@ describe('handlers/markets.js — handleListMarkets', () => {
     expect(result.items[0]).to.deep.equal({
       brandId: BRAND,
       geoTargetId: 2840,
+      market: 'US',
       languageCode: 'en',
       createdAt: '2026-05-28T10:00:00Z',
       updatedAt: '2026-05-28T10:00:00Z',
@@ -128,6 +130,26 @@ describe('handlers/markets.js — handleListMarkets', () => {
 
     const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE);
     expect(result.items).to.have.lengthOf(1);
+  });
+});
+
+describe('handlers/markets.js — marketFromGeoTargetId', () => {
+  it('reverses (2000 + ISO numeric) back to the ISO-2 code', () => {
+    expect(marketFromGeoTargetId(2840)).to.equal('US');
+    expect(marketFromGeoTargetId(2276)).to.equal('DE');
+    expect(marketFromGeoTargetId(2250)).to.equal('FR');
+  });
+
+  it('round-trips with resolveLocation', () => {
+    const { geoTargetId } = resolveLocation('AU');
+    expect(marketFromGeoTargetId(geoTargetId)).to.equal('AU');
+  });
+
+  it('returns null for non-country ids and unknown numerics', () => {
+    expect(marketFromGeoTargetId(1234)).to.equal(null); // region/metro range
+    expect(marketFromGeoTargetId(2000)).to.equal(null); // no offset
+    expect(marketFromGeoTargetId(2999)).to.equal(null); // unassigned numeric
+    expect(marketFromGeoTargetId('not-a-number')).to.equal(null);
   });
 });
 
@@ -437,6 +459,29 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       'handleCreateMarket: orphaned upstream project after row-create race',
       sinon.match({ semrushProjectId: 'proj-orphan-2' }),
     );
+  });
+
+  // createProject throws SerenityTransportError (e.g. upstream 422 on bad body):
+  // the error must propagate out of handleCreateMarket so the fan-out can catch
+  // it, sanitise the message, and record a failure entry without aborting the
+  // remaining tuples. publishProject and DB write must never be reached.
+  it('propagates SerenityTransportError thrown by createProject', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().rejects(
+        new SerenityTransportError(422, 'Semrush POST https://sr.example.com/ws/ws-1/projects failed: 422', { error: 'invalid body' }),
+      ),
+      publishProject: sinon.stub(),
+    };
+
+    await expect(handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, fakeLog())).to.be.rejectedWith(SerenityTransportError);
+
+    expect(transport.publishProject).to.have.callCount(0);
+    expect(dataAccess.BrandSemrushProject.create).to.have.callCount(0);
   });
 
   // Upstream contract: createProject must echo an id. If it doesn't, we have

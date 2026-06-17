@@ -18,8 +18,10 @@ import sinonChai from 'sinon-chai';
 import {
   LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT,
   hasPreBrandalfSites,
+  isSerenityOnboardingEnabled,
   readBrandalfFlagOverride,
   readBrandalfMigrationFlagOverride,
+  readSerenityFlagOverride,
   resolveBrandalfCutoffMs,
   resolveLlmoOnboardingMode,
 } from '../../src/support/llmo-onboarding-mode.js';
@@ -668,6 +670,63 @@ describe('llmo-onboarding-mode', () => {
         expect(mode).to.equal('v2');
         expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to read brandalf_migration flag/);
       });
+    });
+  });
+
+  describe('readSerenityFlagOverride', () => {
+    it('reads the serenity flag from feature_flags', async () => {
+      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const postgrestClient = {
+        from: sinon.stub().returns({
+          select: sinon.stub().returns({
+            eq: sinon.stub().returns({
+              eq: sinon.stub().returns({
+                eq: sinon.stub().returns({ maybeSingle }),
+              }),
+            }),
+          }),
+        }),
+      };
+      const result = await readSerenityFlagOverride('org-1', postgrestClient);
+      expect(result).to.equal(true);
+      expect(postgrestClient.from).to.have.been.calledWith('feature_flags');
+    });
+
+    it('returns null when organizationId is missing', async () => {
+      expect(await readSerenityFlagOverride()).to.equal(null);
+    });
+
+    it('returns null when postgrestClient has no .from', async () => {
+      expect(await readSerenityFlagOverride('org-1', {})).to.equal(null);
+    });
+  });
+
+  describe('isSerenityOnboardingEnabled (DB flag only)', () => {
+    it('returns true when the serenity DB flag is true', async () => {
+      const ctx = makeContext({ brandalfValue: true });
+      expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.true;
+    });
+
+    it('returns false when the serenity DB flag is false', async () => {
+      const ctx = makeContext({ brandalfValue: false });
+      expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.false;
+    });
+
+    it('returns false when no DB row exists (null)', async () => {
+      const ctx = makeContext({ brandalfValue: null });
+      expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.false;
+    });
+
+    it('returns false when there is no postgrest client at all', async () => {
+      // brandalfValue undefined → makeContext attaches no postgrestClient.
+      const ctx = makeContext({});
+      expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.false;
+    });
+
+    it('returns false and logs when the DB read throws', async () => {
+      const ctx = makeContext({ brandalfValue: 'throw' });
+      expect(await isSerenityOnboardingEnabled('org-1', ctx)).to.be.false;
+      expect(ctx.log.error).to.have.been.calledWithMatch(/Failed to read serenity flag/);
     });
   });
 });

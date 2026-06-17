@@ -517,7 +517,6 @@ describe('getRouteHandlers', () => {
     createPrompts: sinon.stub(),
     updatePrompt: sinon.stub(),
     bulkDeletePrompts: sinon.stub(),
-    listProjects: sinon.stub(),
     createProject: sinon.stub(),
     listProjectTags: sinon.stub(),
     listProjectModels: sinon.stub(),

@@ -41,6 +41,9 @@ services:
       retries: 10
 
   data-service:
+    # Must carry the brand_to_semrush_projects migration (20260528000000) that
+    # BRAND_SELECT now embeds; v5.20.0 was the first such release (older images
+    # lack the table and PostgREST 500s on every brand read).
     image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v5.38.0
     container_name: spacecat-it-data-service
     depends_on:

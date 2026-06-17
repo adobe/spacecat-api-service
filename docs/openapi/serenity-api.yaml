@@ -261,7 +261,10 @@ v2-serenity-markets:
     summary: List markets configured for a brand
     description: |
       Returns the brand's (geoTargetId, languageCode) slices. The presence
-      of a row is the contract that the market is active.
+      of a row is the contract that the market is active. Each item also
+      carries the derived ISO 3166-1 alpha-2 `market` (translated from
+      `geoTargetId` server-side) so consumers can match on {market,
+      languageCode} tuples without a local geo-target table.
     operationId: listSerenityMarkets
     security:
       - ims_key: []

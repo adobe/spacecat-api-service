@@ -584,7 +584,7 @@ describe('SerenityController', () => {
   });
 
   describe('controller surface', () => {
-    it('exposes the new method names and does NOT expose listProjects / listWorkspaceProjects', () => {
+    it('exposes the markets-named methods and not the removed project names', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       expect(controller.listPrompts).to.be.a('function');
       expect(controller.createPrompts).to.be.a('function');
@@ -598,11 +598,80 @@ describe('SerenityController', () => {
       expect(controller.listModels).to.be.a('function');
       expect(controller.updateModels).to.be.a('function');
 
+      // listProjects was removed — /serenity/markets is the single list endpoint
+      // (its response now carries the derived ISO `market`), per the prompts-api
+      // abstraction spec. The project-CRUD surface below was never exposed.
       expect(controller.listProjects).to.be.undefined;
       expect(controller.createProject).to.be.undefined;
       expect(controller.listProjectTags).to.be.undefined;
       expect(controller.listProjectModels).to.be.undefined;
       expect(controller.listWorkspaceProjects).to.be.undefined;
+    });
+  });
+
+  // Each handler shares the same shape: `if (auth.error) return auth.error`
+  // (authorize() denial short-circuit) and a `catch` that funnels through
+  // mapError. Exercise both branches across every method so the per-handler
+  // auth-denial and error paths are all covered.
+  describe('per-handler auth-denial and error branches', () => {
+    const methods = [
+      { name: 'listPrompts', stub: 'handleListPrompts' },
+      { name: 'createPrompts', stub: 'handleCreatePrompts' },
+      { name: 'updatePrompt', stub: 'handleUpdatePrompt', params: { semrushPromptId: 'p-1' } },
+      { name: 'bulkDeletePrompts', stub: 'handleBulkDeletePrompts' },
+      { name: 'listMarkets', stub: 'handleListMarkets' },
+      { name: 'getMarket', stub: 'handleGetMarket', params: { geoTargetId: '2840', languageCode: 'en' } },
+      { name: 'createMarket', stub: 'handleCreateMarket' },
+      { name: 'deleteMarket', stub: 'handleDeleteMarket', params: { geoTargetId: '2840', languageCode: 'en' } },
+      { name: 'listTags', stub: 'handleListTags' },
+      { name: 'listModels', stub: 'handleListModels' },
+      { name: 'updateModels', stub: 'handleUpdateModels' },
+    ];
+
+    methods.forEach(({ name, stub, params = {} }) => {
+      it(`${name} returns the authorize() error (403) when the caller lacks org access`, async () => {
+        accessControlHasAccessStub.resolves(false);
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller[name](fakeContext({ params, data: {} }));
+        expect(response.status).to.equal(403);
+        expect(handlers[stub]).not.to.have.been.called;
+      });
+
+      it(`${name} funnels a thrown handler error through mapError (500)`, async () => {
+        handlers[stub].rejects(new Error('boom from handler'));
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller[name](fakeContext({ params, data: {} }));
+        expect(response.status).to.equal(500);
+      });
+    });
+  });
+
+  // authorize() denial branches that the happy-path + per-handler tests don't reach.
+  describe('authorize() guard branches', () => {
+    it('500s when Organization data-access is unavailable', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess = { services: { postgrestClient: { from: () => ({}) } } };
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(500);
+    });
+
+    it('404s when the organization is not found', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization = { findById: sinon.stub().resolves(null) };
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(404);
+    });
+
+    it('503s when the PostgREST client is not available', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.services = {};
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(503);
+      const body = await readBody(response);
+      expect(body.error).to.equal('configurationError');
     });
   });
 });

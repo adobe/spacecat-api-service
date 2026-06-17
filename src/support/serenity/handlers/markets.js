@@ -71,6 +71,33 @@ export function resolveLocation(market) {
   };
 }
 
+// Reverse of resolveLocation's country mapping: keyed by the (zero-padded) ISO
+// 3166-1 numeric string, value is the alpha-2 code. Built once at module load.
+const numericToAlpha2 = Object.entries(iso31661Alpha2ToNumeric)
+  .reduce((acc, [alpha2, numeric]) => {
+    acc[numeric] = alpha2;
+    return acc;
+  }, {});
+
+/**
+ * Inverse of `resolveLocation` for country geo targets: maps a Google Ads
+ * `criterion_id` (`2000 + ISO numeric`) back to its ISO 3166-1 alpha-2 code.
+ * Returns null for non-country ids (region/city/etc.) or unknown numerics —
+ * consistent with `resolveLocation` returning null for unknown markets.
+ *
+ * @param {number|string} geoTargetId
+ * @returns {string|null} Uppercase alpha-2 code (e.g. 2840 → 'US'), or null.
+ */
+export function marketFromGeoTargetId(geoTargetId) {
+  const n = Number(geoTargetId);
+  if (!Number.isInteger(n) || n <= 2000) {
+    return null;
+  }
+  // ISO numeric codes are 3-digit, zero-padded (e.g. US=840, AF=004).
+  const numeric = String(n - 2000).padStart(3, '0');
+  return numericToAlpha2[numeric] ?? null;
+}
+
 /**
  * Module-scoped Semrush language UUID cache. 1h TTL — the catalog is stable
  * but languages do get added occasionally, so we don't pin it for the
@@ -131,10 +158,18 @@ async function resolveLanguageId(transport, languageTag, log) {
 /**
  * GET /serenity/markets — list a brand's (geoTargetId, languageCode) slices.
  *
- * Pure DB read: the row's existence IS the contract that the market is
- * active for this brand. We do not enrich with upstream metadata — name
- * and publish_status would require an O(workspace-size) `listWorkspaceProjects`
- * call per request, and the consumer (project-elmo-ui) reads neither.
+ * Pure DB read: the row's existence is the contract that the slice is
+ * configured for this brand (publish state is not implied — a row may be a
+ * provisioned draft). We do not enrich with upstream metadata — name and
+ * publish_status would require an O(workspace-size) `listWorkspaceProjects`
+ * call per request, and the consumer being built alongside this API
+ * (project-elmo-ui) reads neither.
+ *
+ * Each row also carries the derived ISO alpha-2 `market` (translated from
+ * `geoTargetId` via the local locations table, no upstream call) so consumers
+ * — notably the onboarding provisioning read-back — can match on the
+ * {market, languageCode} tuples they requested without shipping the
+ * geo-target table to the client.
  *
  * `transport` and `semrushWorkspaceId` are kept on the signature for the
  * controller's parity with the other handlers; they are unused here.
@@ -149,6 +184,7 @@ export async function handleListMarkets(transport, dataAccess, brandId, semrushW
     items: rows.map((row) => ({
       brandId,
       geoTargetId: row.getGeoTargetId(),
+      market: marketFromGeoTargetId(row.getGeoTargetId()),
       languageCode: row.getLanguageCode(),
       createdAt: row.getCreatedAt(),
       updatedAt: row.getUpdatedAt(),
@@ -435,6 +471,9 @@ export async function handleCreateMarket(
         error: e.message,
       },
     );
+    // Return 409 so the fan-out treats this tuple as idempotent success and
+    // M8 reclassifies it via DB read-back. Known gap: a re-onboarding retry
+    // after this path finds no DB row → creates a second upstream orphan.
     return {
       status: 409,
       body: {

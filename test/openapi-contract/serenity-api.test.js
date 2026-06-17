@@ -142,6 +142,7 @@ const FIXTURES = {
       items: [{
         brandId: BRAND,
         geoTargetId: 2840,
+        market: 'US',
         languageCode: 'en',
       }],
     },

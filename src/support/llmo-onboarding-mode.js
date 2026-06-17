@@ -15,8 +15,61 @@ import { readFeatureFlag, upsertFeatureFlag } from './feature-flags-storage.js';
 export const LLMO_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const LLMO_BRANDALF_FLAG = 'brandalf';
 export const LLMO_BRANDALF_MIGRATION_FLAG = 'brandalf_migration';
+export const LLMO_SERENITY_FLAG = 'serenity';
 export const LLMO_ONBOARDING_MODE_V1 = 'v1';
 export const LLMO_ONBOARDING_MODE_V2 = 'v2';
+
+/**
+ * Reads the per-org `serenity` cohort flag from the feature_flags table
+ * (product LLMO). Mirrors readBrandalfFlagOverride.
+ *
+ * @param {string} organizationId - SpaceCat org ID
+ * @param {object} postgrestClient
+ * @returns {Promise<boolean|null>} true/false when a row exists, null when absent.
+ */
+export async function readSerenityFlagOverride(organizationId, postgrestClient) {
+  if (!organizationId || !postgrestClient?.from) {
+    return null;
+  }
+
+  return readFeatureFlag({
+    organizationId,
+    product: LLMO_FEATURE_FLAG_PRODUCT,
+    flagName: LLMO_SERENITY_FLAG,
+    postgrestClient,
+  });
+}
+
+/**
+ * Returns true if the given org is in the Semrush onboarding cohort, which gates
+ * the Semrush provisioning path (M5–M8).
+ *
+ * Membership is the per-org `serenity` flag in the feature_flags table (product
+ * LLMO), seedable at runtime via PUT /organizations/:id/feature-flags/LLMO/serenity
+ * — no deploy needed. A missing row (read returns null) means not in the cohort;
+ * only an explicit `true` opts the org in.
+ *
+ * @param {string} organizationId - SpaceCat org ID
+ * @param {object} context - Request context (dataAccess.services.postgrestClient + log)
+ * @returns {Promise<boolean>}
+ */
+export async function isSerenityOnboardingEnabled(organizationId, context) {
+  const postgrestClient = context?.dataAccess?.services?.postgrestClient;
+  const log = context?.log;
+
+  try {
+    const flag = await readSerenityFlagOverride(organizationId, postgrestClient);
+    return flag === true;
+  } catch (err) {
+    // Use error for unexpected throws (e.g. programming errors, not just missing rows)
+    // so they surface in monitoring rather than silently disabling the cohort path.
+    log?.error?.(
+      `Failed to read serenity flag for org ${organizationId}: ${err.message} `
+      + '— treating as not in the cohort',
+    );
+    return false;
+  }
+}
 
 /**
  * Brandalf GA cutoff in Unix epoch milliseconds (2026-04-01T00:00:00Z).

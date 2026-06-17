@@ -23,6 +23,7 @@ import sinon, { stub } from 'sinon';
 import esmock from 'esmock';
 
 import BrandsController from '../../src/controllers/brands.js';
+import { clearWorkspaceCache } from '../../src/support/serenity/workspace-resolver.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -4814,6 +4815,94 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+    });
+
+    describe('Serenity project cleanup (LLMO-5491)', () => {
+      beforeEach(() => {
+        clearWorkspaceCache();
+      });
+
+      it('fails closed with 409 when the brand owns Semrush projects but the org has no workspace id', async () => {
+        // Org resolves but exposes no semrush_workspace_id → resolveWorkspaceId returns null.
+        mockDataAccess.Organization.findById = sandbox.stub().resolves({
+          getId: () => ORGANIZATION_ID,
+          getSemrushWorkspaceId: () => null,
+        });
+        mockDataAccess.BrandSemrushProject = {
+          allByBrandId: sandbox.stub().resolves([
+            { getGeoTargetId: () => 2840, getLanguageCode: () => 'en', getSemrushProjectId: () => 'p1' },
+          ]),
+        };
+        brandsController = BrandsController(context, loggerStub, mockEnv);
+
+        const response = await brandsController.deleteBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+        expect(response.status).to.equal(409);
+      });
+
+      it('removes the brand\'s Semrush projects before deleting the brand, then returns 204', async () => {
+        const cleanupStub = sandbox.stub().resolves({ deleted: 2 });
+        const deleteBrandStub = sandbox.stub().resolves(true);
+        const ControllerWithMocks = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/serenity/brand-cleanup.js': {
+            cleanupBrandSemrushProjects: cleanupStub,
+          },
+          '../../src/support/brands-storage.js': {
+            deleteBrand: deleteBrandStub,
+          },
+          '../../src/support/prompts-storage.js': {
+            resolveBrandUuid: sandbox.stub().resolves(BRAND_UUID),
+          },
+        });
+        const mockedController = ControllerWithMocks(context, loggerStub, mockEnv);
+
+        const response = await mockedController.deleteBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(204);
+        expect(cleanupStub).to.have.been.calledOnce;
+        expect(cleanupStub.firstCall.args[1]).to.equal(ORGANIZATION_ID);
+        expect(cleanupStub.firstCall.args[2]).to.equal(BRAND_UUID);
+        // cleanup must run before the brand row is removed
+        expect(cleanupStub).to.have.been.calledBefore(deleteBrandStub);
+      });
+
+      it('aborts the brand delete when cleanup fails closed (does not call deleteBrand)', async () => {
+        const cleanupStub = sandbox.stub().rejects(
+          Object.assign(new Error('upstream 502'), { status: 502 }),
+        );
+        const deleteBrandStub = sandbox.stub().resolves(true);
+        const ControllerWithMocks = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/serenity/brand-cleanup.js': {
+            cleanupBrandSemrushProjects: cleanupStub,
+          },
+          '../../src/support/brands-storage.js': {
+            deleteBrand: deleteBrandStub,
+          },
+          '../../src/support/prompts-storage.js': {
+            resolveBrandUuid: sandbox.stub().resolves(BRAND_UUID),
+          },
+        });
+        const mockedController = ControllerWithMocks(context, loggerStub, mockEnv);
+
+        const response = await mockedController.deleteBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(502);
+        expect(deleteBrandStub).to.not.have.been.called;
+      });
     });
   });
 });

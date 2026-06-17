@@ -1097,7 +1097,46 @@ llmo-onboard:
                   Optional ISO 3166-1 alpha-2 country code for the brand's primary market.
                   Forwarded to DRS prompt generation so the GPT job conditions on the right region.
                   If omitted, the DRS client defaults to 'US' (backward-compatible).
+                  Deprecated in favour of `markets` for cohort customers — if both are supplied,
+                  `markets` wins and `region` is ignored with a warning logged.
                 example: "IN"
+              markets:
+                type: array
+                maxItems: 50
+                description: |
+                  Optional list of market/language tuples for Semrush project provisioning (LLMO-5007).
+                  Each entry maps to one Semrush project created during onboarding.
+                  Format validation (count cap, ISO codes, BCP-47 language tags) applies to all callers —
+                  an invalid entry returns 400 regardless of cohort membership.
+                  Semrush provisioning only runs for orgs in the Semrush cohort (the per-org
+                  `serenity` LLMO feature flag); a valid `markets` array from a non-cohort org
+                  is accepted (200) but not provisioned.
+                  If absent and `region` is present, a single `{ market: region, languageCode: "en" }`
+                  entry is synthesized for backward compatibility.
+                items:
+                  type: object
+                  required:
+                    - market
+                    - languageCode
+                  properties:
+                    market:
+                      type: string
+                      pattern: '^[A-Z]{2}$'
+                      description: ISO 3166-1 alpha-2 uppercase country code.
+                      example: "US"
+                    languageCode:
+                      type: string
+                      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+                      description: |
+                        BCP-47 language tag (lowercase). Accepts a primary subtag
+                        or primary + script/region subtag (e.g. en, de, zh-hans).
+                        Lowercase is enforced as a normalization choice.
+                      example: "en"
+                example:
+                  - market: "US"
+                    languageCode: "en"
+                  - market: "DE"
+                    languageCode: "de"
             required:
               - domain
               - brandName
@@ -1205,18 +1244,149 @@ llmo-onboard:
                     the request body; omitted when the DRS default ('US')
                     applies.
                   example: "IN"
+                requested:
+                  type: array
+                  description: The market tuples requested for Semrush provisioning. Present only for cohort orgs.
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      languageCode:
+                        type: string
+                succeeded:
+                  type: array
+                  description: |
+                    Tuples for which a Semrush project is live (read back from the DB). Cohort orgs only.
+                    `semrushProjectId`/`geoTargetId` are populated from the authoritative read-back;
+                    on a degraded path (read-back failure) a succeeded entry may carry only market/language.
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      languageCode:
+                        type: string
+                      semrushProjectId:
+                        type: string
+                      geoTargetId:
+                        type: integer
+                failed:
+                  type: array
+                  description: Tuples with no Semrush project row. Empty on 200; non-empty drives a 207. Cohort orgs only.
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      languageCode:
+                        type: string
+                      status:
+                        type: integer
+                      error:
+                        type: string
               required:
                 - message
                 - domain
                 - brandName
                 - imsOrgId
                 - status
+      '207':
+        description: |
+          Partial success — LLMO onboarding completed but one or more Semrush project
+          provisioning steps failed. Successfully created projects are not rolled back.
+          Re-invoking with the same `markets[]` is safe (already-created slices are skipped).
+
+          The body carries all standard 200 onboarding fields (message, domain, brandName,
+          imsOrgId, organizationId, siteId, status, createdAt, detectedCdn, region) plus
+          the `requested`/`succeeded`/`failed` arrays. Only cohort orgs (per-org `serenity`
+          LLMO feature flag) can return 207; all others return 200.
+        content:
+          application/json:
+            schema:
+              type: object
+              description: |
+                Identical to the 200 response body with the addition of
+                `requested`, `succeeded`, and `failed` arrays.
+              required:
+                - message
+                - domain
+                - brandName
+                - imsOrgId
+                - status
+                - requested
+                - succeeded
+                - failed
+              properties:
+                message:
+                  type: string
+                domain:
+                  type: string
+                brandName:
+                  type: string
+                imsOrgId:
+                  type: string
+                organizationId:
+                  type: string
+                siteId:
+                  type: string
+                status:
+                  type: string
+                createdAt:
+                  type: string
+                  format: date-time
+                region:
+                  type: string
+                requested:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      languageCode:
+                        type: string
+                succeeded:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      languageCode:
+                        type: string
+                      semrushProjectId:
+                        type: string
+                      geoTargetId:
+                        type: integer
+                failed:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                      languageCode:
+                        type: string
+                      status:
+                        type: integer
+                      error:
+                        type: string
       '400':
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
+      '404':
+        description: |
+          The org is in the Semrush cohort (per-org `serenity` LLMO feature flag) but has no
+          Semrush workspace bound. An operator must run
+          `PATCH /organizations/:spaceCatId` with `{ semrushWorkspaceId: ... }`
+          before retrying onboarding. No Adobe-side state is created in this case.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
         $ref: './responses.yaml#/500'
     security: []

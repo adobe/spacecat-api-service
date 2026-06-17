@@ -15,7 +15,9 @@ import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import {
+  composeBaseURL, tracingFetch as fetch, isNonEmptyArray, hasText,
+} from '@adobe/spacecat-shared-utils';
 import SeoClient from '@adobe/mysticat-shared-seo-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
@@ -27,6 +29,7 @@ import {
 import { convertV1ToV2, generateBrandId } from '../../support/customer-config-mapper.js';
 import {
   resolveLlmoOnboardingMode,
+  isSerenityOnboardingEnabled,
   LLMO_ONBOARDING_MODE_V1,
   LLMO_ONBOARDING_MODE_V2,
   LLMO_FEATURE_FLAG_PRODUCT,
@@ -35,6 +38,9 @@ import {
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
+import { handleCreateMarket, resolveLocation } from '../../support/serenity/handlers/markets.js';
+import { createSerenityTransport, SerenityTransportError } from '../../support/serenity/rest-transport.js';
+import { extractImsBearer } from '../../support/serenity/ims-bearer.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1245,6 +1251,279 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 }
 
 /**
+ * M7 (LLMO-5204): fan out one Semrush project per (market, language) tuple by
+ * calling the already-shipped AIO Proxy handler (`handleCreateMarket`)
+ * in-process, once per tuple, sequentially.
+ *
+ * Best-effort per LLMO-5007 §M7: a per-tuple failure is collected, not thrown,
+ * and does not abort the remaining tuples — there is no retry and no rollback.
+ * A 409 (slice already exists) counts as success so re-invoking onboarding with
+ * the same `markets[]` is idempotent (the proxy 409-dedupes via `findBySlice`).
+ *
+ * Returns `{ requested, succeeded, failed }`; the authoritative read-back and
+ * 200/207 response shaping happen in M8 (LLMO-5205, T3c).
+ *
+ * @param {object} context - The request context (env, log, dataAccess, auth).
+ * @param {object} args
+ * @param {string} args.orgId - SpaceCat org ID, tagged on each per-tuple
+ *   `serenity_project_fanout` metric so Coralogix can group by cohort (LLMO-5206).
+ * @param {string} args.brandId - The brand UUID (from M4 `upsertBrand`).
+ * @param {string} args.workspaceId - The org's Semrush workspace ID (M5-validated).
+ * @param {string} args.brandName - The brand name from the onboard request.
+ * @param {string} args.baseURL - The site base URL; its hostname is sent as `brandDomain`.
+ * @param {Array<{market: string, languageCode: string}>} [args.markets] - Tuples to provision.
+ * @returns {Promise<{requested: object[], succeeded: object[], failed: object[]}>}
+ */
+/**
+ * Resolves the fan-out pre-conditions (brand, IMS token, transport, URL) and
+ * returns either `{ transport, brandSlug, brandDomain }` on success or a
+ * `{ failAllResult }` sentinel that `performSerenityFanOut` returns immediately.
+ */
+function resolveFanOutContext(context, {
+  brandId, brandName, baseURL, failAll,
+}) {
+  const { env, log } = context;
+
+  if (!hasText(brandId)) {
+    log.warn('Serenity fan-out: brand row missing — cannot provision market(s)');
+    return { failAllResult: failAll(500, 'brandNotCreated') };
+  }
+
+  const imsToken = extractImsBearer(context);
+  if (!imsToken) {
+    log.warn(`Serenity fan-out: no IMS bearer — cannot provision market(s) for brand ${brandId}`);
+    return { failAllResult: failAll(401, 'missingImsBearer') };
+  }
+
+  let transport;
+  try {
+    transport = createSerenityTransport({ env, imsToken });
+  } catch (transportError) {
+    log.error(`Serenity fan-out: failed to build Semrush transport: ${transportError.message}`);
+    return { failAllResult: failAll(transportError.status || 502, 'transportUnavailable') };
+  }
+
+  const brandSlug = generateBrandId(brandName.trim());
+  let brandDomain;
+  try {
+    brandDomain = new URL(baseURL).hostname;
+  } catch {
+    return { failAllResult: failAll(400, 'invalidBaseURL') };
+  }
+
+  return { transport, brandSlug, brandDomain };
+}
+
+export async function performSerenityFanOut(context, {
+  orgId, brandId, workspaceId, brandName, baseURL, markets,
+}) {
+  const { log } = context;
+  const requested = (Array.isArray(markets) ? markets : [])
+    .map(({ market, languageCode }) => ({ market, languageCode }));
+  const succeeded = [];
+  const failed = [];
+
+  if (requested.length === 0) {
+    return { requested, succeeded, failed };
+  }
+
+  const failAll = (status, error) => {
+    requested.forEach(({ market, languageCode }) => failed.push({
+      market, languageCode, status, error,
+    }));
+    return { requested, succeeded, failed };
+  };
+
+  const ctx = resolveFanOutContext(context, {
+    brandId, brandName, baseURL, failAll,
+  });
+  if (ctx.failAllResult) {
+    return ctx.failAllResult;
+  }
+  const { transport, brandSlug, brandDomain } = ctx;
+
+  for (const { market, languageCode } of requested) {
+    const body = {
+      name: `${brandSlug} · ${market} · ${languageCode}`,
+      market,
+      languageCode,
+      brandDomain,
+      brandNames: [brandName.trim()],
+    };
+
+    // Deadline guard: leave at least 15 s for M8 read-back + response serialization.
+    // context.invocation.deadline is set by helix-universal to
+    // Date.now() + getRemainingTimeInMillis() at Lambda entry. When absent (local
+    // dev / unit tests), the guard is skipped.
+    const deadline = context.invocation?.deadline;
+    if (deadline !== undefined && Date.now() + 15_000 > deadline) {
+      log.warn(`Serenity fan-out: Lambda deadline too close — aborting after ${succeeded.length} of ${requested.length} tuple(s); remaining marked as 'timeout'`);
+      for (const remaining of requested.slice(succeeded.length + failed.length)) {
+        failed.push({
+          market: remaining.market, languageCode: remaining.languageCode, status: 503, error: 'timeout',
+        });
+      }
+      break;
+    }
+
+    // T4 (LLMO-5206): time each tuple so Coralogix can chart per-tuple fan-out
+    // latency. The clock spans only the upstream create+publish+row write.
+    const startedAt = Date.now();
+    let outcome;
+    let thrown;
+    try {
+      // Sequential by design for the prototype phase. GA migration path: move the
+      // fan-out to an SQS job — the {requested, succeeded, failed} interface maps
+      // directly to an SQS job result without changing the M8 read-back contract.
+      // Do NOT replace with in-process Promise.allSettled: the AIO Proxy's
+      // per-workspace rate limits make concurrent fan-out unsafe at scale.
+      // eslint-disable-next-line no-await-in-loop
+      outcome = await handleCreateMarket(
+        transport,
+        context.dataAccess,
+        brandId,
+        workspaceId,
+        body,
+        log,
+      );
+    } catch (e) {
+      // Record the throw and fall through to the per-tuple metric; the loop continues.
+      thrown = e;
+    }
+    const durationMs = Date.now() - startedAt;
+
+    let success;
+    if (thrown) {
+      // Never forward raw error messages to API callers — SerenityTransportError
+      // carries the upstream URL with workspace ID; unexpected internal errors may
+      // contain file paths or internal hostnames. Log the raw message server-side.
+      log.error(`Serenity fan-out error for ${market}::${languageCode}: ${thrown.message}`);
+      failed.push({
+        market,
+        languageCode,
+        status: thrown.status || 502,
+        error: thrown instanceof SerenityTransportError ? 'semrushUpstreamError' : 'internalError',
+      });
+      success = false;
+    } else if (outcome.status === 201 || outcome.status === 409) {
+      // 201 = newly created; 409 = slice already exists (idempotent success).
+      // Neither response echoes the project id or geo target, so this fan-out
+      // entry just records the tuple — M8 (`reconcileSerenityProjects`) reads the
+      // authoritative semrushProjectId + geoTargetId back from the DB.
+      succeeded.push({ market, languageCode });
+      success = true;
+    } else {
+      failed.push({
+        market,
+        languageCode,
+        status: outcome.status,
+        // Use an opaque token — outcome.body?.error comes from the upstream proxy
+        // and may echo request-body content; treat it the same as thrown errors.
+        error: 'upstreamRejected',
+      });
+      success = false;
+    }
+
+    // T4 (LLMO-5206): one structured metric per tuple. No PII — orgId only.
+    log.info('serenity_project_fanout', {
+      event: 'serenity_project_fanout',
+      orgId,
+      market,
+      languageCode,
+      success,
+      durationMs,
+    });
+  }
+
+  return { requested, succeeded, failed };
+}
+
+/**
+ * M8 (LLMO-5205): validate cohort readiness by reading back the authoritative
+ * DB state after the M7 fan-out and shaping the final per-tuple outcome.
+ *
+ * Reads `BrandSemrushProject.allByBrandId(brandId)` and asserts one row exists
+ * per requested `(market, language)` tuple — rather than trusting the fan-out's
+ * own responses, which also catches the rare case where the proxy returned 201
+ * but the row insert failed silently (LLMO-5007 §M8). A requested tuple with a
+ * matching row is `succeeded`; one without is `failed`, enriched with the
+ * fan-out's status/error when available (otherwise `projectRowMissing`).
+ *
+ * Successful tuples are never rolled back. The caller maps a non-empty `failed`
+ * to HTTP 207.
+ *
+ * @param {object} context - The request context (log, dataAccess).
+ * @param {object} args
+ * @param {string} args.brandId - The brand UUID.
+ * @param {object} args.fanOut - The M7 result `{ requested, succeeded, failed }`.
+ * @returns {Promise<{requested: object[], succeeded: object[], failed: object[]}>}
+ */
+export async function reconcileSerenityProjects(context, { brandId, fanOut }) {
+  const { log, dataAccess } = context;
+  const { requested } = fanOut;
+
+  // Nothing requested, or no brand to key the read-back on — the fan-out result
+  // is already authoritative (it short-circuited for these cases).
+  if (requested.length === 0 || !hasText(brandId)) {
+    return fanOut;
+  }
+
+  let rows;
+  try {
+    rows = await dataAccess.BrandSemrushProject.allByBrandId(brandId) || [];
+  } catch (e) {
+    // If the read-back itself fails we cannot improve on the fan-out result;
+    // surface it as-is rather than masking a partial success as total failure.
+    log.error(`Serenity M8: read-back failed for brand ${brandId}: ${e.message}`);
+    return fanOut;
+  }
+
+  const rowBySlice = new Map();
+  rows.forEach((row) => {
+    const key = `${row.getGeoTargetId()}::${row.getLanguageCode()}`;
+    if (rowBySlice.has(key)) {
+      log.warn(`Serenity M8: duplicate DB row for slice ${key} under brand ${brandId} — keeping first row`);
+      return;
+    }
+    rowBySlice.set(key, row);
+  });
+  const failureByTuple = new Map();
+  // Normalize to lowercase so the key matches rowBySlice (which uses getLanguageCode() from DB).
+  fanOut.failed.forEach((f) => failureByTuple.set(`${f.market}::${String(f.languageCode).toLowerCase()}`, f));
+
+  const succeeded = [];
+  const failed = [];
+  requested.forEach(({ market, languageCode }) => {
+    // `resolveLocation` returns null for an unknown market, in which case no DB
+    // slice can match and the tuple is treated as failed. This is consistent
+    // with M7: the proxy also rejects such a tuple (`unknownMarket`), so it
+    // never wrote a row. Unreachable given the `^[A-Z]{2}$` + proxy validation,
+    // but guarded so a bad code degrades to a failure, not a thrown lookup.
+    const location = resolveLocation(market);
+    const lang = String(languageCode).toLowerCase();
+    const row = location ? rowBySlice.get(`${location.geoTargetId}::${lang}`) : undefined;
+    if (row) {
+      succeeded.push({
+        market,
+        languageCode,
+        semrushProjectId: row.getSemrushProjectId(),
+        geoTargetId: row.getGeoTargetId(),
+      });
+    } else {
+      const prior = failureByTuple.get(`${market}::${languageCode}`);
+      failed.push({
+        market,
+        languageCode,
+        status: prior?.status ?? 500,
+        error: prior?.error ?? 'projectRowMissing',
+      });
+    }
+  });
+
+  return { requested, succeeded, failed };
+}
+
+/**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
  * @param {string} [params.domain] - The domain name (alternative to baseURL)
@@ -1263,7 +1542,7 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
-    tempOnboarding, region,
+    tempOnboarding, region, markets,
   } = params;
   const { env, log } = context;
 
@@ -1273,11 +1552,64 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
   let site;
   let detectedCdn = null;
+  // M7 fan-out result (LLMO-5204); consumed by the M8 response shaping (LLMO-5205).
+  let serenityProvisioning = null;
   try {
     log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, baseURL ${baseURL}, brand ${brandName}`);
 
     // Create or find organization
     const organization = await createOrFindOrganization(imsOrgId, context, say);
+
+    // M1 cohort gate (LLMO-5201) + M5 fail-fast workspace check (LLMO-5203).
+    // Resolved here, right after the org exists and BEFORE any other Adobe-side
+    // state (site, entitlement, audits, brand) is created. Per the orchestration
+    // design (LLMO-5007 §M5), a missing Semrush workspace must fail fast so the
+    // operator can bind one via PATCH /organizations/:id and retry cleanly with
+    // nothing left behind. Only the org is needed for this check; the brand-keyed
+    // fan-out (M6–M8) runs later, once the brand row exists. `serenityEnabled` is
+    // reused there to avoid evaluating the cohort gate twice.
+    const serenityEnabled = await isSerenityOnboardingEnabled(
+      organization.getId(),
+      context,
+    );
+    if (serenityEnabled) {
+      // T4 (LLMO-5206): emitted before M5 so the dashboard counts every cohort
+      // onboarding attempt as the denominator for the success rate. No PII —
+      // orgId/domain/marketCount only (domain is the customer's public site).
+      log.info('serenity_onboarding_start', {
+        event: 'serenity_onboarding_start',
+        orgId: organization.getId(),
+        // HTTP onboarding always supplies `domain`; the Slack path supplies only
+        // `baseURL`, so fall back to its hostname to never log `undefined`.
+        // `baseURL` is already URL-validated above (generateDataFolder parses it).
+        domain: domain || new URL(baseURL).hostname,
+        marketCount: markets?.length ?? 0,
+      });
+    }
+    if (serenityEnabled && !organization.getSemrushWorkspaceId()) {
+      const spaceCatId = organization.getId();
+      // T4 (LLMO-5206): structured metric — counts cohort onboardings blocked because
+      // no Semrush workspace is bound to the org.
+      log.info('serenity_onboarding_blocked', {
+        event: 'serenity_onboarding_blocked',
+        reason: 'no_workspace',
+        orgId: spaceCatId,
+      });
+      // Log operator-actionable detail server-side; surface only a generic message
+      // to API callers so internal org IDs and API paths are not disclosed.
+      log.warn(
+        `Serenity M5: Semrush workspace not bound to org ${spaceCatId}. `
+        + `Run PATCH /organizations/${spaceCatId} with { semrushWorkspaceId: ... } `
+        + 'then retry onboarding.',
+      );
+      const workspaceError = new Error('Semrush workspace not configured for this organization.');
+      // Surfaced as HTTP 404 by the controller (matches the AIO Proxy convention,
+      // LLMO-5007 §M5). `preflight` tells the cleanup handler below there is no
+      // Adobe-side state to roll back — this throw precedes site creation.
+      workspaceError.status = 404;
+      workspaceError.preflight = true;
+      throw workspaceError;
+    }
 
     // Create site BEFORE resolving the onboarding mode. createOrFindSite may
     // re-parent an existing site into the destination org; resolveLlmoOnboardingMode
@@ -1400,6 +1732,9 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       // full-replace syncs inside upsertBrand. Detect the collision and skip the
       // initial-brand write — the brand already exists so DRS sync still resolves
       // it; a human then decides whether the new site is a sub-brand or a URL.
+      // `upsertedBrand` stays undefined on a skip, so the Serenity fan-out below
+      // sees a null brandId and fails every tuple cleanly (LLMO-5007).
+      let upsertedBrand;
       try {
         const { data: existingBrand, error: lookupError } = await postgrestClient
           .from('brands')
@@ -1428,7 +1763,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           // placeholder (consistent with the V2 config + brandAliases, both
           // overwritten by Brandalf's async result).
           const stubRegions = onboardingStubRegions(region);
-          await upsertBrand({
+          upsertedBrand = await upsertBrand({
             organizationId: organization.getId(),
             brand: {
               name: brandName.trim(),
@@ -1446,6 +1781,46 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         }
       } catch (brandError) {
         log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
+      }
+
+      if (serenityEnabled && Array.isArray(markets) && markets.length > 0) {
+        // M6–M8 (LLMO-5007): Semrush provisioning path. M5 already validated the
+        // workspace presence above. T3b fans out one project per market tuple;
+        // T3c (LLMO-5205) will shape the 200/207 response from the result.
+        // Guard: cohort org with no markets → skip fan-out entirely so the
+        // response body stays clean (no empty requested/succeeded/failed arrays).
+        log.info(`Serenity onboarding enabled for org ${organization.getId()} — ${markets.length} market(s) to provision (LLMO-5007)`);
+        // A failed M4 brand upsert leaves `upsertedBrand` undefined; the fan-out
+        // detects the missing brand id and fails every tuple cleanly.
+        const brandId = upsertedBrand?.id ?? null;
+        // T4 (LLMO-5206): time the whole fan-out + read-back so the dashboard
+        // can chart end-to-end provisioning latency per onboarding.
+        const provisioningStartedAt = Date.now();
+        // M7: fan out one Semrush project per (market, language) tuple.
+        const fanOut = await performSerenityFanOut(context, {
+          orgId: organization.getId(),
+          brandId,
+          workspaceId: organization.getSemrushWorkspaceId(),
+          brandName,
+          baseURL,
+          markets,
+        });
+        // M8: read back the authoritative DB state and shape the final outcome.
+        serenityProvisioning = await reconcileSerenityProjects(context, {
+          brandId,
+          fanOut,
+        });
+        const totalDurationMs = Date.now() - provisioningStartedAt;
+        log.info(`Serenity provisioning for org ${organization.getId()}: ${serenityProvisioning.succeeded.length} of ${serenityProvisioning.requested.length} project(s) live, ${serenityProvisioning.failed.length} failed (LLMO-5007)`);
+        // T4 (LLMO-5206): the M8 readiness result — drives the success-rate
+        // numerator and end-to-end latency. No PII — orgId and counts only.
+        log.info('serenity_onboarding_complete', {
+          event: 'serenity_onboarding_complete',
+          orgId: organization.getId(),
+          succeeded: serenityProvisioning.succeeded.length,
+          failed: serenityProvisioning.failed.length,
+          totalDurationMs,
+        });
       }
 
       // Trigger Brandalf immediately after the v2 config exists so downstream
@@ -1475,6 +1850,15 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       }
     } else {
       log.info(`Skipping v2 customer config initialization and Brandalf flow for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
+
+      // M6–M8 (Semrush provisioning) only runs in the v2 block. An allowlisted
+      // org that resolves to v1 (global v1 kill-switch, or re-onboarding a
+      // pre-cutoff site) passed the M5 workspace check but its markets are not
+      // provisioned — surface that rather than dropping them silently. Whether
+      // v1 + cohort is a valid combination is a product decision (LLMO-5007).
+      if (serenityEnabled && Array.isArray(markets) && markets.length > 0) {
+        log.warn(`Serenity onboarding: org ${organization.getId()} resolved to v1 — skipping Semrush provisioning of ${markets.length} market(s); markets[] not processed (LLMO-5007)`);
+      }
 
       // V1 has no Brandalf trigger, so DRS will not submit prompt generation
       // automatically. Submit it directly here so v1 onboardings still get
@@ -1534,8 +1918,18 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       dataFolder,
       detectedCdn,
       message: 'LLMO onboarding completed successfully',
+      // M7 fan-out outcome for the cohort; absent for non-serenity onboardings.
+      // M8 (LLMO-5205) shapes this into the 200/207 response.
+      ...(serenityProvisioning ? { serenity: serenityProvisioning } : {}),
     };
   } catch (error) {
+    // Pre-flight failures (e.g. the M5 missing-workspace 404) throw before any
+    // Adobe-side state is created — there is nothing to clean up, so propagate
+    // directly and let the caller map the status.
+    if (error.preflight) {
+      throw error;
+    }
+
     log.error(`Error during LLMO onboarding: ${error.message}. Attempting cleanup.`);
 
     // Attempt cleanup
