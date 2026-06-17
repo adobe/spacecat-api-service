@@ -144,8 +144,11 @@ function mapError(e, log) {
   if (e instanceof SerenityTransportError) {
     log.error('Serenity upstream error', e);
     if (e.status === 401 || e.status === 403) {
+      // Do NOT echo e.message here: the transport error message embeds the full
+      // gateway URL (internal host + workspace/project UUIDs). Return a generic
+      // message and keep the detail to the log.error above (matches the 502 branch).
       return createResponse(
-        { error: errorTokenForStatus(e.status), message: safeError(e.message) },
+        { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
         e.status,
       );
     }

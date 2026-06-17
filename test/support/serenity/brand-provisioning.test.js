@@ -232,4 +232,70 @@ describe('provisionBrandSubworkspace', () => {
     }
     expect(resolveWorkspaceId.called).to.equal(false);
   });
+
+  it('rejects a non-IMS caller with 401 before forwarding the token upstream', async () => {
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const ctx = {
+      ...buildContext(),
+      attributes: { authInfo: { getType: () => 'jwt' } },
+    };
+    try {
+      await provisionBrandSubworkspace(ctx, baseParams);
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e.status).to.equal(401);
+    }
+    // Guard fires before any upstream provisioning — the non-IMS bearer is
+    // never proxied to the Semrush gateway.
+    expect(handleCreateMarketSubworkspace.called).to.equal(false);
+  });
+});
+
+describe('releaseProvisionedWorkspace', () => {
+  function buildAuthedContext() {
+    return {
+      env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
+      pathInfo: { headers: { authorization: 'Bearer test-ims-token' } },
+    };
+  }
+
+  async function loadWithTransport(transferWorkspaceResources) {
+    return esmock('../../../src/support/serenity/brand-provisioning.js', {
+      '../../../src/support/serenity/rest-transport.js': {
+        createSerenityTransport: () => ({ transferWorkspaceResources }),
+        SerenityTransportError,
+      },
+    });
+  }
+
+  it('releases the orphaned workspace allocation back to the parent pool', async () => {
+    const transfer = sinon.stub().resolves({});
+    const { releaseProvisionedWorkspace } = await loadWithTransport(transfer);
+    const log = { info: sinon.stub(), error: sinon.stub() };
+    await releaseProvisionedWorkspace(buildAuthedContext(), NEW_WS, log);
+    expect(transfer.calledOnce).to.equal(true);
+    const [wsArg, allocArg] = transfer.firstCall.args;
+    expect(wsArg).to.equal(NEW_WS);
+    expect(allocArg).to.deep.equal({ ai: { projects: 0, prompts: 0 } });
+    expect(log.error.called).to.equal(false);
+  });
+
+  it('is a no-op when no workspace id is given', async () => {
+    const transfer = sinon.stub().resolves({});
+    const { releaseProvisionedWorkspace } = await loadWithTransport(transfer);
+    await releaseProvisionedWorkspace(buildAuthedContext(), '', { error: sinon.stub() });
+    expect(transfer.called).to.equal(false);
+  });
+
+  it('swallows a release failure and logs it at error with the workspace id', async () => {
+    const transfer = sinon.stub().rejects(new SerenityTransportError(500, 'boom'));
+    const { releaseProvisionedWorkspace } = await loadWithTransport(transfer);
+    const log = { info: sinon.stub(), error: sinon.stub() };
+    // Must NOT throw — the caller is already on an error path.
+    await releaseProvisionedWorkspace(buildAuthedContext(), NEW_WS, log);
+    expect(log.error.calledOnce).to.equal(true);
+    expect(log.error.firstCall.args[1].semrushWorkspaceId).to.equal(NEW_WS);
+  });
 });

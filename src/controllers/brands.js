@@ -51,7 +51,7 @@ import {
   getBrandBySite,
   getBrandCompetitors,
 } from '../support/brands-storage.js';
-import { provisionBrandSubworkspace } from '../support/serenity/brand-provisioning.js';
+import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import {
@@ -1316,6 +1316,11 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId } = context.params || {};
     const brandData = context.data;
 
+    // Hoisted above the try so the catch can run compensation: if a Semrush
+    // sub-workspace was provisioned but the brand row failed to persist, the
+    // catch releases the orphaned allocation (see below).
+    let provisionedWorkspaceId = null;
+
     try {
       if (!hasText(spaceCatId)) {
         return badRequest('Organization ID required');
@@ -1352,7 +1357,6 @@ function BrandsController(ctx, log, env) {
       // brand never exists without a valid Semrush side. The pre-generated id is
       // the sub-workspace title key and is forced onto the row.
       let provisionedBrandId = null;
-      let provisionedWorkspaceId = null;
       const { semrushMarket } = brandData;
       if (isNonEmptyObject(semrushMarket)) {
         const { market, languageCode } = semrushMarket;
@@ -1418,6 +1422,16 @@ function BrandsController(ctx, log, env) {
       return createResponse(created, 201);
     } catch (error) {
       log.error(`Error creating brand for organization ${spaceCatId}:`, error);
+      // Compensation: a sub-workspace was provisioned upstream but the brand row
+      // failed to persist (e.g. a unique-constraint 409 or transient PostgREST
+      // error). Nothing references that workspace, so release its allocation back
+      // to the parent pool (best-effort) rather than leaking it.
+      if (hasText(provisionedWorkspaceId)) {
+        log.error('serenity: brand-create failed after subworkspace provision; releasing orphaned allocation', {
+          semrushWorkspaceId: provisionedWorkspaceId,
+        });
+        await releaseProvisionedWorkspace(context, provisionedWorkspaceId, log);
+      }
       return createErrorResponse(error);
     }
   };

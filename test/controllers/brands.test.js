@@ -4468,6 +4468,37 @@ describe('Brands Controller', () => {
         expect(upsertStub.called).to.equal(false);
       });
 
+      it('releases the orphaned sub-workspace when the brand row write fails after provisioning', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-orphan' });
+        const releaseStub = sinon.stub().resolves();
+        // A routine post-provision DB failure (e.g. unique-constraint 409).
+        const upsertStub = sinon.stub().rejects(new Error('duplicate key value violates unique constraint'));
+        const Mocked = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/serenity/brand-provisioning.js': {
+            provisionBrandSubworkspace: provisionStub,
+            releaseProvisionedWorkspace: releaseStub,
+          },
+          '../../src/support/brands-storage.js': { upsertBrand: upsertStub },
+        });
+        const controller = Mocked.default(context, loggerStub, mockEnv);
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        // The DB write failed, so the create still errors out...
+        expect(response.status).to.not.equal(201);
+        expect(provisionStub.calledOnce).to.equal(true);
+        // ...but the provisioned-yet-unreferenced sub-workspace is released back
+        // to the parent pool, not leaked.
+        expect(releaseStub.calledOnce).to.equal(true);
+        expect(releaseStub.firstCall.args[1]).to.equal('ws-orphan');
+      });
+
       it('returns 400 when semrushMarket lacks a languageCode', async () => {
         const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
         const controller = await buildController({ provisionBrandSubworkspace: provisionStub });

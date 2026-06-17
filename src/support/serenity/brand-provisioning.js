@@ -15,6 +15,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode, getImsUserToken } from '../utils.js';
 import { createSerenityTransport, SerenityTransportError } from './rest-transport.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
+import { RELEASE_ALLOCATION } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
 import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from './prompt-tags.js';
 
@@ -44,10 +45,10 @@ export function marketProjectName(market, languageCode) {
  * (serenity dual-mode). Creates the brand's Semrush sub-workspace (named after
  * the brand) and one DRAFT AIO project for the (market, languageCode) slice
  * BEFORE the brand row is written, so a brand only ever exists once its Semrush
- * side is valid ("only valid things on our side"). The market is left as a draft
- * — publish is deferred until prompts/models are added (publish-after-populate),
- * so brand-create never blocks on the empty-market publish quota (see
- * handleCreateMarketSubworkspace `skipPublish`).
+ * side is valid ("only valid things on our side"). Models and generated
+ * topics/prompts are attached, then the initial market is published
+ * synchronously (`publishMode: 'require'`) so the brand goes live on create; a
+ * quota 405 from publishing surfaces as a 409 "Quota exceeded".
  *
  * The brand row is written by the caller AFTER this resolves, so provisioning is
  * driven through a lightweight brand stub: it supplies the brand's name + the
@@ -68,16 +69,18 @@ export function marketProjectName(market, languageCode) {
  *   they classify each generated prompt as `type:branded` / `type:non-branded`.
  * @param {object} [params.brandUrlSources] - the brand's URL sources
  *   ({ urls, socialAccounts, earnedContent }) pushed onto the initial market's
- *   project benchmark (own sites + social + earned). A failed push hard-fails
- *   provisioning (the brand row is then not written).
+ *   own-brand benchmark (own sites + social + earned). Best-effort: a failed
+ *   push is logged and skipped, never aborts provisioning.
  * @param {object[]} [params.competitors] - the brand's competitors ("other
- *   brands to track") merged into the initial market's project CI competitor
- *   list (region-filtered, domain-only). A failed sync hard-fails provisioning.
+ *   brands to track") tracked as region-filtered project benchmarks (domain-only).
+ *   Best-effort: a failed sync is logged and skipped, never aborts provisioning.
  * @param {object} [log]
  * @returns {Promise<{semrushWorkspaceId: string, published: boolean}>} the new
  *   sub-workspace id and whether the initial market was published (best-effort:
  *   a quota 405 leaves it a draft).
- * @throws {ErrorWithStatusCode} on any failure (the caller then skips the brand write).
+ * @throws {ErrorWithStatusCode} on workspace/project create or publish failure
+ *   (the caller then skips the brand write). URL and competitor propagation are
+ *   best-effort and never throw.
  */
 export async function provisionBrandSubworkspace(context, {
   spaceCatId, brandId, brandName, market, languageCode, brandDomain,
@@ -101,6 +104,14 @@ export async function provisionBrandSubworkspace(context, {
     throw new ErrorWithStatusCode('Organization has no Semrush workspace configured', 400);
   }
 
+  // Match the /serenity/* IMS-only contract (requireImsBearer): the upstream
+  // gateway only understands IMS user tokens, so refuse to forward anything
+  // else. POST /brands is organization:write and thus S2S-reachable; without
+  // this guard an S2S consumer's non-IMS bearer would be proxied upstream.
+  const authInfo = context?.attributes?.authInfo;
+  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+    throw new ErrorWithStatusCode('Semrush provisioning requires IMS authentication', 401);
+  }
   const imsToken = getImsUserToken(context);
   const transport = createSerenityTransport({ env: context.env, imsToken });
 
@@ -167,4 +178,38 @@ export async function provisionBrandSubworkspace(context, {
     throw new ErrorWithStatusCode('Semrush provisioning returned no sub-workspace id', 502);
   }
   return { semrushWorkspaceId: capturedWorkspaceId, published: Boolean(result.body?.published) };
+}
+
+/**
+ * Best-effort cleanup for a sub-workspace that was provisioned upstream but whose
+ * brand row was never written (e.g. the post-provision DB upsert threw). Because
+ * the brand id was a throwaway UUID never persisted, nothing references this
+ * workspace, so it would otherwise leak and permanently hold its CREATE allocation
+ * against the parent pool. Releasing the allocation hands the quota back. The
+ * sub-workspace itself is never deleted (deletion is fail-closed) — it is left
+ * empty and reclaimable. Never throws: the caller is already on an error path, so
+ * a failed release is logged at ERROR (with the workspace id, for manual recovery)
+ * and swallowed.
+ *
+ * @param {object} context - request context (env, pathInfo headers, attributes).
+ * @param {string} workspaceId - the orphaned sub-workspace id to release.
+ * @param {object} [log]
+ */
+export async function releaseProvisionedWorkspace(context, workspaceId, log = console) {
+  if (!hasText(workspaceId)) {
+    return;
+  }
+  try {
+    const imsToken = getImsUserToken(context);
+    const transport = createSerenityTransport({ env: context.env, imsToken });
+    await transport.transferWorkspaceResources(workspaceId, RELEASE_ALLOCATION);
+    log?.info?.('serenity: released orphaned subworkspace allocation back to parent pool', {
+      semrushWorkspaceId: workspaceId,
+    });
+  } catch (e) {
+    log?.error?.('serenity: failed to release orphaned subworkspace allocation', {
+      semrushWorkspaceId: workspaceId,
+      error: e?.message,
+    });
+  }
 }

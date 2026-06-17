@@ -565,7 +565,10 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(403);
       const body = await readBody(response);
       expect(body.error).to.equal('forbidden');
-      expect(body.message).to.equal('invalid access attempt');
+      // Redacted: the transport error message embeds the gateway URL (internal
+      // host + workspace UUIDs), so 401/403 return a generic message, not e.message.
+      expect(body.message).to.equal('Upstream authorization failed');
+      expect(body.message).to.not.equal('invalid access attempt');
       expect(JSON.stringify(body)).not.to.match(/leak/);
     });
 
@@ -576,7 +579,9 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(401);
       const body = await readBody(response);
       expect(body.error).to.equal('authenticationRequired');
-      expect(body.message).to.equal('token expired');
+      // Redacted (see 403 case): no upstream message echoed on 401/403.
+      expect(body.message).to.equal('Upstream authorization failed');
+      expect(body.message).to.not.equal('token expired');
       expect(JSON.stringify(body)).not.to.match(/leak/);
     });
 
