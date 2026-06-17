@@ -2940,7 +2940,6 @@ llmo-agentic-traffic-hits-by-urls:
                   items:
                     type: object
                     properties:
-                      url: { type: string }
                       host: { type: string }
                       urlPath: { type: string }
                       totalHits: { type: integer }
@@ -2953,8 +2952,7 @@ llmo-agentic-traffic-hits-by-urls:
                             value: { type: integer }
             example:
               rows:
-                - url: 'https://www.example.com/products/widget'
-                  host: 'www.example.com'
+                - host: 'www.example.com'
                   urlPath: '/products/widget'
                   totalHits: 1234
                   hitsTrend:

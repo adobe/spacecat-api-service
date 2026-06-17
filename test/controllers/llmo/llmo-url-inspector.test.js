@@ -526,17 +526,10 @@ describe('URL Inspector Handlers', () => {
       ]);
       expect(body.urls[1].referralHits).to.equal(0);
       expect(body.urls[1].referralHitsTrend).to.deep.equal([]);
-      // LLMO-5586: citability/deployed come keyed off this RPC so the owned
-      // table no longer fans out to by_url. null citability maps to null;
-      // deployed defaults to false.
-      expect(body.urls[0].avgCitabilityScore).to.equal(88.0);
-      expect(body.urls[0].deployedAtEdge).to.equal(true);
-      expect(body.urls[1].avgCitabilityScore).to.be.null;
-      expect(body.urls[1].deployedAtEdge).to.equal(false);
-      // page3 omits both columns entirely (deploy-order gap where the RPC
-      // hasn't shipped them): handler must default to null / false, not crash.
-      expect(body.urls[2].avgCitabilityScore).to.be.null;
-      expect(body.urls[2].deployedAtEdge).to.equal(false);
+      // LLMO-5586: citability/deployed are NOT surfaced here — the owned table
+      // sources them UI-side (single citability source, Anuj's RCV hook).
+      expect(body.urls[0]).to.not.have.property('avgCitabilityScore');
+      expect(body.urls[0]).to.not.have.property('deployedAtEdge');
     });
 
     // Same defence-in-depth as the agentic-trend test below — referral side

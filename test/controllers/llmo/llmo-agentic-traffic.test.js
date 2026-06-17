@@ -2231,7 +2231,6 @@ describe('llmo-agentic-traffic', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.rows).to.deep.equal([{
-        url: 'https://www.example.com/a',
         host: 'www.example.com',
         urlPath: '/a',
         totalHits: 42,

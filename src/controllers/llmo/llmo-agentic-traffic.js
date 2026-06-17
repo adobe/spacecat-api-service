@@ -754,7 +754,7 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
  *   startDate, endDate,          // same shape as the other agentic endpoints
  *   platform?, agentType?, agentTypes?, userAgent?
  * }
- * Returns: { rows: [{ url, host, urlPath, totalHits, hitsTrend }] }
+ * Returns: { rows: [{ host, urlPath, totalHits, hitsTrend }] }
  *
  * Calls rpc_agentic_hits_for_urls, which matches rpc_agentic_traffic_by_url's
  * fact-derived totals/trend exactly without the full-site scan + ranking.
@@ -794,7 +794,6 @@ export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) 
           p_end_date: parsed.endDate,
           p_urls: urls,
           p_platform: parsed.platform,
-          p_agent_type: parsed.agentType,
           p_user_agent: parsed.userAgent,
           ...buildAgentTypesRpcParam(parsed),
         };
@@ -811,7 +810,6 @@ export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) 
         ctx.log.info(`Agentic traffic hits-by-urls: raw=${rawUrls.length} valid=${urls.length} returned=${rows.length}`);
         return ok({
           rows: rows.map((row) => ({
-            url: row.url || '',
             host: row.host || '',
             urlPath: row.url_path || '',
             totalHits: Number(row.total_hits ?? 0),

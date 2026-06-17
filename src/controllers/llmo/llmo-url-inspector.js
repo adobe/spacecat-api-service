@@ -323,12 +323,6 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
             value: Number(point.value ?? 0),
           }))
           : [],
-        // LLMO-5586: citability/deployed now come keyed off this RPC, so the
-        // owned table no longer fans out to rpc_agentic_traffic_by_url for them.
-        avgCitabilityScore: r.avg_citability_score !== null
-          && r.avg_citability_score !== undefined
-          ? Number(r.avg_citability_score) : null,
-        deployedAtEdge: r.deployed_at_edge ?? false,
       }));
 
       return cachedOk({ urls, totalCount });
