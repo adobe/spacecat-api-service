@@ -449,6 +449,70 @@ describe('markets-subworkspace handlers', () => {
       });
     });
 
+    it('best-effort publish marks the project published when the publish succeeds', async () => {
+      const transport = makeTransport();
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { publishMode: 'best-effort' },
+      );
+      expect(res.status).to.equal(201);
+      expect(res.body.published).to.equal(true);
+      expect(transport.publishProject).to.have.been.calledOnce;
+    });
+
+    it('reads topics from the { items: [...] } envelope shape returned by getBrandTopics', async () => {
+      const transport = makeTransport({
+        getBrandTopics: sinon.stub().resolves({
+          items: [{ topic: 'Boots', volume: 500, prompts: ['best boots'] }],
+        }),
+        createTaggedPrompts: sinon.stub().resolves(null),
+      });
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { generateTopics: true, standardTags: ['source:ai'], publishMode: 'skip' },
+      );
+      expect(res.status).to.equal(201);
+      expect(transport.createTaggedPrompts).to.have.been.calledOnce;
+      const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
+      expect(promptsByText).to.have.property('best boots');
+    });
+
+    it('skips the prompt attach (topicCount/promptCount 0) when topics yield no prompts', async () => {
+      const transport = makeTransport({
+        // Topics present but every prompts list is empty → nothing to attach.
+        getBrandTopics: sinon.stub().resolves([
+          { topic: 'Empty', volume: 10, prompts: [] },
+          { topic: 'AlsoEmpty', volume: 5 },
+        ]),
+        createTaggedPrompts: sinon.stub().resolves(null),
+      });
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { generateTopics: true, standardTags: ['source:ai'], publishMode: 'skip' },
+      );
+      expect(res.status).to.equal(201);
+      expect(res.body).to.include({ topicCount: 0, promptCount: 0 });
+      expect(transport.createTaggedPrompts).to.not.have.been.called;
+    });
+
     it('409s when a LIVE project already exists for the slice', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj({ status: 'live' })] }) });
       const res = await handleCreateMarketSubworkspace(

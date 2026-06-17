@@ -672,6 +672,56 @@ describe('SerenityController', () => {
       expect(handlers.listLanguageCatalog).to.not.have.been.called;
     });
 
+    it('listOrgModels 500s when Organization data-access is unavailable', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization = undefined;
+      const response = await controller.listOrgModels(ctx);
+      expect(response.status).to.equal(500);
+      expect(handlers.listGlobalModelCatalog).to.not.have.been.called;
+    });
+
+    it('listOrgModels 404s when the organization is not found', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById = sinon.stub().resolves(null);
+      const response = await controller.listOrgModels(ctx);
+      expect(response.status).to.equal(404);
+      expect(handlers.listGlobalModelCatalog).to.not.have.been.called;
+    });
+
+    it('listOrgModels routes an upstream failure through mapError', async () => {
+      handlers.listGlobalModelCatalog.rejects(new MockTransportError(502, 'gw.internal boom'));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listOrgModels(fakeContext());
+      expect(response.status).to.equal(502);
+    });
+
+    it('listOrgLanguages 500s when Organization data-access is unavailable', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization = undefined;
+      const response = await controller.listOrgLanguages(ctx);
+      expect(response.status).to.equal(500);
+      expect(handlers.listLanguageCatalog).to.not.have.been.called;
+    });
+
+    it('listOrgLanguages 404s when the organization is not found', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById = sinon.stub().resolves(null);
+      const response = await controller.listOrgLanguages(ctx);
+      expect(response.status).to.equal(404);
+      expect(handlers.listLanguageCatalog).to.not.have.been.called;
+    });
+
+    it('listOrgLanguages routes an upstream failure through mapError', async () => {
+      handlers.listLanguageCatalog.rejects(new MockTransportError(502, 'gw.internal boom'));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listOrgLanguages(fakeContext());
+      expect(response.status).to.equal(502);
+    });
+
     it('updateModels dispatches ctx.data to handleUpdateModels and wraps the result in ok()', async () => {
       handlers.handleUpdateModels.resolves({ items: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});

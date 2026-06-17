@@ -19,6 +19,7 @@ import {
   BRAND_URL_TYPE,
   regionApplies,
   collectBrandUrlEntries,
+  normalizeBenchmarkDomain,
   ensureOwnBrandBenchmark,
   attachBrandUrlsToProject,
   syncBrandUrlsAcrossMarkets,
@@ -118,8 +119,43 @@ describe('brand-urls helpers', () => {
     });
   });
 
+  describe('normalizeBenchmarkDomain', () => {
+    it('strips scheme, www., and path to the bare host', () => {
+      expect(normalizeBenchmarkDomain('https://www.Acme.com/path?q=1')).to.equal('acme.com');
+      expect(normalizeBenchmarkDomain('acme.com')).to.equal('acme.com');
+    });
+
+    it('returns null for empty / non-string input', () => {
+      expect(normalizeBenchmarkDomain('')).to.equal(null);
+      expect(normalizeBenchmarkDomain('   ')).to.equal(null);
+      expect(normalizeBenchmarkDomain(undefined)).to.equal(null);
+      expect(normalizeBenchmarkDomain(42)).to.equal(null);
+    });
+
+    it('returns null when the value cannot be parsed as a URL', () => {
+      // Contains '://' so it is NOT prefixed with https://, and is unparseable —
+      // exercises the catch path.
+      expect(normalizeBenchmarkDomain('https://')).to.equal(null);
+      expect(normalizeBenchmarkDomain('ht!tp://[bad')).to.equal(null);
+    });
+  });
+
   describe('ensureOwnBrandBenchmark', () => {
     const BRAND = { name: 'Acme', domain: 'https://acme.com', aliases: ['acme inc'] };
+
+    it('logs the created benchmark id when a logger is supplied', async () => {
+      const info = sandbox.stub();
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['new-9'], existing_count: 0 }),
+      };
+      const id = await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, { info });
+      expect(id).to.equal('new-9');
+      expect(info).to.have.been.calledWithMatch(
+        'brand-urls: created own-brand benchmark',
+        sinon.match({ benchmarkId: 'new-9' }),
+      );
+    });
 
     it('returns the existing main_brand benchmark without creating', async () => {
       const transport = {
@@ -249,6 +285,29 @@ describe('brand-urls helpers', () => {
       expect(transport.createBrandUrls).to.not.have.been.called;
     });
 
+    it('warns when skipping a benchmark-less attach and a logger is supplied', async () => {
+      const warn = sandbox.stub();
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub(),
+        createBrandUrls: sandbox.stub(),
+      };
+      const entries = [{ url: 'https://acme.com', type: 'website' }];
+      const result = await attachBrandUrlsToProject(
+        transport,
+        WS,
+        PID,
+        entries,
+        { name: 'Acme', domain: '' },
+        { warn, info: () => {} },
+      );
+      expect(result).to.deep.equal({ created: 0, skipped: true });
+      expect(warn).to.have.been.calledWithMatch(
+        'brand-urls: no benchmark available — skipping URL attach',
+        sinon.match({ count: 1 }),
+      );
+    });
+
     it('propagates a create-URL failure', async () => {
       const transport = {
         listBenchmarks: sandbox.stub().resolves(benchOk()),
@@ -309,6 +368,30 @@ describe('brand-urls helpers', () => {
       expect(transport.deleteBrandUrls).to.not.have.been.called;
       expect(transport.publishProject).to.not.have.been.called;
       expect(result).to.deep.equal({ markets: 1, created: 0, deleted: 0 });
+    });
+
+    it('skips (warns, decrements market count) when a project has no resolvable benchmark', async () => {
+      const warn = sandbox.stub();
+      // Project has a country (so it is region-addressable) but no domain and no
+      // existing benchmark → ensureOwnBrandBenchmark returns null → skip.
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub(),
+        listBrandUrls: sandbox.stub(),
+        createBrandUrls: sandbox.stub(),
+        deleteBrandUrls: sandbox.stub(),
+        publishProject: sandbox.stub(),
+      };
+      const result = await syncBrandUrlsAcrossMarkets(
+        transport,
+        { urls: ['https://acme.com'] },
+        WS,
+        { warn, info: () => {} },
+      );
+      expect(transport.listBrandUrls).to.not.have.been.called;
+      expect(warn).to.have.been.calledWithMatch('brand-urls: no benchmark available — skipping market');
+      expect(result).to.deep.equal({ markets: 0, created: 0, deleted: 0 });
     });
 
     it('skips projects with no resolvable market country', async () => {

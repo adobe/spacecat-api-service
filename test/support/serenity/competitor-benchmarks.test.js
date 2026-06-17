@@ -160,6 +160,29 @@ describe('competitor-benchmarks helpers', () => {
       expect(result).to.deep.equal({ markets: 2, created: 2, deleted: 0 });
     });
 
+    it('logs a per-sync summary when a logger is supplied', async () => {
+      const info = sandbox.stub();
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['x'], existing_count: 0 }),
+        deleteBenchmarks: sandbox.stub().resolves(null),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncCompetitorBenchmarksAcrossMarkets(
+        transport,
+        [{ name: 'US rival', url: 'https://us-rival.com', regions: ['us'] }],
+        [],
+        WS,
+        { info, warn: () => {} },
+      );
+      expect(result).to.deep.equal({ markets: 1, created: 1, deleted: 0 });
+      expect(info).to.have.been.calledWithMatch(
+        'competitor-benchmarks: re-synced across markets',
+        sinon.match({ workspaceId: WS, markets: 1, created: 1 }),
+      );
+    });
+
     it('skips republish for an unchanged project and skips region-less projects', async () => {
       const transport = {
         listProjects: sandbox.stub().resolves({

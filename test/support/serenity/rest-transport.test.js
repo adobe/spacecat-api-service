@@ -420,6 +420,31 @@ describe('Semrush REST transport', () => {
       expect(url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls$/);
       expect(JSON.parse(init.body)).to.deep.equal({ ids: ['u1', 'u2'] });
     });
+
+    it('createBenchmarks POSTs the benchmarks array to /v2/.../ai_models/benchmarks', async () => {
+      fetchStub.resolves(fetchOk({ ids: ['b1'], existing_count: 0 }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const benchmarks = [{ brand_name: 'Acme', domain: 'acme.com' }];
+      await transport.createBenchmarks(WORKSPACE_ID, PROJECT_ID, benchmarks);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.match(/\/v2\/workspaces\/.*\/projects\/proj-xyz\/ai_models\/benchmarks$/);
+      expect(JSON.parse(init.body)).to.deep.equal(benchmarks);
+    });
+
+    it('deleteBenchmarks DELETEs /v1/.../ai_models/benchmarks with body { ids }', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.deleteBenchmarks(WORKSPACE_ID, PROJECT_ID, ['b1', 'b2']);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('DELETE');
+      expect(url).to.match(/\/v1\/workspaces\/.*\/projects\/proj-xyz\/ai_models\/benchmarks$/);
+      expect(JSON.parse(init.body)).to.deep.equal({ ids: ['b1', 'b2'] });
+    });
   });
 
   describe('CI competitors', () => {
