@@ -39,6 +39,7 @@ import {
   checkPromptsExist,
   getPromptStats,
   resolveBrandUuid,
+  findPromptsBlockingRegionRemoval,
 } from '../support/prompts-storage.js';
 import {
   listBrands,
@@ -52,6 +53,7 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
+import { createIntentClassifier, resolveBatchTimeoutMs } from '../support/intent-classifier.js';
 import {
   listCategories,
   createCategory,
@@ -89,6 +91,16 @@ function BrandsController(ctx, log, env) {
   const { Organization, Site } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  // Best-effort intent classifier for prompts that arrive without an intent
+  // (human-added). Returns null when disabled by config or Azure OpenAI is not
+  // configured, in which case intent is simply left null. Built once per
+  // controller instance and passed into the prompt storage layer.
+  const classifyIntent = createIntentClassifier({ env, log });
+  // Total wall-clock ceiling for the bulk-create classification batch, so a slow
+  // Azure can't stall the write past the Lambda timeout (per-call timeout only
+  // bounds a single call). On expiry, completed classifications are kept.
+  const classifyIntentBatchTimeoutMs = resolveBatchTimeoutMs(env);
 
   /**
    * Fetches an organization by ID and returns a 404 error if not found.
@@ -420,6 +432,8 @@ function BrandsController(ctx, log, env) {
         prompts,
         postgrestClient,
         updatedBy,
+        classifyIntent,
+        classifyIntentBatchTimeoutMs,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);
@@ -475,6 +489,7 @@ function BrandsController(ctx, log, env) {
         updates,
         postgrestClient,
         updatedBy,
+        classifyIntent,
       });
 
       if (!prompt) {
@@ -943,7 +958,7 @@ function BrandsController(ctx, log, env) {
       // without grepping messages. LLMO-4370 #15.
       log.info(`Category POST resolved for organization ${spaceCatId}`, {
         organization_id: spaceCatId,
-        category_id: category.id,
+        category_uuid: category.id,
         outcome,
       });
 
@@ -978,6 +993,9 @@ function BrandsController(ctx, log, env) {
       }
       if (!hasText(categoryId)) {
         return badRequest('Category ID required');
+      }
+      if (!isValidUUID(categoryId)) {
+        return badRequest('Category ID must be a valid UUID');
       }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
@@ -1033,6 +1051,9 @@ function BrandsController(ctx, log, env) {
       }
       if (!hasText(categoryId)) {
         return badRequest('Category ID required');
+      }
+      if (!isValidUUID(categoryId)) {
+        return badRequest('Category ID must be a valid UUID');
       }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
@@ -1299,6 +1320,7 @@ function BrandsController(ctx, log, env) {
         brand: brandData,
         postgrestClient,
         updatedBy,
+        log,
       });
 
       return createResponse(created, 201);
@@ -1347,6 +1369,39 @@ function BrandsController(ctx, log, env) {
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
 
+      // LLMO-5645: a region must not be removed from a brand while prompts still
+      // use it — DRS schedules off each prompt's `regions`, so dropping a brand
+      // region would orphan those prompts on a market the brand no longer
+      // covers. Reject the change and have the operator relocate the prompts
+      // first (consistency guard, enforced before the brand is mutated).
+      //
+      // Best-effort, NOT transactional: there is a TOCTOU window between this
+      // check and the update below — a prompt created in the removed region in
+      // between could slip past. Acceptable given how infrequent brand-region
+      // edits are, and the next edit re-checks; a prompt added later still can't
+      // be scheduled for a region the brand lacks.
+      if (updates.region !== undefined) {
+        const before = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        const blocking = await findPromptsBlockingRegionRemoval({
+          organizationId: spaceCatId,
+          brandUuid,
+          oldRegions: before?.region || [],
+          newRegions: updates.region || [],
+          postgrestClient,
+          log,
+        });
+        const blockedRegions = Object.keys(blocking).sort();
+        if (blockedRegions.length > 0) {
+          const detail = blockedRegions
+            .map((r) => `${r.toUpperCase()} (${blocking[r]} prompt${blocking[r] === 1 ? '' : 's'})`)
+            .join(', ');
+          return badRequest(
+            `Cannot remove region(s) still used by prompts: ${detail}. `
+            + 'Reassign or delete those prompts first, then retry the region change.',
+          );
+        }
+      }
+
       const updated = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -1358,6 +1413,7 @@ function BrandsController(ctx, log, env) {
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
       return ok(updated);
     } catch (error) {
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);

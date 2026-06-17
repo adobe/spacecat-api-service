@@ -18,7 +18,6 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { AsyncJob } from '@adobe/spacecat-shared-data-access';
 import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
-import { TierClient } from '@adobe/spacecat-shared-tier-client';
 import AccessControlUtil from '../support/access-control-util.js';
 import { PreflightDto } from '../dto/preflight.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
@@ -49,7 +48,7 @@ function PreflightController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess, sqs } = ctx;
+  const { dataAccess, sqs, imsClient } = ctx;
 
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
@@ -57,6 +56,10 @@ function PreflightController(ctx, log, env) {
 
   if (!isNonEmptyObject(sqs)) {
     throw new Error('SQS client required');
+  }
+
+  if (!isNonEmptyObject(imsClient)) {
+    throw new Error('IMS client required');
   }
 
   if (!isNonEmptyObject(env)) {
@@ -97,41 +100,6 @@ function PreflightController(ctx, log, env) {
         `Invalid request: step must be either ${AUDIT_STEP_IDENTIFY} or ${AUDIT_STEP_SUGGEST}`,
       );
     }
-  }
-
-  /**
-   * Checks if a handler type is enabled for a site, including product code
-   * entitlement verification. Mirrors the audit worker's isAuditEnabledForSite.
-   */
-  async function isAuditEnabledForSite(type, site, configuration) {
-    const handler = configuration.getHandlers()?.[type];
-    if (!handler) {
-      log.info(`Handler ${type} not found in Configuration`);
-      return false;
-    }
-    if (isNonEmptyArray(handler.productCodes)) {
-      const tierContext = { dataAccess, log };
-      const enrollmentChecks = await Promise.all(
-        handler.productCodes.map(async (productCode) => {
-          try {
-            const tierClient = await TierClient.createForSite(tierContext, site, productCode);
-            const tierResult = await tierClient.checkValidEntitlement();
-            return tierResult.siteEnrollment || false;
-          } catch (e) {
-            log.error(`Failed to check entitlement for ${productCode}: ${e.message}`);
-            return false;
-          }
-        }),
-      );
-      if (!enrollmentChecks.some((has) => has)) {
-        log.info(`No valid site enrollment for handler ${type} with product codes ${handler.productCodes} for site ${site.getId()}`);
-        return false;
-      }
-    } else {
-      log.info(`Handler ${type} has no product codes`);
-      return false;
-    }
-    return configuration.isHandlerEnabledForSite(type, site);
   }
 
   /**
@@ -344,11 +312,21 @@ function PreflightController(ctx, log, env) {
    * Calls Mysticat's POST /v1/preflight/analyze and returns once the request is accepted.
    * Mysticat processes the analysis asynchronously and writes results directly to the AsyncJob
    * identified by scanId.
+   *
+   * Two distinct auth headers are sent (SITES-43236 / mystique-deploy PR #463):
+   *  - `Authorization`: the customer site's page-auth token, forwarded by
+   *    Mysticat to DRS for authenticated page-HTML fetch.
+   *  - `x-ims-authorization`: spacecat-api-service's own IMS service token,
+   *    validated at the Ethos CGW-Flex edge before reaching the Mysticat pod.
+   *    Kept on a dedicated header — not `Authorization` — so the IMS edge gate
+   *    does not collide with the customer's page-auth token above.
+   *
    * @param {string} mysticatBaseUrl - The base URL of the Mystique service (MYSTIQUE_API_BASE_URL).
    * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
    * @param {string} siteId - The site ID.
    * @param {string} url - The page URL to analyze.
-   * @param {string} [authorizationHeader] - Optional auth header forwarded to Mysticat.
+   * @param {string} [authorizationHeader] - Optional customer-site page-auth header.
+   * @param {string} [imsServiceToken] - Optional spacecat IMS v3 service token (raw access_token).
    */
   async function callMysticatAnalyze(
     mysticatBaseUrl,
@@ -356,6 +334,7 @@ function PreflightController(ctx, log, env) {
     siteId,
     url,
     authorizationHeader,
+    imsServiceToken,
   ) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -367,6 +346,7 @@ function PreflightController(ctx, log, env) {
         headers: {
           'Content-Type': 'application/json',
           ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
+          ...(hasText(imsServiceToken) && { 'x-ims-authorization': `Bearer ${imsServiceToken}` }),
         },
         body: JSON.stringify({
           site_id: siteId,
@@ -401,7 +381,39 @@ function PreflightController(ctx, log, env) {
       return preflightError('PREFLIGHT_INVALID_REQUEST', 'url is missing or not a valid URI', 400);
     }
 
-    if (!hasText(env.MYSTIQUE_API_BASE_URL)) {
+    // mystiqueUrl override (SITES-46216): in non-prod, allow the caller to
+    // point this request at a specific Mysticat host instead of the
+    // env-configured one. Same shape as the legacy /preflight/beta/jobs
+    // override (PR #2140, hardened in 746138e4), restored here after the
+    // SITES-44686 redesign dropped it. Guards:
+    //   1. AWS_ENV !== 'prod' — dead code in prod regardless of body content
+    //   2. Valid URL parse
+    //   3. Hostname suffix-match against *.adobe.io — broader than the
+    //      original *.stage.cloud.adobe.io because corp-only Ethos hosts
+    //      proved unreachable from public Lambda networking, and m-dev.adobe.io
+    //      is the current publicly-reachable canonical dev host
+    //   4. Tenancy boundary unchanged — caller must still pass hasAccess(site)
+    const isDevForOverride = env.AWS_ENV !== 'prod';
+    const useMystiqueUrlOverride = isDevForOverride && hasText(data.mystiqueUrl);
+    if (useMystiqueUrlOverride) {
+      if (!isValidUrl(data.mystiqueUrl)) {
+        return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must be a valid URL', 400);
+      }
+      const parsedOverride = new URL(data.mystiqueUrl);
+      if (parsedOverride.protocol !== 'https:') {
+        return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must use https://', 400);
+      }
+      if (!/\.adobe\.io$/.test(parsedOverride.hostname)) {
+        return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must point at an *.adobe.io host', 400);
+      }
+      log.info(`Using caller-supplied mystiqueUrl override: ${data.mystiqueUrl}`);
+    }
+
+    const mysticatBaseUrl = useMystiqueUrlOverride
+      ? data.mystiqueUrl
+      : env.MYSTIQUE_API_BASE_URL;
+
+    if (!hasText(mysticatBaseUrl)) {
       return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Analyze service not configured', 500);
     }
 
@@ -437,21 +449,7 @@ function PreflightController(ctx, log, env) {
       return preflightError('PREFLIGHT_INVALID_REQUEST', 'URL does not belong to this site', 400);
     }
 
-    let configuration;
-    try {
-      configuration = await dataAccess.Configuration.findLatest();
-      if (!configuration) {
-        return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Configuration not available', 500);
-      }
-    } catch (e) {
-      log.error(`Failed to load Configuration: ${e.message}`);
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to load configuration', 500);
-    }
-
-    const preflightEnabled = await isAuditEnabledForSite('preflight', site, configuration);
-    if (!preflightEnabled) {
-      return preflightError('PREFLIGHT_NOT_ENABLED', 'Preflight is not enabled for this site', 403);
-    }
+    // Eligibility is Mysticat's decision — see SITES-46202 + ADR-002.
 
     // Resolve page authentication if required.
     // checkEnableAuthentication does a bare HEAD fetch against the customer
@@ -487,6 +485,38 @@ function PreflightController(ctx, log, env) {
         log.error(`Failed to retrieve page authentication: ${e.message}`);
         return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Error retrieving page authentication', 500);
       }
+    }
+
+    // Mint a spacecat-api-service IMS v3 service token for the Mystique CGW
+    // edge gate (SITES-43236 / mystique-deploy PR #463). Sent on the dedicated
+    // x-ims-authorization header — separate from `Authorization` above, which
+    // carries the customer site's page-auth token for DRS upstream. The
+    // ImsClient caches the token in-memory on the wrapper instance, so warm
+    // Lambda invocations short-circuit the IMS round-trip.
+    //
+    // Mint before the AsyncJob / Preflight DB writes so a transient IMS
+    // failure doesn't leave orphaned IN_PROGRESS records to clean up.
+    //
+    // Fail-closed in Phase 1 and Phase 2: mint failure returns 500 even
+    // though the Phase 1 edge gate is `optional: true` and could tolerate a
+    // missing header. The load-bearing rationale is symmetry with the Phase
+    // 2 `optional: false` flip — same behavior on both sides of the gate flip
+    // means no new failure modes to surprise callers. IMS reliability makes
+    // this a narrow availability cost in practice.
+    let imsServiceToken;
+    try {
+      const tokenPayload = await imsClient.getServiceAccessTokenV3();
+      imsServiceToken = tokenPayload?.access_token;
+      // Post-condition: a successful mint must yield a non-empty access_token.
+      // Guards against an SDK shape change (e.g. `{ accessToken }` or `{}`)
+      // silently dropping the header — without this, Phase 2's `optional:
+      // false` edge gate would 401 with no spacecat-side diagnostic trail.
+      if (!hasText(imsServiceToken)) {
+        throw new Error('IMS token payload missing access_token');
+      }
+    } catch (e) {
+      log.error(`Failed to acquire IMS service token for preflight analyze: ${e.message}`, e);
+      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to acquire IMS service token', 500);
     }
 
     // Build createdBy from the authenticated IMS profile
@@ -531,11 +561,12 @@ function PreflightController(ctx, log, env) {
 
     try {
       await callMysticatAnalyze(
-        env.MYSTIQUE_API_BASE_URL,
+        mysticatBaseUrl,
         asyncJob.getId(),
         siteId,
         url,
         authorizationHeader,
+        imsServiceToken,
       );
     } catch (mysticatError) {
       log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);

@@ -150,6 +150,11 @@ describe('Preflight Controller', () => {
       {
         dataAccess: mockDataAccess,
         sqs: mockSqs,
+        // Sentinel — only `createPreflight` actually calls the IMS client;
+        // legacy `createPreflightJob` / `getPreflight*` tests never reach it.
+        // The `createPreflight` describe block injects a real stub via its
+        // own beforeEach.
+        imsClient: { unused: true },
         attributes: { authInfo: mockAuthInfo },
         pathInfo: { headers: {} },
       },
@@ -189,8 +194,12 @@ describe('Preflight Controller', () => {
     expect(() => PreflightController({ dataAccess: { test: 'property' }, sqs: null }, loggerStub, { test: 'env' })).to.throw('SQS client required');
   });
 
+  it('throws an error if imsClient is not an object', () => {
+    expect(() => PreflightController({ dataAccess: { test: 'property' }, sqs: { test: 'property' }, imsClient: null }, loggerStub, { test: 'env' })).to.throw('IMS client required');
+  });
+
   it('throws an error if env is not object', () => {
-    expect(() => PreflightController({ dataAccess: { test: 'property' }, sqs: { test: 'property' } }, loggerStub, null)).to.throw('Environment object required');
+    expect(() => PreflightController({ dataAccess: { test: 'property' }, sqs: { test: 'property' }, imsClient: { test: 'property' } }, loggerStub, null)).to.throw('Environment object required');
   });
 
   describe('createPreflightJob', () => {
@@ -261,6 +270,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
           traceId,
@@ -398,6 +408,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -637,6 +648,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -691,6 +703,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -735,6 +748,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -784,6 +798,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -834,6 +849,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -883,6 +899,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -932,6 +949,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -988,6 +1006,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1031,6 +1050,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1085,6 +1105,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1114,10 +1135,8 @@ describe('Preflight Controller', () => {
   describe('createPreflight', () => {
     let fetchStub;
     let CreatePreflightController;
-    const mockTierClient = {
-      checkValidEntitlement: sandbox.stub().resolves({ siteEnrollment: true }),
-    };
     let hasAccessStub;
+    let mockImsClient;
 
     beforeEach(async () => {
       if (!global.fetch) {
@@ -1132,26 +1151,25 @@ describe('Preflight Controller', () => {
       mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
       mockDataAccess.Site.findByPreviewURL = sandbox.stub().resolves(mockSite);
       mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
-      mockDataAccess.Configuration.findLatest = sandbox.stub().resolves(mockConfiguration);
-      mockConfiguration.isHandlerEnabledForSite.returns(true);
-      mockConfiguration.getHandlers.returns({
-        preflight: {
-          productCodes: ['ASO'],
-          enabledByDefault: false,
-          enabled: { sites: ['test-site-123'], orgs: [] },
-          disabled: { sites: [], orgs: [] },
-        },
-      });
-      mockConfiguration.getEnabledAuditsForSite.returns([
-        'alt-text-preflight', 'headings-preflight', 'links-preflight',
-      ]);
-      mockTierClient.checkValidEntitlement.resolves({ siteEnrollment: true });
       hasAccessStub = sandbox.stub().resolves(true);
 
+      // SITES-43236: createPreflight mints a spacecat IMS v3 service token
+      // via context.imsClient and attaches it on the x-ims-authorization
+      // header of the Mysticat call. Tests in this block control mint
+      // behavior by overriding getServiceAccessTokenV3 on the stub.
+      mockImsClient = {
+        getServiceAccessTokenV3: sandbox.stub().resolves({
+          access_token: 'test-ims-service-token',
+          token_type: 'bearer',
+          expires_in: 3600,
+        }),
+      };
+
+      // SITES-46202: createPreflight no longer consults Configuration / TierClient
+      // for eligibility — Mysticat owns that decision. The controller is mocked
+      // here only against AccessControlUtil (tenancy boundary) and the standard
+      // dataAccess stubs.
       CreatePreflightController = await esmock('../../src/controllers/preflight.js', {
-        '@adobe/spacecat-shared-tier-client': {
-          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
-        },
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
         },
@@ -1160,6 +1178,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1204,6 +1223,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1217,6 +1237,161 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(500);
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+    });
+
+    // -- mystiqueUrl dev override (SITES-46216) --
+
+    // The default preflightController in this describe block is built with
+    // AWS_ENV='prod'. Override tests need a separate dev-mode controller.
+    const buildDevController = () => CreatePreflightController(
+      {
+        dataAccess: mockDataAccess,
+        sqs: mockSqs,
+        imsClient: mockImsClient,
+        attributes: { authInfo: mockAuthInfo },
+        pathInfo: { headers: {} },
+      },
+      loggerStub,
+      {
+        AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+        MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+        AWS_ENV: 'dev',
+      },
+    );
+
+    it('honors mystiqueUrl override on non-prod when host is *.adobe.io', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'https://m-dev.adobe.io',
+        },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      const [calledUrl] = fetchStub.secondCall.args;
+      expect(calledUrl).to.equal('https://m-dev.adobe.io/v1/preflight/analyze');
+    });
+
+    it('falls back to env.MYSTIQUE_API_BASE_URL when mystiqueUrl is absent on non-prod', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      const [calledUrl] = fetchStub.secondCall.args;
+      expect(calledUrl).to.equal('https://mysticat.example.com/v1/preflight/analyze');
+    });
+
+    it('returns 400 PREFLIGHT_INVALID_REQUEST when mystiqueUrl is not a valid URL', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'not-a-url',
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.message).to.include('mystiqueUrl');
+    });
+
+    it('returns 400 PREFLIGHT_INVALID_REQUEST when mystiqueUrl host is not *.adobe.io', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'https://evil.example.com',
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.message).to.include('*.adobe.io');
+    });
+
+    it('returns 400 PREFLIGHT_INVALID_REQUEST when mystiqueUrl scheme is not https', async () => {
+      const devController = buildDevController();
+      const response = await devController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'http://m-dev.adobe.io', // http, not https
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.message).to.include('https');
+    });
+
+    it('ignores mystiqueUrl in prod (override is dead code there)', async () => {
+      const controller = CreatePreflightController(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          imsClient: mockImsClient,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'https://m-dev.adobe.io', // would be allowed in dev, ignored in prod
+        },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      const [calledUrl] = fetchStub.secondCall.args;
+      // Hit the env-configured URL, NOT the body-supplied override
+      expect(calledUrl).to.equal('https://mysticat.example.com/v1/preflight/analyze');
+    });
+
+    it('allows mystiqueUrl override even when MYSTIQUE_API_BASE_URL env is empty (non-prod)', async () => {
+      // Sanity check that an operator can use the override to test even if
+      // the env var hasn't been configured yet — the override path should
+      // sidestep the "Analyze service not configured" 500.
+      const controller = CreatePreflightController(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          imsClient: mockImsClient,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'dev',
+          // MYSTIQUE_API_BASE_URL: deliberately unset
+        },
+      );
+      const response = await controller.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          mystiqueUrl: 'https://m-dev.adobe.io',
+        },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      // Confirm the override was actually used — not just that the request
+      // avoided the "Analyze service not configured" 500.
+      expect(fetchStub.secondCall.args[0]).to.equal('https://m-dev.adobe.io/v1/preflight/analyze');
     });
 
     it('returns 404 when site is not found', async () => {
@@ -1286,50 +1461,57 @@ describe('Preflight Controller', () => {
       expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
     });
 
-    it('returns 500 when Configuration.findLatest throws', async () => {
-      mockDataAccess.Configuration.findLatest = sandbox.stub().rejects(new Error('DB error'));
+    it('does not consult Configuration / TierClient (eligibility deferred to Mysticat per SITES-46202)', async () => {
+      // Stub Configuration / TierClient to throw if anyone calls them. After
+      // SITES-46202, createPreflight must not touch either — eligibility is
+      // Mysticat's decision (Gate 0 tier features + Gates 1/2/3). This test
+      // guards against a future regression that re-introduces SpaceCat-side
+      // entitlement checks on the new endpoints.
+      mockDataAccess.Configuration.findLatest = sandbox.stub().rejects(
+        new Error('Configuration.findLatest must NOT be called by createPreflight'),
+      );
+
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
       });
-      expect(response.status).to.equal(500);
-      const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
-      expect(result.message).to.equal('Failed to load configuration');
+
+      expect(response.status).to.equal(202);
+      expect(mockDataAccess.Configuration.findLatest).to.not.have.been.called;
+      // Mysticat WAS called (it owns the decision now).
+      const mysticatCall = fetchStub.secondCall;
+      expect(mysticatCall.args[0]).to.equal('https://mysticat.example.com/v1/preflight/analyze');
     });
 
-    it('returns 500 when Configuration.findLatest returns null', async () => {
-      mockDataAccess.Configuration.findLatest = sandbox.stub().resolves(null);
-      const response = await preflightController.createPreflight({
-        params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
+    it('returns 202 and does NOT roll back rows when Mysticat returns 200 with empty audits (tier-ineligible site)', async () => {
+      // Post-SITES-46202 contract: a site whose Mysticat tier disables preflight
+      // (Gate 0 features.preflight=false, or all goals opted out via Gate 3) gets
+      // a 200 with `audits: []` from Mysticat — NOT a 4xx. SpaceCat must treat
+      // this as a successful dispatch: the Preflight + AsyncJob rows remain in
+      // IN_PROGRESS, no FAILED rollback, no error response. The projector
+      // eventually flips the rows to COMPLETED with empty result.
+      fetchStub.onSecondCall().resolves({
+        ok: true,
+        status: 200,
+        json: async () => ({ pageUrl: 'https://main--example-site.aem.page/test.html', audits: [], profiling: {} }),
       });
-      expect(response.status).to.equal(500);
-      const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
-      expect(result.message).to.equal('Configuration not available');
-    });
 
-    it('returns 403 when preflight is not enabled for site', async () => {
-      mockConfiguration.isHandlerEnabledForSite.returns(false);
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
       });
-      expect(response.status).to.equal(403);
-      const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_NOT_ENABLED');
-    });
 
-    it('returns 403 when site has no valid entitlement', async () => {
-      mockTierClient.checkValidEntitlement.resolves({ siteEnrollment: false });
-      const response = await preflightController.createPreflight({
-        params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
-      });
-      expect(response.status).to.equal(403);
-      const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_NOT_ENABLED');
+      // 202 with the Preflight payload — same as any other successful dispatch.
+      expect(response.status).to.equal(202);
+      const body = await response.json();
+      expect(body.preflightId).to.equal(preflightId);
+
+      // No FAILED rollback path was taken.
+      expect(mockPreflight.setStatus).to.not.have.been.calledWith('FAILED');
+      expect(mockJob.setStatus).to.not.have.been.calledWith('FAILED');
+      expect(mockPreflight.setError).to.not.have.been.called;
     });
 
     it('returns 502 when Mysticat analyze returns non-ok status', async () => {
@@ -1380,6 +1562,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1424,6 +1607,139 @@ describe('Preflight Controller', () => {
       expect(calledOptions.headers.Authorization).to.be.undefined;
     });
 
+    // -- IMS service token on x-ims-authorization (SITES-43236) --
+
+    it('attaches the IMS service token on x-ims-authorization (Bearer prefix)', async () => {
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      expect(mockImsClient.getServiceAccessTokenV3).to.have.been.calledOnce;
+      const [, calledOptions] = fetchStub.secondCall.args;
+      // Bearer prefix mirrors the v3-token convention; verified against the
+      // mystique-deploy CGW-Flex validator (Authorization on /v1/apply uses
+      // the same shape).
+      expect(calledOptions.headers['x-ims-authorization']).to.equal(
+        'Bearer test-ims-service-token',
+      );
+      // The customer-site page-auth header lives on a different key and
+      // must not be clobbered or duplicated by the IMS attachment.
+      expect(calledOptions.headers.Authorization).to.be.undefined;
+    });
+
+    it('keeps Authorization (page-auth) and x-ims-authorization (IMS) on separate headers when both are present', async () => {
+      // HEAD returns 401 → enableAuthentication=true → retrievePageAuthentication
+      // resolves a customer-site token onto Authorization. The IMS token still
+      // rides x-ims-authorization independently.
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+      const aemCsSite = {
+        ...mockSite,
+        getDeliveryType: () => 'aem_cs',
+      };
+      mockDataAccess.Site.findById.resolves(aemCsSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const pageAuthStub = sandbox.stub().resolves('customer-site-token');
+      const controller = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
+        },
+        '@adobe/spacecat-shared-ims-client': {
+          retrievePageAuthentication: pageAuthStub,
+        },
+      });
+      const preflightCtrl = controller(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          imsClient: mockImsClient,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await preflightCtrl.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      const [, calledOptions] = fetchStub.secondCall.args;
+      expect(calledOptions.headers.Authorization).to.equal('token customer-site-token');
+      expect(calledOptions.headers['x-ims-authorization']).to.equal(
+        'Bearer test-ims-service-token',
+      );
+    });
+
+    it('returns 500 PREFLIGHT_INTERNAL_ERROR when IMS service-token mint fails', async () => {
+      mockImsClient.getServiceAccessTokenV3.rejects(new Error('IMS down'));
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.include('IMS service token');
+    });
+
+    it('does not create AsyncJob or Preflight records when IMS mint fails', async () => {
+      // Mint happens before DB writes — a transient IMS failure must not
+      // leave orphaned IN_PROGRESS records that the caller can't reconcile.
+      mockImsClient.getServiceAccessTokenV3.rejects(new Error('IMS down'));
+      await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(mockDataAccess.AsyncJob.create).to.not.have.been.called;
+      expect(mockDataAccess.Preflight.create).to.not.have.been.called;
+    });
+
+    it('does not call Mysticat when IMS mint fails', async () => {
+      mockImsClient.getServiceAccessTokenV3.rejects(new Error('IMS down'));
+      await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      // Filter by Mysticat URL — resilient to future fetch additions (HEAD
+      // probe, IMS-client HTTP fetches, etc.) that could change the raw
+      // call count without changing the load-bearing invariant.
+      const mysticatCalls = fetchStub.getCalls().filter(
+        (c) => typeof c.args[0] === 'string' && c.args[0].includes('/v1/preflight/analyze'),
+      );
+      expect(mysticatCalls).to.have.lengthOf(0);
+    });
+
+    it('returns 500 PREFLIGHT_INTERNAL_ERROR when IMS mint returns a payload missing access_token', async () => {
+      // SDK shape drift guard (e.g. `{ accessToken: ... }` after a version bump
+      // or `{}` on partial responses) — must surface as an explicit 500, not
+      // silently drop the header.
+      mockImsClient.getServiceAccessTokenV3.resolves({});
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.include('IMS service token');
+      // No DB writes when the post-condition rejects the mint result.
+      expect(mockDataAccess.AsyncJob.create).to.not.have.been.called;
+      expect(mockDataAccess.Preflight.create).to.not.have.been.called;
+    });
+
     it('creates preflight with correct createdBy from IMS profile', async () => {
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
@@ -1463,70 +1779,6 @@ describe('Preflight Controller', () => {
       });
     });
 
-    // -- isAuditEnabledForSite error / not-found paths --
-
-    it('returns 403 PREFLIGHT_NOT_ENABLED when the preflight handler is not in Configuration', async () => {
-      mockConfiguration.getHandlers.returns({}); // no `preflight` handler
-      const response = await preflightController.createPreflight({
-        params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
-      });
-      expect(response.status).to.equal(403);
-      const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_NOT_ENABLED');
-    });
-
-    it('returns 403 PREFLIGHT_NOT_ENABLED when the preflight handler has no productCodes', async () => {
-      mockConfiguration.getHandlers.returns({
-        preflight: {
-          // no productCodes
-          enabledByDefault: false,
-          enabled: { sites: ['test-site-123'], orgs: [] },
-          disabled: { sites: [], orgs: [] },
-        },
-      });
-      const response = await preflightController.createPreflight({
-        params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
-      });
-      expect(response.status).to.equal(403);
-      const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_NOT_ENABLED');
-    });
-
-    it('returns 403 PREFLIGHT_NOT_ENABLED when TierClient.createForSite throws (caught, returns false)', async () => {
-      // Rebuild the controller so the TierClient esmock rejects this run.
-      const ControllerWithFailingTier = await esmock('../../src/controllers/preflight.js', {
-        '@adobe/spacecat-shared-tier-client': {
-          TierClient: { createForSite: sandbox.stub().rejects(new Error('tier-client-down')) },
-        },
-        '../../src/support/access-control-util.js': {
-          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
-        },
-      });
-      const controller = ControllerWithFailingTier(
-        {
-          dataAccess: mockDataAccess,
-          sqs: mockSqs,
-          attributes: { authInfo: mockAuthInfo },
-          pathInfo: { headers: {} },
-        },
-        loggerStub,
-        {
-          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
-          AWS_ENV: 'prod',
-        },
-      );
-      const response = await controller.createPreflight({
-        params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
-      });
-      expect(response.status).to.equal(403);
-      const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_NOT_ENABLED');
-    });
-
     // -- enableAuthentication=true path (HEAD returns 401) --
 
     it('forwards Authorization header to Mysticat for auth-required URL with x-promise-token header', async () => {
@@ -1550,9 +1802,6 @@ describe('Preflight Controller', () => {
         '@adobe/spacecat-shared-ims-client': {
           retrievePageAuthentication: mockRetrievePageAuth,
         },
-        '@adobe/spacecat-shared-tier-client': {
-          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
-        },
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
         },
@@ -1561,6 +1810,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: { 'x-promise-token': 'header-token' } },
         },
@@ -1597,9 +1847,6 @@ describe('Preflight Controller', () => {
       mockDataAccess.Site.findById.resolves(csSite);
       mockDataAccess.Site.findByPreviewURL.resolves(csSite);
       const ControllerWithStubbed = await esmock('../../src/controllers/preflight.js', {
-        '@adobe/spacecat-shared-tier-client': {
-          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
-        },
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
         },
@@ -1608,6 +1855,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1643,9 +1891,6 @@ describe('Preflight Controller', () => {
       mockDataAccess.Site.findById.resolves(brokenSite);
       mockDataAccess.Site.findByPreviewURL.resolves(brokenSite);
       const ControllerWithStubbed = await esmock('../../src/controllers/preflight.js', {
-        '@adobe/spacecat-shared-tier-client': {
-          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
-        },
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
         },
@@ -1654,6 +1899,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1691,9 +1937,6 @@ describe('Preflight Controller', () => {
         '@adobe/spacecat-shared-ims-client': {
           retrievePageAuthentication: mockRetrievePageAuth,
         },
-        '@adobe/spacecat-shared-tier-client': {
-          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
-        },
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
         },
@@ -1702,6 +1945,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: { 'x-promise-token': 'header-token' } },
         },
@@ -1759,9 +2003,6 @@ describe('Preflight Controller', () => {
         '@adobe/spacecat-shared-ims-client': {
           retrievePageAuthentication: mockRetrievePageAuth,
         },
-        '@adobe/spacecat-shared-tier-client': {
-          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
-        },
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
         },
@@ -1770,6 +2011,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1808,9 +2050,6 @@ describe('Preflight Controller', () => {
         '@adobe/spacecat-shared-ims-client': {
           retrievePageAuthentication: mockRetrievePageAuth,
         },
-        '@adobe/spacecat-shared-tier-client': {
-          TierClient: { createForSite: sandbox.stub().resolves(mockTierClient) },
-        },
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
         },
@@ -1819,6 +2058,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: { 'x-promise-token': 'header-token' } },
         },
@@ -2017,6 +2257,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -2128,6 +2369,7 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
+          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },

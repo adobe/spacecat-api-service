@@ -7151,6 +7151,8 @@ describe('Suggestions Controller', () => {
         getData: () => ({
           url: 'https://example.com/page1',
           prompts: [{ prompt: 'What is page1?', regions: ['US'] }],
+          aiSummary: 'Page 1 content summary',
+          valuable: true,
         }),
         getKpiDeltas: () => ({}),
         getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -7173,6 +7175,210 @@ describe('Suggestions Controller', () => {
       // Domain-wide suggestion with allowedRegexPatterns is accepted as valid
       const accepted = body.suggestions.filter((s) => s.statusCode !== 400 && s.statusCode !== 404);
       expect(accepted.length).to.be.greaterThan(0);
+    });
+
+    it('sorts domain-wide prompt sources by agenticTraffic × contentGainRatio, falling back to 0 for missing values', async () => {
+      const domainWideSugg = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'APPROVED',
+        getData: () => ({
+          isDomainWide: true,
+          allowedRegexPatterns: ['.*\\.html'],
+        }),
+        setData: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+      };
+      // score: 10 * 5 = 50 — should sort first
+      const highScoreSugg = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/high',
+          prompts: [{ prompt: 'high-score prompt', regions: ['US'] }],
+          aiSummary: 'high summary',
+          valuable: true,
+          agenticTraffic: 10,
+          contentGainRatio: 5,
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      // missing agenticTraffic and contentGainRatio → both fall back to 0
+      const lowScoreSugg = {
+        getId: () => SUGGESTION_IDS[2],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/low',
+          prompts: [{ prompt: 'low-score prompt', regions: ['US'] }],
+          aiSummary: 'low summary',
+          valuable: true,
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      // approved suggestion — should be excluded by NEW-only filter even though it passes other checks
+      const approvedSugg = {
+        getId: () => '11111111-1111-1111-1111-111111111111',
+        getStatus: () => 'APPROVED',
+        getData: () => ({
+          url: 'https://example.com/approved',
+          prompts: [{ prompt: 'approved prompt', regions: ['US'] }],
+          aiSummary: 'approved summary',
+          valuable: true,
+          agenticTraffic: 999,
+          contentGainRatio: 999,
+        }),
+      };
+      // Ordered low-before-high in allSuggestions to confirm sort reorders them
+      mockSuggestion.allByOpportunityId.resolves([
+        domainWideSugg, lowScoreSugg, highScoreSugg, approvedSugg,
+      ]);
+
+      let uploadedPrompts;
+      context.s3.s3Client.send.callsFake((command) => {
+        const key = command?.Key || command?.input?.Key || '';
+        const cmdName = command?.constructor?.name || '';
+        const isStrategyKey = key.startsWith('workspace/llmo/') && key.endsWith('/strategy.json');
+        if (isStrategyKey && (cmdName.includes('Get'))) {
+          const err = new Error('NoSuchKey');
+          err.name = 'NoSuchKey';
+          return Promise.reject(err);
+        }
+        if (isStrategyKey && cmdName.includes('Put')) {
+          return Promise.resolve({ VersionId: 'v1' });
+        }
+        if (cmdName.includes('Put') && key.endsWith('-prompts.json')) {
+          uploadedPrompts = JSON.parse(command.Body);
+        }
+        return Promise.resolve();
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      // high-score suggestion's prompt should appear before low-score suggestion's
+      expect(uploadedPrompts[0]).to.deep.equal({ prompt: 'high-score prompt', regions: ['US'] });
+      expect(uploadedPrompts[1]).to.deep.equal({ prompt: 'low-score prompt', regions: ['US'] });
+    });
+
+    it('excludes domain-wide prompt source candidates that are already deployed, missing aiSummary, or not valuable', async () => {
+      const domainWideSugg = {
+        getId: () => SUGGESTION_IDS[0],
+        getStatus: () => 'APPROVED',
+        getData: () => ({ isDomainWide: true, allowedRegexPatterns: ['.*\\.html'] }),
+        setData: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+      };
+      // eligible — should appear in uploaded prompts
+      const eligibleSugg = {
+        getId: () => SUGGESTION_IDS[1],
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/eligible',
+          prompts: [{ prompt: 'eligible prompt', regions: ['US'] }],
+          aiSummary: 'a summary',
+          valuable: true,
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      // already deployed — excluded by !data.edgeDeployed
+      const deployedSugg = {
+        getId: () => SUGGESTION_IDS[2],
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/deployed',
+          prompts: [{ prompt: 'deployed prompt', regions: ['US'] }],
+          aiSummary: 'a summary',
+          valuable: true,
+          edgeDeployed: 1700000000000,
+        }),
+      };
+      // missing aiSummary — excluded by data.aiSummary check
+      const noSummarySugg = {
+        getId: () => '11111111-1111-1111-1111-111111111111',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/no-summary',
+          prompts: [{ prompt: 'no-summary prompt', regions: ['US'] }],
+          valuable: true,
+        }),
+      };
+      // valuable !== true — excluded by data.valuable === true check
+      const notValuableSugg = {
+        getId: () => '22222222-2222-2222-2222-222222222222',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/not-valuable',
+          prompts: [{ prompt: 'not-valuable prompt', regions: ['US'] }],
+          aiSummary: 'a summary',
+          valuable: false,
+        }),
+      };
+
+      mockSuggestion.allByOpportunityId.resolves([
+        domainWideSugg, eligibleSugg, deployedSugg, noSummarySugg, notValuableSugg,
+      ]);
+
+      let uploadedPrompts;
+      context.s3.s3Client.send.callsFake((command) => {
+        const key = command?.Key || command?.input?.Key || '';
+        const cmdName = command?.constructor?.name || '';
+        const isStrategyKey = key.startsWith('workspace/llmo/') && key.endsWith('/strategy.json');
+        if (isStrategyKey && cmdName.includes('Get')) {
+          const err = new Error('NoSuchKey');
+          err.name = 'NoSuchKey';
+          return Promise.reject(err);
+        }
+        if (isStrategyKey && cmdName.includes('Put')) {
+          return Promise.resolve({ VersionId: 'v1' });
+        }
+        if (cmdName.includes('Put') && key.endsWith('-prompts.json')) {
+          uploadedPrompts = JSON.parse(command.Body);
+        }
+        return Promise.resolve();
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(uploadedPrompts).to.have.lengthOf(1);
+      expect(uploadedPrompts[0]).to.deep.equal({ prompt: 'eligible prompt', regions: ['US'] });
     });
 
     it('logs warning and continues when domain-wide regex is invalid', async () => {

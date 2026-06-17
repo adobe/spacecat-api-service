@@ -59,7 +59,7 @@ import { cachedOk } from '../../support/cached-response.js';
 // unknown 10th positional parameter), and PostgREST then applies the
 // function's own `DEFAULT 'optel'` on the new build. Mirrors the same
 // "omit when absent" pattern used for `p_agent_types` (LLMO-4526).
-const VALID_REFERRAL_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4']);
+const VALID_REFERRAL_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4', 'cja']);
 const DEFAULT_REFERRAL_SOURCE = 'optel';
 
 function parseReferralSource(q) {

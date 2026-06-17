@@ -56,16 +56,23 @@ describe('SetImsOrgModal', () => {
   beforeEach(() => {
     mockLog = {
       info: sinon.stub(),
+      warn: sinon.stub(),
       error: sinon.stub(),
     };
 
     mockDataAccess = {
       Site: {
         findByBaseURL: sinon.stub(),
+        allByProjectId: sinon.stub().resolves([]),
       },
       Organization: {
         findByImsOrgId: sinon.stub(),
         create: sinon.stub(),
+      },
+      Project: {
+        findById: sinon.stub().resolves(null),
+        create: sinon.stub(),
+        allByOrganizationId: sinon.stub().resolves([]),
       },
     };
 
@@ -203,6 +210,7 @@ describe('SetImsOrgModal', () => {
       const ack = sinon.stub().resolves();
       const mockSite = {
         getId: () => 'site123',
+        getProjectId: () => null,
         setOrganizationId: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -257,6 +265,7 @@ describe('SetImsOrgModal', () => {
       const ack = sinon.stub().resolves();
       const mockSite = {
         getId: () => 'site123',
+        getProjectId: () => null,
         setOrganizationId: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -316,6 +325,7 @@ describe('SetImsOrgModal', () => {
       const ack = sinon.stub().resolves();
       const mockSite = {
         getId: () => 'site123',
+        getProjectId: () => null,
         setOrganizationId: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -397,6 +407,7 @@ describe('SetImsOrgModal', () => {
       const ack = sinon.stub().resolves();
       const mockSite = {
         getId: () => 'site456',
+        getProjectId: () => null,
         setOrganizationId: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -623,6 +634,250 @@ describe('SetImsOrgModal', () => {
       await handler({ ack, body, client });
 
       expect(mockLog.error.calledWith('Error handling modal submission:')).to.be.true;
+    });
+
+    describe('project re-parenting (SITES-46200)', () => {
+      const baseURL = 'https://example.com';
+
+      const makeBody = (selectedProducts = []) => ({
+        view: {
+          private_metadata: JSON.stringify({
+            baseURL,
+            imsOrgId: 'ABC123@AdobeOrg',
+            channelId: 'C123',
+            threadTs: '1234567890.123456',
+            messageTs: '1234567890.123457',
+          }),
+          state: {
+            values: {
+              products_block: {
+                aso_checkbox: {
+                  selected_options: selectedProducts.map((value) => ({ value })),
+                },
+                llmo_checkbox: { selected_options: [] },
+              },
+            },
+          },
+        },
+        user: { id: 'U123' },
+      });
+
+      const makeClient = () => ({
+        chat: {
+          postMessage: sinon.stub().resolves(),
+          update: sinon.stub().resolves(),
+        },
+      });
+
+      it('moves the project to the new org when the site is its only member', async () => {
+        const ack = sinon.stub().resolves();
+        const mockProject = {
+          getId: () => 'project123',
+          getProjectName: () => 'example.com',
+          getOrganizationId: () => 'oldOrg',
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        const mockSite = {
+          getId: () => 'site123',
+          getProjectId: () => 'project123',
+          setProjectId: sinon.stub(),
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+        mockDataAccess.Organization.findByImsOrgId.resolves({ getId: () => 'newOrg' });
+        mockDataAccess.Project.findById.resolves(mockProject);
+        mockDataAccess.Site.allByProjectId.resolves([mockSite]);
+
+        const client = makeClient();
+        await setImsOrgModal(lambdaContext)({ ack, body: makeBody(), client });
+
+        expect(mockDataAccess.Project.findById.calledWith('project123')).to.be.true;
+        expect(mockProject.setOrganizationId.calledWith('newOrg')).to.be.true;
+        expect(mockProject.save.calledOnce).to.be.true;
+        // The site keeps its projectId; only the project moved orgs.
+        expect(mockSite.setProjectId.called).to.be.false;
+        expect(mockSite.setOrganizationId.calledWith('newOrg')).to.be.true;
+        expect(mockSite.save.calledOnce).to.be.true;
+        expect(
+          client.chat.postMessage.getCalls().some((c) => c.args[0].text.includes('Moved project')),
+        ).to.be.true;
+      });
+
+      it('splits the project when other sites still share it', async () => {
+        const ack = sinon.stub().resolves();
+        const mockProject = {
+          getId: () => 'project123',
+          getProjectName: () => 'example.com',
+          getOrganizationId: () => 'oldOrg',
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        const newProject = {
+          getId: () => 'newProject456',
+          getProjectName: () => 'example.com',
+        };
+        const mockSite = {
+          getId: () => 'site123',
+          getProjectId: () => 'project123',
+          setProjectId: sinon.stub(),
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        const siblingSite = { getId: () => 'sibling999' };
+        mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+        mockDataAccess.Organization.findByImsOrgId.resolves({ getId: () => 'newOrg' });
+        mockDataAccess.Project.findById.resolves(mockProject);
+        mockDataAccess.Site.allByProjectId.resolves([mockSite, siblingSite]);
+        mockDataAccess.Project.allByOrganizationId.resolves([]);
+        mockDataAccess.Project.create.resolves(newProject);
+
+        const client = makeClient();
+        await setImsOrgModal(lambdaContext)({ ack, body: makeBody(), client });
+
+        // The shared project must NOT be moved (would orphan the sibling)...
+        expect(mockProject.setOrganizationId.called).to.be.false;
+        expect(mockProject.save.called).to.be.false;
+        // ...instead a project is created in the target org and the site re-pointed.
+        expect(
+          mockDataAccess.Project.create.calledWith({
+            projectName: 'example.com',
+            organizationId: 'newOrg',
+          }),
+        ).to.be.true;
+        expect(mockSite.setProjectId.calledWith('newProject456')).to.be.true;
+        expect(mockSite.save.calledOnce).to.be.true;
+      });
+
+      it('does nothing to the project when it is already in the target org', async () => {
+        const ack = sinon.stub().resolves();
+        const mockProject = {
+          getId: () => 'project123',
+          getProjectName: () => 'example.com',
+          getOrganizationId: () => 'newOrg',
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        const mockSite = {
+          getId: () => 'site123',
+          getProjectId: () => 'project123',
+          setProjectId: sinon.stub(),
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+        mockDataAccess.Organization.findByImsOrgId.resolves({ getId: () => 'newOrg' });
+        mockDataAccess.Project.findById.resolves(mockProject);
+
+        const client = makeClient();
+        await setImsOrgModal(lambdaContext)({ ack, body: makeBody(), client });
+
+        expect(mockProject.setOrganizationId.called).to.be.false;
+        expect(mockProject.save.called).to.be.false;
+        expect(mockSite.setProjectId.called).to.be.false;
+        // No need to count siblings when the project is already aligned.
+        expect(mockDataAccess.Site.allByProjectId.called).to.be.false;
+        expect(mockSite.save.calledOnce).to.be.true;
+      });
+
+      it('skips project re-parenting and warns when the referenced project is missing', async () => {
+        const ack = sinon.stub().resolves();
+        const mockSite = {
+          getId: () => 'site123',
+          getProjectId: () => 'missingProject',
+          setProjectId: sinon.stub(),
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+        mockDataAccess.Organization.findByImsOrgId.resolves({ getId: () => 'newOrg' });
+        mockDataAccess.Project.findById.resolves(null);
+
+        const client = makeClient();
+        await setImsOrgModal(lambdaContext)({ ack, body: makeBody(), client });
+
+        expect(mockLog.warn.called).to.be.true;
+        expect(mockSite.setProjectId.called).to.be.false;
+        // Org update still persists even though the project could not be re-parented.
+        expect(mockSite.setOrganizationId.calledWith('newOrg')).to.be.true;
+        expect(mockSite.save.calledOnce).to.be.true;
+      });
+
+      it('still saves the site when the project-move Slack message fails', async () => {
+        const ack = sinon.stub().resolves();
+        const mockProject = {
+          getId: () => 'project123',
+          getProjectName: () => 'example.com',
+          getOrganizationId: () => 'oldOrg',
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        const mockSite = {
+          getId: () => 'site123',
+          getProjectId: () => 'project123',
+          setProjectId: sinon.stub(),
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+        mockDataAccess.Organization.findByImsOrgId.resolves({ getId: () => 'newOrg' });
+        mockDataAccess.Project.findById.resolves(mockProject);
+        mockDataAccess.Site.allByProjectId.resolves([mockSite]);
+
+        // say() posts via client.chat.postMessage; make it fail so the
+        // best-effort guard is exercised.
+        const client = makeClient();
+        client.chat.postMessage.rejects(new Error('Slack down'));
+
+        await setImsOrgModal(lambdaContext)({ ack, body: makeBody(), client });
+
+        // The project move and the site save must both still happen — a Slack
+        // failure must not leave the project moved with the site unpersisted.
+        expect(mockProject.save.calledOnce).to.be.true;
+        expect(mockSite.save.calledOnce).to.be.true;
+        expect(mockLog.warn.called).to.be.true;
+      });
+
+      it('creates entitlements for the re-parented site when products are selected', async () => {
+        // Entitlements are org-scoped and resolved from the site at call time
+        // (TierClient.createForSite reads site.getOrganizationId()). They run
+        // after the project re-parent + site.save(), so they must operate on the
+        // re-parented site and land in the new org. This guards that ordering.
+        const ack = sinon.stub().resolves();
+        const mockProject = {
+          getId: () => 'project123',
+          getProjectName: () => 'example.com',
+          getOrganizationId: () => 'oldOrg',
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        const mockSite = {
+          getId: () => 'site123',
+          getProjectId: () => 'project123',
+          setProjectId: sinon.stub(),
+          setOrganizationId: sinon.stub(),
+          save: sinon.stub().resolves(),
+        };
+        mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+        mockDataAccess.Organization.findByImsOrgId.resolves({ getId: () => 'newOrg' });
+        mockDataAccess.Project.findById.resolves(mockProject);
+        mockDataAccess.Site.allByProjectId.resolves([mockSite]);
+
+        const client = makeClient();
+        await setImsOrgModal(lambdaContext)({ ack, body: makeBody(['ASO']), client });
+
+        // Project moved to the new org, site persisted, THEN entitlements created
+        // against that same (now re-parented) site.
+        expect(mockProject.setOrganizationId.calledWith('newOrg')).to.be.true;
+        expect(mockSite.save.calledOnce).to.be.true;
+        expect(mockCreateEntitlementsForProducts.calledOnce).to.be.true;
+        expect(mockCreateEntitlementsForProducts.firstCall.args[1]).to.equal(mockSite);
+        expect(mockCreateEntitlementsForProducts.firstCall.args[2]).to.deep.equal(['ASO']);
+        // Mechanically enforce the ordering invariant: the re-parented site is
+        // persisted before entitlements are created against it.
+        sinon.assert.callOrder(mockSite.save, mockCreateEntitlementsForProducts);
+      });
     });
   });
 });
