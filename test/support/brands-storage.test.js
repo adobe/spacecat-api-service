@@ -18,6 +18,9 @@ import chaiAsPromised from 'chai-as-promised';
 import {
   listBrands,
   getBrandById,
+  getBrandAliasNames,
+  getBrandUrlSources,
+  getBrandCompetitors,
   getBrandBySite,
   upsertBrand,
   updateBrand,
@@ -281,6 +284,26 @@ describe('brands-storage', () => {
       expect(result.earnedContent).to.deep.equal([{ name: 'Blog', url: 'https://blog.example.com', regions: [] }]);
     });
 
+    it('maps semrush_workspace_id to semrushWorkspaceId (sub-workspace), null when absent', async () => {
+      const subWsRow = makeBrandRow({ semrush_workspace_id: 'ws-sub-123' });
+      const subWsQuery = createChainableQuery({ data: subWsRow, error: null });
+      const subWsResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(subWsQuery) },
+      );
+      expect(subWsResult.semrushWorkspaceId).to.equal('ws-sub-123');
+
+      // Flat-mode brand: no sub-workspace column → null.
+      const flatQuery = createChainableQuery({ data: makeBrandRow(), error: null });
+      const flatResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(flatQuery) },
+      );
+      expect(flatResult.semrushWorkspaceId).to.equal(null);
+    });
+
     it('defaults to empty regions when competitor regions is missing', async () => {
       const dbRow = makeBrandRow({
         competitors: [{ name: 'Rival', url: null }], // no regions key — triggers || []
@@ -346,6 +369,138 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(getBrandById(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to get brand');
+    });
+  });
+
+  describe('getBrandAliasNames', () => {
+    it('returns [] when postgrestClient is missing', async () => {
+      expect(await getBrandAliasNames(BRAND_ID, null)).to.deep.equal([]);
+    });
+
+    it('returns [] when brandId is empty', async () => {
+      expect(await getBrandAliasNames('', { from: () => {} })).to.deep.equal([]);
+    });
+
+    it('returns de-duplicated, non-empty alias names', async () => {
+      const query = createChainableQuery({
+        data: [
+          { alias: 'Acme Inc' },
+          { alias: 'ACME' },
+          { alias: 'Acme Inc' }, // exact duplicate dropped
+          { alias: '' }, // empty dropped (hasText)
+          { alias: null }, // null dropped
+        ],
+        error: null,
+      });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      const result = await getBrandAliasNames(BRAND_ID, postgrestClient);
+      expect(postgrestClient.from).to.have.been.calledOnceWith('brand_aliases');
+      expect(result).to.deep.equal(['Acme Inc', 'ACME']);
+    });
+
+    it('returns [] when the brand has no aliases (null data)', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandAliasNames(BRAND_ID, postgrestClient)).to.deep.equal([]);
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(getBrandAliasNames(BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand aliases');
+    });
+  });
+
+  describe('getBrandUrlSources', () => {
+    const EMPTY = { urls: [], socialAccounts: [], earnedContent: [] };
+
+    it('returns empty collections when postgrestClient is missing', async () => {
+      expect(await getBrandUrlSources(BRAND_ID, null)).to.deep.equal(EMPTY);
+    });
+
+    it('returns empty collections when brandId is empty', async () => {
+      expect(await getBrandUrlSources('', { from: () => {} })).to.deep.equal(EMPTY);
+    });
+
+    it('maps the brand URL sources to the V2 shape', async () => {
+      const query = createChainableQuery({
+        data: {
+          brand_urls: [{ url: 'https://acme.com' }, { url: 'https://blog.acme.com' }],
+          brand_social_accounts: [{ url: 'https://x.com/acme', regions: ['us'] }],
+          brand_earned_sources: [{ url: 'https://news.example/acme', regions: null }],
+        },
+        error: null,
+      });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      const result = await getBrandUrlSources(BRAND_ID, postgrestClient);
+      expect(postgrestClient.from).to.have.been.calledOnceWith('brands');
+      expect(result).to.deep.equal({
+        urls: [{ value: 'https://acme.com' }, { value: 'https://blog.acme.com' }],
+        socialAccounts: [{ url: 'https://x.com/acme', regions: ['us'] }],
+        earnedContent: [{ url: 'https://news.example/acme', regions: [] }],
+      });
+    });
+
+    it('returns empty collections when the brand row is not found (null data)', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandUrlSources(BRAND_ID, postgrestClient)).to.deep.equal(EMPTY);
+    });
+
+    it('defaults missing child arrays to empty', async () => {
+      const query = createChainableQuery({ data: {}, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandUrlSources(BRAND_ID, postgrestClient)).to.deep.equal(EMPTY);
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(getBrandUrlSources(BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand URL sources');
+    });
+  });
+
+  describe('getBrandCompetitors', () => {
+    it('returns [] when postgrestClient is missing', async () => {
+      expect(await getBrandCompetitors(BRAND_ID, null)).to.deep.equal([]);
+    });
+
+    it('returns [] when brandId is empty', async () => {
+      expect(await getBrandCompetitors('', { from: () => {} })).to.deep.equal([]);
+    });
+
+    it('returns url + regions, skipping url-less competitors', async () => {
+      const query = createChainableQuery({
+        data: [
+          { url: 'https://a.com', regions: ['us'] },
+          { url: 'https://b.com', regions: null },
+          { url: '', regions: [] }, // skipped (no url)
+          { name: 'no-url', regions: [] }, // skipped (no url)
+        ],
+        error: null,
+      });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      const result = await getBrandCompetitors(BRAND_ID, postgrestClient);
+      expect(postgrestClient.from).to.have.been.calledOnceWith('competitors');
+      expect(result).to.deep.equal([
+        { url: 'https://a.com', regions: ['us'] },
+        { url: 'https://b.com', regions: [] },
+      ]);
+    });
+
+    it('returns [] when null data', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandCompetitors(BRAND_ID, postgrestClient)).to.deep.equal([]);
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(getBrandCompetitors(BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand competitors');
     });
   });
 
@@ -650,6 +805,113 @@ describe('brands-storage', () => {
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.site_id).to.equal('new-site');
+    });
+
+    it('forces the brand id and binds the sub-workspace on the upsert row (serenity-first create)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+          { data: { id: 'forced-id', name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' },
+        postgrestClient: client,
+        forceBrandId: 'forced-id',
+        semrushWorkspaceId: 'ws-9999',
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.id).to.equal('forced-id');
+      expect(brandsUpsert.row.semrush_workspace_id).to.equal('ws-9999');
+    });
+
+    it('omits id and semrush_workspace_id from the row when not provided (default create)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row).to.not.have.property('id');
+      expect(brandsUpsert.row).to.not.have.property('semrush_workspace_id');
+    });
+
+    it('keeps the brand active without a site_id when a semrush_workspace_id anchors it', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', status: 'active' }, // no baseSiteId
+        postgrestClient: client,
+        semrushWorkspaceId: 'ws-1',
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.status).to.equal('active');
+      expect(brandsUpsert.row.semrush_workspace_id).to.equal('ws-1');
+      expect(brandsUpsert.row).to.not.have.property('site_id');
+    });
+
+    it('ignores baseSiteId on a semrush-anchored create (never sets site_id, avoids 409)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        // baseSiteId would coincidentally match an onboarded site already owned by
+        // another brand; a semrush-anchored brand must NOT claim it as site_id.
+        brand: { name: 'Test', status: 'active', baseSiteId: 'collides-with-other-brand' },
+        postgrestClient: client,
+        semrushWorkspaceId: 'ws-1',
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row).to.not.have.property('site_id');
+      expect(brandsUpsert.row.semrush_workspace_id).to.equal('ws-1');
+      expect(brandsUpsert.row.status).to.equal('active');
+    });
+
+    it('downgrades to pending when neither site_id nor semrush_workspace_id anchors the brand', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', status: 'active' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.status).to.equal('pending');
     });
 
     it('normalizes brand guidance fields in upsert row', async () => {

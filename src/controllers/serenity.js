@@ -17,7 +17,10 @@ import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-u
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
-import { resolveWorkspaceId } from '../support/serenity/workspace-resolver.js';
+import {
+  resolveBrandWorkspace,
+  clearBrandWorkspaceCache,
+} from '../support/serenity/workspace-resolver.js';
 import {
   handleListPrompts,
   handleCreatePrompts,
@@ -32,13 +35,38 @@ import {
   handleListTags,
   handleListModels,
   handleUpdateModels,
+  listGlobalModelCatalog,
+  listLanguageCatalog,
 } from '../support/serenity/handlers/markets.js';
+import {
+  handleListMarketsSubworkspace,
+  handleGetMarketSubworkspace,
+  handleCreateMarketSubworkspace,
+  handleDeleteMarketSubworkspace,
+  handleListTagsSubworkspace,
+  handleListModelsSubworkspace,
+  handleUpdateModelsSubworkspace,
+} from '../support/serenity/handlers/markets-subworkspace.js';
+import {
+  handleListPromptsSubworkspace,
+  handleCreatePromptsSubworkspace,
+  handleUpdatePromptSubworkspace,
+  handleBulkDeletePromptsSubworkspace,
+} from '../support/serenity/handlers/prompts-subworkspace.js';
+import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
+import {
+  getBrandAliasNames, getBrandUrlSources, getBrandCompetitors,
+} from '../support/brands-storage.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
+// Upper bound on markets per activate request. Each market drives sequential
+// upstream create+publish calls in the request thread, so an unbounded array
+// could pin the Lambda (same rationale as MAX_MODEL_IDS on PUT /serenity/models).
+const MAX_MARKETS = 50;
 
 /**
  * Strips characters HTTP headers can't carry (CR/LF/non-ASCII) and caps length.
@@ -120,8 +148,11 @@ function mapError(e, log) {
   if (e instanceof SerenityTransportError) {
     log.error('Serenity upstream error', e);
     if (e.status === 401 || e.status === 403) {
+      // Do NOT echo e.message here: the transport error message embeds the full
+      // gateway URL (internal host + workspace/project UUIDs). Return a generic
+      // message and keep the detail to the log.error above (matches the 502 branch).
       return createResponse(
-        { error: errorTokenForStatus(e.status), message: safeError(e.message) },
+        { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
         e.status,
       );
     }
@@ -161,6 +192,23 @@ function requireImsBearer(ctx) {
   return header.substring(BEARER_PREFIX.length);
 }
 
+/**
+ * Builds an async reload callback that re-reads the brand's CURRENT
+ * semrush_workspace_id from the data layer. ensureSubworkspace uses it as a
+ * lost-update concurrency guard so a parallel activation cannot orphan a
+ * freshly-created, resourced sub-workspace.
+ */
+export function brandPointerReloader(ctx, brandUuid) {
+  return async () => {
+    const Brand = ctx?.dataAccess?.Brand;
+    if (!Brand || typeof Brand.findById !== 'function') {
+      return null;
+    }
+    const fresh = await Brand.findById(brandUuid);
+    return fresh?.getSemrushWorkspaceId?.() ?? null;
+  };
+}
+
 function SerenityController(context, log, env) {
   if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
@@ -178,7 +226,12 @@ function SerenityController(context, log, env) {
    * brand between page load and a PATCH/DELETE would otherwise silently
    * 404 (or worse, resolve to a different row on a name collision).
    *
-   * Returns either `{ error: Response }` or `{ brandUuid, semrushWorkspaceId }`.
+   * Returns either `{ error: Response }` or
+   * `{ brandUuid, mode, workspaceId, parentWorkspaceId }`:
+   *   - `mode` is 'subworkspace' when brands.semrush_workspace_id is set, else 'flat'
+   *   - `workspaceId` is the workspace handlers call upstream (subworkspace ws in subworkspace
+   *     mode, org parent in flat mode)
+   *   - `parentWorkspaceId` is the org parent (needed for subworkspace create/activate)
    */
   async function authorize(ctx) {
     const spaceCatId = ctx?.params?.spaceCatId;
@@ -219,15 +272,61 @@ function SerenityController(context, log, env) {
     if (!brandUuid) {
       return { error: notFound(`Brand not found for organization: ${brandId}`) };
     }
-    const semrushWorkspaceId = await resolveWorkspaceId(ctx, spaceCatId);
-    if (!hasText(semrushWorkspaceId)) {
+    // resolveBrandWorkspace resolves the parent workspace once and returns it
+    // alongside the mode, so activate can mint a sub-workspace without a second
+    // org lookup. A brand already in subworkspace mode resolves against its OWN
+    // workspace, so a missing/cleared parent must NOT 404 it out of a
+    // functioning sub-workspace - only flat mode without a parent is a genuine
+    // "no workspace" 404 (in flat mode workspaceId IS the parent).
+    const { mode, workspaceId, parentWorkspaceId } = await resolveBrandWorkspace(
+      ctx,
+      spaceCatId,
+      brandUuid,
+    );
+    if (mode !== 'subworkspace' && !hasText(workspaceId)) {
       return { error: notFound('Organization has no semrush_workspace_id') };
     }
-    return { brandUuid, semrushWorkspaceId };
+    // Hard invariant: a brand's sub-workspace must NEVER be the org's shared
+    // parent workspace. If they coincide (misconfiguration / bad backfill / a
+    // gateway create that handed back the parent id), every sub-workspace
+    // operation - most dangerously deactivate's decommission, which deletes all
+    // projects and releases the allocation - would run against the shared
+    // parent pool and wipe it for every brand in the org. Refuse all operations
+    // until the pointer is corrected, rather than act on the parent.
+    if (mode === 'subworkspace' && workspaceId === parentWorkspaceId) {
+      log.error('serenity: brand sub-workspace equals org parent workspace - refusing', {
+        brandUuid, spaceCatId, workspaceId,
+      });
+      return {
+        error: createResponse(
+          {
+            error: 'workspaceMisconfigured',
+            message: 'Brand sub-workspace must not be the organization parent workspace',
+          },
+          409,
+        ),
+      };
+    }
+    return {
+      brandUuid, mode, workspaceId, parentWorkspaceId,
+    };
   }
 
   function buildTransport(ctx, imsToken) {
     return createSerenityTransport({ env: ctx.env || env, imsToken });
+  }
+
+  /** Loads the Brand model instance (for subworkspace-mode write/lifecycle flows). */
+  async function loadBrand(ctx, brandUuid) {
+    const Brand = ctx?.dataAccess?.Brand;
+    if (!Brand || typeof Brand.findById !== 'function') {
+      throw new ErrorWithStatusCode('Brand data-access not available', 500);
+    }
+    const brand = await Brand.findById(brandUuid);
+    if (!brand) {
+      throw new ErrorWithStatusCode(`Brand not found: ${brandUuid}`, 404);
+    }
+    return brand;
   }
 
   const listPrompts = async (ctx) => {
@@ -238,13 +337,15 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleListPrompts(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        parsedQuery(ctx),
-      );
+      const result = auth.mode === 'subworkspace'
+        ? await handleListPromptsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : await handleListPrompts(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          parsedQuery(ctx),
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -259,14 +360,16 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleCreatePrompts(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        ctx.data || {},
-        log,
-      );
+      const result = auth.mode === 'subworkspace'
+        ? await handleCreatePromptsSubworkspace(transport, auth.workspaceId, ctx.data || {}, log)
+        : await handleCreatePrompts(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -285,15 +388,23 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleUpdatePrompt(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        semrushPromptId,
-        ctx.data || {},
-        log,
-      );
+      const result = auth.mode === 'subworkspace'
+        ? await handleUpdatePromptSubworkspace(
+          transport,
+          auth.workspaceId,
+          semrushPromptId,
+          ctx.data || {},
+          log,
+        )
+        : await handleUpdatePrompt(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          semrushPromptId,
+          ctx.data || {},
+          log,
+        );
       return createResponse(result.body, result.status);
     } catch (e) {
       return mapError(e, log);
@@ -308,14 +419,21 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleBulkDeletePrompts(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        ctx.data || {},
-        log,
-      );
+      const result = auth.mode === 'subworkspace'
+        ? await handleBulkDeletePromptsSubworkspace(
+          transport,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+        )
+        : await handleBulkDeletePrompts(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -330,13 +448,14 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleListMarkets(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        log,
-      );
+      const result = auth.mode === 'subworkspace'
+        ? await handleListMarketsSubworkspace(transport, auth.brandUuid, auth.workspaceId)
+        : await handleListMarkets(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -345,11 +464,10 @@ function SerenityController(context, log, env) {
 
   const getMarket = async (ctx) => {
     try {
-      // Enforce the IMS-only contract (throws 401 on non-IMS / missing bearer)
-      // even though this is a pure DB read with no upstream call — keeps the
-      // whole /serenity/* surface uniformly IMS-gated. Token is intentionally
-      // not captured: there is no upstream transport to build here.
-      requireImsBearer(ctx);
+      // IMS bearer is required on the whole surface. Flat mode is a pure DB
+      // read (no upstream), but subworkspace mode reads the live listing, so the token
+      // is captured here and a transport built only when needed.
+      const imsToken = requireImsBearer(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -358,12 +476,17 @@ function SerenityController(context, log, env) {
       // Strict digit match — same rationale as deleteMarket: parseInt would
       // coerce '2840abc' → 2840 and silently resolve a different slice.
       const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
-      const result = await handleGetMarket(
-        ctx.dataAccess,
-        auth.brandUuid,
-        geoTargetId,
-        pLang ? String(pLang).toLowerCase() : null,
-      );
+      const languageCode = pLang ? String(pLang).toLowerCase() : null;
+      const result = auth.mode === 'subworkspace'
+        ? await handleGetMarketSubworkspace(
+          buildTransport(ctx, imsToken),
+          auth.brandUuid,
+          auth.workspaceId,
+          geoTargetId,
+          languageCode,
+          log,
+        )
+        : await handleGetMarket(ctx.dataAccess, auth.brandUuid, geoTargetId, languageCode);
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -378,14 +501,46 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleCreateMarket(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        ctx.data || {},
-        log,
-      );
+      let result;
+      if (auth.mode === 'subworkspace') {
+        const brand = await loadBrand(ctx, auth.brandUuid);
+        // Brand aliases are brand-level: every market/project carries them in
+        // its Semrush brand_names.
+        const brandAliases = await getBrandAliasNames(
+          auth.brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        // Brand URLs (own sites + social + earned) are brand-level too: read the
+        // persisted set and push it (region-filtered) onto the new market.
+        const brandUrlSources = await getBrandUrlSources(
+          auth.brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        // Competitors ("other brands to track") merge into the new market's CI list.
+        const competitors = await getBrandCompetitors(
+          auth.brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        result = await handleCreateMarketSubworkspace(
+          transport,
+          brand,
+          auth.parentWorkspaceId,
+          ctx.data || {},
+          log,
+          null,
+          brandPointerReloader(ctx, auth.brandUuid),
+          { brandAliases, brandUrlSources, competitors },
+        );
+      } else {
+        result = await handleCreateMarket(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+        );
+      }
       return createResponse(result.body, result.status);
     } catch (e) {
       return mapError(e, log);
@@ -405,16 +560,25 @@ function SerenityController(context, log, env) {
       // OpenAPI contract declares `geoTargetId: integer, minimum: 1`, so the
       // path segment must be all digits.
       const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
+      const languageCode = pLang ? String(pLang).toLowerCase() : null;
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleDeleteMarket(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        geoTargetId,
-        pLang ? String(pLang).toLowerCase() : null,
-        log,
-      );
+      const result = auth.mode === 'subworkspace'
+        ? await handleDeleteMarketSubworkspace(
+          transport,
+          auth.workspaceId,
+          geoTargetId,
+          languageCode,
+          log,
+        )
+        : await handleDeleteMarket(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          geoTargetId,
+          languageCode,
+          log,
+        );
       return createResponse(null, result.status);
     } catch (e) {
       return mapError(e, log);
@@ -429,14 +593,16 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleListTags(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        parsedQuery(ctx),
-        log,
-      );
+      const result = auth.mode === 'subworkspace'
+        ? await handleListTagsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : await handleListTags(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          parsedQuery(ctx),
+          log,
+        );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -451,13 +617,88 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleListModels(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        parsedQuery(ctx),
-      );
+      const result = auth.mode === 'subworkspace'
+        ? await handleListModelsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : await handleListModels(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          parsedQuery(ctx),
+        );
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/models — the brand-INDEPENDENT global AI
+   * model catalog. The add-brand wizard needs the catalog before a brand (and
+   * its workspace) exists, so this authorizes at the org level and reads the
+   * workspace-independent `GET /v1/ai_models` catalog. No brand/workspace
+   * resolution, no geo/lang params.
+   */
+  const listOrgModels = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const spaceCatId = ctx?.params?.spaceCatId;
+      if (!isValidUUID(spaceCatId)) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'spaceCatId must be a UUID' },
+          400,
+        );
+      }
+      const Organization = ctx?.dataAccess?.Organization;
+      if (!Organization || typeof Organization.findById !== 'function') {
+        return internalServerError('Organization data-access not available');
+      }
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+      const accessControl = AccessControlUtil.fromContext(ctx);
+      if (!await accessControl.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = await listGlobalModelCatalog(transport);
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/languages — the brand-INDEPENDENT catalog
+   * of languages Semrush AIO supports. The add-brand wizard needs it before a
+   * brand (and its workspace) exists to limit the language picker to codes that
+   * will actually resolve (org-level auth, no brand/workspace resolution).
+   */
+  const listOrgLanguages = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const spaceCatId = ctx?.params?.spaceCatId;
+      if (!isValidUUID(spaceCatId)) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'spaceCatId must be a UUID' },
+          400,
+        );
+      }
+      const Organization = ctx?.dataAccess?.Organization;
+      if (!Organization || typeof Organization.findById !== 'function') {
+        return internalServerError('Organization data-access not available');
+      }
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+      const accessControl = AccessControlUtil.fromContext(ctx);
+      if (!await accessControl.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = await listLanguageCatalog(transport);
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -472,15 +713,261 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await handleUpdateModels(
-        transport,
-        ctx.dataAccess,
-        auth.brandUuid,
-        auth.semrushWorkspaceId,
-        ctx.data || {},
-        log,
-      );
+      const result = auth.mode === 'subworkspace'
+        ? await handleUpdateModelsSubworkspace(transport, auth.workspaceId, ctx.data || {}, log)
+        : await handleUpdateModels(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+        );
       return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * POST /serenity/activate — flips a brand into subworkspace mode (design flow 5):
+   * ensure the subworkspace, then per caller-supplied market create a draft,
+   * publish once, and confirm. Sets brands.status = 'active' once ≥1 market is
+   * live. Body: { brandDomain, brandNames, brandDisplayName?, markets: [{ market,
+   * languageCode }] }. Markets are supplied by the caller (reactivation
+   * re-supplies them — there is no stored memory).
+   */
+  const activate = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const body = ctx.data || {};
+      const markets = Array.isArray(body.markets) ? body.markets : [];
+      if (markets.length === 0) {
+        throw new ErrorWithStatusCode('markets must be a non-empty array', 400);
+      }
+      if (markets.length > MAX_MARKETS) {
+        throw new ErrorWithStatusCode(`markets must not exceed ${MAX_MARKETS} entries`, 400);
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const brand = await loadBrand(ctx, auth.brandUuid);
+      // Brand aliases are brand-level: read once and apply to every market's
+      // project (Semrush brand_names) in this batch.
+      const brandAliases = await getBrandAliasNames(
+        auth.brandUuid,
+        ctx.dataAccess.services.postgrestClient,
+      );
+      // Brand URLs are brand-level: read once, push (region-filtered) per market.
+      const brandUrlSources = await getBrandUrlSources(
+        auth.brandUuid,
+        ctx.dataAccess.services.postgrestClient,
+      );
+      // Competitors are brand-level too: read once, merge (region-filtered) per market.
+      const competitors = await getBrandCompetitors(
+        auth.brandUuid,
+        ctx.dataAccess.services.postgrestClient,
+      );
+
+      // Ensure the sub-workspace ONCE for the whole batch, sized to the real
+      // market count, then create each market against the resolved workspace.
+      // (Calling ensureSubworkspace per market would re-grant + double-poll N
+      // times — seconds of redundant settling that risks the Lambda timeout —
+      // and size the allocation as if there were a single market.)
+      const workspaceId = await ensureSubworkspace(
+        transport,
+        brand,
+        auth.parentWorkspaceId,
+        markets.length,
+        log,
+        {},
+        brandPointerReloader(ctx, auth.brandUuid),
+      );
+      const results = [];
+      let anyLive = false; // ≥1 market is live (created now OR already live)
+      let anyFailed = false; // ≥1 market neither created nor already-live
+      for (const m of markets) {
+        const createBody = {
+          market: m.market,
+          languageCode: m.languageCode,
+          brandDomain: body.brandDomain,
+          brandNames: body.brandNames,
+          brandDisplayName: body.brandDisplayName,
+          name: m.name,
+        };
+        let r;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          r = await handleCreateMarketSubworkspace(
+            transport,
+            brand,
+            auth.parentWorkspaceId,
+            createBody,
+            log,
+            workspaceId,
+            null,
+            { brandAliases, brandUrlSources, competitors },
+          );
+        } catch (e) {
+          // A single market failing must NOT abort the batch: markets already
+          // published in this loop are live upstream, and aborting would leave
+          // them live while the brand stays pending with no per-market record.
+          // Record the failure and continue; the multi-status response reports
+          // it per market. (A generic message - never the upstream error text,
+          // which carries the gateway URL.)
+          log?.error?.('serenity activate: market create failed', {
+            market: m.market,
+            languageCode: m.languageCode,
+            status: e?.status,
+          });
+          r = {
+            status: e?.status || 502,
+            body: { error: 'serenityUpstreamError', message: 'Market activation failed' },
+          };
+        }
+        // 201 = created+published now; 409 = sliceExists (the market is already
+        // live upstream). Both mean the slice IS live, so both count toward
+        // brand-active and neither trips the partial-failure path — a full
+        // idempotent re-activate (every market already live → all 409s) is a
+        // complete success, not a 207/pending.
+        if (r.status === 201 || r.status === 409) {
+          anyLive = true;
+        } else {
+          anyFailed = true;
+        }
+        results.push({
+          market: m.market,
+          languageCode: m.languageCode,
+          status: r.status,
+          body: r.body,
+        });
+      }
+
+      if (anyLive && typeof brand.setStatus === 'function') {
+        brand.setStatus('active');
+        try {
+          await brand.save();
+        } catch (saveError) {
+          // Non-atomic seam — the mirror of deactivate's
+          // SERENITY_DEACTIVATE_SAVE_DIVERGENCE guard. The markets are already
+          // LIVE upstream (published in the loop above; the workspace pointer was
+          // persisted by ensureSubworkspace), but persisting the 'active' status
+          // flip failed: brands.status stays 'pending' while markets are live —
+          // divergent. A re-activate converges (idempotent: every live market
+          // returns 409), so this self-heals. Crucially, do NOT collapse to a 5xx
+          // via mapError — that would discard the per-market results telling the
+          // caller which markets went live. Emit a DISTINCT, greppable token so
+          // the orphaned status is alertable (not indistinguishable from an
+          // ordinary upstream error), force the partial-failure path so the caller
+          // sees a 207 instead of a bare 200 that hides the divergence, then fall
+          // through to return the multi-status body.
+          anyFailed = true;
+          log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — markets live upstream but failed to persist active status', {
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: workspaceId,
+            marketsLive: results.filter((r) => r.status === 201 || r.status === 409).length,
+            error: saveError?.message,
+          });
+        }
+      }
+      // Success-level summary so a completed activation can be correlated with
+      // upstream state during incident investigation (counts + workspace).
+      log.info('serenity activate: completed', {
+        brandId: auth.brandUuid,
+        semrushWorkspaceId: workspaceId,
+        status: anyLive ? 'active' : 'pending',
+        marketsTotal: results.length,
+        marketsLive: results.filter((r) => r.status === 201 || r.status === 409).length,
+        marketsFailed: results.filter((r) => !(r.status === 201 || r.status === 409)).length,
+      });
+      // 207 Multi-Status whenever ANY market failed (even if others went live),
+      // so a caller keying off the HTTP status sees the partial failure instead
+      // of a bare 200. 200 only when every market is live.
+      return createResponse(
+        {
+          brandId: auth.brandUuid,
+          status: anyLive ? 'active' : 'pending',
+          markets: results,
+        },
+        anyFailed ? 207 : 200,
+      );
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * POST /serenity/deactivate — decommissions the brand's sub-workspace
+   * (design flow 6): delete every project and release the allocation back to
+   * the parent pool, then DISCONNECT the brand by clearing its
+   * semrush_workspace_id pointer. The sub-workspace itself is NEVER deleted
+   * (deletion is forbidden — upstream deprovisioning is Semrush CS's act); it
+   * is left empty and unowned. Clearing the pointer flips the brand back to
+   * flat mode, so a future activate allocates a fresh sub-workspace. Sets
+   * brands.status = 'pending'. No-op decommission (still 200) for a brand with
+   * no sub-workspace.
+   */
+  const deactivate = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const brand = await loadBrand(ctx, auth.brandUuid);
+      const subworkspaceId = brand.getSemrushWorkspaceId?.();
+      if (hasText(subworkspaceId)) {
+        await decommissionBrandWorkspace(
+          transport,
+          subworkspaceId,
+          log,
+          auth.parentWorkspaceId,
+          {
+            enforceLinkedGuard:
+              (ctx.env || env)?.SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD === 'true',
+          },
+        );
+        // Disconnect the brand from the now-emptied sub-workspace. The
+        // sub-workspace is kept (never deleted); clearing the pointer is what
+        // returns the brand to flat mode. Invalidate the resolver cache HERE —
+        // before the save — so that even if save() throws, the resolver can't
+        // keep routing to the already-emptied sub-workspace for the full
+        // positive-TTL window (the upstream is empty the moment decommission
+        // returns).
+        brand.setSemrushWorkspaceId?.(null);
+        clearBrandWorkspaceCache();
+      }
+      brand.setStatus?.('pending');
+      if (typeof brand.save === 'function') {
+        try {
+          await brand.save();
+        } catch (saveError) {
+          // Non-atomic seam: the sub-workspace was already decommissioned
+          // (emptied + allocation released) upstream, but persisting the
+          // cleared pointer / pending status failed. The state is divergent —
+          // brands.semrush_workspace_id still points at the now-empty
+          // sub-workspace and status is not 'pending'. A re-activate converges
+          // (the re-grant path re-uses the emptied workspace), so this
+          // self-heals, but emit a DISTINCT, greppable token so the orphan is
+          // alertable rather than indistinguishable from an ordinary upstream
+          // error. Re-throw to mapError after recording it.
+          log.error('serenity deactivate: SERENITY_DEACTIVATE_SAVE_DIVERGENCE — decommissioned upstream but failed to persist pointer/status', {
+            brandId: auth.brandUuid,
+            decommissionedWorkspaceId: hasText(subworkspaceId) ? subworkspaceId : null,
+            error: saveError?.message,
+          });
+          throw saveError;
+        }
+      }
+      log.info('serenity deactivate: completed', {
+        brandId: auth.brandUuid,
+        decommissionedWorkspaceId: hasText(subworkspaceId) ? subworkspaceId : null,
+        status: 'pending',
+      });
+      return ok({ brandId: auth.brandUuid, status: 'pending' });
     } catch (e) {
       return mapError(e, log);
     }
@@ -497,7 +984,11 @@ function SerenityController(context, log, env) {
     deleteMarket,
     listTags,
     listModels,
+    listOrgModels,
+    listOrgLanguages,
     updateModels,
+    activate,
+    deactivate,
   };
 }
 
