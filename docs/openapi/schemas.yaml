@@ -3816,6 +3816,13 @@ Brand:
       description: Read-only. The base URL of the primary site, resolved from baseSiteId.
       type: string
       readOnly: true
+    semrushWorkspaceId:
+      description: >-
+        Read-only. The brand's own Semrush sub-workspace id (dual-mode). Null
+        for brands still in flat mode (no sub-workspace minted yet). Used to
+        scope per-brand Semrush views to the sub-workspace.
+      type: [string, 'null']
+      readOnly: true
     imsOrgId:
       description: The IMS Organization ID of the brand
       $ref: '#/ImsOrganizationId'
@@ -6721,6 +6728,20 @@ CustomerConfigBrand:
       type: string
       description: Detailed description of the brand
       example: "Adobe's flagship image editing software"
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Blank values clear the stored value.
+      example: "Adobe Photoshop is Adobe's image editing product for creative professionals."
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Blank values clear the stored value.
+      example: "Treat comparisons about subscription cost as neutral unless the answer explicitly recommends against the brand."
     updatedAt:
       $ref: '#/DateTime'
       description: When the brand was last updated
@@ -7367,6 +7388,18 @@ V2Brand:
         - string
         - 'null'
       description: Brand description
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Blank values clear the stored value.
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Blank values clear the stored value.
     vertical:
       type:
         - string
@@ -7430,6 +7463,8 @@ V2Brand:
     status: 'active'
     origin: 'human'
     description: 'An example brand'
+    brandContext: "Example Brand is a B2B analytics platform."
+    mentionSentimentGuidance: "Treat factual pricing mentions as neutral unless the response recommends against the brand."
     vertical: 'technology'
     region: ['US', 'DE']
     urls:
@@ -7472,6 +7507,18 @@ V2BrandInput:
       default: human
     description:
       type: string
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Omit to preserve, blank or null to clear.
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Omit to preserve, blank or null to clear.
     vertical:
       type: string
     region:
@@ -7513,6 +7560,18 @@ V2BrandUpdateInput:
       enum: [human, ai]
     description:
       type: string
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Omit to preserve, blank or null to clear.
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Omit to preserve, blank or null to clear.
     vertical:
       type: string
     region:
@@ -10514,6 +10573,16 @@ SerenityBulkDeletePromptsResponse:
           status: { type: integer }
           message: { type: string }
 
+SerenityMarketStatus:
+  type: string
+  description: |
+    Publish state of the market's upstream project, surfaced only in
+    sub-workspace mode where markets are read live from the brand's own
+    workspace. Maps 1:1 from the upstream `publish_status`
+    (`initial_publish_failed` → `publish_failed`). Absent in flat mode,
+    where market existence is a pure DB-row contract.
+  enum: [draft, publishing, publish_failed, live, live_with_unpublished_updates]
+
 SerenityMarket:
   type: object
   description: |
@@ -10538,6 +10607,15 @@ SerenityMarket:
       oneOf:
         - $ref: '#/DateTime'
         - type: 'null'
+    # Additive, sub-workspace mode only. In flat mode the list
+    # is a pure DB read and omits both. status reflects the live publish state;
+    # semrushProjectId is the upstream project id for the slice (same value the
+    # market-detail endpoint exposes). Optional so flat-mode responses still validate.
+    status:
+      $ref: '#/SerenityMarketStatus'
+    semrushProjectId:
+      type: string
+      description: Upstream Semrush AIO project id for this slice (sub-workspace mode only).
 
 SerenityMarketListResponse:
   type: object
@@ -10564,6 +10642,107 @@ SerenityMarketDetail:
         semrushProjectId:
           type: string
           description: Upstream Semrush AIO project id for this slice (provider-specific by design).
+        initialized:
+          description: |
+            AIO readiness for this slice's project (sub-workspace mode only). `true`/`false`
+            from the upstream init-status probe, or `null` when the probe is
+            unavailable or the read failed (best-effort enrichment — never fails
+            the detail read). Absent in flat mode.
+          oneOf:
+            - type: boolean
+            - type: 'null'
+
+SerenityActivateRequest:
+  type: object
+  description: |
+    Activates a brand into sub-workspace mode: ensures the brand's own
+    Semrush sub-workspace exists (creating + resourcing it on first call),
+    then per supplied market creates-or-resumes a draft and publishes it once.
+    Markets are caller-supplied — reactivation re-supplies them (there is no
+    stored market memory). Sets the brand status to `active` once ≥1 market is live.
+  required: [brandDomain, brandNames, markets]
+  properties:
+    brandDomain:
+      type: string
+      description: Primary domain for the brand's upstream projects.
+    brandNames:
+      type: array
+      minItems: 1
+      items: { type: string }
+      description: Brand name variants tracked upstream; the first is the display name.
+    brandDisplayName:
+      type: string
+      description: Prefix for each market's default project name when `name` is omitted.
+    markets:
+      type: array
+      minItems: 1
+      maxItems: 50
+      description: |
+        Markets to bring live for this brand. Capped at 50 per request: each
+        market drives sequential upstream create+publish calls, so a larger
+        array is rejected with 400 (rather than risking a Lambda timeout).
+      items:
+        type: object
+        required: [market, languageCode]
+        properties:
+          market:
+            type: string
+            pattern: '^[A-Za-z]{2}$'
+            description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.
+          languageCode:
+            type: string
+            pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+          name:
+            type: string
+            description: Optional display name for this market's upstream project.
+
+SerenityActivateResponse:
+  type: object
+  required: [brandId, status, markets]
+  properties:
+    brandId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [active, pending]
+      description: |
+        `active` when at least one market went live; `pending` when none did
+        (the response is HTTP 207 in that case). Mirrors the persisted brand status.
+    markets:
+      type: array
+      description: Per-market outcome, in request order.
+      items:
+        type: object
+        required: [market, languageCode, status]
+        properties:
+          market:
+            type: string
+          languageCode:
+            type: string
+          status:
+            type: integer
+            description: Per-market HTTP-style status (201 live, 409 already-live, 4xx validation).
+          body:
+            type: object
+            additionalProperties: true
+            description: The per-market handler result body.
+
+SerenityDeactivateResponse:
+  type: object
+  description: |
+    Result of decommissioning a brand's sub-workspace: every project is
+    deleted and the allocation released back to the parent pool, but the
+    workspace and its `semrush_workspace_id` pointer are KEPT for reuse
+    (never-delete). The brand status is set to `pending`.
+  required: [brandId, status]
+  properties:
+    brandId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [pending]
 
 SerenityCreateMarketRequest:
   type: object
@@ -10630,6 +10809,46 @@ SerenityModelListResponse:
     items:
       type: array
       items: { $ref: '#/SerenityModel' }
+
+SerenityLanguage:
+  type: object
+  required: [name]
+  properties:
+    id:
+      type: [string, 'null']
+      description: Semrush language catalog id (null when the catalog omits it).
+    name:
+      type: string
+      description: English language name as Semrush spells it (the match key).
+
+SerenityLanguageListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityLanguage' }
+
+SerenityUpdateModelsRequest:
+  type: object
+  description: |
+    Desired AI-model set for one (geoTargetId, languageCode) slice. The server
+    diffs this against the currently-assigned models and applies the minimal
+    add/remove, then publishes. `modelIds` are catalog model ids (the `id` from
+    `GET /serenity/models`), not assignment-row ids.
+  required: [geoTargetId, languageCode, modelIds]
+  properties:
+    geoTargetId:
+      type: integer
+      minimum: 1
+    languageCode:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    modelIds:
+      type: array
+      maxItems: 50
+      items: { type: string }
+      description: Catalog model ids to track for this slice. Empty array clears all.
 
 SerenityErrorResponse:
   type: object

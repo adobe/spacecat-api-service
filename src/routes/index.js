@@ -220,6 +220,12 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.listModels,
     'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
+    // Brand-independent global model catalog (add-brand wizard, before a brand exists).
+    'GET /v2/orgs/:spaceCatId/serenity/models': serenityController.listOrgModels,
+    // Brand-independent Semrush language catalog (add-brand wizard language picker).
+    'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': serenityController.deactivate,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
@@ -491,6 +497,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/by-status': llmoMysticatController.getAgenticTrafficByStatus,
     'GET /sites/:siteId/agentic-traffic/by-user-agent': llmoMysticatController.getAgenticTrafficByUserAgent,
     'GET /sites/:siteId/agentic-traffic/by-url': llmoMysticatController.getAgenticTrafficByUrl,
+    'POST /sites/:siteId/agentic-traffic/hits-by-urls': llmoMysticatController.getAgenticTrafficHitsByUrls,
     'GET /sites/:siteId/agentic-traffic/filter-dimensions': llmoMysticatController.getAgenticTrafficFilterDimensions,
     'GET /sites/:siteId/agentic-traffic/weeks': llmoMysticatController.getAgenticTrafficWeeks,
     'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,

@@ -40,7 +40,9 @@ what order*; the runbook tells you *how*.
 
 ### Phase 1 — Confirm and frame the outage
 
-- Pull live errors (`npm run logs` / Coralogix `inv.functionName:/spacecat-services/api-service/latest`).
+- Pull live errors (`npm run logs` / Splunk `index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_prod service=api-service level=error | sort -_time`).
+  Run it via the `mcp__splunk__search_splunk` MCP tool, or open the UI:
+  https://splunk.or1.adobe.net/en-US/app/search/search?q=search%20index%3Ddx_aem_engineering%20sourcetype%3Ddx_aem_sites_spacecat_backend_prod%20service%3Dapi-service%20level%3Derror%20%7C%20sort%20-_time&earliest=-1h&latest=now
 - Establish: is it **broad** (all/most requests) or scoped to one endpoint/tenant?
   If scoped, **stop** — this skill is for release-wide outages; diagnose that
   endpoint instead.
@@ -102,8 +104,10 @@ Follow runbook Step 5 exactly. Key points the runbook details:
 
 ### Phase 6 — Confirm recovery
 
-- Watch the Coralogix error rate fall to zero **on the new deploy**, not just on
-  the revert merge.
+- Watch the Splunk error rate fall to zero **on the new deploy**, not just on
+  the revert merge. Re-run the Phase 1 search and confirm `level=error` events
+  stop after the redeploy:
+  `index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_prod service=api-service level=error | sort -_time`.
 - Confirm CI ran on the revert commit and the deploy job completed; check the
   Lambda `LastModified` updated and the health check returns `200` (runbook Step 6).
 - Do not declare the incident resolved until errors stop on the redeployed code.

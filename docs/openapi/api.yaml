@@ -157,6 +157,14 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-tags'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:
     $ref: './serenity-api.yaml#/v2-serenity-models'
+  /v2/orgs/{spaceCatId}/serenity/models:
+    $ref: './serenity-api.yaml#/v2-serenity-org-models'
+  /v2/orgs/{spaceCatId}/serenity/languages:
+    $ref: './serenity-api.yaml#/v2-serenity-org-languages'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/activate:
+    $ref: './serenity-api.yaml#/v2-serenity-activate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/deactivate:
+    $ref: './serenity-api.yaml#/v2-serenity-deactivate'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -524,6 +532,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-user-agent'
   /sites/{siteId}/agentic-traffic/by-url:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-url'
+  /sites/{siteId}/agentic-traffic/hits-by-urls:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-hits-by-urls'
   /sites/{siteId}/agentic-traffic/urls/export:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-urls-export'
   /sites/{siteId}/agentic-traffic/urls/export/{exportId}:

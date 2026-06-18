@@ -61,6 +61,8 @@ describe('AI Visibility – topics handlers', () => {
         gapPromptsTotals: sandbox.stub(),
         promptsByTopicFTS: sandbox.stub(),
         promptsByTopicFTSTotals: sandbox.stub(),
+        promptsByTopicIDs: sandbox.stub(),
+        promptsByTopicIDsTotal: sandbox.stub(),
       },
       sourceClient: {
         sources: sandbox.stub(),
@@ -842,6 +844,89 @@ describe('AI Visibility – topics handlers', () => {
       const res = await handleTopicsResearchPrompts(sp, clients);
       expect(res.status).to.equal(200);
       expect(res.body.data.length).to.be.greaterThan(0);
+    });
+
+    /* ---- topicId path: promptsByTopicIDs (no searchQuery required) ---- */
+    describe('with topicId (promptsByTopicIDs path)', () => {
+      it('single LLM: fetches prompts for the topic without a searchQuery', async () => {
+        clients.promptClient.promptsByTopicIDsTotal.resolves({ total: 3 });
+        clients.promptClient.promptsByTopicIDs.resolves({
+          prompts: [{
+            prompt: 'Q', promptHash: 'h', serpId: 's', topicId: '42', llm: 1, mentionedBrandsCount: 2, sourcesCount: 1,
+          }],
+        });
+        const sp = new URLSearchParams('topicId=42&engine=chatgpt');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.status).to.equal(200);
+        expect(res.body.total).to.equal(3);
+        expect(res.body.data).to.have.length(1);
+        expect(res.body.data[0].engine).to.equal('chatgpt');
+        expect(res.body.data[0].topicId).to.equal('42');
+        // No FTS call on the topicId path.
+        expect(clients.promptClient.promptsByTopicFTS.called).to.equal(false);
+        // topic_ids forwarded as bigint to both gRPC calls.
+        expect(clients.promptClient.promptsByTopicIDs.firstCall.args[0].topicIds).to.deep.equal([42n]);
+        expect(clients.promptClient.promptsByTopicIDsTotal.firstCall.args[0].topicIds).to.deep.equal([42n]);
+      });
+
+      it('omits topicName/topicVolume (not present in the ByTopicIDs response)', async () => {
+        clients.promptClient.promptsByTopicIDsTotal.resolves({ total: 1 });
+        clients.promptClient.promptsByTopicIDs.resolves({
+          prompts: [{
+            prompt: 'Q', promptHash: 'h', serpId: 's', topicId: '7', llm: 1, mentionedBrandsCount: 4, sourcesCount: 2, briefResponse: 'hi',
+          }],
+        });
+        const sp = new URLSearchParams('topicId=7&engine=chatgpt');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.body.data[0]).to.not.have.property('topic');
+        expect(res.body.data[0]).to.not.have.property('topicVolume');
+        expect(res.body.data[0].mentions).to.equal(4);
+        expect(res.body.data[0].citedPages).to.equal(2);
+        expect(res.body.data[0].responseExcerpt).to.equal('hi');
+      });
+
+      it('all LLMs: fans out across engines and sums per-LLM totals', async () => {
+        for (const llm of FTS_LLMS) {
+          clients.promptClient.promptsByTopicIDsTotal.withArgs(sinon.match({ llm })).resolves({ total: 1 });
+          clients.promptClient.promptsByTopicIDs.withArgs(sinon.match({ llm })).resolves({
+            prompts: [{
+              prompt: 'Same prompt', promptHash: 'h1', serpId: 's1', topicId: '1', llm, mentionedBrandsCount: 2, sourcesCount: 1,
+            }],
+          });
+        }
+        const sp = new URLSearchParams('topicId=1');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.status).to.equal(200);
+        expect(res.body.total).to.equal(FTS_LLMS.length);
+        res.body.data.forEach((d) => {
+          expect(d).to.not.have.property('mentionSortKey');
+          expect(d).to.not.have.property('promptNormKey');
+        });
+      });
+
+      it('accepts repeated topicIds and forwards all ids', async () => {
+        clients.promptClient.promptsByTopicIDsTotal.resolves({ total: 0 });
+        clients.promptClient.promptsByTopicIDs.resolves({ prompts: [] });
+        const sp = new URLSearchParams('topicIds=1&topicIds=2&engine=chatgpt');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.status).to.equal(200);
+        expect(clients.promptClient.promptsByTopicIDs.firstCall.args[0].topicIds).to.deep.equal([1n, 2n]);
+      });
+
+      it('returns 400 for a non-numeric topicId', async () => {
+        const sp = new URLSearchParams('topicId=abc');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalid_topic_ids');
+        expect(clients.promptClient.promptsByTopicIDs.called).to.equal(false);
+      });
+
+      it('returns 400 invalid_sort_by for RELEVANCE_SCORE (not valid for topicId path)', async () => {
+        const sp = new URLSearchParams('topicId=1&sortBy=RELEVANCE_SCORE');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalid_sort_by');
+      });
     });
   });
 
