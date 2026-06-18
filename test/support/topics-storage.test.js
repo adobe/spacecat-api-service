@@ -371,6 +371,43 @@ describe('topics-storage', () => {
       expect(log.warn.firstCall.args[0]).to.match(/not a valid UUID/i);
     });
 
+    it('truncates an over-long non-UUID categoryId in the skip warning', async () => {
+      // A caller-controlled categoryId can be arbitrarily long (a URL or
+      // base64 blob); bound it so a malformed value cannot produce multi-KB
+      // log lines.
+      const dbRow = {
+        id: 'uuid-long-cat',
+        topic_id: 'long-cat-topic',
+        name: 'Long Cat',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-04-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-04-01',
+        updated_by: 'system',
+      };
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const fromStub = sinon.stub().returns(query);
+      const postgrestClient = { from: fromStub };
+      const log = { warn: sinon.stub() };
+      const longCategoryId = 'x'.repeat(500);
+
+      await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Long Cat', categoryId: longCategoryId },
+        postgrestClient,
+        log,
+      });
+
+      expect(fromStub).to.not.have.been.calledWith('topic_categories');
+      expect(log.warn).to.have.been.calledOnce;
+      const msg = log.warn.firstCall.args[0];
+      // The full 500-char value must not land in the log line.
+      expect(msg).to.not.include(longCategoryId);
+      expect(msg.length).to.be.lessThan(200);
+    });
+
     it('includes the PostgREST error code and details in the warn when the junction upsert fails', async () => {
       // When a well-formed category UUID still fails the junction upsert
       // (e.g. 23503 — the category row is not committed yet, or belongs to a

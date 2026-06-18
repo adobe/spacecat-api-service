@@ -145,7 +145,9 @@ export async function createTopic({
       // A non-UUID categoryId (e.g. a category slug / business-key) can never
       // satisfy the uuid FK to categories.id and would only produce a
       // guaranteed PostgREST 400. Skip the doomed write rather than emit it.
-      log?.warn(`Skipping topic_categories link for topic ${data.id}: categoryId "${categoryId}" is not a valid UUID`);
+      // The value is caller-controlled and unbounded — truncate it so a
+      // malformed payload cannot produce multi-KB log lines.
+      log?.warn(`Skipping topic_categories link for topic ${data.id}: categoryId "${String(categoryId).slice(0, 64)}" is not a valid UUID`);
     } else {
       const { error: junctionError } = await postgrestClient
         .from('topic_categories')
