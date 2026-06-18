@@ -1,3 +1,10 @@
+# [1.581.0](https://github.com/adobe/spacecat-api-service/compare/v1.580.0...v1.581.0) (2026-06-18)
+
+
+### Features
+
+* add POST agentic-traffic/hits-by-urls endpoint | LLMO-5586 ([#2615](https://github.com/adobe/spacecat-api-service/issues/2615)) ([6f4dbd8](https://github.com/adobe/spacecat-api-service/commit/6f4dbd88563af5adeed5721ffbafae54ac9755f6))
+
 # [1.580.0](https://github.com/adobe/spacecat-api-service/compare/v1.579.0...v1.580.0) (2026-06-18)
 
 

@@ -497,6 +497,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/by-status': llmoMysticatController.getAgenticTrafficByStatus,
     'GET /sites/:siteId/agentic-traffic/by-user-agent': llmoMysticatController.getAgenticTrafficByUserAgent,
     'GET /sites/:siteId/agentic-traffic/by-url': llmoMysticatController.getAgenticTrafficByUrl,
+    'POST /sites/:siteId/agentic-traffic/hits-by-urls': llmoMysticatController.getAgenticTrafficHitsByUrls,
     'GET /sites/:siteId/agentic-traffic/filter-dimensions': llmoMysticatController.getAgenticTrafficFilterDimensions,
     'GET /sites/:siteId/agentic-traffic/weeks': llmoMysticatController.getAgenticTrafficWeeks,
     'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,
