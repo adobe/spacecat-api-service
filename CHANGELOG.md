@@ -1,3 +1,10 @@
+## [1.582.1](https://github.com/adobe/spacecat-api-service/compare/v1.582.0...v1.582.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **slack/run-audit:** set onDemand bypass and align entitlement to siteEnrollment ([#2555](https://github.com/adobe/spacecat-api-service/issues/2555)) ([0cdc067](https://github.com/adobe/spacecat-api-service/commit/0cdc067f2e5ee45bd1ea689ddebc81dbb9aa14d5))
+
 # [1.582.0](https://github.com/adobe/spacecat-api-service/compare/v1.581.0...v1.582.0) (2026-06-18)
 
 
