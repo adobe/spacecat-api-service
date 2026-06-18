@@ -301,8 +301,54 @@ function StateAccessMappingsController(context) {
   }
 
   /**
-   * Controller-level FACS (JWT) capability gate for the state-layer management
-   * endpoints.
+   * True when the caller holds `<product>/can_manage_users` at the **FACS (JWT)**
+   * layer (or is admin). This is the *strong* form of management authority: only
+   * a FACS-layer manager may grant `can_manage_users` itself (hybrid-model §8.3 —
+   * a state-layer manager can assign every capability *except* `can_manage_users`).
+   *
+   * @param {object} ctx
+   * @param {string} product Uppercase product code.
+   * @returns {boolean}
+   */
+  function callerHasFacsManageUsers(ctx, product) {
+    const authInfo = ctx.attributes?.authInfo;
+    return !!(authInfo?.isAdmin?.()
+      || authInfo?.hasFacsPermission?.(`${product.toLowerCase()}/can_manage_users`));
+  }
+
+  /**
+   * True when the caller holds `<product>/can_manage_users` via the **state
+   * layer** — any active binding (user-subject or the caller's org-subject) whose
+   * `granted_capabilities` include the manage capability. Backs hybrid-model §8.3
+   * (Brand Manager whose management authority is state-granted, not FACS).
+   *
+   * @param {object} ctx
+   * @param {string} imsOrgId Canonical caller org id.
+   * @param {string} product  Uppercase product code.
+   * @returns {Promise<boolean>}
+   */
+  async function callerHasStateManageUsers(ctx, imsOrgId, product) {
+    const manageCap = `${product.toLowerCase()}/can_manage_users`;
+    const userIdent = resolveCallerUserIdent(ctx);
+    const { postgrestClient } = ctx.dataAccess.services;
+    const queries = [
+      listFacsAccessMappings(postgrestClient, {
+        imsOrgId, product, subjectType: 'org', subjectId: imsOrgId, limit: MAX_PAGE_SIZE,
+      }),
+    ];
+    if (userIdent) {
+      queries.push(listFacsAccessMappings(postgrestClient, {
+        imsOrgId, product, subjectType: 'user', subjectId: userIdent, limit: MAX_PAGE_SIZE,
+      }));
+    }
+    const results = await Promise.all(queries);
+    return results.some((rows) => rows.some(
+      (row) => (row.granted_capabilities ?? []).includes(manageCap),
+    ));
+  }
+
+  /**
+   * Controller-level capability gate for the state-layer management endpoints.
    *
    * Why this lives in the controller and not solely in `facsWrapper`:
    * `/state/access-mappings/*` carry no ReBAC-scoped resource in the path, so
@@ -310,21 +356,46 @@ function StateAccessMappingsController(context) {
    * resource to evaluate the state layer against and **defers to the
    * controller** ("FACS defer-to-controller: no ReBAC-scoped resource for this
    * request"). Without this check a caller missing the capability would reach
-   * the handler unguarded. The gate is therefore: admin OR JWT holds
-   * `<product>/can_manage_users`.
+   * the handler unguarded.
+   *
+   * The gate is: admin OR FACS `<product>/can_manage_users` OR state-layer
+   * `<product>/can_manage_users` (hybrid-model §8.3). FACS and state managers
+   * both reach the management endpoints; the *grant* of `can_manage_users` is
+   * additionally restricted to FACS managers (see `requireFacsManageToGrant`).
    *
    * @param {object} ctx
-   * @param {string} product Uppercase product code.
-   * @returns {Response|null} A `forbidden` Response when denied, else null.
+   * @param {string} product  Uppercase product code.
+   * @param {string} imsOrgId Canonical caller org id.
+   * @returns {Promise<Response|null>} A `forbidden` Response when denied, else null.
    */
-  function requireManageUsers(ctx, product) {
-    const authInfo = ctx.attributes?.authInfo;
-    if (authInfo?.isAdmin?.()) {
+  async function requireManageUsers(ctx, product, imsOrgId) {
+    if (callerHasFacsManageUsers(ctx, product)) {
       return null;
     }
+    if (await callerHasStateManageUsers(ctx, imsOrgId, product)) {
+      return null;
+    }
+    return forbidden(`Requires ${product.toLowerCase()}/can_manage_users`);
+  }
+
+  /**
+   * Guards the *grant* of `can_manage_users`: only a FACS-layer manager (or
+   * admin) may include `<product>/can_manage_users` in `grantedCapabilities`
+   * (hybrid-model §8.3 — a state-layer manager assigns every other capability
+   * but cannot mint new managers). Returns a `forbidden` Response when the grant
+   * is disallowed, else null.
+   *
+   * @param {object} ctx
+   * @param {string} product
+   * @param {string[]} grantedCapabilities
+   * @returns {Response|null}
+   */
+  function requireFacsManageToGrant(ctx, product, grantedCapabilities) {
     const manageCap = `${product.toLowerCase()}/can_manage_users`;
-    if (!authInfo?.hasFacsPermission?.(manageCap)) {
-      return forbidden(`Requires ${manageCap}`);
+    if (Array.isArray(grantedCapabilities)
+      && grantedCapabilities.includes(manageCap)
+      && !callerHasFacsManageUsers(ctx, product)) {
+      return forbidden(`Granting ${manageCap} requires FACS-layer ${manageCap}`);
     }
     return null;
   }
@@ -366,7 +437,7 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = requireManageUsers(ctx, product);
+    const gate = await requireManageUsers(ctx, product, imsOrgId);
     if (gate) {
       return gate;
     }
@@ -415,7 +486,7 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = requireManageUsers(ctx, product);
+    const gate = await requireManageUsers(ctx, product, imsOrgId);
     if (gate) {
       return gate;
     }
@@ -467,7 +538,7 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = requireManageUsers(ctx, product);
+    const gate = await requireManageUsers(ctx, product, imsOrgId);
     if (gate) {
       return gate;
     }
@@ -507,6 +578,10 @@ function StateAccessMappingsController(context) {
     const capErr = validateGrantedCapabilities(grantedCapabilities, product);
     if (capErr) {
       return badRequest(capErr);
+    }
+    const grantGuard = requireFacsManageToGrant(ctx, product, grantedCapabilities);
+    if (grantGuard) {
+      return grantGuard;
     }
 
     try {
@@ -578,7 +653,7 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = requireManageUsers(ctx, product);
+    const gate = await requireManageUsers(ctx, product, imsOrgId);
     if (gate) {
       return gate;
     }
@@ -595,6 +670,10 @@ function StateAccessMappingsController(context) {
     const capErr = validateGrantedCapabilities(grantedCapabilities, product);
     if (capErr) {
       return badRequest(capErr);
+    }
+    const grantGuard = requireFacsManageToGrant(ctx, product, grantedCapabilities);
+    if (grantGuard) {
+      return grantGuard;
     }
 
     try {
@@ -644,7 +723,7 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = requireManageUsers(ctx, product);
+    const gate = await requireManageUsers(ctx, product, imsOrgId);
     if (gate) {
       return gate;
     }
@@ -693,17 +772,30 @@ function StateAccessMappingsController(context) {
   }
 
   /**
-   * GET /product/capabilities — read-only catalog of capabilities declared
-   * for the product. Sourced from `PRODUCTS_CAPABILITIES[product]`.
+   * GET /product/capabilities — the catalog of capabilities the caller may
+   * **assign** to others under the product. Sourced from
+   * `PRODUCTS_CAPABILITIES[product]`, then shaped by the caller's management
+   * authority (hybrid-model §8.3):
+   *
+   *   - FACS-layer manager (or admin) → the full catalog, including
+   *     `can_manage_users` (only FACS managers may mint new managers).
+   *   - Otherwise (state-layer manager / any other caller) → the full catalog
+   *     **minus** `can_manage_users` — a state-layer manager can assign every
+   *     other capability but cannot grant management authority.
    */
   async function getProductCapabilities(ctx) {
     const product = resolveProduct(ctx);
     if (!product) {
       return badRequest('x-product header is required and must reference a known product');
     }
+    const catalog = getProductCapabilityCatalog(product);
+    if (callerHasFacsManageUsers(ctx, product)) {
+      return ok({ product, capabilities: catalog });
+    }
+    const manageCap = `${product.toLowerCase()}/can_manage_users`;
     return ok({
       product,
-      capabilities: getProductCapabilityCatalog(product),
+      capabilities: catalog.filter((cap) => cap !== manageCap),
     });
   }
 
@@ -849,7 +941,7 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = requireManageUsers(ctx, product);
+    const gate = await requireManageUsers(ctx, product, imsOrgId);
     if (gate) {
       return gate;
     }

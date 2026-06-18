@@ -228,11 +228,18 @@ product-capabilities:
   get:
     tags:
       - state-access-mappings
-    summary: List the product's capability catalog
+    summary: List the capabilities the caller may assign
     description: |
-      Returns the de-duplicated, sorted catalog of capability strings
-      declared for the product in
-      `routeFacsCapabilities.PRODUCTS_ROUTES`.
+      Returns the de-duplicated, sorted catalog of capability strings the
+      caller may **assign** to others under the product, shaped by the
+      caller's management authority (hybrid-model §8.3):
+
+        - FACS-layer manager (or admin) → the full catalog, including
+          `<product>/can_manage_users`.
+        - Otherwise (state-layer manager / any other caller) → the full
+          catalog **minus** `<product>/can_manage_users` — a state-layer
+          manager can assign every other capability but cannot mint new
+          managers.
     operationId: getProductCapabilities
     parameters:
       - *xProductHeader

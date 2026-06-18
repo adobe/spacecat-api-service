@@ -783,6 +783,91 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(200);
       expect(stubs.listFacsAccessMappings.called).to.be.true;
     });
+
+    it('flow 8.3: a state-layer can_manage_users holder passes the gate (empty JWT)', async () => {
+      // The caller's own user binding carries can_manage_users — management
+      // authority is state-granted, not FACS. The gate consults the state layer.
+      const managerRow = makeRow({
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        granted_capabilities: ['llmo/can_manage_users'],
+      });
+      const { Controller } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow]),
+      });
+      const ctx = denyCtx({
+        queryParams: { subjectType: 'org', subjectId: CALLER_ORG_CANONICAL },
+      });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(200);
+    });
+  });
+
+  describe('flow 8.3: granting can_manage_users requires FACS-layer can_manage_users', () => {
+    const manageBody = {
+      subjectType: 'user',
+      subjectId: 'someone@AdobeID',
+      resourceType: 'brand',
+      resourceId: VALID_UUID_RES,
+      grantedCapabilities: ['llmo/can_view', 'llmo/can_manage_users'],
+    };
+
+    it('createMapping 403s when a state-layer manager grants can_manage_users', async () => {
+      // Caller passes the gate via a state-layer can_manage_users binding, but
+      // may NOT mint a new manager — that requires FACS-layer authority.
+      const managerRow = makeRow({
+        subject_type: 'user', subject_id: CALLER_USER, granted_capabilities: ['llmo/can_manage_users'],
+      });
+      const { Controller, stubs } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow]),
+      });
+      const ctx = makeContext({ facsPermissions: [], isAdmin: false, body: manageBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
+    });
+
+    it('createMapping allows a FACS-layer manager to grant can_manage_users', async () => {
+      const created = makeRow({ granted_capabilities: ['llmo/can_view', 'llmo/can_manage_users'] });
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [created], skipped: [] }),
+      });
+      const ctx = makeContext({ facsPermissions: ['llmo/can_manage_users'], isAdmin: false, body: manageBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+    });
+
+    it('patchMapping 403s when a state-layer manager adds can_manage_users', async () => {
+      const managerRow = makeRow({
+        subject_type: 'user', subject_id: CALLER_USER, granted_capabilities: ['llmo/can_manage_users'],
+      });
+      const { Controller, stubs } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow]),
+      });
+      const ctx = makeContext({
+        facsPermissions: [],
+        isAdmin: false,
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_manage_users'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('admin may grant can_manage_users', async () => {
+      const created = makeRow({ granted_capabilities: ['llmo/can_manage_users'] });
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [created], skipped: [] }),
+      });
+      const ctx = makeContext({
+        facsPermissions: [],
+        isAdmin: true,
+        body: { ...manageBody, grantedCapabilities: ['llmo/can_manage_users'] },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+    });
   });
 
   describe('GET /product/capabilities', () => {
@@ -806,6 +891,27 @@ describe('StateAccessMappingsController', () => {
       const sorted = [...body.capabilities].sort();
       expect(body.capabilities).to.deep.equal(sorted);
       expect(new Set(body.capabilities).size).to.equal(body.capabilities.length);
+    });
+
+    it('flow 8.3: omits can_manage_users for a non-FACS-manager caller', async () => {
+      // A state-layer manager (or any non-FACS caller) may assign every
+      // capability EXCEPT can_manage_users — only FACS managers mint managers.
+      const { Controller } = await loadController();
+      const ctx = makeContext({ facsPermissions: [], isAdmin: false });
+      const res = await Controller(ctx).getProductCapabilities(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.capabilities).to.include('llmo/can_view');
+      expect(body.capabilities).to.not.include('llmo/can_manage_users');
+    });
+
+    it('flow 8.3: includes can_manage_users for a FACS-manager caller', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ facsPermissions: ['llmo/can_manage_users'], isAdmin: false });
+      const res = await Controller(ctx).getProductCapabilities(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.capabilities).to.include('llmo/can_manage_users');
     });
 
     it('returns the catalog for ASO', async () => {
