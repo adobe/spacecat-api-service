@@ -125,6 +125,26 @@ describe('workspace-lifecycle', () => {
       expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('adopted-ws');
     });
 
+    it('adopts a unique match when the family endpoint returns a BARE ARRAY (real gateway shape)', async () => {
+      // GET /v1/workspaces/{id}/family returns a bare array (live-verified), NOT an
+      // { items: [...] } envelope. The earlier family?.items read discarded every
+      // entry on the real response, so adoption never matched. This pins the
+      // bare-array shape so the fix can't regress.
+      const transport = makeTransport({
+        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+        listWorkspaceFamily: sinon.stub().resolves([
+          { id: 'other-ws', title: 'Some Other Brand [11111111]' },
+          { id: 'adopted-ws', title: EXPECTED_TITLE },
+        ]),
+      });
+      const brand = makeBrand();
+
+      const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+
+      expect(result).to.equal('adopted-ws');
+      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('adopted-ws');
+    });
+
     it('refuses to adopt a NON-empty family match after a create timeout', async () => {
       // A timed-out create has no projects yet; a non-empty title match is some
       // OTHER provisioned workspace, never our interrupted create. Refuse it.
@@ -462,6 +482,27 @@ describe('workspace-lifecycle', () => {
         expect(e.status).to.equal(409);
         expect(e.code).to.equal('linkedSubworkspaces');
       }
+      expect(transport.deleteProject).to.not.have.been.called;
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
+    });
+
+    it('refuses to decommission when the BARE-ARRAY family lists a real child (guard enabled)', async () => {
+      // Real gateway shape: family is a bare array, not { items: [...] }. The old
+      // family?.items read saw zero children here and would have let the
+      // decommission proceed — silently wiping a parent with live children.
+      const transport = makeTransport({
+        listWorkspaceFamily: sinon.stub().resolves([{ id: SUB_WS }, {}, { id: 'child-1' }]),
+        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
+      });
+
+      const promise = decommissionBrandWorkspace(
+        transport,
+        SUB_WS,
+        log,
+        PARENT_WS,
+        { enforceLinkedGuard: true },
+      );
+      await expect(promise).to.be.rejectedWith(/active linked sub-workspace/);
       expect(transport.deleteProject).to.not.have.been.called;
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });

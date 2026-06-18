@@ -110,6 +110,21 @@ async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, 
   );
 }
 
+// The user-manager family endpoint (GET /v1/workspaces/{id}/family) returns a
+// BARE ARRAY of workspaces — live-verified against the gateway (the swagger types
+// it as a top-level array too). An earlier `family?.items` read assumed an
+// `{ items: [...] }` envelope, so on the real bare-array response `.items` is
+// undefined and EVERY family entry was discarded: ambiguous-create recovery never
+// matched (always 502 "no family match to adopt") and the linked-child guard saw
+// zero children. Normalize here — prefer the bare array, tolerate a legacy
+// `.items` envelope — and use it at both call sites.
+function familyItems(family) {
+  if (Array.isArray(family)) {
+    return family;
+  }
+  return Array.isArray(family?.items) ? family.items : [];
+}
+
 /**
  * Ambiguous-create recovery (design §6): a timed-out createSubworkspace is
  * ambiguous (no idempotency key). List the parent's family, match the exact
@@ -118,7 +133,7 @@ async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, 
  */
 async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
   const family = await transport.listWorkspaceFamily(parentWorkspaceId);
-  const items = Array.isArray(family?.items) ? family.items : [];
+  const items = familyItems(family);
   const matches = items.filter((w) => w?.title === title);
   if (matches.length === 0) {
     throw new ErrorWithStatusCode(
@@ -374,7 +389,7 @@ export async function decommissionBrandWorkspace(
   // workspace as a blocking child.
   if (enforceLinkedGuard) {
     const family = await transport.listWorkspaceFamily(subworkspaceId);
-    const children = (Array.isArray(family?.items) ? family.items : [])
+    const children = familyItems(family)
       .filter((w) => hasText(w?.id) && w.id !== subworkspaceId);
     if (children.length > 0) {
       const err = new ErrorWithStatusCode(
