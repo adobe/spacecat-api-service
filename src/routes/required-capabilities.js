@@ -281,6 +281,12 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:read',
   'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:write',
+  // Org-level Semrush catalogue lookups (brand-independent): read-only, org
+  // access enforced in the controller (listOrgModels / listOrgLanguages).
+  'GET /v2/orgs/:spaceCatId/serenity/models': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/serenity/languages': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
   'GET /org/:spaceCatId/brands/:brandId/fanout-report': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
