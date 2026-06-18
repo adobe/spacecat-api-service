@@ -134,15 +134,18 @@
 			"sitemap": {},
 			"toc": {},
 			"wikipedia-analysis": {},
-			"money-pages": {}
+			"money-pages": {},
+			"cwv-trends-audit": {}
 		},
-		"imports": {
+		"imports": {			
 			"organic-traffic" : {},
 			"top-pages" : {},
 			"organic-keywords" :{},
 			"all-traffic": {},
             "traffic-analysis": {},
 			"user-engagement": {},
+			"cwv-trends-onboard": {},
+			"cwv-trends-daily": {},
 			"cwv-weekly": {},
 			"ahref-paid-pages": {}
 		},
