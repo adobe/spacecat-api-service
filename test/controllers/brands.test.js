@@ -4317,7 +4317,10 @@ describe('Brands Controller', () => {
             data: {
               id: BRAND_UUID,
               name: 'New Brand',
-              status: 'active',
+              // 'pending' = no active same-name brand exists (a fresh-create
+              // precondition); avoids tripping the LLMO-5587 demotion guard, which
+              // only fires when an upsert-by-name would demote an *active* brand.
+              status: 'pending',
               origin: 'human',
               updated_at: '2026-01-01T00:00:00Z',
               updated_by: 'user@test.com',
@@ -4349,8 +4352,27 @@ describe('Brands Controller', () => {
     });
 
     it('returns 409 when a by-name create would demote an active brand to pending (LLMO-5587)', async () => {
-      // beforeEach resolves an existing brand of the same name with status 'active';
-      // a create carrying status:'pending' must not silently demote it.
+      // An ACTIVE brand of the same name already exists; a create carrying
+      // status:'pending' would silently demote it via the (org, name) upsert.
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          single: sandbox.stub().resolves({ data: { id: BRAND_UUID, name: 'New Brand' }, error: null }),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID, name: 'New Brand', site_id: 'site-1', status: 'active',
+            },
+            error: null,
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
       const response = await brandsController.createBrandForOrg({
         ...context,
         params: { spaceCatId: ORGANIZATION_ID },
