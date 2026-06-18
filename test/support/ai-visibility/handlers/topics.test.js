@@ -918,6 +918,20 @@ describe('AI Visibility – topics handlers', () => {
         expect(clients.promptClient.promptsByTopicIDs.firstCall.args[0].topicIds).to.deep.equal([1n, 2n]);
       });
 
+      it('forwards a non-zero offset to the single backend call (page-2 pagination)', async () => {
+        // Regression guard for the bug this fix targets: page 2 must reach the backend with the
+        // requested offset on a single aggregated call (not a per-engine fan-out that empties it).
+        clients.promptClient.promptsByTopicIDsTotal.resolves({ total: 18 });
+        clients.promptClient.promptsByTopicIDs.resolves({ prompts: [] });
+        const sp = new URLSearchParams('topicId=1&limit=10&offset=10');
+        const res = await handleTopicsResearchPrompts(sp, clients);
+        expect(res.status).to.equal(200);
+        expect(clients.promptClient.promptsByTopicIDs.callCount).to.equal(1);
+        expect(clients.promptClient.promptsByTopicIDs.firstCall.args[0].range).to.deep.equal({ limit: 10, offset: 10 });
+        expect(res.body.offset).to.equal(10);
+        expect(res.body.total).to.equal(18);
+      });
+
       it('returns 400 for a non-numeric topicId', async () => {
         const sp = new URLSearchParams('topicId=abc');
         const res = await handleTopicsResearchPrompts(sp, clients);
