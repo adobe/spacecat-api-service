@@ -483,7 +483,7 @@ function PreflightController(ctx, log, env) {
       }
     }
 
-    // Mint a spacecat-api-service IMS v3 service token for the Mystique CGW
+    // Mint a spacecat-api-service IMS service token for the Mystique CGW
     // edge gate (SITES-43236 / SITES-46699 / mystique-deploy PR #463). Sent
     // on the dedicated x-ims-authorization header — separate from
     // `Authorization` above, which carries the customer site's page-auth
@@ -491,22 +491,19 @@ function PreflightController(ctx, log, env) {
     //
     // Constructs a custom-env ImsClient with the dedicated PREFLIGHT_IMS_*
     // credentials provisioned in Vault for this S2S use case (SITES-46699).
-    // The default IMS client wired into `context.imsClient` by
-    // `imsClientWrapper` is not registered for the `client_credentials`
-    // grant type, so v3 service-token minting cannot succeed against it.
-    // ASO team manages a dedicated client for this purpose, following the
-    // established spacecat one-IMS-client-per-purpose convention (see
-    // `email-service.js` / `trial-users.js` / cloud-manager-client /
-    // brand-client — each swaps IMS env at construction for their own
-    // dedicated identity).
+    // ASO team manages a dedicated IMS client (`aem_site_optimizer_preflight`)
+    // for this purpose, following the established spacecat
+    // one-IMS-client-per-purpose convention (see `email-service.js` /
+    // `trial-users.js` / cloud-manager-client / brand-client — each swaps
+    // IMS env at construction for their own dedicated identity).
     //
-    // Uses getServicePrincipalAccessToken(imsOrgId) rather than
-    // getServiceAccessTokenV3() because the PREFLIGHT IMS client is
-    // ownerless — it has no default org bound at registration, so per the
-    // IMS Client Credentials wiki (wiki x/Olwxn) every v3 mint must
-    // explicitly carry org_id. The required Service Principal Binding
-    // between the client and PREFLIGHT_IMS_ORG_ID is provisioned out-of-band
-    // (SITES-46699 acceptance criterion).
+    // Uses getServiceAccessToken (v2 authorization_code) against the
+    // IMSS-provisioned permanent authorization code (Service Token row on
+    // the client) — the synthetic service-account identity is encoded in
+    // the code itself, so no org_id is needed at mint time and no Service
+    // Principal Binding is required. The CGW-Flex edge gate validates the
+    // `client_id` claim, which is identical across v2 and v3 tokens for
+    // this client, so v2 satisfies the gate.
     //
     // Mint before the AsyncJob / Preflight DB writes so a transient IMS
     // failure doesn't leave orphaned IN_PROGRESS records to clean up.
@@ -523,21 +520,17 @@ function PreflightController(ctx, log, env) {
         ...env,
         IMS_CLIENT_ID: env.PREFLIGHT_IMS_CLIENT_ID,
         IMS_CLIENT_SECRET: env.PREFLIGHT_IMS_CLIENT_SECRET,
-        // IMS_CLIENT_CODE is required by ImsClient.createFrom's constructor
-        // validation even though v3 `client_credentials` doesn't send it to
-        // IMS — bind to our own PREFLIGHT_IMS_CLIENT_CODE so the dedicated
-        // client is fully self-contained rather than inheriting the default
-        // client's CLIENT_CODE via the env spread above.
         IMS_CLIENT_CODE: env.PREFLIGHT_IMS_CLIENT_CODE,
+        // IMS_SCOPE is unused by v2 getServiceAccessToken (scope is bound
+        // to the permanent code at IMSS registration time), but kept here
+        // for forward-compat if/when this client moves to v3.
         IMS_SCOPE: env.PREFLIGHT_IMS_SCOPE,
       };
       const preflightImsClient = ImsClient.createFrom({
         ...context,
         env: preflightImsEnv,
       });
-      const tokenPayload = await preflightImsClient.getServicePrincipalAccessToken(
-        env.PREFLIGHT_IMS_ORG_ID,
-      );
+      const tokenPayload = await preflightImsClient.getServiceAccessToken();
       imsServiceToken = tokenPayload?.access_token;
       // Post-condition: a successful mint must yield a non-empty access_token.
       // Guards against an SDK shape change (e.g. `{ accessToken }` or `{}`)
