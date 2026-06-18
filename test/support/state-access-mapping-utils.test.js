@@ -482,6 +482,7 @@ describe('state-access-mapping-utils helpers', () => {
       product: 'LLMO',
       operation: 'create',
       outcome: 'allow',
+      statusCode: 201,
     };
 
     for (const field of ['imsOrgId', 'product', 'operation', 'outcome']) {
@@ -497,6 +498,18 @@ describe('state-access-mapping-utils helpers', () => {
         }
       });
     }
+
+    it('throws when statusCode is not a number', async () => {
+      const client = fakePostgrestClient();
+      const event = { ...validEvent };
+      delete event.statusCode;
+      try {
+        await insertFacsAccessMappingAuditEvent(client, event);
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('insertFacsAccessMappingAuditEvent: statusCode (number) is required');
+      }
+    });
 
     it('inserts a snake_case row into the audit-events table and returns it', async () => {
       const client = fakePostgrestClient({
@@ -531,16 +544,18 @@ describe('state-access-mapping-utils helpers', () => {
         resource_id: 'brand-x',
       });
       expect(row.granted_capabilities).to.deep.equal(['llmo/can_view']);
+      expect(row.status_code).to.equal(201);
     });
 
-    it('defaults optional columns to null', async () => {
+    it("coalesces NOT NULL actor_id / request_id to 'unknown' and nulls the rest", async () => {
       const client = fakePostgrestClient({
         insertResults: [{ data: [{ id: 'evt-2' }], error: null }],
       });
       await insertFacsAccessMappingAuditEvent(client, validEvent);
       const row = client.insertArgs[0];
-      expect(row.actor_id).to.equal(null);
-      expect(row.request_id).to.equal(null);
+      // actor_id and request_id are NOT NULL columns — coalesced, never null.
+      expect(row.actor_id).to.equal('unknown');
+      expect(row.request_id).to.equal('unknown');
       expect(row.mapping_id).to.equal(null);
       expect(row.granted_capabilities).to.equal(null);
       expect(row.revoke_reason).to.equal(null);

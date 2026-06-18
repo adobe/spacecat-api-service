@@ -261,8 +261,12 @@ export async function listFacsAccessMappingAuditEvents(postgrestClient, filters 
  * @param {string} event.product                - REQUIRED — uppercase product code.
  * @param {string} event.operation              - 'create' | 'update_capabilities' | 'revoke'
  * @param {string} event.outcome                - 'allow' | 'deny' | 'error'
- * @param {string} [event.actorId]              - IMS ident of the actor.
- * @param {string} [event.requestId]            - Invocation/request id.
+ * @param {number} event.statusCode             - REQUIRED — HTTP status returned
+ *                                                to the caller (NOT NULL column).
+ * @param {string} [event.actorId]              - IMS ident of the actor. NOT NULL
+ *                                                column; coalesced to 'unknown'.
+ * @param {string} [event.requestId]            - Invocation/request id. NOT NULL
+ *                                                column; coalesced to 'unknown'.
  * @param {string} [event.mappingId]            - Affected binding row id.
  * @param {string} [event.bindingSubjectType]
  * @param {string} [event.bindingSubjectId]
@@ -281,6 +285,7 @@ export async function insertFacsAccessMappingAuditEvent(postgrestClient, event =
     product,
     operation,
     outcome,
+    statusCode,
     actorId,
     requestId,
     mappingId,
@@ -291,7 +296,6 @@ export async function insertFacsAccessMappingAuditEvent(postgrestClient, event =
     grantedCapabilities,
     revokeReason,
     denialReason,
-    statusCode,
     errorMessage,
   } = event;
   if (!imsOrgId) {
@@ -306,13 +310,21 @@ export async function insertFacsAccessMappingAuditEvent(postgrestClient, event =
   if (!outcome) {
     throw new Error('insertFacsAccessMappingAuditEvent: outcome is required');
   }
+  // status_code, request_id and actor_id are NOT NULL columns. statusCode is
+  // semantically required (the HTTP status); request_id / actor_id are coalesced
+  // to 'unknown' so a missing invocation id or anonymous caller never blocks the
+  // audit write.
+  if (typeof statusCode !== 'number') {
+    throw new Error('insertFacsAccessMappingAuditEvent: statusCode (number) is required');
+  }
   const row = {
     ims_org_id: imsOrgId,
     product,
     operation,
     outcome,
-    actor_id: actorId ?? null,
-    request_id: requestId ?? null,
+    status_code: statusCode,
+    actor_id: actorId ?? 'unknown',
+    request_id: requestId ?? 'unknown',
     mapping_id: mappingId ?? null,
     binding_subject_type: bindingSubjectType ?? null,
     binding_subject_id: bindingSubjectId ?? null,
@@ -321,7 +333,6 @@ export async function insertFacsAccessMappingAuditEvent(postgrestClient, event =
     granted_capabilities: grantedCapabilities ?? null,
     revoke_reason: revokeReason ?? null,
     denial_reason: denialReason ?? null,
-    status_code: statusCode ?? null,
     error_message: errorMessage ?? null,
   };
   const { data, error } = await postgrestClient
