@@ -515,6 +515,12 @@ function PreflightController(ctx, log, env) {
         ...env,
         IMS_CLIENT_ID: env.PREFLIGHT_IMS_CLIENT_ID,
         IMS_CLIENT_SECRET: env.PREFLIGHT_IMS_CLIENT_SECRET,
+        // IMS_CLIENT_CODE is required by ImsClient.createFrom's constructor
+        // validation even though v3 `client_credentials` doesn't send it to
+        // IMS — bind to our own PREFLIGHT_IMS_CLIENT_CODE so the dedicated
+        // client is fully self-contained rather than inheriting the default
+        // client's CLIENT_CODE via the env spread above.
+        IMS_CLIENT_CODE: env.PREFLIGHT_IMS_CLIENT_CODE,
         IMS_SCOPE: env.PREFLIGHT_IMS_SCOPE,
       };
       const preflightImsClient = ImsClient.createFrom({

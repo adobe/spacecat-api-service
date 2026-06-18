@@ -1181,6 +1181,7 @@ describe('Preflight Controller', () => {
           // SITES-46699: dedicated IMS client credentials used by callMysticatAnalyze.
           PREFLIGHT_IMS_CLIENT_ID: 'test-preflight-client-id',
           PREFLIGHT_IMS_CLIENT_SECRET: 'test-preflight-client-secret',
+          PREFLIGHT_IMS_CLIENT_CODE: 'test-preflight-client-code',
           PREFLIGHT_IMS_SCOPE: 'test-preflight-scope',
         },
       );
@@ -1618,6 +1619,7 @@ describe('Preflight Controller', () => {
           env: sinon.match({
             IMS_CLIENT_ID: 'test-preflight-client-id',
             IMS_CLIENT_SECRET: 'test-preflight-client-secret',
+            IMS_CLIENT_CODE: 'test-preflight-client-code',
             IMS_SCOPE: 'test-preflight-scope',
           }),
         }),
