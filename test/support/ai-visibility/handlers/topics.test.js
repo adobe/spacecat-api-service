@@ -885,23 +885,28 @@ describe('AI Visibility – topics handlers', () => {
         expect(res.body.data[0].responseExcerpt).to.equal('hi');
       });
 
-      it('all LLMs: fans out across engines and sums per-LLM totals', async () => {
-        for (const llm of FTS_LLMS) {
-          clients.promptClient.promptsByTopicIDsTotal.withArgs(sinon.match({ llm })).resolves({ total: 1 });
-          clients.promptClient.promptsByTopicIDs.withArgs(sinon.match({ llm })).resolves({
-            prompts: [{
-              prompt: 'Same prompt', promptHash: 'h1', serpId: 's1', topicId: '1', llm, mentionedBrandsCount: 2, sourcesCount: 1,
-            }],
-          });
-        }
+      it('all engines: one LLM_ENUM.ALL call, server-side total (no per-engine fan-out)', async () => {
+        clients.promptClient.promptsByTopicIDsTotal.resolves({ total: 12 });
+        clients.promptClient.promptsByTopicIDs.resolves({
+          prompts: [
+            {
+              prompt: 'P', promptHash: 'h1', serpId: 's1', topicId: '1', llm: FTS_LLMS[0], mentionedBrandsCount: 2, sourcesCount: 1,
+            },
+            {
+              prompt: 'P', promptHash: 'h1', serpId: 's2', topicId: '1', llm: FTS_LLMS[1], mentionedBrandsCount: 3, sourcesCount: 0,
+            },
+          ],
+        });
         const sp = new URLSearchParams('topicId=1');
         const res = await handleTopicsResearchPrompts(sp, clients);
         expect(res.status).to.equal(200);
-        expect(res.body.total).to.equal(FTS_LLMS.length);
-        res.body.data.forEach((d) => {
-          expect(d).to.not.have.property('mentionSortKey');
-          expect(d).to.not.have.property('promptNormKey');
-        });
+        // A single aggregated call — not one per engine (which would break offset pagination).
+        expect(clients.promptClient.promptsByTopicIDs.callCount).to.equal(1);
+        expect(clients.promptClient.promptsByTopicIDs.firstCall.args[0].llm).to.equal(LLM_ENUM.ALL);
+        expect(clients.promptClient.promptsByTopicIDsTotal.firstCall.args[0].llm).to.equal(LLM_ENUM.ALL);
+        // Server-side total is passed through verbatim (not summed across per-LLM calls).
+        expect(res.body.total).to.equal(12);
+        expect(res.body.data).to.have.length(2);
       });
 
       it('accepts repeated topicIds and forwards all ids', async () => {
