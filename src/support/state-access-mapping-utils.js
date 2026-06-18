@@ -242,6 +242,99 @@ export async function listFacsAccessMappingAuditEvents(postgrestClient, filters 
 }
 
 /**
+ * Appends one row to the `facs_access_mapping_audit_events` operation log.
+ *
+ * The table is append-only by grant: `postgrest_writer` holds SELECT + INSERT
+ * (UPDATE / DELETE are revoked), and `postgrest_anon` holds SELECT only. The
+ * api-service PostgREST client authenticates as `postgrest_writer`, so a direct
+ * insert is the legal write path (no RPC needed — the row is immutable once
+ * written).
+ *
+ * Callers MUST treat a thrown error here as non-fatal for the originating
+ * mapping mutation: a failed audit write should log a warning, never fail the
+ * create / update / revoke response. (The controller's `emitAuditEvent` wrapper
+ * enforces this.)
+ *
+ * @param {object} postgrestClient
+ * @param {object} event
+ * @param {string} event.imsOrgId               - REQUIRED — tenant key.
+ * @param {string} event.product                - REQUIRED — uppercase product code.
+ * @param {string} event.operation              - 'create' | 'update_capabilities' | 'revoke'
+ * @param {string} event.outcome                - 'allow' | 'deny' | 'error'
+ * @param {string} [event.actorId]              - IMS ident of the actor.
+ * @param {string} [event.requestId]            - Invocation/request id.
+ * @param {string} [event.mappingId]            - Affected binding row id.
+ * @param {string} [event.bindingSubjectType]
+ * @param {string} [event.bindingSubjectId]
+ * @param {string} [event.resourceType]
+ * @param {string} [event.resourceId]
+ * @param {string[]} [event.grantedCapabilities]
+ * @param {string} [event.revokeReason]
+ * @param {string} [event.denialReason]
+ * @param {number} [event.statusCode]
+ * @param {string} [event.errorMessage]
+ * @returns {Promise<object|null>} The inserted row, or null.
+ */
+export async function insertFacsAccessMappingAuditEvent(postgrestClient, event = {}) {
+  const {
+    imsOrgId,
+    product,
+    operation,
+    outcome,
+    actorId,
+    requestId,
+    mappingId,
+    bindingSubjectType,
+    bindingSubjectId,
+    resourceType,
+    resourceId,
+    grantedCapabilities,
+    revokeReason,
+    denialReason,
+    statusCode,
+    errorMessage,
+  } = event;
+  if (!imsOrgId) {
+    throw new Error('insertFacsAccessMappingAuditEvent: imsOrgId is required');
+  }
+  if (!product) {
+    throw new Error('insertFacsAccessMappingAuditEvent: product is required');
+  }
+  if (!operation) {
+    throw new Error('insertFacsAccessMappingAuditEvent: operation is required');
+  }
+  if (!outcome) {
+    throw new Error('insertFacsAccessMappingAuditEvent: outcome is required');
+  }
+  const row = {
+    ims_org_id: imsOrgId,
+    product,
+    operation,
+    outcome,
+    actor_id: actorId ?? null,
+    request_id: requestId ?? null,
+    mapping_id: mappingId ?? null,
+    binding_subject_type: bindingSubjectType ?? null,
+    binding_subject_id: bindingSubjectId ?? null,
+    resource_type: resourceType ?? null,
+    resource_id: resourceId ?? null,
+    granted_capabilities: grantedCapabilities ?? null,
+    revoke_reason: revokeReason ?? null,
+    denial_reason: denialReason ?? null,
+    status_code: statusCode ?? null,
+    error_message: errorMessage ?? null,
+  };
+  const { data, error } = await postgrestClient
+    .from('facs_access_mapping_audit_events')
+    .insert(row)
+    .select('*');
+  if (error) {
+    throw new Error(`insertFacsAccessMappingAuditEvent failed: ${error.message}`);
+  }
+  return Array.isArray(data) ? (data[0] ?? null) : data;
+}
+
+/**
  * Bulk-inserts subject↔resource bindings for one resource within the
  * caller's org + product. Duplicates (matching the active-row partial
  * unique index `(subject_type, subject_id, resource_type, resource_id,

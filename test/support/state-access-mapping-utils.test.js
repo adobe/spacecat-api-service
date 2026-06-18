@@ -17,6 +17,7 @@ import {
   listFacsAccessMappings,
   listFacsAccessMappingHistory,
   listFacsAccessMappingAuditEvents,
+  insertFacsAccessMappingAuditEvent,
   createFacsAccessMappings,
   revokeFacsAccessMappingById,
   updateFacsAccessMappingCapabilities,
@@ -472,6 +473,97 @@ describe('state-access-mapping-utils helpers', () => {
         subjects: [{ type: 'user', id: 'A@AdobeID' }],
       });
       expect(client.insertArgs[0].created_by).to.equal(null);
+    });
+  });
+
+  describe('insertFacsAccessMappingAuditEvent', () => {
+    const validEvent = {
+      imsOrgId: 'org-1@AdobeOrg',
+      product: 'LLMO',
+      operation: 'create',
+      outcome: 'allow',
+    };
+
+    for (const field of ['imsOrgId', 'product', 'operation', 'outcome']) {
+      it(`throws when ${field} is missing`, async () => {
+        const client = fakePostgrestClient();
+        const event = { ...validEvent };
+        delete event[field];
+        try {
+          await insertFacsAccessMappingAuditEvent(client, event);
+          throw new Error('expected to throw');
+        } catch (e) {
+          expect(e.message).to.equal(`insertFacsAccessMappingAuditEvent: ${field} is required`);
+        }
+      });
+    }
+
+    it('inserts a snake_case row into the audit-events table and returns it', async () => {
+      const client = fakePostgrestClient({
+        insertResults: [{ data: [{ id: 'evt-1' }], error: null }],
+      });
+      const result = await insertFacsAccessMappingAuditEvent(client, {
+        ...validEvent,
+        actorId: 'user-x@AdobeID',
+        requestId: 'req-1',
+        mappingId: 'map-1',
+        bindingSubjectType: 'user',
+        bindingSubjectId: 'someone@AdobeID',
+        resourceType: 'brand',
+        resourceId: 'brand-x',
+        grantedCapabilities: ['llmo/can_view'],
+        revokeReason: null,
+      });
+      expect(result).to.deep.equal({ id: 'evt-1' });
+      expect(client.fromCalls).to.include('facs_access_mapping_audit_events');
+      const row = client.insertArgs[0];
+      expect(row).to.include({
+        ims_org_id: 'org-1@AdobeOrg',
+        product: 'LLMO',
+        operation: 'create',
+        outcome: 'allow',
+        actor_id: 'user-x@AdobeID',
+        request_id: 'req-1',
+        mapping_id: 'map-1',
+        binding_subject_type: 'user',
+        binding_subject_id: 'someone@AdobeID',
+        resource_type: 'brand',
+        resource_id: 'brand-x',
+      });
+      expect(row.granted_capabilities).to.deep.equal(['llmo/can_view']);
+    });
+
+    it('defaults optional columns to null', async () => {
+      const client = fakePostgrestClient({
+        insertResults: [{ data: [{ id: 'evt-2' }], error: null }],
+      });
+      await insertFacsAccessMappingAuditEvent(client, validEvent);
+      const row = client.insertArgs[0];
+      expect(row.actor_id).to.equal(null);
+      expect(row.request_id).to.equal(null);
+      expect(row.mapping_id).to.equal(null);
+      expect(row.granted_capabilities).to.equal(null);
+      expect(row.revoke_reason).to.equal(null);
+    });
+
+    it('throws when PostgREST returns an error', async () => {
+      const client = fakePostgrestClient({
+        insertResults: [{ data: null, error: { message: 'permission denied' } }],
+      });
+      try {
+        await insertFacsAccessMappingAuditEvent(client, validEvent);
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('insertFacsAccessMappingAuditEvent failed: permission denied');
+      }
+    });
+
+    it('returns null when the insert yields no row', async () => {
+      const client = fakePostgrestClient({
+        insertResults: [{ data: [], error: null }],
+      });
+      const result = await insertFacsAccessMappingAuditEvent(client, validEvent);
+      expect(result).to.equal(null);
     });
   });
 

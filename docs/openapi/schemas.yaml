@@ -10769,6 +10769,16 @@ StateAccessMapping:
       type: [string, 'null']
       example: admin@AdobeID
     createdAt: { $ref: '#/DateTime' }
+    updatedBy:
+      type: [string, 'null']
+      description: |
+        IMS ident of the last actor to edit the binding's capabilities, or
+        `system` when never edited since creation.
+      example: system
+    updatedAt:
+      oneOf:
+        - { $ref: '#/DateTime' }
+        - type: 'null'
     revokedAt:
       oneOf:
         - { $ref: '#/DateTime' }

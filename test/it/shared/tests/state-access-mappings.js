@@ -11,6 +11,7 @@
  */
 
 import { expect } from 'chai';
+import { ORG_1_ID } from '../seed-ids.js';
 
 /**
  * Asserts a value is a parseable ISO 8601 timestamp. Unlike the shared
@@ -361,6 +362,74 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.delete(`${BASE}/${BRAND_RESOURCE_ID}`);
         expect(res.status).to.equal(404);
+      });
+    });
+
+    describe('audit-trail emit: create / patch / revoke write audit events', () => {
+      // The api-service IT PostgREST client authenticates as `postgrest_writer`
+      // (POSTGREST_API_KEY = POSTGREST_WRITER_JWT), which holds INSERT on the
+      // append-only `facs_access_mapping_audit_events` table, so the emit lands.
+      // The admin persona's tenant is ORG_1's IMS org, so events are readable
+      // through ORG_1's audit-logs endpoint. We filter by the fresh mappingId to
+      // isolate from the seeded audit rows.
+      const AUDIT_BASE = `/organizations/${ORG_1_ID}/permission/audit-logs`;
+      const AUDIT_RESOURCE_ID = 'a1d17000-0000-4000-8000-000000000001';
+      let mappingId;
+
+      before(() => resetData());
+
+      it('POST create emits an allow/create audit event', async () => {
+        const http = getHttpClient();
+        const created = await http.admin.post(BASE, {
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: AUDIT_RESOURCE_ID,
+          grantedCapabilities: LLMO_CAPS,
+        });
+        expect(created.status).to.equal(201);
+        mappingId = created.body.id;
+
+        const res = await http.admin.get(`${AUDIT_BASE}?mappingId=${mappingId}`);
+        expect(res.status).to.equal(200);
+        expect(res.body.items).to.be.an('array').with.lengthOf(1);
+        const e = res.body.items[0];
+        expect(e.operation).to.equal('create');
+        expect(e.outcome).to.equal('allow');
+        expect(e.mappingId).to.equal(mappingId);
+        expect(e.resourceId).to.equal(AUDIT_RESOURCE_ID);
+        expect(e.product).to.equal('LLMO');
+        expect(e.actorId).to.be.a('string');
+      });
+
+      it('PATCH emits an allow/update_capabilities audit event', async () => {
+        const http = getHttpClient();
+        const patched = await http.admin.patch(`${BASE}/${mappingId}`, {
+          grantedCapabilities: LLMO_CAPS_UPDATED,
+        });
+        expect(patched.status).to.equal(200);
+
+        const res = await http.admin.get(
+          `${AUDIT_BASE}?mappingId=${mappingId}&operation=update_capabilities`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.items).to.be.an('array').with.lengthOf(1);
+        expect(res.body.items[0].outcome).to.equal('allow');
+        expect(res.body.items[0].grantedCapabilities).to.have.members(LLMO_CAPS_UPDATED);
+      });
+
+      it('DELETE emits an allow/revoke audit event', async () => {
+        const http = getHttpClient();
+        const del = await http.admin.delete(`${BASE}/${mappingId}`);
+        expect(del.status).to.equal(204);
+
+        const res = await http.admin.get(
+          `${AUDIT_BASE}?mappingId=${mappingId}&operation=revoke`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.items).to.be.an('array').with.lengthOf(1);
+        expect(res.body.items[0].operation).to.equal('revoke');
+        expect(res.body.items[0].outcome).to.equal('allow');
       });
     });
 

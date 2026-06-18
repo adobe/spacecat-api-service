@@ -25,6 +25,7 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 import routeFacsCapabilities, { PRODUCTS_CAPABILITIES } from '../routes/facs-capabilities.js';
 import {
   createFacsAccessMappings,
+  insertFacsAccessMappingAuditEvent,
   listFacsAccessMappings,
   listFacsAccessMappingHistory,
   listFacsAccessMappingAuditEvents,
@@ -151,6 +152,8 @@ function toMappingDto(row) {
     grantedCapabilities: row.granted_capabilities ?? [],
     createdBy: row.created_by ?? null,
     createdAt: row.created_at ?? null,
+    updatedBy: row.updated_by ?? null,
+    updatedAt: row.updated_at ?? null,
     revokedAt: row.revoked_at ?? null,
     revokedBy: row.revoked_by ?? null,
     revokeReason: row.revoke_reason ?? null,
@@ -298,6 +301,62 @@ function StateAccessMappingsController(context) {
   }
 
   /**
+   * Controller-level FACS (JWT) capability gate for the state-layer management
+   * endpoints.
+   *
+   * Why this lives in the controller and not solely in `facsWrapper`:
+   * `/state/access-mappings/*` carry no ReBAC-scoped resource in the path, so
+   * when the JWT lacks `<product>/can_manage_users` the wrapper finds no
+   * resource to evaluate the state layer against and **defers to the
+   * controller** ("FACS defer-to-controller: no ReBAC-scoped resource for this
+   * request"). Without this check a caller missing the capability would reach
+   * the handler unguarded. The gate is therefore: admin OR JWT holds
+   * `<product>/can_manage_users`.
+   *
+   * @param {object} ctx
+   * @param {string} product Uppercase product code.
+   * @returns {Response|null} A `forbidden` Response when denied, else null.
+   */
+  function requireManageUsers(ctx, product) {
+    const authInfo = ctx.attributes?.authInfo;
+    if (authInfo?.isAdmin?.()) {
+      return null;
+    }
+    const manageCap = `${product.toLowerCase()}/can_manage_users`;
+    if (!authInfo?.hasFacsPermission?.(manageCap)) {
+      return forbidden(`Requires ${manageCap}`);
+    }
+    return null;
+  }
+
+  /**
+   * Best-effort append to the FACS state-mapping audit log. A failure to write
+   * the audit row is logged as a warning and swallowed — it MUST NOT fail the
+   * originating mapping mutation. The append-only table is writer-only; see
+   * `insertFacsAccessMappingAuditEvent`.
+   */
+  async function emitAuditEvent(ctx, event) {
+    try {
+      const { postgrestClient } = ctx.dataAccess.services;
+      await insertFacsAccessMappingAuditEvent(postgrestClient, {
+        requestId: ctx.invocation?.id ?? null,
+        actorId: resolveCallerUserIdent(ctx),
+        ...event,
+      });
+    } catch (error) {
+      log.warn(
+        {
+          tag: 'state-access-mappings',
+          err: error.message,
+          operation: event?.operation,
+          mappingId: event?.mappingId,
+        },
+        'Failed to write FACS access-mapping audit event (mapping operation succeeded)',
+      );
+    }
+  }
+
+  /**
    * GET /state/access-mappings — list ACTIVE bindings. Requires at least one
    * of (subjectType + subjectId) or (resourceType + resourceId).
    */
@@ -307,6 +366,10 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
+    const gate = requireManageUsers(ctx, product);
+    if (gate) {
+      return gate;
+    }
 
     const filters = buildListFilters(ctx, imsOrgId, product);
     if (filters.subjectType && !ALLOWED_SUBJECT_TYPES.has(filters.subjectType)) {
@@ -352,6 +415,10 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
+    const gate = requireManageUsers(ctx, product);
+    if (gate) {
+      return gate;
+    }
 
     const filters = buildListFilters(ctx, imsOrgId, product);
     if (filters.subjectType && !ALLOWED_SUBJECT_TYPES.has(filters.subjectType)) {
@@ -400,6 +467,10 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
+    const gate = requireManageUsers(ctx, product);
+    if (gate) {
+      return gate;
+    }
     const createdBy = resolveCallerUserIdent(ctx);
 
     const { data } = ctx;
@@ -470,7 +541,20 @@ function StateAccessMappingsController(context) {
           409,
         );
       }
-      return createResponse(toMappingDto(result.created[0]), 201);
+      const createdRow = result.created[0];
+      await emitAuditEvent(ctx, {
+        imsOrgId,
+        product,
+        operation: 'create',
+        outcome: 'allow',
+        mappingId: createdRow.id,
+        bindingSubjectType: subjectType,
+        bindingSubjectId: subjectId,
+        resourceType,
+        resourceId,
+        grantedCapabilities,
+      });
+      return createResponse(toMappingDto(createdRow), 201);
     } catch (error) {
       log.error(
         { tag: 'state-access-mappings', err: error.message },
@@ -493,6 +577,10 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
+    const gate = requireManageUsers(ctx, product);
+    if (gate) {
+      return gate;
+    }
 
     const { id } = ctx.params || {};
     if (!hasText(id) || !isValidUUID(id)) {
@@ -522,6 +610,18 @@ function StateAccessMappingsController(context) {
       if (!updated) {
         return notFound('Mapping not found');
       }
+      await emitAuditEvent(ctx, {
+        imsOrgId,
+        product,
+        operation: 'update_capabilities',
+        outcome: 'allow',
+        mappingId: updated.id,
+        bindingSubjectType: updated.subject_type,
+        bindingSubjectId: updated.subject_id,
+        resourceType: updated.resource_type,
+        resourceId: updated.resource_id,
+        grantedCapabilities,
+      });
       return ok(toMappingDto(updated));
     } catch (error) {
       log.error(
@@ -541,7 +641,11 @@ function StateAccessMappingsController(context) {
     if (pre.error) {
       return pre.error;
     }
-    const { imsOrgId } = pre;
+    const { product, imsOrgId } = pre;
+    const gate = requireManageUsers(ctx, product);
+    if (gate) {
+      return gate;
+    }
 
     const { id } = ctx.params || {};
     if (!hasText(id) || !isValidUUID(id)) {
@@ -562,6 +666,19 @@ function StateAccessMappingsController(context) {
       if (!tombstone) {
         return notFound('Mapping not found');
       }
+      await emitAuditEvent(ctx, {
+        imsOrgId,
+        product,
+        operation: 'revoke',
+        outcome: 'allow',
+        mappingId: tombstone.id,
+        bindingSubjectType: tombstone.subject_type,
+        bindingSubjectId: tombstone.subject_id,
+        resourceType: tombstone.resource_type,
+        resourceId: tombstone.resource_id,
+        grantedCapabilities: tombstone.granted_capabilities,
+        revokeReason,
+      });
       return noContent();
     } catch (error) {
       log.error(
@@ -729,13 +846,11 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-
-    const authInfo = ctx.attributes?.authInfo;
-    const isAdmin = !!authInfo?.isAdmin?.();
-    const manageCap = `${product.toLowerCase()}/can_manage_users`;
-    if (!isAdmin && !authInfo?.hasFacsPermission?.(manageCap)) {
-      return forbidden(`Requires ${manageCap}`);
+    const gate = requireManageUsers(ctx, product);
+    if (gate) {
+      return gate;
     }
+    const isAdmin = !!ctx.attributes?.authInfo?.isAdmin?.();
 
     const { organizationId } = ctx.params || {};
     if (!hasText(organizationId) || !isValidUUID(organizationId)) {

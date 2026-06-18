@@ -35,6 +35,8 @@ function makeRow(overrides = {}) {
     granted_capabilities: ['llmo/can_view'],
     created_by: CALLER_USER,
     created_at: '2026-01-01T00:00:00Z',
+    updated_by: 'system',
+    updated_at: '2026-01-01T00:00:00Z',
     revoked_at: null,
     revoked_by: null,
     revoke_reason: null,
@@ -50,7 +52,12 @@ function makeContext({
   pathParams,
   queryParams,
   postgrestClient = { from: () => {} },
-  facsPermissions = [],
+  // Management endpoints are gated at the controller by `<product>/can_manage_users`
+  // (the routes carry no ReBAC resource, so facsWrapper defers to the controller).
+  // Default the caller to hold it for both products; gate-denial is covered by the
+  // dedicated "controller-level can_manage_users gate" block, and the introspection
+  // endpoints override this where empty JWT perms matter.
+  facsPermissions = ['llmo/can_manage_users', 'aso/can_manage_users'],
   isAdmin = false,
   organization,
 } = {}) {
@@ -107,6 +114,7 @@ async function loadController(supportStubs = {}) {
     revokeFacsAccessMappingById: sinon.stub().resolves(null),
     updateFacsAccessMappingCapabilities: sinon.stub().resolves(null),
     listFacsAccessMappingAuditEvents: sinon.stub().resolves([]),
+    insertFacsAccessMappingAuditEvent: sinon.stub().resolves({}),
     requirePostgrestForFacsMappings: () => null,
     ...supportStubs,
   };
@@ -437,6 +445,40 @@ describe('StateAccessMappingsController', () => {
       const body = await res.json();
       expect(body.id).to.equal(row.id);
       expect(body.grantedCapabilities).to.deep.equal(['llmo/can_view']);
+      // DTO surfaces the updated_by/updated_at columns added to the table.
+      expect(body.updatedBy).to.equal('system');
+      expect(body.updatedAt).to.equal('2026-01-01T00:00:00Z');
+    });
+
+    it('emits a create audit event (allow) on success', async () => {
+      const row = makeRow();
+      const { Controller, stubs } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [row], skipped: [] }),
+      });
+      const ctx = makeContext({ body: validBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(stubs.insertFacsAccessMappingAuditEvent.calledOnce).to.be.true;
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      expect(event).to.include({
+        product: 'LLMO',
+        operation: 'create',
+        outcome: 'allow',
+        mappingId: row.id,
+      });
+      expect(event.actorId).to.equal(CALLER_USER);
+    });
+
+    it('still returns 201 when the audit write fails (logs a warning, not failure)', async () => {
+      const row = makeRow();
+      const ctx = makeContext({ body: validBody });
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [row], skipped: [] }),
+        insertFacsAccessMappingAuditEvent: sinon.stub().rejects(new Error('audit table down')),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(ctx.log.warn.called).to.be.true;
     });
 
     it('returns 409 when an active duplicate exists', async () => {
@@ -526,6 +568,42 @@ describe('StateAccessMappingsController', () => {
       expect(args.grantedCapabilities).to.deep.equal(['llmo/can_view', 'llmo/can_configure']);
     });
 
+    it('emits an update_capabilities audit event (allow) on success', async () => {
+      const updated = makeRow({ granted_capabilities: ['llmo/can_view', 'llmo/can_configure'] });
+      const { Controller, stubs } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
+      const ctx = makeContext({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_view', 'llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(200);
+      expect(stubs.insertFacsAccessMappingAuditEvent.calledOnce).to.be.true;
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      expect(event).to.include({
+        operation: 'update_capabilities',
+        outcome: 'allow',
+        mappingId: updated.id,
+      });
+      expect(event.grantedCapabilities).to.deep.equal(['llmo/can_view', 'llmo/can_configure']);
+    });
+
+    it('does not emit an audit event and still 200s when audit write fails', async () => {
+      const updated = makeRow();
+      const ctx = makeContext({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_view'] },
+      });
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+        insertFacsAccessMappingAuditEvent: sinon.stub().rejects(new Error('boom')),
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(200);
+      expect(ctx.log.warn.called).to.be.true;
+    });
+
     it('returns 404 when no active row matched', async () => {
       const { Controller } = await loadController({
         updateFacsAccessMappingCapabilities: sinon.stub().resolves(null),
@@ -589,6 +667,38 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(204);
     });
 
+    it('emits a revoke audit event (allow) carrying the reason on success', async () => {
+      const tombstone = makeRow({ revoked_at: '2026-01-02T00:00:00Z' });
+      const { Controller, stubs } = await loadController({
+        revokeFacsAccessMappingById: sinon.stub().resolves(tombstone),
+      });
+      const ctx = makeContext({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { reason: 'user-request' },
+      });
+      const res = await Controller(ctx).revokeMapping(ctx);
+      expect(res.status).to.equal(204);
+      expect(stubs.insertFacsAccessMappingAuditEvent.calledOnce).to.be.true;
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      expect(event).to.include({
+        operation: 'revoke',
+        outcome: 'allow',
+        mappingId: tombstone.id,
+        revokeReason: 'user-request',
+      });
+    });
+
+    it('still returns 204 when the audit write fails (warning only)', async () => {
+      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
+      const { Controller } = await loadController({
+        revokeFacsAccessMappingById: sinon.stub().resolves(makeRow({ revoked_at: '2026-01-02T00:00:00Z' })),
+        insertFacsAccessMappingAuditEvent: sinon.stub().rejects(new Error('boom')),
+      });
+      const res = await Controller(ctx).revokeMapping(ctx);
+      expect(res.status).to.equal(204);
+      expect(ctx.log.warn.called).to.be.true;
+    });
+
     it('returns 404 when nothing was revoked', async () => {
       const { Controller } = await loadController({
         revokeFacsAccessMappingById: sinon.stub().resolves(null),
@@ -605,6 +715,73 @@ describe('StateAccessMappingsController', () => {
       const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
       const res = await Controller(ctx).revokeMapping(ctx);
       expect(res.status).to.equal(500);
+    });
+  });
+
+  describe('controller-level can_manage_users gate', () => {
+    // These routes carry no ReBAC-scoped resource, so facsWrapper defers to the
+    // controller when the JWT lacks the capability. The controller must enforce
+    // `<product>/can_manage_users` itself (admin bypasses).
+    const denyCtx = (over = {}) => makeContext({
+      facsPermissions: [], isAdmin: false, ...over,
+    });
+
+    it('listMappings returns 403 without can_manage_users', async () => {
+      const { Controller } = await loadController();
+      const ctx = denyCtx({ queryParams: { subjectType: 'org', subjectId: CALLER_ORG_CANONICAL } });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('listHistory returns 403 without can_manage_users', async () => {
+      const { Controller } = await loadController();
+      const ctx = denyCtx({ queryParams: { subjectType: 'org', subjectId: CALLER_ORG_CANONICAL } });
+      const res = await Controller(ctx).listHistory(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('createMapping returns 403 without can_manage_users', async () => {
+      const { Controller } = await loadController();
+      const ctx = denyCtx({
+        body: {
+          subjectType: 'user',
+          subjectId: 'someone@AdobeID',
+          resourceType: 'brand',
+          resourceId: VALID_UUID_RES,
+          grantedCapabilities: ['llmo/can_view'],
+        },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('patchMapping returns 403 without can_manage_users', async () => {
+      const { Controller } = await loadController();
+      const ctx = denyCtx({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_view'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('revokeMapping returns 403 without can_manage_users', async () => {
+      const { Controller } = await loadController();
+      const ctx = denyCtx({ pathParams: { id: VALID_UUID_MAPPING } });
+      const res = await Controller(ctx).revokeMapping(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('admin bypasses the gate (listMappings reaches the handler)', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({
+        facsPermissions: [],
+        isAdmin: true,
+        queryParams: { subjectType: 'org', subjectId: CALLER_ORG_CANONICAL },
+      });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(200);
+      expect(stubs.listFacsAccessMappings.called).to.be.true;
     });
   });
 
@@ -724,7 +901,9 @@ describe('StateAccessMappingsController', () => {
       });
       const stub = sinon.stub().resolves([orgRow]);
       const { Controller } = await loadController({ listFacsAccessMappings: stub });
-      const ctx = makeContext({ callerSub: null, pathParams: { resourceId: VALID_UUID_RES } });
+      const ctx = makeContext({
+        callerSub: null, pathParams: { resourceId: VALID_UUID_RES }, facsPermissions: [],
+      });
       const res = await Controller(ctx).getUserCapabilities(ctx);
       const body = await res.json();
       expect(res.status).to.equal(200);
