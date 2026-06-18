@@ -73,6 +73,7 @@ import SiteDetectionController from './controllers/site-detection.js';
 import DemoController from './controllers/demo.js';
 import ConsentBannerController from './controllers/consentBanner.js';
 import ScrapeController from './controllers/scrape.js';
+import RedirectsController from './controllers/redirects.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
@@ -246,6 +247,7 @@ async function run(request, context) {
     const demoController = DemoController(context);
     const consentBannerController = ConsentBannerController(context);
     const scrapeController = ScrapeController(context);
+    const redirectsController = RedirectsController(context);
     const scrapeJobController = ScrapeJobController(context);
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
@@ -340,6 +342,7 @@ async function run(request, context) {
       agenticPageTypesController,
       serenityController,
       proxyController,
+      redirectsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
