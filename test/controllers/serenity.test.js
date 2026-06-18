@@ -1235,6 +1235,32 @@ describe('SerenityController', () => {
       expect(brand.setStatus).to.have.been.calledWith('active');
     });
 
+    it('activate emits SERENITY_ACTIVATE_SAVE_DIVERGENCE and returns 207 (markets live) when the status save fails', async () => {
+      // The markets are already live upstream; a failed status-save must NOT
+      // collapse to a 5xx that discards the per-market results. The seam mirrors
+      // deactivate's divergence guard: emit a distinct, alertable token and
+      // surface the live markets as a 207 multi-status (not a bare 200 that hides
+      // the brands.status='pending' / markets-live divergence).
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel();
+      brand.save = sinon.stub().rejects(new Error('db down'));
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      // markets are live -> 207 partial (save divergence), never a 5xx or bare 200.
+      expect(response.status).to.equal(207);
+      const { status, markets } = await readBody(response);
+      expect(status).to.equal('active');
+      expect(markets).to.have.length(1);
+      expect(markets[0].status).to.equal(201);
+      expect(brand.setStatus).to.have.been.calledWith('active');
+      // distinct, greppable token so the orphaned status is alertable.
+      expect(log.error).to.have.been.calledWithMatch('SERENITY_ACTIVATE_SAVE_DIVERGENCE');
+    });
+
     it('deactivate decommissions the subworkspace, clears the pointer, and sets the brand pending', async () => {
       const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});

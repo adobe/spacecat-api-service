@@ -123,7 +123,12 @@ function buildCreateProjectBody(body, location, languageId, brandAliases = []) {
   return {
     name,
     type: 'ai',
-    brand_name_display: body.brandNames[0],
+    // Honor an explicit brandDisplayName; fall back to the primary brand name.
+    // This keeps the project's display name consistent with the own-brand
+    // benchmark created from `brandDisplayName` (attachBrandUrlsToProject) and
+    // with the re-sync path, which reads `brand_name_display` back as the
+    // benchmark's own-brand name (brand-urls.js).
+    brand_name_display: hasText(body.brandDisplayName) ? body.brandDisplayName : body.brandNames[0],
     brand_names: brandNames,
     domain: body.brandDomain,
     country_code: body.market.toLowerCase(),

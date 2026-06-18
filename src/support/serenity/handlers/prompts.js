@@ -18,6 +18,13 @@ import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 
+// TWIN FILE: the slice→project orchestration here is paralleled by the
+// subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
+// DEFERRED, not accidental — this flat path (BrandSemrushProject DB lookup) is
+// slated for removal once every brand is migrated to sub-workspaces. Until then,
+// a behavioural change here almost always needs the same change in the twin; keep
+// them in lockstep.
+//
 // Exported (additively) so the subworkspace-mode handlers (prompts-subworkspace.js) share
 // the exact same limits — the only thing that differs between flat and subworkspace
 // is slice→project resolution (DB row vs live listing), never the contract.

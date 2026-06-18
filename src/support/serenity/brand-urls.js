@@ -282,64 +282,76 @@ export async function syncBrandUrlsAcrossMarkets(transport, sources, workspaceId
     }
     markets += 1;
 
-    const desired = collectBrandUrlEntries(sources, market);
-    // Own-brand identity for the benchmark comes from the project itself: its
-    // domain plus the brand_names (display name first, the rest are aliases).
-    const ai = project?.settings?.ai || {};
-    const brandNames = Array.isArray(ai.brand_names) ? ai.brand_names : [];
-    const brand = {
-      name: hasText(ai.brand_name_display) ? ai.brand_name_display : brandNames[0],
-      domain: project?.domain,
-      aliases: hasText(ai.brand_name_display) ? brandNames : brandNames.slice(1),
-    };
-    // eslint-disable-next-line no-await-in-loop
-    const benchmarkId = await ensureOwnBrandBenchmark(
-      transport,
-      workspaceId,
-      projectId,
-      brand,
-      log,
-    );
-    if (benchmarkId === null) {
-      // No benchmark and none creatable for this project — skip (warn) instead
-      // of failing the whole edit re-sync.
-      log?.warn?.('brand-urls: no benchmark available — skipping market', {
-        workspaceId, projectId,
-      });
-      markets -= 1;
-      // eslint-disable-next-line no-continue
-      continue;
-    }
-    // eslint-disable-next-line no-await-in-loop
-    const existingResp = await transport.listBrandUrls(workspaceId, projectId, benchmarkId);
-    const existing = Array.isArray(existingResp?.brand_urls) ? existingResp.brand_urls : [];
-
-    const existingByUrl = new Map();
-    existing.forEach((row) => {
-      if (hasText(row?.url)) {
-        existingByUrl.set(row.url, row.id);
+    try {
+      const desired = collectBrandUrlEntries(sources, market);
+      // Own-brand identity for the benchmark comes from the project itself: its
+      // domain plus the brand_names (display name first, the rest are aliases).
+      const ai = project?.settings?.ai || {};
+      const brandNames = Array.isArray(ai.brand_names) ? ai.brand_names : [];
+      const brand = {
+        name: hasText(ai.brand_name_display) ? ai.brand_name_display : brandNames[0],
+        domain: project?.domain,
+        aliases: hasText(ai.brand_name_display) ? brandNames : brandNames.slice(1),
+      };
+      // eslint-disable-next-line no-await-in-loop
+      const benchmarkId = await ensureOwnBrandBenchmark(
+        transport,
+        workspaceId,
+        projectId,
+        brand,
+        log,
+      );
+      if (benchmarkId === null) {
+        // No benchmark and none creatable for this project — skip (warn) instead
+        // of failing the whole edit re-sync.
+        log?.warn?.('brand-urls: no benchmark available — skipping market', {
+          workspaceId, projectId,
+        });
+        markets -= 1;
+        // eslint-disable-next-line no-continue
+        continue;
       }
-    });
-    const desiredUrls = new Set(desired.map((e) => e.url));
+      // eslint-disable-next-line no-await-in-loop
+      const existingResp = await transport.listBrandUrls(workspaceId, projectId, benchmarkId);
+      const existing = Array.isArray(existingResp?.brand_urls) ? existingResp.brand_urls : [];
 
-    const toCreate = desired.filter((e) => !existingByUrl.has(e.url));
-    const toDelete = existing
-      .filter((row) => hasText(row?.url) && hasText(row?.id) && !desiredUrls.has(row.url))
-      .map((row) => row.id);
+      const existingByUrl = new Map();
+      existing.forEach((row) => {
+        if (hasText(row?.url)) {
+          existingByUrl.set(row.url, row.id);
+        }
+      });
+      const desiredUrls = new Set(desired.map((e) => e.url));
 
-    if (toCreate.length > 0) {
-      // eslint-disable-next-line no-await-in-loop
-      await transport.createBrandUrls(workspaceId, projectId, benchmarkId, toCreate);
-      created += toCreate.length;
-    }
-    if (toDelete.length > 0) {
-      // eslint-disable-next-line no-await-in-loop
-      await transport.deleteBrandUrls(workspaceId, projectId, benchmarkId, toDelete);
-      deleted += toDelete.length;
-    }
-    if (toCreate.length > 0 || toDelete.length > 0) {
-      // eslint-disable-next-line no-await-in-loop
-      await republishBestEffort(transport, workspaceId, projectId, log);
+      const toCreate = desired.filter((e) => !existingByUrl.has(e.url));
+      const toDelete = existing
+        .filter((row) => hasText(row?.url) && hasText(row?.id) && !desiredUrls.has(row.url))
+        .map((row) => row.id);
+
+      if (toCreate.length > 0) {
+        // eslint-disable-next-line no-await-in-loop
+        await transport.createBrandUrls(workspaceId, projectId, benchmarkId, toCreate);
+        created += toCreate.length;
+      }
+      if (toDelete.length > 0) {
+        // eslint-disable-next-line no-await-in-loop
+        await transport.deleteBrandUrls(workspaceId, projectId, benchmarkId, toDelete);
+        deleted += toDelete.length;
+      }
+      if (toCreate.length > 0 || toDelete.length > 0) {
+        // eslint-disable-next-line no-await-in-loop
+        await republishBestEffort(transport, workspaceId, projectId, log);
+      }
+    } catch (e) {
+      // A mid-fan-out failure must name WHICH market split so the brand-edit
+      // hard-fail (brands.js) is diagnosable per market, not just by the
+      // aggregate count the caller logs. Record the failing project/market
+      // (status only — the upstream error text carries the gateway URL), then
+      // rethrow to fail the edit re-sync.
+      log?.error?.('brand-urls: market sync failed', {
+        workspaceId, projectId, market, status: e?.status,
+      });
+      throw e;
     }
   }
 

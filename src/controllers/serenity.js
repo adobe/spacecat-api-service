@@ -847,7 +847,30 @@ function SerenityController(context, log, env) {
 
       if (anyLive && typeof brand.setStatus === 'function') {
         brand.setStatus('active');
-        await brand.save();
+        try {
+          await brand.save();
+        } catch (saveError) {
+          // Non-atomic seam — the mirror of deactivate's
+          // SERENITY_DEACTIVATE_SAVE_DIVERGENCE guard. The markets are already
+          // LIVE upstream (published in the loop above; the workspace pointer was
+          // persisted by ensureSubworkspace), but persisting the 'active' status
+          // flip failed: brands.status stays 'pending' while markets are live —
+          // divergent. A re-activate converges (idempotent: every live market
+          // returns 409), so this self-heals. Crucially, do NOT collapse to a 5xx
+          // via mapError — that would discard the per-market results telling the
+          // caller which markets went live. Emit a DISTINCT, greppable token so
+          // the orphaned status is alertable (not indistinguishable from an
+          // ordinary upstream error), force the partial-failure path so the caller
+          // sees a 207 instead of a bare 200 that hides the divergence, then fall
+          // through to return the multi-status body.
+          anyFailed = true;
+          log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — markets live upstream but failed to persist active status', {
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: workspaceId,
+            marketsLive: results.filter((r) => r.status === 201 || r.status === 409).length,
+            error: saveError?.message,
+          });
+        }
       }
       // Success-level summary so a completed activation can be correlated with
       // upstream state during incident investigation (counts + workspace).

@@ -809,6 +809,40 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(projectBody.name).to.match(/^MyBrand-[0-9a-f]{6}$/);
   });
 
+  // brand_name_display honors an explicit brandDisplayName when it differs from
+  // the primary brand name (brandNames[0]) — keeping the project display name
+  // consistent with the own-brand benchmark built from brandDisplayName and with
+  // the re-sync path that reads brand_name_display back. Falls back to
+  // brandNames[0] only when brandDisplayName is absent.
+  it('buildCreateProjectBody: brand_name_display uses brandDisplayName over brandNames[0]', async () => {
+    const transport = makeTransport();
+    const brand = makeBrand();
+    const res = await handleCreateMarketSubworkspace(transport, brand, PARENT, {
+      market: 'us',
+      languageCode: 'en',
+      brandDomain: 'example.com',
+      brandNames: ['Primary'],
+      brandDisplayName: 'Display Name',
+    }, log);
+    expect(res.status).to.equal(201);
+    const projectBody = transport.createProject.firstCall.args[1];
+    expect(projectBody.brand_name_display).to.equal('Display Name');
+  });
+
+  it('buildCreateProjectBody: brand_name_display falls back to brandNames[0] when brandDisplayName is absent', async () => {
+    const transport = makeTransport();
+    const brand = makeBrand();
+    const res = await handleCreateMarketSubworkspace(transport, brand, PARENT, {
+      market: 'us',
+      languageCode: 'en',
+      brandDomain: 'example.com',
+      brandNames: ['Primary'],
+    }, log);
+    expect(res.status).to.equal(201);
+    const projectBody = transport.createProject.firstCall.args[1];
+    expect(projectBody.brand_name_display).to.equal('Primary');
+  });
+
   // Line 121: `...(Array.isArray(brandAliases)?brandAliases:[])` else branch fires
   // when brandAliases is null (default is [] but null bypasses the default).
   // With generateTopics: false the unguarded `...brandAliases` at line 375 is

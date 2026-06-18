@@ -183,21 +183,33 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
       continue;
     }
     markets += 1;
-    // eslint-disable-next-line no-await-in-loop
-    const result = await syncCompetitorBenchmarksForProject(
-      transport,
-      workspaceId,
-      projectId,
-      competitors,
-      removedDomains,
-      market,
-      log,
-    );
-    created += result.created;
-    deleted += result.deleted;
-    if (result.changed) {
+    try {
       // eslint-disable-next-line no-await-in-loop
-      await republishBestEffort(transport, workspaceId, projectId, log);
+      const result = await syncCompetitorBenchmarksForProject(
+        transport,
+        workspaceId,
+        projectId,
+        competitors,
+        removedDomains,
+        market,
+        log,
+      );
+      created += result.created;
+      deleted += result.deleted;
+      if (result.changed) {
+        // eslint-disable-next-line no-await-in-loop
+        await republishBestEffort(transport, workspaceId, projectId, log);
+      }
+    } catch (e) {
+      // A mid-fan-out failure must name WHICH market split so the brand-edit
+      // hard-fail (brands.js) is diagnosable per market, not just by the
+      // aggregate count the caller logs. Record the failing project/market
+      // (status only — the upstream error text carries the gateway URL), then
+      // rethrow to fail the edit re-sync.
+      log?.error?.('competitor-benchmarks: market sync failed', {
+        workspaceId, projectId, market, status: e?.status,
+      });
+      throw e;
     }
   }
 

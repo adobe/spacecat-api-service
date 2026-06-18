@@ -317,6 +317,39 @@ describe('workspace-lifecycle', () => {
       expect(brand.save).to.have.been.calledOnce;
     });
 
+    // CHARACTERIZATION (residual race, intentionally unfixed pending the tracked
+    // conditional "set pointer where pointer is null" data-layer write): two
+    // requests that BOTH re-read null in the same instant BOTH persist their own
+    // freshly-created workspace id — neither sees the other's winner, so neither
+    // releases. This pins the documented divergence so the future conditional-
+    // write fix has a failing-then-passing target to flip.
+    it('both-read-null: two concurrent activations both persist their own workspace (documents the residual race)', async () => {
+      const brandA = makeBrand();
+      const brandB = makeBrand();
+      // Each request creates a distinct workspace and re-reads null (the loser's
+      // write has not landed yet from its own vantage point).
+      const transportA = makeTransport({
+        createSubworkspace: sinon.stub().resolves({ id: 'ws-A', status: 'not ready' }),
+      });
+      const transportB = makeTransport({
+        createSubworkspace: sinon.stub().resolves({ id: 'ws-B', status: 'not ready' }),
+      });
+      const reloadNull = sinon.stub().resolves(null);
+
+      const [resA, resB] = await Promise.all([
+        ensureSubworkspace(transportA, brandA, PARENT_WS, 1, log, NOOP_TIMING, reloadNull),
+        ensureSubworkspace(transportB, brandB, PARENT_WS, 1, log, NOOP_TIMING, reloadNull),
+      ]);
+
+      // Both persist (divergent): neither releases its allocation, both save.
+      expect(resA).to.equal('ws-A');
+      expect(resB).to.equal('ws-B');
+      expect(brandA.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly('ws-A');
+      expect(brandB.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly('ws-B');
+      expect(transportA.transferWorkspaceResources).to.not.have.been.called;
+      expect(transportB.transferWorkspaceResources).to.not.have.been.called;
+    });
+
     it('tolerates a failed release when adopting a concurrent winner', async () => {
       const transport = makeTransport({
         transferWorkspaceResources: sinon.stub().rejects(new Error('release boom')),

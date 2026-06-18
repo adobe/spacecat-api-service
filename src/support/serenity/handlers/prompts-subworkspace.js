@@ -40,6 +40,13 @@ import { redactUpstreamMessage } from '../rest-transport.js';
  * cache invalidation, the bulk concurrency caps — is the shared, project-keyed
  * logic imported verbatim from prompts.js. The controller dispatches here when
  * resolveBrandWorkspace returns mode === 'subworkspace'.
+ *
+ * TWIN FILE: the orchestration shape here intentionally parallels the flat-mode
+ * handlers in prompts.js. The duplication is DEFERRED, not accidental — flat mode
+ * is slated for removal once every brand is migrated to sub-workspaces, at which
+ * point this file becomes the sole prompt path and prompts.js's slice→project DB
+ * lookup is deleted. Until then, a behavioural change to one twin almost always
+ * needs the same change in the other; keep them in lockstep.
  */
 
 /**

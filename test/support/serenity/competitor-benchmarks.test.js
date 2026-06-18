@@ -160,6 +160,30 @@ describe('competitor-benchmarks helpers', () => {
       expect(result).to.deep.equal({ markets: 2, created: 2, deleted: 0 });
     });
 
+    it('logs the failing project/market (status only) and rethrows when a market sync throws mid-fan-out', async () => {
+      const error = sandbox.stub();
+      // The upstream error text carries the gateway URL — only the status +
+      // project/market identity is recorded before rethrow.
+      const boom = new SerenityTransportError(502, 'Semrush POST https://gw.internal/x failed: 502');
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub().rejects(boom),
+        deleteBenchmarks: sandbox.stub().resolves(null),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      await expect(syncCompetitorBenchmarksAcrossMarkets(
+        transport,
+        [{ name: 'US rival', url: 'https://us-rival.com', regions: ['us'] }],
+        [],
+        WS,
+        { error, info: () => {}, warn: () => {} },
+      )).to.be.rejectedWith('failed: 502');
+      expect(error).to.have.been.calledWithMatch('competitor-benchmarks: market sync failed', {
+        workspaceId: WS, projectId: 'p-us', market: 'us', status: 502,
+      });
+    });
+
     it('logs a per-sync summary when a logger is supplied', async () => {
       const info = sandbox.stub();
       const transport = {

@@ -353,6 +353,30 @@ describe('brand-urls helpers', () => {
       expect(result).to.deep.equal({ markets: 1, created: 1, deleted: 1 });
     });
 
+    it('logs the failing project/market (status only) and rethrows when a market sync throws mid-fan-out', async () => {
+      const error = sandbox.stub();
+      // The upstream error text carries the gateway URL — it must NOT be logged;
+      // only the status + project/market identity is recorded before rethrow.
+      const boom = new SerenityTransportError(502, 'Semrush POST https://gw.internal/x failed: 502');
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
+        createBrandUrls: sandbox.stub().rejects(boom),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      await expect(syncBrandUrlsAcrossMarkets(
+        transport,
+        { urls: ['https://acme.com'] },
+        WS,
+        { error, info: () => {}, warn: () => {} },
+      )).to.be.rejectedWith('failed: 502');
+      expect(error).to.have.been.calledWithMatch('brand-urls: market sync failed', {
+        workspaceId: WS, projectId: 'p-us', market: 'us', status: 502,
+      });
+    });
+
     it('skips republish when nothing changed', async () => {
       const sources = { urls: ['https://acme.com'] };
       const transport = {
