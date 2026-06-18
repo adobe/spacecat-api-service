@@ -1,3 +1,31 @@
+# [1.581.0](https://github.com/adobe/spacecat-api-service/compare/v1.580.0...v1.581.0) (2026-06-18)
+
+
+### Features
+
+* add POST agentic-traffic/hits-by-urls endpoint | LLMO-5586 ([#2615](https://github.com/adobe/spacecat-api-service/issues/2615)) ([6f4dbd8](https://github.com/adobe/spacecat-api-service/commit/6f4dbd88563af5adeed5721ffbafae54ac9755f6))
+
+# [1.580.0](https://github.com/adobe/spacecat-api-service/compare/v1.579.0...v1.580.0) (2026-06-18)
+
+
+### Features
+
+* Add cwv-trends-audit to paid profile ([#2633](https://github.com/adobe/spacecat-api-service/issues/2633)) ([e632f13](https://github.com/adobe/spacecat-api-service/commit/e632f132be10365239fbb2984578effc86050e5e))
+
+# [1.579.0](https://github.com/adobe/spacecat-api-service/compare/v1.578.2...v1.579.0) (2026-06-18)
+
+
+### Features
+
+* **serenity:** sub-workspace dual-mode provisioning (brand-create, activate/deactivate, subworkspace reads/writes) ([#2610](https://github.com/adobe/spacecat-api-service/issues/2610)) ([47b8352](https://github.com/adobe/spacecat-api-service/commit/47b8352c1691492aff259aab0f597840e2cec678)), closes [throu#api](https://github.com/throu/issues/api) [hi#market-count](https://github.com/hi/issues/market-count)
+
+## [1.578.2](https://github.com/adobe/spacecat-api-service/compare/v1.578.1...v1.578.2) (2026-06-18)
+
+
+### Bug Fixes
+
+* **topics:** guard topic_categories link against non-UUID categoryId and log SQLSTATE ([#2631](https://github.com/adobe/spacecat-api-service/issues/2631)) ([741d9d5](https://github.com/adobe/spacecat-api-service/commit/741d9d583d10c9088217d04723f9c3435e4d4950))
+
 ## [1.578.1](https://github.com/adobe/spacecat-api-service/compare/v1.578.0...v1.578.1) (2026-06-17)
 
 

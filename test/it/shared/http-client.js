@@ -123,6 +123,7 @@ export function createHttpClient(baseUrl, tokens) {
     return {
       get: (path, extraHeaders) => request('GET', path, null, token, extraHeaders),
       post: (path, body, extraHeaders) => request('POST', path, body, token, extraHeaders),
+      put: (path, body, extraHeaders) => request('PUT', path, body, token, extraHeaders),
       patch: (path, body, extraHeaders) => request('PATCH', path, body, token, extraHeaders),
       delete: (path, extraHeaders) => request('DELETE', path, null, token, extraHeaders),
     };
