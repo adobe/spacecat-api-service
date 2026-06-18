@@ -1,3 +1,31 @@
+# [1.579.0](https://github.com/adobe/spacecat-api-service/compare/v1.578.2...v1.579.0) (2026-06-18)
+
+
+### Features
+
+* **serenity:** sub-workspace dual-mode provisioning (brand-create, activate/deactivate, subworkspace reads/writes) ([#2610](https://github.com/adobe/spacecat-api-service/issues/2610)) ([47b8352](https://github.com/adobe/spacecat-api-service/commit/47b8352c1691492aff259aab0f597840e2cec678)), closes [throu#api](https://github.com/throu/issues/api) [hi#market-count](https://github.com/hi/issues/market-count)
+
+## [1.578.2](https://github.com/adobe/spacecat-api-service/compare/v1.578.1...v1.578.2) (2026-06-18)
+
+
+### Bug Fixes
+
+* **topics:** guard topic_categories link against non-UUID categoryId and log SQLSTATE ([#2631](https://github.com/adobe/spacecat-api-service/issues/2631)) ([741d9d5](https://github.com/adobe/spacecat-api-service/commit/741d9d583d10c9088217d04723f9c3435e4d4950))
+
+## [1.578.1](https://github.com/adobe/spacecat-api-service/compare/v1.578.0...v1.578.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* **preflight:** construct custom-env ImsClient with IMS_SCOPE=system at the call site (SITES-43236 follow-up) ([#2627](https://github.com/adobe/spacecat-api-service/issues/2627)) ([0fbe049](https://github.com/adobe/spacecat-api-service/commit/0fbe0493fcc0e78921564bf6d72798e81f01828d)), closes [#2611](https://github.com/adobe/spacecat-api-service/issues/2611) [#2611](https://github.com/adobe/spacecat-api-service/issues/2611)
+
+# [1.578.0](https://github.com/adobe/spacecat-api-service/compare/v1.577.1...v1.578.0) (2026-06-17)
+
+
+### Features
+
+* add v2 brand claims guidance fields ([#2626](https://github.com/adobe/spacecat-api-service/issues/2626)) ([174b2b7](https://github.com/adobe/spacecat-api-service/commit/174b2b725e30d194064789e844d1fc4ed4d62316))
+
 ## [1.577.1](https://github.com/adobe/spacecat-api-service/compare/v1.577.0...v1.577.1) (2026-06-16)
 
 

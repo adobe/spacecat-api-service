@@ -18,6 +18,7 @@ import sinonChai from 'sinon-chai';
 import {
   createSerenityTransport,
   SerenityTransportError,
+  redactUpstreamMessage,
 } from '../../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
@@ -370,6 +371,121 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('brand URLs', () => {
+    const BENCHMARK_ID = 'bench-9';
+
+    it('listBenchmarks GETs /v1/.../ai_models/benchmarks', async () => {
+      fetchStub.resolves(fetchOk({ aio_benchmarks: [{ id: BENCHMARK_ID, main_brand: true }] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listBenchmarks(WORKSPACE_ID, PROJECT_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.match(/\/projects\/proj-xyz\/ai_models\/benchmarks$/);
+      expect(init.body).to.equal(undefined);
+    });
+
+    it('listBrandUrls GETs /v2/.../benchmarks/{bid}/brand_urls', async () => {
+      fetchStub.resolves(fetchOk({ brand_urls: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listBrandUrls(WORKSPACE_ID, PROJECT_ID, BENCHMARK_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls$/);
+    });
+
+    it('createBrandUrls POSTs the entries array as the body', async () => {
+      fetchStub.resolves(fetchOk({ ids: ['u1'], existing_count: 0 }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const entries = [{ url: 'https://acme.com', type: 'website' }];
+      await transport.createBrandUrls(WORKSPACE_ID, PROJECT_ID, BENCHMARK_ID, entries);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls$/);
+      expect(JSON.parse(init.body)).to.deep.equal(entries);
+    });
+
+    it('deleteBrandUrls DELETEs with body { ids }', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.deleteBrandUrls(WORKSPACE_ID, PROJECT_ID, BENCHMARK_ID, ['u1', 'u2']);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('DELETE');
+      expect(url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls$/);
+      expect(JSON.parse(init.body)).to.deep.equal({ ids: ['u1', 'u2'] });
+    });
+
+    it('createBenchmarks POSTs the benchmarks array to /v2/.../ai_models/benchmarks', async () => {
+      fetchStub.resolves(fetchOk({ ids: ['b1'], existing_count: 0 }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const benchmarks = [{ brand_name: 'Acme', domain: 'acme.com' }];
+      await transport.createBenchmarks(WORKSPACE_ID, PROJECT_ID, benchmarks);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.match(/\/v2\/workspaces\/.*\/projects\/proj-xyz\/ai_models\/benchmarks$/);
+      expect(JSON.parse(init.body)).to.deep.equal(benchmarks);
+    });
+
+    it('deleteBenchmarks DELETEs /v1/.../ai_models/benchmarks with body { ids }', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.deleteBenchmarks(WORKSPACE_ID, PROJECT_ID, ['b1', 'b2']);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('DELETE');
+      expect(url).to.match(/\/v1\/workspaces\/.*\/projects\/proj-xyz\/ai_models\/benchmarks$/);
+      expect(JSON.parse(init.body)).to.deep.equal({ ids: ['b1', 'b2'] });
+    });
+  });
+
+  describe('CI competitors', () => {
+    it('getProject GETs the project with required draft + type=ai query', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID, settings: { ci: { competitors: [] } } }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.getProject(WORKSPACE_ID, PROJECT_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.include(`/v1/workspaces/${WORKSPACE_ID}/projects/proj-xyz?`);
+      expect(url).to.include('draft=true');
+      expect(url).to.include('type=ai');
+    });
+
+    it('getProject honors an explicit draft=false', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.getProject(WORKSPACE_ID, PROJECT_ID, { draft: false });
+
+      const [url] = fetchStub.firstCall.args;
+      expect(url).to.include('draft=false');
+    });
+
+    it('updateCiCompetitors PUTs ci/competitors with { ci_competitors }', async () => {
+      fetchStub.resolves(fetchOk({ ci_competitors: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const list = [{ domain: 'a.com', color: '#111' }, { domain: 'b.com' }];
+      await transport.updateCiCompetitors(WORKSPACE_ID, PROJECT_ID, list);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('PUT');
+      expect(url).to.match(/\/projects\/proj-xyz\/ci\/competitors$/);
+      expect(JSON.parse(init.body)).to.deep.equal({ ci_competitors: list });
+    });
+  });
+
   describe('publishProject', () => {
     it('POSTs to /v1/workspaces/{ws}/projects/{pid}/publish with no body', async () => {
       fetchStub.resolves(fetchOk({ status: 'accepted' }));
@@ -482,7 +598,7 @@ describe('Semrush REST transport', () => {
   });
 
   describe('addAiModel (new in this PR)', () => {
-    it('POSTs model_id to /v1/.../ai_models and returns the assignment row', async () => {
+    it('POSTs model_id to /v2/.../ai_models and returns the assignment row', async () => {
       fetchStub.resolves(fetchOk({ id: 'new-assignment-uuid' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -490,8 +606,10 @@ describe('Semrush REST transport', () => {
 
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('POST');
+      // V2: identical schema to v1, drop-in (createBenchmarks precedent). The
+      // sibling list/delete ai_models routes have no v2 variant and stay on v1.
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models`,
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models`,
       );
       expect(JSON.parse(init.body)).to.deep.equal({ model_id: 'cat-gpt-4o' });
       expect(result.id).to.equal('new-assignment-uuid');
@@ -527,6 +645,245 @@ describe('Semrush REST transport', () => {
         'https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/ai_models?page=1&limit=100',
       );
       expect(result.items[0].id).to.equal('cat-gpt');
+    });
+  });
+
+  describe('createProjectTags', () => {
+    it('POSTs { names } to /v2/workspaces/{ws}/projects/{pid}/aio/tags', async () => {
+      fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'source:ai' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const names = ['source:ai', 'type:branded'];
+      await transport.createProjectTags(WORKSPACE_ID, PROJECT_ID, names);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/tags`,
+      );
+      expect(JSON.parse(init.body)).to.deep.equal({ names });
+    });
+  });
+
+  describe('getBrandTopics', () => {
+    it('GETs /v1/workspaces/{ws}/brand-topics with domain + country query', async () => {
+      fetchStub.resolves(fetchOk([
+        { topic: 'Running', volume: 900, prompts: ['best running shoes'] },
+      ]));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getBrandTopics(WORKSPACE_ID, { domain: 'example.com', country: 'US' });
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/brand-topics?domain=example.com&country=US`,
+      );
+      expect(result[0].topic).to.equal('Running');
+    });
+  });
+
+  // ── Sub-workspace lifecycle (serenity dual-mode, subworkspace path) ──────────────
+  const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
+
+  describe('createSubworkspace', () => {
+    it('POSTs { title, resources } to /v2/workspaces/{parent}/child (no X-Upload-Receipt)', async () => {
+      fetchStub.resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const resources = { ai: { projects: 3, prompts: 1500 } };
+      const result = await transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/child`,
+      );
+      expect(JSON.parse(init.body)).to.deep.equal({ title: 'Adobe Express', resources });
+      expect(init.headers).to.not.have.property('X-Upload-Receipt');
+      expect(result.id).to.equal('subworkspace-ws-1');
+    });
+  });
+
+  describe('getWorkspaceStatus', () => {
+    it('GETs /v1/workspaces/{ws}/status', async () => {
+      fetchStub.resolves(fetchOk({ status: 'created' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getWorkspaceStatus(WORKSPACE_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/status`,
+      );
+      expect(result.status).to.equal('created');
+    });
+  });
+
+  describe('listWorkspaceFamily', () => {
+    it('GETs /v1/workspaces/{parent}/family', async () => {
+      fetchStub.resolves(fetchOk({ items: [{ id: 'subworkspace-ws-1', title: 'Adobe Express' }] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.listWorkspaceFamily(PARENT_WS);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${PARENT_WS}/family`,
+      );
+      expect(result.items[0].id).to.equal('subworkspace-ws-1');
+    });
+  });
+
+  describe('transferWorkspaceResources', () => {
+    it('POSTs the payload wrapped under `resources` to /v2/workspaces/{ws}/resources/transfer', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const payload = { ai: { projects: 3, prompts: 1500 } };
+      await transport.transferWorkspaceResources(WORKSPACE_ID, payload);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('POST');
+      // V2: same aiProductResources `ai` shape proven live via createSubworkspace,
+      // wrapped under `resources` (WorkspaceResourcesTransferV2Form).
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${WORKSPACE_ID}/resources/transfer`,
+      );
+      expect(JSON.parse(init.body)).to.deep.equal({ resources: payload });
+    });
+  });
+
+  describe('deleteWorkspace (test-cleanup only)', () => {
+    const DELETE_ENV = { ...TEST_ENV, SERENITY_ALLOW_WORKSPACE_DELETE: 'true' };
+
+    it('DELETEs /v1/workspaces/{ws} with no body when explicitly allowed', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: DELETE_ENV, imsToken: IMS });
+
+      await transport.deleteWorkspace(WORKSPACE_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('DELETE');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}`,
+      );
+      expect(init.body).to.be.undefined;
+    });
+
+    it('is fail-closed: throws and never calls fetch when the flag is absent', async () => {
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await expect(transport.deleteWorkspace(WORKSPACE_ID)).to.be.rejectedWith(
+        /workspace deletion is disabled/i,
+      );
+      expect(fetchStub.called).to.equal(false);
+    });
+
+    it('is fail-closed: rejects a non-"true" flag value', async () => {
+      const transport = createSerenityTransport({
+        env: { ...TEST_ENV, SERENITY_ALLOW_WORKSPACE_DELETE: '1' },
+        imsToken: IMS,
+      });
+
+      await expect(transport.deleteWorkspace(WORKSPACE_ID)).to.be.rejectedWith(
+        /workspace deletion is disabled/i,
+      );
+      expect(fetchStub.called).to.equal(false);
+    });
+  });
+
+  describe('listProjects', () => {
+    it('GETs the v1 default-view project list for a workspace', async () => {
+      fetchStub.resolves(fetchOk({ items: [{ id: PROJECT_ID, publish_status: 'live' }] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.listProjects(WORKSPACE_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects?type=ai`,
+      );
+      expect(result.items[0].id).to.equal(PROJECT_ID);
+    });
+  });
+
+  describe('getInitStatus', () => {
+    it('GETs /v1/workspaces/{ws}/projects/{pid}/aio/init_status', async () => {
+      fetchStub.resolves(fetchOk({ initialized: false }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getInitStatus(WORKSPACE_ID, PROJECT_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/init_status`,
+      );
+      expect(result.initialized).to.equal(false);
+    });
+  });
+  describe('defensive branch coverage', () => {
+    describe('redactUpstreamMessage', () => {
+      it('returns "Upstream authorization failed" for 401 SerenityTransportError', () => {
+        const e = new SerenityTransportError(401, 'internal auth fail');
+        expect(redactUpstreamMessage(e)).to.equal('Upstream authorization failed');
+      });
+
+      it('returns "Upstream authorization failed" for 403 SerenityTransportError', () => {
+        const e = new SerenityTransportError(403, 'internal auth fail');
+        expect(redactUpstreamMessage(e)).to.equal('Upstream authorization failed');
+      });
+
+      it('returns "Upstream request failed" for a non-auth SerenityTransportError (e.g. 500)', () => {
+        const e = new SerenityTransportError(500, 'boom');
+        expect(redactUpstreamMessage(e)).to.equal('Upstream request failed');
+      });
+
+      it('returns e.message unchanged for a plain (non-transport) Error', () => {
+        const e = new Error('safe app error message');
+        expect(redactUpstreamMessage(e)).to.equal('safe app error message');
+      });
+
+      it('returns undefined when called with null (e?.message is undefined)', () => {
+        expect(redactUpstreamMessage(null)).to.equal(undefined);
+      });
+    });
+
+    describe('enc nullish path via listProjects with undefined workspaceId', () => {
+      it('encodes undefined workspaceId as empty string (String(undefined ?? ""))', async () => {
+        // enc(undefined) -> String(undefined ?? '') = '' -> encodeURIComponent('') = ''
+        fetchStub.resolves(fetchOk({ items: [] }));
+        const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+        await transport.listProjects(undefined);
+
+        const [url] = fetchStub.firstCall.args;
+        // The workspaceId segment is encoded as empty string, so the URL has //
+        // between /workspaces/ and /projects (empty segment).
+        expect(url).to.include('/workspaces//projects?type=ai');
+      });
+    });
+
+    describe('getBrandTopics with undefined domain and country', () => {
+      it('falls back to empty string for undefined domain and country (String(?? "") branches)', async () => {
+        // Lines 288-289: String(domain ?? '') and String(country ?? '') right-side branches.
+        fetchStub.resolves(fetchOk([]));
+        const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+        await transport.getBrandTopics(WORKSPACE_ID, { domain: undefined, country: undefined });
+
+        const [url] = fetchStub.firstCall.args;
+        expect(url).to.include('domain=');
+        expect(url).to.include('country=');
+        // Both params present but with empty values.
+        const params = new URL(url).searchParams;
+        expect(params.get('domain')).to.equal('');
+        expect(params.get('country')).to.equal('');
+      });
     });
   });
 });

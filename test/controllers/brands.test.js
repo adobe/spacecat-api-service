@@ -23,6 +23,7 @@ import sinon, { stub } from 'sinon';
 import esmock from 'esmock';
 
 import BrandsController from '../../src/controllers/brands.js';
+import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -4354,6 +4355,216 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    describe('serenity-first provisioning (semrushMarket present)', () => {
+      const semrushData = {
+        name: 'New Brand',
+        urls: [{ value: 'https://acme.com/path' }],
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a', 'model-b'],
+      };
+
+      async function buildController({ provisionBrandSubworkspace, upsertBrand }) {
+        const Mocked = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/serenity/brand-provisioning.js': { provisionBrandSubworkspace },
+          ...(upsertBrand ? { '../../src/support/brands-storage.js': { upsertBrand } } : {}),
+        });
+        return Mocked.default(context, loggerStub, mockEnv);
+      }
+
+      it('provisions the sub-workspace then creates the brand bound to it (201)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.calledOnce).to.equal(true);
+        const provisionArgs = provisionStub.firstCall.args[1];
+        expect(provisionArgs.market).to.equal('us');
+        expect(provisionArgs.languageCode).to.equal('en');
+        expect(provisionArgs.brandDomain).to.equal('acme.com');
+        expect(provisionArgs.brandName).to.equal('New Brand');
+        expect(provisionArgs.modelIds).to.deep.equal(['model-a', 'model-b']);
+        // provisioning happens before the row is written, and its outputs are
+        // persisted onto the row.
+        expect(upsertStub.calledOnce).to.equal(true);
+        expect(upsertStub.calledAfter(provisionStub)).to.equal(true);
+        const upsertArgs = upsertStub.firstCall.args[0];
+        expect(upsertArgs.forceBrandId).to.equal(provisionArgs.brandId);
+        expect(upsertArgs.semrushWorkspaceId).to.equal('ws-1');
+      });
+
+      it('forwards the brand URL sources (urls + social + earned) to provisioning', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const social = [{ url: 'https://x.com/acme', regions: ['us'] }];
+        const earned = [{ name: 'News', url: 'https://news/acme', regions: [] }];
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData, socialAccounts: social, earnedContent: earned },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.firstCall.args[1].brandUrlSources).to.deep.equal({
+          urls: semrushData.urls,
+          socialAccounts: social,
+          earnedContent: earned,
+        });
+      });
+
+      it('forwards the brand competitors to provisioning', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const competitors = [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }];
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData, competitors },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.firstCall.args[1].competitors).to.deep.equal(competitors);
+      });
+
+      it('returns the provisioning error and does NOT create the brand on failure', async () => {
+        const err = new Error('Organization has no Semrush workspace configured');
+        err.status = 400;
+        const provisionStub = sinon.stub().rejects(err);
+        const upsertStub = sinon.stub().resolves({ id: 'x' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(upsertStub.called).to.equal(false);
+      });
+
+      it('releases the orphaned sub-workspace when the brand row write fails after provisioning', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-orphan' });
+        const releaseStub = sinon.stub().resolves();
+        // A routine post-provision DB failure (e.g. unique-constraint 409).
+        const upsertStub = sinon.stub().rejects(new Error('duplicate key value violates unique constraint'));
+        const Mocked = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/serenity/brand-provisioning.js': {
+            provisionBrandSubworkspace: provisionStub,
+            releaseProvisionedWorkspace: releaseStub,
+          },
+          '../../src/support/brands-storage.js': { upsertBrand: upsertStub },
+        });
+        const controller = Mocked.default(context, loggerStub, mockEnv);
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        // The DB write failed, so the create still errors out...
+        expect(response.status).to.not.equal(201);
+        expect(provisionStub.calledOnce).to.equal(true);
+        // ...but the provisioned-yet-unreferenced sub-workspace is released back
+        // to the parent pool, not leaked.
+        expect(releaseStub.calledOnce).to.equal(true);
+        expect(releaseStub.firstCall.args[1]).to.equal('ws-orphan');
+      });
+
+      it('returns 400 when semrushMarket lacks a languageCode', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', urls: [{ value: 'https://acme.com' }], semrushMarket: { market: 'us' } },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(provisionStub.called).to.equal(false);
+      });
+
+      it('returns 400 when semrushModelIds is missing or empty', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', urls: [{ value: 'https://acme.com' }], semrushMarket: { market: 'us', languageCode: 'en' } },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(provisionStub.called).to.equal(false);
+      });
+
+      it('returns 400 when no primary URL is present to derive a domain', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', urls: [], semrushMarket: { market: 'us', languageCode: 'en' } },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(provisionStub.called).to.equal(false);
+      });
+
+      it('does NOT provision when no semrushMarket is supplied (flat create)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand' },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(false);
+      });
+    });
+
     it('returns 400 when brand name is missing', async () => {
       const response = await brandsController.createBrandForOrg({
         ...context,
@@ -4362,6 +4573,40 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand guidance fields have the wrong type', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', brandContext: { text: 'wrong' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand guidance fields are longer than 4000 characters', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', mentionSentimentGuidance: 'x'.repeat(4001) },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('accepts brand guidance that trims to within the limit despite surrounding whitespace', async () => {
+      // 4004 raw characters, but 4000 after trim — storage trims before persisting,
+      // so the controller validates the trimmed length and must not reject this.
+      const padded = `  ${'x'.repeat(4000)}  `;
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', brandContext: padded },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(201);
     });
 
     it('returns 400 when params is undefined', async () => {
@@ -4497,6 +4742,298 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
     });
 
+    async function buildUpdateController({
+      updateBrand,
+      syncBrandUrlsAcrossMarkets = sinon.stub().resolves({}),
+      createSerenityTransport,
+      syncCompetitorBenchmarksAcrossMarkets = sinon.stub().resolves({}),
+      getBrandCompetitors = sinon.stub().resolves([]),
+    }) {
+      const Mocked = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/brands-storage.js': { updateBrand, getBrandCompetitors },
+        '../../src/support/prompts-storage.js': { resolveBrandUuid: sinon.stub().resolves(BRAND_UUID) },
+        '../../src/support/serenity/rest-transport.js': { createSerenityTransport },
+        '../../src/support/serenity/brand-urls.js': { syncBrandUrlsAcrossMarkets },
+        // removedCompetitorDomains is left REAL so the diff logic is exercised.
+        '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
+      });
+      return Mocked.default(context, loggerStub, mockEnv);
+    }
+
+    it('re-syncs brand URLs across markets when a URL field changes on a sub-workspace brand', async () => {
+      const updated = {
+        id: BRAND_UUID,
+        name: 'Updated Brand',
+        semrushWorkspaceId: 'ws-9',
+        urls: [{ value: 'https://acme.com' }],
+        socialAccounts: [],
+        earnedContent: [],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const syncStub = sinon.stub().resolves({ markets: 1, created: 1, deleted: 0 });
+      const transport = { name: 't' };
+      const createTransportStub = sinon.stub().returns(transport);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: createTransportStub,
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { socialAccounts: [{ url: 'https://x.com/acme', regions: ['us'] }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(createTransportStub).to.have.been.calledOnce;
+      expect(syncStub).to.have.been.calledOnceWith(
+        transport,
+        { urls: [{ value: 'https://acme.com' }], socialAccounts: [], earnedContent: [] },
+        'ws-9',
+      );
+    });
+
+    it('does NOT re-sync when the edit touches no URL field', async () => {
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: 'ws-9' });
+      const syncStub = sinon.stub().resolves({});
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub(),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { description: 'just a description change' },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(syncStub).to.not.have.been.called;
+    });
+
+    it('does NOT re-sync a flat-mode brand (no sub-workspace) even when URLs change', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: null, urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const syncStub = sinon.stub().resolves({});
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub(),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(syncStub).to.not.have.been.called;
+    });
+
+    it('hard-fails the edit when the brand-URL re-sync fails', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const err = new Error('upstream boom');
+      err.status = 502;
+      const syncStub = sinon.stub().rejects(err);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(502);
+      expect(syncStub).to.have.been.calledOnce;
+    });
+
+    it('rejects a non-IMS caller on the brand-edit re-sync (never forwards the bearer upstream)', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const syncStub = sinon.stub().resolves({});
+      const createTransportStub = sinon.stub().returns({ name: 't' });
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: createTransportStub,
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer s2s-tok' } },
+        attributes: { authInfo: { getType: () => 'jwt', profile: { email: 'svc@test.com' } } },
+      });
+
+      expect(response.status).to.equal(401);
+      // A non-IMS bearer is never built into a transport nor forwarded to Semrush.
+      expect(createTransportStub).to.not.have.been.called;
+      expect(syncStub).to.not.have.been.called;
+    });
+
+    it('redacts the gateway URL from a Semrush upstream error on brand-edit re-sync', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
+      const syncStub = sinon.stub().rejects(
+        new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, {}),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(502);
+      const body = await response.json();
+      expect(body.message).to.equal('Upstream request failed');
+      expect(JSON.stringify(body)).to.not.contain('gw.internal');
+      // ...and not via the x-error header either.
+      expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+    });
+
+    // createErrorResponse lines 196-197: a SerenityTransportError whose status IS
+    // 401/403 is passed through as that status with the 'Upstream authorization
+    // failed' message (the true side of the status ternary and the false side of
+    // the message ternary; the 502 sides are covered by the redaction test above).
+    it('maps a 401 Semrush upstream error to HTTP 401 + generic auth message', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
+      const syncStub = sinon.stub().rejects(
+        new SerenityTransportError(401, `Semrush POST ${leakUrl} failed: 401`, {}),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(401);
+      const body = await response.json();
+      expect(body.message).to.equal('Upstream authorization failed');
+      // The internal gateway URL must not leak via body or header.
+      expect(JSON.stringify(body)).to.not.contain('gw.internal');
+      expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+    });
+
+    it('re-syncs CI competitors (with removed domains) when competitors change on a sub-workspace brand', async () => {
+      const updated = {
+        id: BRAND_UUID,
+        name: 'Updated Brand',
+        semrushWorkspaceId: 'ws-9',
+        competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const ciSyncStub = sinon.stub().resolves({ markets: 1, changed: 1 });
+      const transport = { name: 't' };
+      const createTransportStub = sinon.stub().returns(transport);
+      // Old list had an extra competitor that is now gone → it must be reported removed.
+      const getBrandCompetitorsStub = sinon.stub().resolves([
+        { url: 'https://rival.com', regions: ['us'] },
+        { url: 'https://gone.com', regions: ['us'] },
+      ]);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        createSerenityTransport: createTransportStub,
+        syncCompetitorBenchmarksAcrossMarkets: ciSyncStub,
+        getBrandCompetitors: getBrandCompetitorsStub,
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      // old competitors read BEFORE the update to compute removals.
+      expect(getBrandCompetitorsStub).to.have.been.calledOnceWith(BRAND_UUID);
+      expect(getBrandCompetitorsStub).to.have.been.calledBefore(updateBrandStub);
+      // sync gets the NEW competitor list, the removed domain, and the workspace.
+      expect(ciSyncStub).to.have.been.calledOnceWith(
+        transport,
+        updated.competitors,
+        ['gone.com'],
+        'ws-9',
+      );
+    });
+
+    it('does NOT re-sync competitors when the edit leaves them untouched', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const ciSyncStub = sinon.stub().resolves({});
+      const getBrandCompetitorsStub = sinon.stub().resolves([]);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+        syncCompetitorBenchmarksAcrossMarkets: ciSyncStub,
+        getBrandCompetitors: getBrandCompetitorsStub,
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(getBrandCompetitorsStub).to.not.have.been.called;
+      expect(ciSyncStub).to.not.have.been.called;
+    });
+
     it('returns 400 when brandId is missing', async () => {
       const response = await brandsController.updateBrandForOrg({
         ...context,
@@ -4522,6 +5059,26 @@ describe('Brands Controller', () => {
         ...context,
         params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
         data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand guidance update fields have the wrong type', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { mentionSentimentGuidance: ['wrong'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand guidance update fields are longer than 4000 characters', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { brandContext: 'x'.repeat(4001) },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
@@ -4934,5 +5491,327 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
     expect(body.message).to.contain('US (5 prompts)');
     expect(body.message).to.contain('DE (2 prompts)');
     expect(updateStub).to.not.have.been.called;
+  });
+});
+
+describe('Brands Controller — defensive branch coverage', () => {
+  const ORG_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
+  const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+  const loggerStub = {
+    info: stub(), error: stub(), warn: stub(), debug: stub(),
+  };
+  const mockEnv = {
+    BRAND_IMS_HOST: 'https://ims-na1.adobelogin.com',
+    BRAND_IMS_CLIENT_ID: 'client',
+    BRAND_IMS_CLIENT_CODE: 'code',
+    BRAND_IMS_CLIENT_SECRET: 'secret',
+  };
+
+  function buildContext() {
+    return {
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+      dataAccess: {
+        Organization: { findById: stub().resolves({ getId: () => ORG_ID }) },
+        services: {
+          postgrestClient: {
+            from: stub().callsFake(() => ({
+              select: stub().returnsThis(),
+              eq: stub().returnsThis(),
+              maybeSingle: stub().resolves({
+                data: { id: BRAND_UUID, name: 'New Brand' },
+                error: null,
+              }),
+              single: stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+            })),
+          },
+        },
+      },
+    };
+  }
+
+  async function mountController({
+    provisionBrandSubworkspace = stub().resolves({ semrushWorkspaceId: 'ws-1' }),
+    upsertBrand = stub().resolves({ id: BRAND_UUID, name: 'New Brand' }),
+  } = {}) {
+    const Mocked = await esmock('../../src/controllers/brands.js', {
+      '../../src/support/serenity/brand-provisioning.js': { provisionBrandSubworkspace },
+      '../../src/support/brands-storage.js': { upsertBrand },
+    });
+    const ctx = buildContext();
+    return { controller: Mocked.default(ctx, loggerStub, mockEnv), ctx };
+  }
+
+  // Lines 102-103: brandDomainFromPayload catch block. The URL constructor throws
+  // when the string is structurally invalid even after the 'https://' prefix is
+  // prepended — for example a bare space is not a valid hostname.
+  it('brandDomainFromPayload catch: returns 400 when the first URL is structurally invalid (new URL throws)', async () => {
+    const { controller, ctx } = await mountController();
+
+    // A semrushMarket create requires a parseable domain. Supplying a bare space
+    // as the url value means `new URL('https:// ')` throws → brandDomainFromPayload
+    // returns null → controller returns 400 "primary URL required".
+    const response = await controller.createBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID },
+      data: {
+        name: 'Brand X',
+        urls: [{ value: ' ' }], // space is not a valid hostname → URL throws
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a'],
+      },
+      dataAccess: ctx.dataAccess,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.match(/primary URL is required/i);
+  });
+
+  // Lines 1415-1416: brandAliases map — `typeof a === 'string' ? a : a?.name`.
+  // When the alias array contains object entries ({name}) the a?.name branch fires.
+  // When an entry is neither a string nor has a name, hasText filters it out.
+  it('brandAliases with object entries: extracts name from {name} objects and filters blanks', async () => {
+    const provisionStub = stub().resolves({ semrushWorkspaceId: 'ws-1' });
+    const upsertStub = stub().resolves({ id: BRAND_UUID, name: 'New Brand' });
+    const { controller, ctx } = await mountController({
+      provisionBrandSubworkspace: provisionStub,
+      upsertBrand: upsertStub,
+    });
+
+    const response = await controller.createBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID },
+      data: {
+        name: 'Brand X',
+        urls: [{ value: 'https://x.com' }],
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a'],
+        brandAliases: [
+          { name: 'Brand Alias Co' }, // object entry — a?.name fires (line 1416)
+          'plain string alias', // string entry — the string branch (line 1415)
+          { noName: true }, // object with no name → hasText filters out
+        ],
+      },
+      dataAccess: ctx.dataAccess,
+      attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+    });
+
+    expect(response.status).to.equal(201);
+    // The provisioning call must have received the extracted aliases (object→name,
+    // string→string, no-name object→filtered).
+    const provisionArgs = provisionStub.firstCall.args[1];
+    expect(provisionArgs.brandAliases).to.deep.equal(['Brand Alias Co', 'plain string alias']);
+  });
+
+  // Line 91 else: `Array.isArray(brandData?.urls) ? brandData.urls : []` — fires
+  // when urls is absent or not an array. brandDomainFromPayload then finds no first
+  // URL and returns null → controller returns 400 "primary URL required".
+  it('brandDomainFromPayload else-branch: treats absent urls as empty (no-array fallback → 400)', async () => {
+    const { controller, ctx } = await mountController();
+
+    const response = await controller.createBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID },
+      data: {
+        name: 'Brand X',
+        // urls is a string (not an array) — triggers the `[]` else branch at line 91
+        urls: 'https://x.com',
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a'],
+      },
+      dataAccess: ctx.dataAccess,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.match(/primary URL is required/i);
+  });
+
+  // Line 93 object-value branch: `typeof u === 'string' ? u : u?.value` — fires
+  // when a URL entry is an object like {value: '...'}. Already covered by the catch
+  // test above (space URL is an object entry). Adding an explicit test where the
+  // object yields a valid hostname to cover the non-throw path of line 93.
+  it('brandDomainFromPayload object-url: extracts hostname from {value} entry (line 93 u?.value branch)', async () => {
+    const provisionStub = stub().resolves({ semrushWorkspaceId: 'ws-1' });
+    const upsertStub = stub().resolves({ id: BRAND_UUID, name: 'New Brand' });
+    const { controller, ctx } = await mountController({
+      provisionBrandSubworkspace: provisionStub,
+      upsertBrand: upsertStub,
+    });
+
+    const response = await controller.createBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID },
+      data: {
+        name: 'Brand X',
+        urls: [{ value: 'https://brand.example.com' }], // object entry → u?.value branch
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a'],
+      },
+      dataAccess: ctx.dataAccess,
+      attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+    });
+
+    expect(response.status).to.equal(201);
+    expect(provisionStub.firstCall.args[1].brandDomain).to.equal('brand.example.com');
+  });
+
+  // Line 100: `url.hostname || null` — the null branch fires when URL parsing
+  // succeeds but yields an empty hostname. `file:///path` contains '://' so it is
+  // used as-is in new URL(...); file URLs have an empty hostname → || null fires →
+  // returns null → controller returns 400 "primary URL required".
+  it('brandDomainFromPayload null-hostname: file:// URL has empty hostname → null → 400', async () => {
+    const { controller, ctx } = await mountController();
+
+    const response = await controller.createBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID },
+      data: {
+        name: 'Brand X',
+        // file:///path contains '://' so it bypasses the https:// prefix, but
+        // new URL('file:///path').hostname is '' → url.hostname || null → null.
+        urls: ['file:///local/path'],
+        semrushMarket: { market: 'us', languageCode: 'en' },
+        semrushModelIds: ['model-a'],
+      },
+      dataAccess: ctx.dataAccess,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.match(/primary URL is required/i);
+  });
+
+  // Line 684: checkPromptsByBrand — `context.data || {}` — fires when context.data
+  // is undefined. The handler then extracts `prompts` from {}, finds no array, and
+  // returns 400.
+  it('checkPromptsByBrand: falls back to {} when context.data is absent', async () => {
+    const Mocked = await esmock('../../src/controllers/brands.js', {
+      '../../src/support/access-control-util.js': {
+        default: {
+          fromContext: () => ({ hasAccess: async () => true, hasAdminAccess: () => true }),
+        },
+      },
+      '../../src/support/prompts-storage.js': {
+        resolveBrandUuid: stub().resolves(BRAND_UUID),
+        checkPromptsExist: stub().resolves([]),
+        listPrompts: stub().resolves({ data: [], count: 0 }),
+        getPromptById: stub().resolves(null),
+        upsertPrompts: stub().resolves({}),
+        updatePromptById: stub().resolves(null),
+        deletePromptById: stub().resolves(false),
+        bulkDeletePrompts: stub().resolves({}),
+        getPromptStats: stub().resolves({}),
+        findPromptsBlockingRegionRemoval: stub().resolves({}),
+      },
+    });
+    const ctx = buildContext();
+    const controller = Mocked.default(ctx, loggerStub, mockEnv);
+
+    const response = await controller.checkPromptsByBrand({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: undefined, // exercises context.data || {} at line 684
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.match(/prompts.*array required/i);
+  });
+
+  // Line 737: getPromptStatsByBrand — `context.params || {}` — fires when
+  // context.params is undefined. spaceCatId and brandId are both undefined →
+  // first validation check returns 400.
+  it('getPromptStatsByBrand: falls back to {} when context.params is absent', async () => {
+    const Mocked = await esmock('../../src/controllers/brands.js', {
+      '../../src/support/access-control-util.js': {
+        default: {
+          fromContext: () => ({ hasAccess: async () => true, hasAdminAccess: () => true }),
+        },
+      },
+      '../../src/support/prompts-storage.js': {
+        resolveBrandUuid: stub().resolves(BRAND_UUID),
+        checkPromptsExist: stub().resolves([]),
+        listPrompts: stub().resolves({ data: [], count: 0 }),
+        getPromptById: stub().resolves(null),
+        upsertPrompts: stub().resolves({}),
+        updatePromptById: stub().resolves(null),
+        deletePromptById: stub().resolves(false),
+        bulkDeletePrompts: stub().resolves({}),
+        getPromptStats: stub().resolves({}),
+        findPromptsBlockingRegionRemoval: stub().resolves({}),
+      },
+    });
+    const ctx = buildContext();
+    const controller = Mocked.default(ctx, loggerStub, mockEnv);
+
+    const response = await controller.getPromptStatsByBrand({
+      ...ctx,
+      params: undefined, // exercises context.params || {} at line 737
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.match(/Organization ID required/i);
+  });
+
+  // Lines 1539-1540: updateBrandForOrg — `before?.region || []` and
+  // `updates.region || []`. These fire when the before-brand has no region field
+  // and the updates payload has no region (null/undefined/not set). In practice
+  // `updates.region` is undefined when the caller sets region to something; here
+  // we test the [] fallback.
+  it('updateBrandForOrg: before.region || [] and updates.region || [] fallback when both are absent', async () => {
+    const findPromptsStub = stub().resolves({});
+    const updateBrandStubLocal = stub().resolves({ id: BRAND_UUID });
+    const Mocked = await esmock('../../src/controllers/brands.js', {
+      '../../src/support/access-control-util.js': {
+        default: {
+          fromContext: () => ({ hasAccess: async () => true, hasAdminAccess: () => true }),
+        },
+      },
+      '../../src/support/prompts-storage.js': {
+        resolveBrandUuid: stub().resolves(BRAND_UUID),
+        findPromptsBlockingRegionRemoval: findPromptsStub,
+        listPrompts: stub().resolves({ data: [], count: 0 }),
+        getPromptById: stub().resolves(null),
+        upsertPrompts: stub().resolves({}),
+        updatePromptById: stub().resolves(null),
+        deletePromptById: stub().resolves(false),
+        bulkDeletePrompts: stub().resolves({}),
+        checkPromptsExist: stub().resolves([]),
+        getPromptStats: stub().resolves({}),
+      },
+      '../../src/support/brands-storage.js': {
+        getBrandById: stub().resolves({ id: BRAND_UUID }), // no region field → undefined
+        updateBrand: updateBrandStubLocal,
+        getBrandCompetitors: stub().resolves([]),
+        listBrands: stub().resolves([]),
+        upsertBrand: stub().resolves({}),
+        deleteBrand: stub().resolves(true),
+        getBrandBySite: stub().resolves(null),
+      },
+    });
+    const ctx = buildContext();
+    const controller = Mocked.default(ctx, loggerStub, mockEnv);
+
+    await controller.updateBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: { region: null }, // sets updates.region to null → || [] fires at line 1540
+    });
+
+    // The brand row returned null (not found) → 404; the important thing is
+    // that both || [] branches were exercised on the way to findPromptsBlockingRegionRemoval.
+    expect(findPromptsStub).to.have.been.calledOnce;
+    const arg = findPromptsStub.firstCall.args[0];
+    expect(arg.oldRegions).to.deep.equal([]); // before?.region was undefined → line 1539
+    expect(arg.newRegions).to.deep.equal([]); // updates.region was null → line 1540
   });
 });
