@@ -42,7 +42,7 @@ function makeTransport(overrides = {}) {
   return {
     createSubworkspace: sinon.stub().resolves({ id: SUB_WS, status: 'not ready' }),
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
-    listWorkspaceFamily: sinon.stub().resolves({ items: [] }),
+    listWorkspaceFamily: sinon.stub().resolves([]),
     transferWorkspaceResources: sinon.stub().resolves(null),
     listProjects: sinon.stub().resolves({ items: [] }),
     deleteProject: sinon.stub().resolves(null),
@@ -111,25 +111,9 @@ describe('workspace-lifecycle', () => {
     });
 
     it('adopts a unique family match after a create timeout (504)', async () => {
-      const transport = makeTransport({
-        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
-        listWorkspaceFamily: sinon.stub().resolves({
-          items: [{ id: 'adopted-ws', title: EXPECTED_TITLE }],
-        }),
-      });
-      const brand = makeBrand();
-
-      const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
-
-      expect(result).to.equal('adopted-ws');
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('adopted-ws');
-    });
-
-    it('adopts a unique match when the family endpoint returns a BARE ARRAY (real gateway shape)', async () => {
-      // GET /v1/workspaces/{id}/family returns a bare array (live-verified), NOT an
-      // { items: [...] } envelope. The earlier family?.items read discarded every
-      // entry on the real response, so adoption never matched. This pins the
-      // bare-array shape so the fix can't regress.
+      // GET /v1/workspaces/{id}/family returns a BARE ARRAY (live-verified), not an
+      // { items: [...] } envelope; non-matching entries are skipped and the single
+      // title match is adopted.
       const transport = makeTransport({
         createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
         listWorkspaceFamily: sinon.stub().resolves([
@@ -150,9 +134,7 @@ describe('workspace-lifecycle', () => {
       // OTHER provisioned workspace, never our interrupted create. Refuse it.
       const transport = makeTransport({
         createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
-        listWorkspaceFamily: sinon.stub().resolves({
-          items: [{ id: 'occupied-ws', title: EXPECTED_TITLE }],
-        }),
+        listWorkspaceFamily: sinon.stub().resolves([{ id: 'occupied-ws', title: EXPECTED_TITLE }]),
         listProjects: sinon.stub().resolves({ items: [{ id: 'existing-project' }] }),
       });
       const brand = makeBrand();
@@ -165,9 +147,7 @@ describe('workspace-lifecycle', () => {
     it('throws when the sole family match has no id', async () => {
       const transport = makeTransport({
         createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
-        listWorkspaceFamily: sinon.stub().resolves({
-          items: [{ title: EXPECTED_TITLE }],
-        }),
+        listWorkspaceFamily: sinon.stub().resolves([{ title: EXPECTED_TITLE }]),
       });
       const brand = makeBrand();
 
@@ -191,12 +171,10 @@ describe('workspace-lifecycle', () => {
     it('fails with an ambiguousWorkspace alert on multiple family matches', async () => {
       const transport = makeTransport({
         createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
-        listWorkspaceFamily: sinon.stub().resolves({
-          items: [
-            { id: 'ws-a', title: EXPECTED_TITLE },
-            { id: 'ws-b', title: EXPECTED_TITLE },
-          ],
-        }),
+        listWorkspaceFamily: sinon.stub().resolves([
+          { id: 'ws-a', title: EXPECTED_TITLE },
+          { id: 'ws-b', title: EXPECTED_TITLE },
+        ]),
       });
       const brand = makeBrand();
 
@@ -214,7 +192,7 @@ describe('workspace-lifecycle', () => {
     it('throws when an ambiguous create has no family match to adopt', async () => {
       const transport = makeTransport({
         createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
-        listWorkspaceFamily: sinon.stub().resolves({ items: [] }),
+        listWorkspaceFamily: sinon.stub().resolves([]),
       });
       const brand = makeBrand();
 
@@ -459,12 +437,12 @@ describe('workspace-lifecycle', () => {
     });
 
     it('refuses to decommission a workspace with active linked sub-workspaces (guard enabled)', async () => {
+      // family is a BARE ARRAY (live gateway shape): a no-id entry and the target
+      // itself are ignored, the one real child blocks the decommission. The old
+      // family?.items read saw zero children here and would have proceeded —
+      // silently decommissioning a parent with live children.
       const transport = makeTransport({
-        // family includes a no-id entry and the target itself (both ignored)
-        // plus one real child that must block the decommission.
-        listWorkspaceFamily: sinon.stub().resolves({
-          items: [{ id: SUB_WS }, {}, { id: 'child-1' }],
-        }),
+        listWorkspaceFamily: sinon.stub().resolves([{ id: SUB_WS }, {}, { id: 'child-1' }]),
         listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
       });
 
@@ -486,30 +464,9 @@ describe('workspace-lifecycle', () => {
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });
 
-    it('refuses to decommission when the BARE-ARRAY family lists a real child (guard enabled)', async () => {
-      // Real gateway shape: family is a bare array, not { items: [...] }. The old
-      // family?.items read saw zero children here and would have let the
-      // decommission proceed — silently wiping a parent with live children.
-      const transport = makeTransport({
-        listWorkspaceFamily: sinon.stub().resolves([{ id: SUB_WS }, {}, { id: 'child-1' }]),
-        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
-      });
-
-      const promise = decommissionBrandWorkspace(
-        transport,
-        SUB_WS,
-        log,
-        PARENT_WS,
-        { enforceLinkedGuard: true },
-      );
-      await expect(promise).to.be.rejectedWith(/active linked sub-workspace/);
-      expect(transport.deleteProject).to.not.have.been.called;
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
-    });
-
     it('ignores the target own id in the family listing and proceeds (guard enabled)', async () => {
       const transport = makeTransport({
-        listWorkspaceFamily: sinon.stub().resolves({ items: [{ id: SUB_WS }] }),
+        listWorkspaceFamily: sinon.stub().resolves([{ id: SUB_WS }]),
         listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
       });
 
@@ -530,7 +487,7 @@ describe('workspace-lifecycle', () => {
       // family listing that WOULD report a child does not block, and the family
       // endpoint is never called. Parent-equality guard remains always-on.
       const transport = makeTransport({
-        listWorkspaceFamily: sinon.stub().resolves({ items: [{ id: 'child-1' }] }),
+        listWorkspaceFamily: sinon.stub().resolves([{ id: 'child-1' }]),
         listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
       });
 
@@ -568,8 +525,8 @@ describe('workspace-lifecycle', () => {
     });
 
     describe('adoptFromFamily - listWorkspaceFamily resolves non-array', () => {
-      it('throws when listWorkspaceFamily returns {} (items not array)', async () => {
-        // Line 121: Array.isArray false branch in adoptFromFamily.
+      it('throws when listWorkspaceFamily returns a non-array body ({})', async () => {
+        // familyItems guard: a non-array response (null / malformed) → [] → no match.
         const transport = makeTransport({
           createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
           listWorkspaceFamily: sinon.stub().resolves({}),
@@ -586,9 +543,7 @@ describe('workspace-lifecycle', () => {
         // Line 156: Array.isArray false branch -> projectCount = 0 -> adopts.
         const transport = makeTransport({
           createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
-          listWorkspaceFamily: sinon.stub().resolves({
-            items: [{ id: 'adopted-ws', title: EXPECTED_TITLE }],
-          }),
+          listWorkspaceFamily: sinon.stub().resolves([{ id: 'adopted-ws', title: EXPECTED_TITLE }]),
           listProjects: sinon.stub().resolves({}),
         });
         const brand = makeBrand();

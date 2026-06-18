@@ -113,16 +113,13 @@ async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, 
 // The user-manager family endpoint (GET /v1/workspaces/{id}/family) returns a
 // BARE ARRAY of workspaces — live-verified against the gateway (the swagger types
 // it as a top-level array too). An earlier `family?.items` read assumed an
-// `{ items: [...] }` envelope, so on the real bare-array response `.items` is
+// `{ items: [...] }` envelope, so on the real bare-array response `.items` was
 // undefined and EVERY family entry was discarded: ambiguous-create recovery never
 // matched (always 502 "no family match to adopt") and the linked-child guard saw
-// zero children. Normalize here — prefer the bare array, tolerate a legacy
-// `.items` envelope — and use it at both call sites.
+// zero children. Read the array directly; the guard only protects against a
+// non-array (null / error body) so a malformed response can't throw here.
 function familyItems(family) {
-  if (Array.isArray(family)) {
-    return family;
-  }
-  return Array.isArray(family?.items) ? family.items : [];
+  return Array.isArray(family) ? family : [];
 }
 
 /**
