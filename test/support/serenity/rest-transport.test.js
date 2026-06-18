@@ -598,7 +598,7 @@ describe('Semrush REST transport', () => {
   });
 
   describe('addAiModel (new in this PR)', () => {
-    it('POSTs model_id to /v1/.../ai_models and returns the assignment row', async () => {
+    it('POSTs model_id to /v2/.../ai_models and returns the assignment row', async () => {
       fetchStub.resolves(fetchOk({ id: 'new-assignment-uuid' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -606,8 +606,10 @@ describe('Semrush REST transport', () => {
 
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('POST');
+      // V2: identical schema to v1, drop-in (createBenchmarks precedent). The
+      // sibling list/delete ai_models routes have no v2 variant and stay on v1.
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models`,
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models`,
       );
       expect(JSON.parse(init.body)).to.deep.equal({ model_id: 'cat-gpt-4o' });
       expect(result.id).to.equal('new-assignment-uuid');

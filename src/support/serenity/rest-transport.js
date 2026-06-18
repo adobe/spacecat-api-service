@@ -328,12 +328,16 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * POST /v1/workspaces/{ws}/projects/{pid}/ai_models — adds one AI model
+     * POST /v2/workspaces/{ws}/projects/{pid}/ai_models — adds one AI model
      * to a project. `modelId` is the catalog model identifier from
      * `AIModelResponse.id` on the GET listing. Returns the new assignment row.
+     * V2: identical request (CreateProjectAIModelRequest `{ model_id }`) and
+     * response (ProjectAIModelResponse) to the v1 route, so it is a drop-in —
+     * matching the createBenchmarks v2 move. The sibling list/delete ai_models
+     * routes have no v2 variant (v2 ai_models is POST-only) and stay on v1.
      */
     async addAiModel(semrushWorkspaceId, projectId, modelId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models`;
+      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models`;
       return request('POST', url, imsToken, { model_id: modelId });
     },
 
