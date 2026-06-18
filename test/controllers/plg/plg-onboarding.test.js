@@ -4986,6 +4986,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       // Should NOT run other full onboarding steps
       expect(detectBotBlockerStub).to.not.have.been.called;
+      // Config handlers enrolled, no audit trigger
+      const config = await mockDataAccess.Configuration.findLatest();
+      expect(config.enableHandlerForSite).to.have.been.calledWith('summit-plg', mockSite);
+      expect(triggerAuditsStub).to.not.have.been.called;
     });
 
     it('fast-tracks preonboarded site with null steps', async () => {
