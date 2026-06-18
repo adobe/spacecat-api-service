@@ -2005,7 +2005,93 @@ function LlmoController(ctx) {
     return ok(result);
   };
 
+  /**
+   * POST /sites/{siteId}/llmo/edge-optimize-bootstrap-url
+   * Builds a one-click CloudFormation quick-create URL (with a server-side
+   * presigned template URL) the customer uses to create the cross-account
+   * connector role in their own AWS account. Presigning runs with the service
+   * execution role, so the template bucket stays private (no public endpoint)
+   * and the customer needs no S3 access.
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} Bootstrap details + CloudFormation quick-create URL
+   */
+  const getEdgeOptimizeBootstrapUrl = async (context) => {
+    const {
+      log, dataAccess, env, s3,
+    } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can generate the edge optimize bootstrap URL');
+      }
+
+      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET;
+      if (!hasText(bucket) || !s3?.s3Client) {
+        return badRequest('Edge optimize template hosting is not configured for this environment');
+      }
+
+      const key = env.EDGE_OPTIMIZE_TEMPLATE_KEY || 'customer-bootstrap-role.yaml';
+      const region = 'us-east-1';
+      const roleName = env.EDGE_OPTIMIZE_ROLE_NAME || 'AdobeLLMOptimizerCloudFrontConnectorRole';
+      const stackName = env.EDGE_OPTIMIZE_STACK_NAME || 'adobe-edgeoptimize-connector-role';
+      const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 3600);
+      const externalId = crypto.randomUUID();
+      const roleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
+      const trustedPrincipalArn = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN
+        || `arn:aws:iam::${accountId}:root`;
+
+      // Presign the (private) template so the customer's CloudFormation can read it
+      // cross-account via the signature — no public bucket, no customer S3 access.
+      const templateUrl = await s3.getSignedUrl(
+        s3.s3Client,
+        new s3.GetObjectCommand({ Bucket: bucket, Key: key }),
+        { expiresIn: presignTtlSeconds },
+      );
+
+      const params = {
+        TrustedPrincipalArn: trustedPrincipalArn,
+        ExternalId: externalId,
+        RoleName: roleName,
+      };
+      const qs = new URLSearchParams();
+      qs.set('templateURL', templateUrl);
+      qs.set('stackName', stackName);
+      Object.entries(params).forEach(([k, v]) => qs.set(`param_${k}`, v));
+      const quickCreateUrl = `https://${region}.console.aws.amazon.com/cloudformation/home?region=${region}#/stacks/quickcreate?${qs.toString()}`;
+
+      log.info(`[edge-optimize-bootstrap-url] Generated bootstrap URL for site ${siteId}, account ${accountId}`);
+
+      return ok({
+        externalId,
+        roleName,
+        roleArn,
+        trustedPrincipalArn,
+        stackName,
+        quickCreateUrl,
+        presignTtlSeconds,
+      });
+    } catch (error) {
+      log.error(`Failed to generate edge optimize bootstrap URL for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
   return {
+    getEdgeOptimizeBootstrapUrl,
     getLlmoSheetData,
     queryLlmoSheetData,
     getLlmoGlobalSheetData,

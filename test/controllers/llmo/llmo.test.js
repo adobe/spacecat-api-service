@@ -7158,6 +7158,71 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('getEdgeOptimizeBootstrapUrl', () => {
+    let bootstrapContext;
+    let getSignedUrlStub;
+
+    beforeEach(() => {
+      getSignedUrlStub = sinon.stub().resolves('https://llmo-edgeoptimize-cf-template-stage.s3.us-east-1.amazonaws.com/customer-bootstrap-role.yaml?X-Amz-Signature=abc');
+      bootstrapContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: { accountId: '682033462621' },
+        env: { EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template-stage' },
+        s3: {
+          s3Client: {},
+          getSignedUrl: getSignedUrlStub,
+          GetObjectCommand: class GetObjectCommand {},
+        },
+      };
+    });
+
+    it('returns a quick-create URL with a presigned template for a valid account', async () => {
+      const result = await controller.getEdgeOptimizeBootstrapUrl(bootstrapContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.quickCreateUrl).to.include('stacks/quickcreate');
+      expect(body.quickCreateUrl).to.include('templateURL=');
+      expect(body.quickCreateUrl).to.include('param_RoleName=AdobeLLMOptimizerCloudFrontConnectorRole');
+      expect(body.roleArn).to.equal('arn:aws:iam::682033462621:role/AdobeLLMOptimizerCloudFrontConnectorRole');
+      expect(body.externalId).to.be.a('string');
+      expect(getSignedUrlStub.calledOnce).to.equal(true);
+    });
+
+    it('returns 400 for an invalid account id', async () => {
+      const result = await controller.getEdgeOptimizeBootstrapUrl({ ...bootstrapContext, data: { accountId: '123' } });
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('12-digit');
+    });
+
+    it('returns 400 when the template bucket is not configured', async () => {
+      const result = await controller.getEdgeOptimizeBootstrapUrl({ ...bootstrapContext, env: {} });
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('not configured');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.getEdgeOptimizeBootstrapUrl(bootstrapContext);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      const result = await deniedController.getEdgeOptimizeBootstrapUrl(bootstrapContext);
+
+      expect(result.status).to.equal(403);
+    });
+  });
+
   describe('getStrategy', () => {
     const mockStrategyData = {
       opportunities: [
