@@ -1,3 +1,10 @@
+## [1.578.2](https://github.com/adobe/spacecat-api-service/compare/v1.578.1...v1.578.2) (2026-06-18)
+
+
+### Bug Fixes
+
+* **topics:** guard topic_categories link against non-UUID categoryId and log SQLSTATE ([#2631](https://github.com/adobe/spacecat-api-service/issues/2631)) ([741d9d5](https://github.com/adobe/spacecat-api-service/commit/741d9d583d10c9088217d04723f9c3435e4d4950))
+
 ## [1.578.1](https://github.com/adobe/spacecat-api-service/compare/v1.578.0...v1.578.1) (2026-06-17)
 
 
