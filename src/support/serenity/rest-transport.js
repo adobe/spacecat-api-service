@@ -418,14 +418,20 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * POST /v1/workspaces/{ws}/resources/transfer — grant an allocation onto a
+     * POST /v2/workspaces/{ws}/resources/transfer — grant an allocation onto a
      * subworkspace (activation / re-grant) and release it back to the parent pool
-     * (decommission). A public user-token endpoint (workspace doc §5/§7). The
-     * exact payload shape is pinned by the Gate-A live smoke.
+     * (decommission). A public user-token endpoint (workspace doc §5/§7).
+     * V2 wraps the resources under a `resources` key (WorkspaceResourcesTransferV2Form
+     * → createWorkspaceV2Resources); `payload` is the bare resources object
+     * (`{ ai: { projects, prompts } }`, the aiProductResources shape), so wrap it
+     * here. That `ai` shape is the SAME one already proven live as the v2 child-create
+     * `resources` body (createSubworkspace), so this is contract-compatible — the v1
+     * route's documented body (flat WorkspaceResources, no `ai` key) never matched
+     * what we send. The exact allocation values remain a Gate-A live-smoke pin.
      */
     async transferWorkspaceResources(workspaceId, payload) {
-      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}/resources/transfer`;
-      return request('POST', url, imsToken, payload);
+      const url = `${root}${USERS_API_PREFIX}/v2/workspaces/${enc(workspaceId)}/resources/transfer`;
+      return request('POST', url, imsToken, { resources: payload });
     },
 
     /**

@@ -738,7 +738,7 @@ describe('Semrush REST transport', () => {
   });
 
   describe('transferWorkspaceResources', () => {
-    it('POSTs the payload to /v1/workspaces/{ws}/resources/transfer', async () => {
+    it('POSTs the payload wrapped under `resources` to /v2/workspaces/{ws}/resources/transfer', async () => {
       fetchStub.resolves(fetchOk(null));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -747,10 +747,12 @@ describe('Semrush REST transport', () => {
 
       const [url, init] = fetchStub.firstCall.args;
       expect(init.method).to.equal('POST');
+      // V2: same aiProductResources `ai` shape proven live via createSubworkspace,
+      // wrapped under `resources` (WorkspaceResourcesTransferV2Form).
       expect(url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/resources/transfer`,
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${WORKSPACE_ID}/resources/transfer`,
       );
-      expect(JSON.parse(init.body)).to.deep.equal(payload);
+      expect(JSON.parse(init.body)).to.deep.equal({ resources: payload });
     });
   });
 
