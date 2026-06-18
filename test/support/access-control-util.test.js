@@ -305,6 +305,24 @@ describe('Access Control Util', () => {
     expect(util.authInfo.getProfile().user_id).to.equal('anonymous');
   });
 
+  it('treats GET /config/<env>/<service>/redirects.txt as anonymous (key checked in controller)', () => {
+    const util = AccessControlUtil.fromContext({
+      log: { info: logSpy },
+      pathInfo: { method: 'GET', suffix: '/config/dev/cm-p154709-e1629980/redirects.txt' },
+    });
+    expect(util.authInfo.getProfile().user_id).to.equal('anonymous');
+  });
+
+  it('does not treat a malformed /config path as anonymous', () => {
+    // Not anonymous -> falls through to the normal path, which requires a real
+    // authInfo and throws without one. Proves the regex boundary holds.
+    expect(() => AccessControlUtil.fromContext({
+      log: { info: logSpy },
+      pathInfo: { method: 'GET', suffix: '/config/dev/not-a-service/redirects.txt', headers: {} },
+      attributes: {},
+    })).to.throw('Missing authInfo');
+  });
+
   // Test error cases in hasAccess
   it('throws error when entity is missing in hasAccess', async () => {
     const util = AccessControlUtil.fromContext(context);

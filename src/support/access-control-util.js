@@ -28,7 +28,7 @@ const ANONYMOUS_ENDPOINTS = [
   /^POST \/hooks\/site-detection.+/,
   // ASO redirect overlay: authenticated by X-ASO-API-Key in RedirectsController
   // (same pattern as the hooks above), not by the standard auth chain.
-  /^GET \/config\/(dev|stage|prod)\/[^/]+\/redirects\.txt$/,
+  /^GET \/config\/(dev|stage|prod)\/cm-p\d+-e\d+\/redirects\.txt$/,
 ];
 const SERVICE_CODE = 'dx_aem_perf';
 export const X_PRODUCT_HEADER = 'x-product';

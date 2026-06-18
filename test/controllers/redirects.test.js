@@ -107,6 +107,23 @@ describe('RedirectsController', () => {
     expect(response.status).to.equal(404);
   });
 
+  it('returns 404 when S3 surfaces a 404 via $metadata', async () => {
+    const err = new Error('not found');
+    err.$metadata = { httpStatusCode: 404 };
+    mockS3.s3Client.send.rejects(err);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(404);
+  });
+
+  it('returns 404 when the requested env does not match the deployment bucket', async () => {
+    // Bucket is spacecat-dev-aso-overlays; a request for prod must not be served.
+    requestContext.params.env = 'prod';
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(404);
+    expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
   it('returns 500 on an unexpected S3 error', async () => {
     mockS3.s3Client.send.rejects(new Error('boom'));
     const response = await controller.getRedirects(requestContext);

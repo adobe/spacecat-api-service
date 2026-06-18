@@ -21,14 +21,17 @@ import {
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 
 const ENVS = ['dev', 'stage', 'prod'];
-// Cloud Manager service identifier, e.g. cm-p154709-e1629980.
-const SERVICE_RE = /^cm-p\d+-e\d+$/;
+// Cloud Manager service identifier, e.g. cm-p154709-e1629980. Digit runs are
+// capped to a realistic length to avoid arbitrarily long S3 key lookups.
+const SERVICE_RE = /^cm-p\d{1,10}-e\d{1,10}$/;
 // Aligns with the Fastly edge TTL for this path (fetch/100-aso-overlay-ttl.vcl).
 const OVERLAY_TTL_SECONDS = 10;
 
 /**
- * Constant-time string comparison. Returns false on length mismatch (without a
- * timing side channel) and never throws on non-string input.
+ * Constant-time string comparison that does not leak input length. Both inputs
+ * are HMAC'd to a fixed 32-byte digest before the timing-safe compare, so a
+ * length mismatch is not observable via response timing. Never throws on
+ * non-string input.
  *
  * @param {string} a
  * @param {string} b
@@ -38,12 +41,11 @@ function safeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') {
     return false;
   }
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) {
-    return false;
-  }
-  return crypto.timingSafeEqual(ab, bb);
+  // The HMAC key is not a secret — it only normalises both inputs to a fixed
+  // 32-byte digest regardless of length, removing the length side channel.
+  const ha = crypto.createHmac('sha256', 'aso-key-compare').update(a).digest();
+  const hb = crypto.createHmac('sha256', 'aso-key-compare').update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
 }
 
 /**
@@ -94,6 +96,7 @@ function RedirectsController(ctx) {
       return internalServerError('Overlay endpoint not configured');
     }
     if (!safeEqual(providedKey, apiKey)) {
+      log.info('[aso-overlay] auth failed', { hasKey: !!providedKey });
       return unauthorized('Unauthorized: missing or invalid X-ASO-API-Key');
     }
 
@@ -107,6 +110,14 @@ function RedirectsController(ctx) {
     if (!bucketName) {
       log.error('[aso-overlay] S3_ASO_OVERLAYS_BUCKET is not configured');
       return internalServerError('Overlay endpoint not configured');
+    }
+
+    // The env in the URL is for Fastly routing compatibility; this deployment
+    // serves exactly one env's bucket (spacecat-<env>-aso-overlays). Reject a
+    // mismatch so e.g. a dev deployment never appears to answer for prod.
+    const bucketEnv = /(?:^|-)(dev|stage|prod)-aso-overlays$/.exec(bucketName)?.[1];
+    if (bucketEnv && reqEnv !== bucketEnv) {
+      return notFound('No redirect overlay found');
     }
 
     // Read the overlay with the Lambda's own execution role (no SigV4 from caller).

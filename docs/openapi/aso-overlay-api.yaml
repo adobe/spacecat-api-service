@@ -1,0 +1,53 @@
+get-aso-redirects:
+  get:
+    tags:
+      - aso-overlay
+    summary: Get the ASO dispatcher redirect overlay for a Cloud Manager service
+    description: |
+      Returns the plain-text redirect overlay (`config/<service>/redirects.txt`)
+      for the given Cloud Manager service, served from the per-environment ASO
+      overlay S3 bucket via the api-service execution role.
+
+      Authenticated with the `X-ASO-API-Key` header (the inbound key the AEM
+      dispatcher presents). Fronted by Fastly for edge caching; the dispatcher
+      polls this URL on its normal cycle. The `env` path segment is for Fastly
+      routing compatibility — each deployment serves its own env's bucket.
+
+      See ADR `aso-dispatcher-overlay` (Lite-E) in mysticat-architecture.
+    operationId: getAsoRedirects
+    parameters:
+      - name: env
+        in: path
+        required: true
+        description: Deployment environment segment (must match the serving deployment).
+        schema:
+          type: string
+          enum: [dev, stage, prod]
+      - name: service
+        in: path
+        required: true
+        description: Cloud Manager service identifier.
+        schema:
+          type: string
+          pattern: '^cm-p\d{1,10}-e\d{1,10}$'
+          example: cm-p154709-e1629980
+    responses:
+      '200':
+        description: The redirect overlay file.
+        content:
+          text/plain:
+            schema:
+              type: string
+            example: |
+              example.com/old-widget https://www.example.com/products/widget-v2
+              blog.example.com/old-post https://blog.example.com/articles/new
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - aso_overlay_api_key: []
