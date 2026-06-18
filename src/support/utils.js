@@ -35,6 +35,7 @@ import worldCountries from 'world-countries';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
+  STATUS_UNAUTHORIZED,
 } from '../utils/constants.js';
 import { updateRumConfig } from './rum-config-service.js';
 // Two signals indicate a previous paid onboarding:
@@ -661,6 +662,25 @@ export function getImsUserToken(context) {
     throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
   }
   return authorizationHeader.substring(BEARER_PREFIX.length);
+}
+
+/**
+ * Get the IMS user token, but ONLY when the caller authenticated via IMS.
+ * The Semrush gateway only understands IMS user tokens, so any flow that
+ * forwards the caller's bearer upstream (serenity proxy, brand provisioning,
+ * brand-edit re-sync) must refuse a non-IMS credential rather than proxy it.
+ * An S2S consumer reaching an `organization:write` route would otherwise have
+ * its non-IMS bearer forwarded to Semrush.
+ * @param {object} context - The request context (attributes.authInfo + headers).
+ * @returns {string} imsUserToken - The validated IMS user access token.
+ * @throws {ErrorWithStatusCode} 401 when the caller is not IMS-authenticated.
+ */
+export function getImsUserTokenStrict(context) {
+  const authInfo = context?.attributes?.authInfo;
+  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+    throw new ErrorWithStatusCode('IMS authentication required', STATUS_UNAUTHORIZED);
+  }
+  return getImsUserToken(context);
 }
 
 /**
@@ -1780,16 +1800,23 @@ export const onboardSingleSite = async (
 
     const auditTypes = Object.keys(profile.audits);
 
+    // Determine scheduledRun early so we only enable audits in config for paid profiles
+    const scheduledRun = additionalParams.scheduledRun !== undefined
+      ? additionalParams.scheduledRun
+      : (profile.config?.scheduledRun || false);
+
     const latestConfiguration = await Configuration.findLatest();
 
-    // Check which audits are not already enabled
+    // Only enable audits in configuration when scheduledRun is true (paid profiles)
     const auditsEnabled = [];
-    for (const auditType of auditTypes) {
-      /* eslint-disable no-await-in-loop */
-      const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
-      if (!isEnabled) {
-        latestConfiguration.enableHandlerForSite(auditType, site);
-        auditsEnabled.push(auditType);
+    if (scheduledRun) {
+      for (const auditType of auditTypes) {
+        /* eslint-disable no-await-in-loop */
+        const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
+        if (!isEnabled) {
+          latestConfiguration.enableHandlerForSite(auditType, site);
+          auditsEnabled.push(auditType);
+        }
       }
     }
 
@@ -1797,12 +1824,15 @@ export const onboardSingleSite = async (
       try {
         await latestConfiguration.save();
         log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+        await say(
+          `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsEnabled.join(', ')}`,
+        );
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
         throw error;
       }
     } else {
-      log.debug(`All audits are already enabled for site ${siteID}`);
+      log.debug(`All the required audits for the given profile are already enabled for site ${siteID}`);
     }
 
     reportLine.audits = auditTypes.join(', ');
@@ -1816,17 +1846,13 @@ export const onboardSingleSite = async (
     }
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
-      if (!latestConfiguration.isHandlerEnabledForSite(auditType, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-      } else {
-        await triggerAuditForSite(
-          site,
-          auditType,
-          undefined,
-          slackContext,
-          context,
-        );
-      }
+      await triggerAuditForSite(
+        site,
+        auditType,
+        undefined,
+        slackContext,
+        context,
+      );
     }
 
     // Opportunity status job
@@ -1846,29 +1872,7 @@ export const onboardSingleSite = async (
       },
     };
 
-    const scheduledRun = additionalParams.scheduledRun !== undefined
-      ? additionalParams.scheduledRun
-      : (profile.config?.scheduledRun || false);
-
     await say(`:information_source: Scheduled run: ${scheduledRun}`);
-
-    // Disable imports and audits job - only disable what was enabled during onboarding
-    const disableImportAndAuditJob = {
-      type: 'disable-import-audit-processor',
-      siteId: siteID,
-      siteUrl: baseURL,
-      imsOrgId: imsOrgID,
-      organizationId,
-      taskContext: {
-        importTypes: importsEnabled || [],
-        auditTypes: auditsEnabled || [],
-        scheduledRun,
-        slackContext: {
-          channelId: slackContext.channelId,
-          threadTs: slackContext.threadTs,
-        },
-      },
-    };
 
     // Demo URL job
     const demoURLJob = {
@@ -1902,10 +1906,29 @@ export const onboardSingleSite = async (
       },
     };
 
-    // Prepare and start step function workflow with the necessary parameters
+    // Prepare and start step function workflow with the necessary parameters.
+    // Always send disableImportAndAuditJob so imports can be disabled (avoid exhausting Ahrefs).
+    // auditsEnabled is not sent to the task handler; only log/Slack the info here.
     const workflowInput = {
       opportunityStatusJob,
-      disableImportAndAuditJob,
+      disableImportAndAuditJob: {
+        type: 'disable-import-audit-processor',
+        siteId: siteID,
+        siteUrl: baseURL,
+        imsOrgId: imsOrgID,
+        organizationId,
+        taskContext: {
+          importTypes: importsEnabled || [],
+          // Not sent to task handler; audits are enabled in config only when scheduledRun is true,
+          // so no separate audit-disable list is needed here.
+          auditTypes: [],
+          scheduledRun,
+          slackContext: {
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
+          },
+        },
+      },
       demoURLJob,
       cwvDemoSuggestionsJob,
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,

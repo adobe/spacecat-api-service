@@ -18,56 +18,114 @@ import CheckAgenticTrafficDbStatusCommand from '../../../../src/support/slack/co
 
 use(sinonChai);
 
+const TARGET_SITE_ID = '11111111-2222-3333-4444-555555555555';
+const OTHER_SITE_ID = '22222222-3333-4444-5555-555555555555';
+
+const HANDLERS = {
+  raw: 'wrpc_import_agentic_traffic',
+  daily: 'wrpc_refresh_agentic_traffic_daily',
+  weekly: 'wrpc_refresh_agentic_traffic_weekly',
+};
+
+const makeSite = (id, baseURL) => ({
+  getId: () => id,
+  getBaseURL: () => baseURL,
+  getLatestAuditByAuditType: sinon.stub().resolves(null),
+});
+
+// Chainable thenable PostgREST mock: records filters, applies them on await.
+// Supports the per-handler cs queries (eq handler_name, gte/lt projected_at,
+// gt output_count, contains on a jsonb metadata path).
+const makePostgrest = (allRows, error = null) => {
+  const from = sinon.stub().callsFake(() => {
+    const f = {
+      scope: null,
+      handlerEq: null,
+      gteAt: null,
+      ltAt: null,
+      skipped: null,
+      gtOutput: null,
+      contains: [],
+    };
+    const chain = {};
+    chain.select = sinon.stub().callsFake(() => chain);
+    chain.in = sinon.stub().callsFake((c, v) => {
+      if (c === 'scope_prefix') {
+        f.scope = v;
+      }
+      return chain;
+    });
+    chain.eq = sinon.stub().callsFake((c, v) => {
+      if (c === 'handler_name') {
+        f.handlerEq = v;
+      }
+      if (c === 'skipped') {
+        f.skipped = v;
+      }
+      return chain;
+    });
+    chain.gte = sinon.stub().callsFake((c, v) => {
+      if (c === 'projected_at') {
+        f.gteAt = v;
+      }
+      return chain;
+    });
+    chain.lt = sinon.stub().callsFake((c, v) => {
+      if (c === 'projected_at') {
+        f.ltAt = v;
+      }
+      return chain;
+    });
+    chain.gt = sinon.stub().callsFake((c, v) => {
+      if (c === 'output_count') {
+        f.gtOutput = v;
+      }
+      return chain;
+    });
+    chain.contains = sinon.stub().callsFake((c, v) => {
+      f.contains.push([c, v]);
+      return chain;
+    });
+    const passes = (r) => {
+      if (f.scope && !f.scope.includes(r.scope_prefix)) {
+        return false;
+      }
+      if (f.handlerEq && r.handler_name !== f.handlerEq) {
+        return false;
+      }
+      if (f.gteAt && r.projected_at < f.gteAt) {
+        return false;
+      }
+      if (f.ltAt && r.projected_at >= f.ltAt) {
+        return false;
+      }
+      if (f.skipped != null && r.skipped !== f.skipped) {
+        return false;
+      }
+      if (f.gtOutput != null && !(Number(r.output_count ?? 0) > f.gtOutput)) {
+        return false;
+      }
+      return f.contains.every(([col, json]) => {
+        const key = col.split('->').pop();
+        const have = r.metadata?.[key] ?? [];
+        return JSON.parse(json).every((x) => have.includes(x));
+      });
+    };
+    chain.then = (resolve) => {
+      resolve(error ? { data: null, error } : { data: allRows.filter(passes), error: null });
+    };
+    return chain;
+  });
+  return { from };
+};
+
 describe('CheckAgenticTrafficDbStatusCommand', () => {
   let context;
   let slackContext;
   let configStub;
-  let postgrestStub;
-  let tableRows;
-
-  const TARGET_SITE_ID = '11111111-2222-3333-4444-555555555555';
-  const OTHER_SITE_ID = '22222222-3333-4444-5555-555555555555';
-  const MISSING_SITE_ID = '33333333-4444-5555-6666-555555555555';
-
-  const makeSite = (id, baseURL) => ({
-    getId: () => id,
-    getBaseURL: () => baseURL,
-    getLatestAuditByAuditType: sinon.stub().resolves(null),
-  });
-
-  const makePostgrestChain = (result) => {
-    const chain = {
-      select: sinon.stub(),
-      in: sinon.stub(),
-      eq: sinon.stub(),
-      gte: sinon.stub(),
-      lte: sinon.stub(),
-    };
-    chain.select.returns(chain);
-    chain.in.returns(chain);
-    chain.gte.returns(chain);
-    chain.eq.resolves(result);
-    chain.lte.resolves(result);
-    return chain;
-  };
-
-  const installPostgrestRows = () => {
-    postgrestStub.from.callsFake((table) => makePostgrestChain({
-      data: tableRows[table] || [],
-      error: null,
-    }));
-  };
 
   beforeEach(() => {
-    tableRows = {
-      agentic_traffic: [],
-      agentic_traffic_daily: [],
-      agentic_traffic_weekly: [],
-    };
     configStub = { isHandlerEnabledForSite: sinon.stub().returns(true) };
-    postgrestStub = { from: sinon.stub() };
-    installPostgrestRows();
-
     context = {
       dataAccess: {
         Site: {
@@ -76,459 +134,307 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
           findByBaseURL: sinon.stub().resolves(null),
         },
         Configuration: { findLatest: sinon.stub().resolves(configStub) },
-        services: { postgrestClient: postgrestStub },
+        services: { postgrestClient: makePostgrest([]) },
       },
       log: { error: sinon.stub(), warn: sinon.stub() },
     };
     slackContext = { say: sinon.stub().resolves() };
   });
 
-  afterEach(() => {
-    sinon.restore();
-  });
+  afterEach(() => sinon.restore());
 
-  it('has the correct id and phrase', () => {
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-
-    expect(cmd.id).to.equal('check-agentic-traffic-db-status');
-    expect(cmd.accepts('check agentic traffic db status')).to.be.true;
-  });
-
-  it('warns on invalid date format', async () => {
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-99-99'], slackContext);
-
-    expect(slackContext.say).to.have.been.calledWith(
-      ':warning: Invalid date format. Use YYYY-MM-DD.',
-    );
-    expect(postgrestStub.from).not.to.have.been.called;
-  });
-
-  it('warns when the requested traffic date is in the future', async () => {
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2099-01-01'], slackContext);
-
-    expect(slackContext.say).to.have.been.calledWith(
-      ':warning: Cannot check a future traffic date.',
-    );
-    expect(postgrestStub.from).not.to.have.been.called;
-  });
-
-  it('warns when siteId is invalid', async () => {
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['siteId=foo'], slackContext);
-
-    expect(slackContext.say).to.have.been.calledWith(
-      ':warning: Invalid siteId. Expected UUID.',
-    );
-    expect(context.dataAccess.Site.findById).not.to.have.been.called;
-  });
-
-  it('warns when PostgREST is unavailable', async () => {
-    context.dataAccess.services = {};
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    expect(slackContext.say).to.have.been.calledWith(
-      ':warning: PostgREST client is unavailable; cannot check agentic traffic tables.',
-    );
-  });
-
-  it('uses yesterday as the default traffic date', async () => {
-    const clock = sinon.useFakeTimers(new Date('2026-04-23T12:00:00Z').getTime());
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution([], slackContext);
-    clock.restore();
-
-    expect(slackContext.say.firstCall.args[0]).to.include(
-      'Checking agentic traffic DB tables for *2026-04-22*',
-    );
-  });
-
-  it('reports when the requested siteId is not found', async () => {
-    context.dataAccess.Site.findById.resolves(null);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', `siteId=${MISSING_SITE_ID}`], slackContext);
-
-    expect(slackContext.say).to.have.been.calledWith(
-      `:warning: No site found with siteId \`${MISSING_SITE_ID}\`.`,
-    );
-    expect(context.dataAccess.Site.all).not.to.have.been.called;
-  });
-
-  it('filters the check to one requested baseUrl', async () => {
-    const targetSite = makeSite(TARGET_SITE_ID, 'https://base-url.example.com');
-    context.dataAccess.Site.findByBaseURL.resolves(targetSite);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 8, updated_at: '2026-04-22T08:00:00Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 8, updated_at: '2026-04-22T08:01:00Z' },
-    ];
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', 'baseUrl=https://base-url.example.com'], slackContext);
-
-    expect(context.dataAccess.Site.all).not.to.have.been.called;
-    expect(context.dataAccess.Site.findById).not.to.have.been.called;
-    expect(context.dataAccess.Site.findByBaseURL)
-      .to.have.been.calledWith('https://base-url.example.com');
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('for site `https://base-url.example.com`');
-    expect(output).to.include('Raw table: *1/1* sites, 1 rows / 8 hits');
-  });
-
-  it('reports when the requested baseUrl is not found', async () => {
-    context.dataAccess.Site.findByBaseURL.resolves(null);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', 'baseUrl=https://missing.example.com'], slackContext);
-
-    expect(slackContext.say).to.have.been.calledWith(
-      ':warning: No site found with baseUrl `https://missing.example.com`.',
-    );
-    expect(context.dataAccess.Site.all).not.to.have.been.called;
-  });
-
-  it('reports when no sites have cdn-logs-report enabled', async () => {
-    configStub.isHandlerEnabledForSite.returns(false);
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://example.com'),
+  it('reports DASHBOARD_READY when all sites have raw + matching daily/weekly metadata', async () => {
+    // Clock past the closed week so weeklyExpected = true and weekly is required.
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://wknd.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-20T06:46:53Z',
+        metadata: {},
+        skipped: false,
+      },
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.daily,
+        projected_at: '2026-05-20T06:54:13Z',
+        metadata: { dailyRefreshDates: ['2026-05-19'] },
+        skipped: false,
+      },
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.weekly,
+        projected_at: '2026-05-25T07:10:00Z',
+        metadata: { weeklyRefreshWeeks: ['2026-05-18'] },
+        skipped: false,
+      },
     ]);
 
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    expect(output).to.include('Dashboard-ready: *1/1*');
+    expect(output).to.include('Missing raw projection: *0*');
+    expect(output).to.include('Missing daily refresh: *0*');
+    expect(output).to.include('Missing weekly refresh');
+  });
+
+  it('credits a backfill whose refresh was projected weeks after the traffic date', async () => {
+    // Backfill ran 2026-06-05 but its metadata covers 2026-05-19. The old
+    // projected_at < date+7 window missed this; cs-by-date matching catches it.
+    const clock = sinon.useFakeTimers(new Date('2026-06-10T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://backfilled.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.daily,
+        projected_at: '2026-06-05T14:13:00Z',
+        metadata: { dailyRefreshDates: ['2026-05-19'] },
+        skipped: false,
+      },
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.weekly,
+        projected_at: '2026-06-05T14:14:00Z',
+        metadata: { weeklyRefreshWeeks: ['2026-05-18'] },
+        skipped: false,
+      },
+    ]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    expect(output).to.include('Missing raw projection: *0*');
+    expect(output).to.include('Missing daily refresh: *0*');
+  });
+
+  it('reports NO_DB_ROWS_FOR_DATE when zero audit rows match', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([
+      makeSite(TARGET_SITE_ID, 'https://wknd.site'),
+      makeSite(OTHER_SITE_ID, 'https://other.site'),
+    ]);
+    // Empty audit corpus: projector never ran for these sites.
+    context.dataAccess.services.postgrestClient = makePostgrest([]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Outcome: *NO_DB_ROWS_FOR_DATE*');
+    expect(output).to.include('Missing raw projection: *2*');
+  });
+
+  it('flags raw AND daily as missing when audit rows exist but lack per-date evidence for dateStr', async () => {
+    // Raw projection_audit rows carry no per-date metadata, so a raw row alone
+    // cannot prove that *dateStr* was covered (it could be for any other date
+    // in the lookup window). When daily refresh metadata also lacks dateStr,
+    // and the raw row has no positive output_count fallback, both must be
+    // reported missing. Regression for the bug where any raw row in the window
+    // was permissively credited as "raw OK for dateStr".
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://wknd.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-20T06:46:00Z',
+        output_count: 0,
+        metadata: {},
+        skipped: false,
+      },
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.daily,
+        projected_at: '2026-05-20T06:54:00Z',
+        metadata: { dailyRefreshDates: ['2026-05-18'] }, // wrong date
+        skipped: false,
+      },
+    ]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing raw projection: *1*');
+    expect(output).to.include('Missing daily refresh: *1*');
+    expect(output).to.include('missing: raw, daily');
+  });
+
+  it('flags only daily as missing when raw ran post-day with positive output_count but daily metadata does not cover dateStr', async () => {
+    // The legitimate "raw OK, daily refresh failed" diagnostic: raw audit row
+    // has projected_at >= dateStr+1 day UTC and output_count > 0 (the raw
+    // projector runs the day after the traffic day), but the daily refresh
+    // did not record dateStr in its metadata. Raw should count, daily shouldn't.
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://raw-ok.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-20T06:46:00Z', // dateStr+1 day
+        output_count: 1234,
+        metadata: {},
+        skipped: false,
+      },
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.daily,
+        projected_at: '2026-05-20T06:54:00Z',
+        metadata: { dailyRefreshDates: ['2026-05-18'] }, // wrong date
+        skipped: false,
+      },
+    ]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing raw projection: *0*');
+    expect(output).to.include('Missing daily refresh: *1*');
+    expect(output).to.include('missing: daily');
+  });
+
+  it('does not credit raw when projected_at is before dateStr+1 day UTC even with positive output_count', async () => {
+    // A raw row whose projected_at falls on dateStr or earlier cannot have
+    // covered dateStr — the raw projector runs the day after the traffic day.
+    // Without daily refresh proof for dateStr, raw must be reported missing.
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://early-raw.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-19T06:46:00Z', // same day as dateStr
+        output_count: 5000,
+        metadata: {},
+        skipped: false,
+      },
+    ]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing raw projection: *1*');
+    expect(output).to.include('Missing daily refresh: *1*');
+  });
+
+  it('does not credit raw when projected_at is at/after dateStr + RAW_FALLBACK_WINDOW_DAYS', async () => {
+    // Raw fallback window is [dateStr+1, dateStr+7). A raw row projected on
+    // 2026-05-26 (== dateStr 2026-05-19 + 7 days) is outside it, so without daily
+    // proof for the date, raw must be reported missing.
+    const clock = sinon.useFakeTimers(new Date('2026-06-01T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://late-raw.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-26T00:00:00Z', // dateStr + 7 days (exclusive bound)
+        output_count: 5000,
+        metadata: {},
+        skipped: false,
+      },
+    ]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing raw projection: *1*');
+  });
+
+  it('skips weekly check for traffic dates in the current (incomplete) ISO week', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-20T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://midweek.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-20T06:46:00Z',
+        metadata: {},
+        skipped: false,
+      },
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.daily,
+        projected_at: '2026-05-20T06:54:00Z',
+        metadata: { dailyRefreshDates: ['2026-05-19'] },
+        skipped: false,
+      },
+    ]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    expect(output).to.not.include('Missing weekly refresh');
+  });
+
+  it('excludes rows where skipped=true', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://skipped.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([
+      // A skipped row should NOT be counted as a successful projection run.
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-20T06:46:00Z',
+        metadata: {},
+        skipped: true,
+      },
+    ]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing raw projection: *1*');
+  });
+
+  it('warns and short-circuits when PostgREST is unavailable', async () => {
+    context.dataAccess.services = {};
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: PostgREST client is unavailable; cannot check projection_audit.',
+    );
+  });
+
+  it('reports when no enabled sites match the requested scope', async () => {
+    configStub.isHandlerEnabledForSite.returns(false);
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://nope.site')]);
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
 
     expect(slackContext.say).to.have.been.calledWith(
       ':information_source: No sites have cdn-logs-report enabled.',
     );
-    expect(postgrestStub.from).not.to.have.been.called;
   });
 
-  it('reports when the requested site does not have cdn-logs-report enabled', async () => {
-    configStub.isHandlerEnabledForSite.returns(false);
-    context.dataAccess.Site.findById.resolves(
-      makeSite(TARGET_SITE_ID, 'https://disabled.example.com'),
-    );
+  it('surfaces non-transient PostgREST errors through the generic Slack error handler', async () => {
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://err.site')]);
+    context.dataAccess.services.postgrestClient = makePostgrest([], { message: 'relation missing' });
 
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', `siteId=${TARGET_SITE_ID}`], slackContext);
-
-    expect(slackContext.say).to.have.been.calledWith(
-      `:information_source: Site \`${TARGET_SITE_ID}\` does not have cdn-logs-report enabled.`,
-    );
-    expect(postgrestStub.from).not.to.have.been.called;
-  });
-
-  it('checks raw, daily, and weekly tables directly for one site', async () => {
-    const targetSite = makeSite(TARGET_SITE_ID, 'https://wknd.site');
-    context.dataAccess.Site.findById.resolves(targetSite);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 20, updated_at: '2026-05-04T10:07:12Z' },
-      { site_id: TARGET_SITE_ID, hits: 34, updated_at: '2026-05-04T10:07:13Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 54, updated_at: '2026-05-04T10:07:14Z' },
-    ];
-    tableRows.agentic_traffic_weekly = [
-      { site_id: TARGET_SITE_ID, hits: 500, updated_at: '2026-05-04T10:08:00Z' },
-    ];
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-05-03', `siteId=${TARGET_SITE_ID}`], slackContext);
-
-    expect(targetSite.getLatestAuditByAuditType).not.to.have.been.called;
-    expect(postgrestStub.from.args.map(([table]) => table)).to.deep.equal([
-      'agentic_traffic',
-      'agentic_traffic_daily',
-      'agentic_traffic_weekly',
-      'agentic_traffic',
-    ]);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Agentic Traffic DB Table Status — 2026-05-03');
-    expect(output).to.include('Outcome: *DASHBOARD_READY*');
-    expect(output).to.include('Raw table: *1/1* sites, 2 rows / 54 hits');
-    expect(output).to.include('Daily table: *1/1* sites, 1 rows / 54 hits');
-    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 2 rows / 54 hits');
-    expect(output).to.include('Weekly table (2026-04-27): *1/1* raw-week sites, 1 rows / 500 hits');
-    expect(output).to.include('https://wknd.site');
-  });
-
-  it('caps long site detail lists and points to focused site checks', async () => {
-    const clock = sinon.useFakeTimers(new Date('2026-04-23T12:00:00Z').getTime());
-    const sites = Array.from({ length: 9 }, (_, index) => {
-      const siteId = `11111111-2222-3333-4444-${String(index + 1).padStart(12, '0')}`;
-      return makeSite(siteId, `https://site-${index + 1}.example.com`);
-    });
-    context.dataAccess.Site.all.resolves(sites);
-    tableRows.agentic_traffic = sites.map((site) => ({
-      site_id: site.getId(),
-      hits: 10,
-      updated_at: '2026-04-22T08:00:00Z',
-    }));
-    tableRows.agentic_traffic_daily = sites.map((site) => ({
-      site_id: site.getId(),
-      hits: 10,
-      updated_at: '2026-04-22T08:01:00Z',
-    }));
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-    clock.restore();
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Dashboard-ready: *9*');
-    expect(output).to.include('... 1 more. Re-run with `siteId=<siteId>` for focused details.');
-  });
-
-  it('ignores malformed table rows and prints invalid timestamps as-is', async () => {
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://defensive.com'),
-    ]);
-    tableRows.agentic_traffic = [
-      { hits: 999, updated_at: '2026-04-22T07:59:00Z' },
-      { site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-04-22T08:00:00Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 10, updated_at: 'not-a-date' },
-    ];
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Raw table: *1/1* sites, 1 rows / 10 hits');
-    expect(output).to.include('daily: 1 rows / 10 hits (updated not-a-date)');
-  });
-
-  it('handles missing hits, non-numeric hits, and null table responses', async () => {
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://odd-rows.com'),
-    ]);
-    postgrestStub.from.withArgs('agentic_traffic').returns(makePostgrestChain({
-      data: [
-        { site_id: TARGET_SITE_ID, updated_at: '2026-04-22T08:00:00Z' },
-        { site_id: TARGET_SITE_ID, hits: 'not-a-number' },
-      ],
-      error: null,
-    }));
-    postgrestStub.from.withArgs('agentic_traffic_daily').returns(makePostgrestChain({
-      data: null,
-      error: null,
-    }));
-    postgrestStub.from.withArgs('agentic_traffic_weekly').returns(makePostgrestChain({
-      data: [],
-      error: null,
-    }));
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Raw table: *1/1* sites, 2 rows / 0 hits');
-    expect(output).to.include('Daily table: *0/1* sites, 0 rows / 0 hits');
-  });
-
-  it('reports missing daily rows when raw rows exist', async () => {
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://raw-only.com'),
-    ]);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-04-22T08:00:00Z' },
-    ];
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *ACTION_REQUIRED*');
-    expect(output).to.include('Missing raw import: *0*');
-    expect(output).to.include('Missing daily serving: *1*');
-    expect(output).to.include('missing: daily');
-    expect(output).to.include('https://raw-only.com');
-  });
-
-  it('reports no DB rows for the date when all checked tables are empty', async () => {
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://empty-one.com'),
-      makeSite(OTHER_SITE_ID, 'https://empty-two.com'),
-    ]);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *NO_DB_ROWS_FOR_DATE*');
-    expect(output).to.include('Missing raw import: *2*');
-    expect(output).to.include('Missing daily serving: *2*');
-    expect(output).to.include('Raw table: *0/2* sites, 0 rows / 0 hits');
-    expect(output).to.include('Daily table: *0/2* sites, 0 rows / 0 hits');
-  });
-
-  it('does not report no DB rows when only weekly rows exist for a closed Sunday', async () => {
-    const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://weekly-only.com'),
-    ]);
-    tableRows.agentic_traffic_weekly = [
-      { site_id: TARGET_SITE_ID, hits: 12, updated_at: '2026-05-04T08:02:00Z' },
-    ];
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-05-03'], slackContext);
-    clock.restore();
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *ACTION_REQUIRED*');
-    expect(output).to.not.include('Outcome: *NO_DB_ROWS_FOR_DATE*');
-    expect(output).to.include('Weekly table (2026-04-27): *0/0* raw-week sites, 0 rows / 0 hits');
-  });
-
-  it('marks weekly as required for a closed Sunday', async () => {
-    const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://closed-sunday.com'),
-    ]);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-05-04T08:00:00Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-05-04T08:01:00Z' },
-    ];
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-05-03'], slackContext);
-    clock.restore();
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Missing weekly serving: *1*');
-    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 1 rows / 10 hits');
-    expect(output).to.include('Weekly table (2026-04-27): *0/1* raw-week sites, 0 rows / 0 hits');
-    expect(output).to.include('missing: weekly');
-  });
-
-  it('marks weekly as required for a midweek date in a completed ISO week', async () => {
-    const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://midweek-completed.com'),
-    ]);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 7, updated_at: '2026-04-29T22:00:00Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 7, updated_at: '2026-04-29T22:01:00Z' },
-    ];
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-29'], slackContext);
-    clock.restore();
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Agentic Traffic DB Table Status — 2026-04-29');
-    expect(output).to.include('Missing weekly serving: *1*');
-    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 1 rows / 7 hits');
-    expect(output).to.include('Weekly table (2026-04-27): *0/1* raw-week sites, 0 rows / 0 hits');
-    expect(output).to.include('missing: weekly');
-  });
-
-  it('does not mark weekly missing for a midweek date in the current (incomplete) ISO week', async () => {
-    const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime());
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://midweek-current.com'),
-    ]);
-    tableRows.agentic_traffic = [
-      { site_id: TARGET_SITE_ID, hits: 3, updated_at: '2026-05-05T22:00:00Z' },
-    ];
-    tableRows.agentic_traffic_daily = [
-      { site_id: TARGET_SITE_ID, hits: 3, updated_at: '2026-05-05T22:01:00Z' },
-    ];
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-05-05'], slackContext);
-    clock.restore();
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.not.include('Missing weekly serving:');
-    expect(output).to.not.include('Raw week (2026-05-04..2026-05-10):');
-  });
-
-  it('does not mark weekly missing when a closed week has no raw week data for the site', async () => {
-    const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://no-raw-week.com'),
-    ]);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-05-03'], slackContext);
-    clock.restore();
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Missing weekly serving: *0*');
-    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *0/1* sites, 0 rows / 0 hits');
-    expect(output).to.include('Weekly table (2026-04-27): *0/0* raw-week sites, 0 rows / 0 hits');
-  });
-
-  it('merges raw week batches and ignores empty batch responses', async () => {
-    const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
-    const sites = Array.from({ length: 51 }, (_, index) => {
-      const id = index === 0 || index === 25
-        ? TARGET_SITE_ID
-        : `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
-      return makeSite(id, `https://batch-${index}.com`);
-    });
-    context.dataAccess.Site.all.resolves(sites);
-    postgrestStub.from.resetBehavior();
-    for (let i = 0; i < 9; i += 1) {
-      postgrestStub.from.onCall(i).returns(makePostgrestChain({
-        data: [],
-        error: null,
-      }));
-    }
-    postgrestStub.from.onCall(9).returns(makePostgrestChain({
-      data: [{ site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-05-04T09:00:00Z' }],
-      error: null,
-    }));
-    postgrestStub.from.onCall(10).returns(makePostgrestChain({
-      data: [{ site_id: TARGET_SITE_ID, hits: 20, updated_at: '2026-05-04T08:00:00Z' }],
-      error: null,
-    }));
-    postgrestStub.from.onCall(11).returns(makePostgrestChain({
-      data: null,
-      error: null,
-    }));
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-05-03'], slackContext);
-    clock.restore();
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Raw week (2026-04-27..2026-05-03):');
-    expect(output).to.include('https://batch-0.com');
-    expect(output).to.include('raw week: 2 rows / 30 hits');
-  });
-
-  it('surfaces table query errors through the generic Slack error handler', async () => {
-    const targetSite = makeSite(TARGET_SITE_ID, 'https://error.com');
-    context.dataAccess.Site.all.resolves([targetSite]);
-    postgrestStub.from.withArgs('agentic_traffic').returns(makePostgrestChain({
-      data: null,
-      error: { message: 'relation missing' },
-    }));
-    postgrestStub.from.withArgs('agentic_traffic_daily').returns(makePostgrestChain({
-      data: [],
-      error: null,
-    }));
-    postgrestStub.from.withArgs('agentic_traffic_weekly').returns(makePostgrestChain({
-      data: [],
-      error: null,
-    }));
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22'], slackContext);
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
 
     expect(context.log.error).to.have.been.calledWith(
       'Error in check-agentic-traffic-db-status:',
@@ -538,38 +444,143 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('relation missing');
   });
 
-  it('surfaces raw week query errors through the generic Slack error handler', async () => {
-    const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
-    context.dataAccess.Site.all.resolves([
-      makeSite(TARGET_SITE_ID, 'https://weekly-error.com'),
-    ]);
-    postgrestStub.from.resetBehavior();
-    postgrestStub.from.onCall(0).returns(makePostgrestChain({
-      data: [{ site_id: TARGET_SITE_ID, hits: 10 }],
-      error: null,
-    }));
-    postgrestStub.from.onCall(1).returns(makePostgrestChain({
-      data: [{ site_id: TARGET_SITE_ID, hits: 10 }],
-      error: null,
-    }));
-    postgrestStub.from.onCall(2).returns(makePostgrestChain({
-      data: [],
-      error: null,
-    }));
-    postgrestStub.from.onCall(3).returns(makePostgrestChain({
-      data: null,
-      error: { message: 'weekly range failed' },
-    }));
+  it('retries transient errors (EBUSY) and recovers without failing the report', async () => {
+    // shouldAdvanceTime auto-fires the retry's setTimeout under the fake clock.
+    const clock = sinon.useFakeTimers({
+      now: new Date('2026-05-26T12:00:00Z').getTime(),
+      shouldAdvanceTime: true,
+    });
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://flaky.site')]);
+    const goodRows = [
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-20T06:46:00Z',
+        metadata: {},
+        skipped: false,
+      },
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.daily,
+        projected_at: '2026-05-20T06:54:00Z',
+        metadata: { dailyRefreshDates: ['2026-05-19'] },
+        skipped: false,
+      },
+      {
+        scope_prefix: TARGET_SITE_ID,
+        handler_name: HANDLERS.weekly,
+        projected_at: '2026-05-25T07:10:00Z',
+        metadata: { weeklyRefreshWeeks: ['2026-05-18'] },
+        skipped: false,
+      },
+    ];
+    const flaky = makePostgrest(goodRows);
+    // First call resolves with a transient EBUSY error in the result envelope
+    // (this is how supabase-js surfaces RPC failures, not as a rejected Promise).
+    const originalFrom = flaky.from;
+    let firstCall = true;
+    flaky.from = sinon.stub().callsFake((...args) => {
+      const chain = originalFrom(...args);
+      if (firstCall) {
+        firstCall = false;
+        const ebusy = Object.assign(
+          new Error('getaddrinfo EBUSY data-svc-balanced.internal'),
+          { code: 'EBUSY' },
+        );
+        chain.then = (_resolve, reject) => {
+          reject(ebusy);
+        };
+      }
+      return chain;
+    });
+    context.dataAccess.services.postgrestClient = flaky;
 
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-05-03'], slackContext);
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
     clock.restore();
 
-    expect(context.log.error).to.have.been.calledWith(
-      'Error in check-agentic-traffic-db-status:',
-      sinon.match.instanceOf(Error),
-    );
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('weekly range failed');
+    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    // daily query: 1 transient failure + 1 retry; then weekly + raw queries.
+    expect(flaky.from.callCount).to.equal(4);
+  });
+
+  it('defaults to yesterday when no date argument is given', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://wknd.site')]);
+
+    await CheckAgenticTrafficDbStatusCommand(context).handleExecution([], slackContext);
+    clock.restore();
+
+    expect(slackContext.say.firstCall.args[0]).to.include('*2026-05-25*');
+  });
+
+  it('gives up on non-transient errors without retry', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-06-01T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([makeSite(TARGET_SITE_ID, 'https://err.site')]);
+    const pg = makePostgrest([]);
+    // Non-transient rejection at the terminal: must propagate without retry.
+    const originalFrom = pg.from;
+    pg.from = sinon.stub().callsFake((...args) => {
+      const chain = originalFrom(...args);
+      chain.then = (_resolve, reject) => {
+        reject(Object.assign(new Error('permission denied'), { code: 'PGRST301' }));
+      };
+      return chain;
+    });
+    context.dataAccess.services.postgrestClient = pg;
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    // 3 parallel per-handler queries, each attempted once (no retry for non-transient).
+    expect(pg.from.callCount).to.equal(3);
+    expect(context.log.error).to.have.been.called;
+  });
+
+  it('chunks site IDs across multiple PostgREST calls (250 sites -> 2 chunks)', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-26T12:00:00Z').getTime());
+    const sites = Array.from({ length: 250 }, (_, i) => {
+      const id = `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+      return makeSite(id, `https://site-${i}.example.com`);
+    });
+    context.dataAccess.Site.all.resolves(sites);
+    const audits = sites.flatMap((s) => [
+      {
+        scope_prefix: s.getId(),
+        handler_name: HANDLERS.raw,
+        projected_at: '2026-05-20T06:46:00Z',
+        metadata: {},
+        skipped: false,
+      },
+      {
+        scope_prefix: s.getId(),
+        handler_name: HANDLERS.daily,
+        projected_at: '2026-05-20T06:54:00Z',
+        metadata: { dailyRefreshDates: ['2026-05-19'] },
+        skipped: false,
+      },
+      {
+        scope_prefix: s.getId(),
+        handler_name: HANDLERS.weekly,
+        projected_at: '2026-05-25T07:10:00Z',
+        metadata: { weeklyRefreshWeeks: ['2026-05-18'] },
+        skipped: false,
+      },
+    ]);
+    const postgrest = makePostgrest(audits);
+    context.dataAccess.services.postgrestClient = postgrest;
+
+    await CheckAgenticTrafficDbStatusCommand(context)
+      .handleExecution(['2026-05-19'], slackContext);
+    clock.restore();
+
+    // 250 sites, chunk size 150 -> 2 chunks; 3 per-handler queries each = 6 calls.
+    const calls = postgrest.from.callCount;
+    expect(calls).to.equal(6);
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    expect(output).to.include('Dashboard-ready: *250/250*');
   });
 });

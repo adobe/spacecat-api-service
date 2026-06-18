@@ -40,7 +40,6 @@ import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
 import {
   sendAutofixMessage,
-  getCookieValue,
   getIMSPromiseToken,
   ErrorWithStatusCode,
   getHostName,
@@ -48,9 +47,68 @@ import {
   isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import { postSlackMessage } from '../utils/slack/base.js';
+import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+async function isSitePlgTier(site, log) {
+  try {
+    const enrollments = await site.getSiteEnrollments();
+    const entitlements = await Promise.all((enrollments ?? []).map((e) => e.getEntitlement()));
+    return entitlements.some((e) => e?.getProductCode() === 'ASO' && e.getTier() === 'PLG');
+  } catch (err) {
+    log.warn(`Failed to determine PLG tier for site ${site.getId()}: ${err.message}`);
+    return false;
+  }
+}
+
+async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context, isPlgTier) {
+  const { env, log } = context;
+  const channelId = env?.SLACK_PLG_SKIP_CHANNEL_ID;
+  const token = env?.SLACK_BOT_TOKEN;
+  if (!channelId || !token) {
+    return;
+  }
+
+  try {
+    const plg = isPlgTier !== undefined ? isPlgTier : await isSitePlgTier(site, log);
+    if (!plg) {
+      return;
+    }
+
+    const siteBaseURL = site.getBaseURL?.() ?? site.getId();
+    const opportunityType = opportunity.getType?.() ?? 'unknown';
+    const opportunityId = opportunity.getId?.() ?? 'unknown';
+    const suggestionId = suggestion.getId?.() ?? 'unknown';
+    const skipReason = suggestion.getSkipReason?.() ?? null;
+    const skipDetail = suggestion.getSkipDetail?.() ?? null;
+
+    let message = ':no_entry_sign: *PLG Customer Skipped a Suggestion*\n\n'
+      + `• *Site:* \`${siteBaseURL}\`\n`
+      + `• *Site ID:* \`${site.getId()}\`\n`
+      + `• *Opportunity Type:* \`${opportunityType}\`\n`
+      + `• *Opportunity ID:* \`${opportunityId}\`\n`
+      + `• *Suggestion ID:* \`${suggestionId}\``;
+
+    if (skipReason) {
+      message += `\n• *Skip Reason:* \`${skipReason}\``;
+    }
+    if (skipDetail) {
+      message += `\n• *Skip Detail:* \`${skipDetail}\``;
+    }
+
+    await postSlackMessage(channelId, message, token);
+  } catch (alertError) {
+    log.error('Failed to send PLG suggestion skip Slack alert', {
+      error: alertError,
+      suggestionId: suggestion.getId?.(),
+      siteId: site.getId?.(),
+    });
+  }
+}
 
 /**
  * Suggestions controller.
@@ -191,8 +249,13 @@ function SuggestionsController(ctx, sqs, env) {
     return data?.isDomainWide === true;
   };
 
+  const isPathSuggestion = (suggestion) => {
+    const data = suggestion.getData();
+    return Array.isArray(data?.allowedRegexPatterns) && !data?.isDomainWide;
+  };
+
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
+    Opportunity, Suggestion, SuggestionGrant, Site, GeoExperiment,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -673,6 +736,7 @@ function SuggestionsController(ctx, sqs, env) {
         suggestion.setKpiDeltas(kpiDeltas);
       }
 
+      let isNewSkipTransition = false;
       if (hasText(status) && status !== suggestion.getStatus()) {
         const { valid, error } = validateSkipFields(status, skipReason, skipDetail);
         if (!valid) {
@@ -681,6 +745,7 @@ function SuggestionsController(ctx, sqs, env) {
         hasUpdates = true;
         suggestion.setStatus(status);
         if (status === SuggestionModel.STATUSES.SKIPPED) {
+          isNewSkipTransition = true;
           if (suggestion.setSkipReason) {
             suggestion.setSkipReason(skipReason ?? null);
             suggestion.setSkipDetail(skipDetail ?? null);
@@ -710,6 +775,10 @@ function SuggestionsController(ctx, sqs, env) {
       if (hasUpdates) {
         suggestion.setUpdatedBy(profile.email || 'system');
         const updatedSuggestion = await suggestion.save();
+        if (isNewSkipTransition) {
+          postPlgSuggestionSkipAlert(site, opportunity, updatedSuggestion, context)
+            .catch((err) => context.log.error(`PLG skip alert failed: ${err.message}`));
+        }
         return ok(SuggestionDto.toJSON(updatedSuggestion));
       }
     } catch (e) {
@@ -796,6 +865,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Request body must be an array of [{ id: <suggestion id>, status: <suggestion status> },...]');
     }
 
+    const isPlgSite = await isSitePlgTier(site, context.log);
+
     const suggestionPromises = context.data.map(async (item, index) => {
       const {
         id, status, skipReason, skipDetail,
@@ -847,12 +918,26 @@ function SuggestionsController(ctx, sqs, env) {
       }
 
       const currentStatus = suggestion.getStatus();
+      let isNewSkipTransition = false;
       try {
         if (currentStatus !== status) {
           // Validate REJECTED status transition
           if (status === SuggestionModel.STATUSES.REJECTED) {
-            // Check admin access for REJECTED status
-            if (!accessControlUtil.hasAdminAccess()) {
+            // S2S consumers with suggestion:write capability may also reject suggestions
+            const s2sResult = await accessControlUtil.hasS2SCapability(CAP_SUGGESTION_WRITE);
+            if (s2sResult.allowed) {
+              context.log.info(`[acl] S2S REJECT granted - suggestionId=${id} clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
+            } else if (s2sResult.reason !== 'not-s2s') {
+              // S2S call but missing the required capability — audit trail + immediate denial
+              context.log.warn(`[acl] S2S REJECT denied - suggestionId=${id} reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+              return {
+                index,
+                uuid: id,
+                message: 'S2S consumer does not have the required capability to reject suggestions',
+                statusCode: 403,
+              };
+            } else if (!accessControlUtil.hasAdminAccess()) {
+              // Not an S2S call — original admin gate, unchanged
               return {
                 index,
                 uuid: id,
@@ -874,6 +959,7 @@ function SuggestionsController(ctx, sqs, env) {
 
           suggestion.setStatus(status);
           if (status === SuggestionModel.STATUSES.SKIPPED) {
+            isNewSkipTransition = true;
             if (suggestion.setSkipReason) {
               suggestion.setSkipReason(skipReason ?? null);
               suggestion.setSkipDetail(skipDetail ?? null);
@@ -895,6 +981,7 @@ function SuggestionsController(ctx, sqs, env) {
             suggestion.setUpdatedBy(profile.email);
           } else {
             context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+            suggestion.setUpdatedBy(profile.email);
           }
         } else {
           return {
@@ -905,16 +992,23 @@ function SuggestionsController(ctx, sqs, env) {
           };
         }
       } catch (e) {
-        // Validation error on setStatus
+        if (e?.name !== VALIDATION_ERROR_NAME) {
+          context.log.error(`[patchSuggestionsStatus] unexpected error for suggestionId=${id}: ${e.message}`);
+        }
         return {
           index,
           uuid: id,
           message: e.message,
-          statusCode: 400,
+          statusCode: e?.name === VALIDATION_ERROR_NAME ? 400 : 500,
         };
       }
       try {
         const updatedSuggestion = await suggestion.save();
+        if (isNewSkipTransition) {
+          const opp = await suggestion.getOpportunity();
+          postPlgSuggestionSkipAlert(site, opp, updatedSuggestion, context, isPlgSite)
+            .catch((err) => context.log.error(`PLG skip alert failed: ${err.message}`));
+        }
         return {
           index,
           uuid: id,
@@ -1048,7 +1142,13 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+    const s2sResult = await accessControlUtil.hasS2SCapability(CAP_FIX_ENTITY_CREATE);
+    if (s2sResult.allowed) {
+      ctx.log?.info(`[acl] S2S auto-fix granted - clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
+    } else if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+      if (s2sResult.reason !== 'not-s2s') {
+        ctx.log?.info(`[acl] Denied PATCH auto-fix - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+      }
       return forbidden('User does not belong to the organization or does not have sufficient permissions');
     }
 
@@ -1093,10 +1193,11 @@ function SuggestionsController(ctx, sqs, env) {
       if (invalidEntry !== undefined) {
         return badRequest('Each page must be a valid URL string or an object with pageUrl (valid URL) and optional imageUrls (array of valid URLs)');
       }
-      const configuration = await Configuration.findLatest();
-      if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-        return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-      }
+      // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+      // intentionally. Auto-fix deploys are user-initiated one-off actions; gating them
+      // on the scheduled-audit enabled-list blocked legitimate ad-hoc deploys for sites
+      // that simply weren't on that list. Access control (`auto_fix` permission) above
+      // still rejects unauthorized callers.
       const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
       // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
       await sqs.sendMessage(queueUrl, {
@@ -1127,10 +1228,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    const configuration = await Configuration.findLatest();
-    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-      return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-    }
+    // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+    // intentionally — see the matching note in the assess-urls branch above.
     const suggestions = await Suggestion.allByOpportunityId(
       opportunityId,
     );
@@ -1255,10 +1354,12 @@ function SuggestionsController(ctx, sqs, env) {
     let promiseTokenResponse;
     const skipPromiseToken = isAssessAction && precheckOnly === true;
     if (!skipPromiseToken) {
-      const cookieToken = getCookieValue(context, 'promiseToken');
-      if (hasText(cookieToken)) {
-        promiseTokenResponse = { promise_token: cookieToken };
+      const headerToken = context.pathInfo?.headers?.['x-promise-token'];
+      if (hasText(headerToken)) {
+        context.log.info('[autofix] using promise token from x-promise-token header');
+        promiseTokenResponse = { promise_token: headerToken };
       } else {
+        context.log.info('[autofix] no x-promise-token header, creating promise token via IMS');
         try {
           promiseTokenResponse = await getIMSPromiseToken(context);
         } catch (e) {
@@ -1683,6 +1784,7 @@ function SuggestionsController(ctx, sqs, env) {
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
     const domainWideSuggestions = [];
+    const pathSuggestions = [];
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
     // Check each requested suggestion (basic validation only)
@@ -1698,6 +1800,7 @@ function SuggestionsController(ctx, sqs, env) {
           statusCode: 404,
         });
       } else if (isDomainWideSuggestion(suggestion)) {
+        context.log.info(`[edge-deploy] ${suggestionId} → DOMAIN-WIDE`);
         const data = suggestion.getData();
         if (isNonEmptyArray(data.allowedRegexPatterns)) {
           domainWideSuggestions.push({
@@ -1710,6 +1813,28 @@ function SuggestionsController(ctx, sqs, env) {
             uuid: suggestionId,
             index,
             message: 'Domain-wide suggestion missing allowedRegexPatterns',
+            statusCode: 400,
+          });
+        }
+      } else if (isPathSuggestion(suggestion)) {
+        context.log.info(`[edge-deploy] ${suggestionId} → PATH (patterns=${JSON.stringify(suggestion.getData()?.allowedRegexPatterns)})`);
+        const data = suggestion.getData();
+        if (data?.edgeDeployed) {
+          context.log.warn(`[edge-deploy] site: ${apexBaseUrl}, path suggestion ${suggestionId} is already deployed`);
+          failedSuggestions.push({
+            uuid: suggestionId,
+            index,
+            message: 'Path suggestion already deployed',
+            statusCode: 400,
+          });
+        } else if (isNonEmptyArray(data.allowedRegexPatterns)) {
+          pathSuggestions.push({ suggestion, allowedRegexPatterns: data.allowedRegexPatterns });
+        } else {
+          context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, path suggestion ${suggestionId} missing allowedRegexPatterns`);
+          failedSuggestions.push({
+            uuid: suggestionId,
+            index,
+            message: 'Path suggestion missing allowedRegexPatterns',
             statusCode: 400,
           });
         }
@@ -1731,6 +1856,7 @@ function SuggestionsController(ctx, sqs, env) {
     const validSuggestionIds = [
       ...validSuggestions.map((s) => s.getId()),
       ...domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
+      ...pathSuggestions.map(({ suggestion }) => suggestion.getId()),
     ];
 
     if (validSuggestionIds.length === 0) {
@@ -1765,6 +1891,9 @@ function SuggestionsController(ctx, sqs, env) {
       });
 
       let geoExperiment = null;
+      // Tracks whether the Atomic strategy was successfully written, so the
+      // outer catch knows whether to compensate by deleting it.
+      let atomicStrategyCreated = false;
       try {
         const preScheduleParams = getScheduleParams(
           context,
@@ -1777,24 +1906,31 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('Missing required environment variables');
         }
         const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
-        let promptSources;
-        if (domainWideSuggestions.length > 0) {
-          const newStatus = SuggestionModel.STATUSES.NEW;
-          const allNew = await Suggestion.allByOpportunityIdAndStatus(opportunityId, newStatus);
-          const top15ByContentGainRatio = [...allNew]
-            .filter((s) => s.getData()?.isDomainWide !== true)
-            .sort((a, b) => (b.getData()?.contentGainRatio || 0)
-              - (a.getData()?.contentGainRatio || 0))
-            .slice(0, 15);
-          promptSources = top15ByContentGainRatio
-            .sort((a, b) => (b.getData()?.agenticTraffic || 0) - (a.getData()?.agenticTraffic || 0))
-            .slice(0, 10);
-        } else {
-          promptSources = validSuggestions;
-        }
         const domainWideSuggestionIds = new Set(
           domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
         );
+        let promptSources;
+        if (domainWideSuggestions.length > 0) {
+          promptSources = [...allSuggestions]
+            .filter((s) => {
+              const data = s.getData() || {};
+              return !domainWideSuggestionIds.has(s.getId())
+                && s.getStatus() === SuggestionModel.STATUSES.NEW
+                && !data.edgeDeployed
+                && data.aiSummary
+                && data.valuable === true;
+            })
+            .sort((a, b) => {
+              const aScore = (a.getData()?.agenticTraffic || 0)
+                * (a.getData()?.contentGainRatio || 0);
+              const bScore = (b.getData()?.agenticTraffic || 0)
+                * (b.getData()?.contentGainRatio || 0);
+              return bScore - aScore;
+            })
+            .slice(0, 100);
+        } else {
+          promptSources = validSuggestions;
+        }
         urls = promptSources
           .filter((s) => !domainWideSuggestionIds.has(s.getId()))
           .map((s) => s.getData()?.url)
@@ -1840,6 +1976,20 @@ function SuggestionsController(ctx, sqs, env) {
 
         context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_STARTED`);
 
+        // Create the Atomic strategy before DRS / suggestion-marking so a
+        // failure rolls back cheaply via the outer catch.
+        await createAtomicStrategy({
+          siteId,
+          geoExperimentId,
+          opportunityId,
+          opportunityType: opportunity.getType(),
+          name: geoExperiment.getName?.() || `${opportunity.getType()}-${new Date().toISOString().slice(0, 10)}`,
+          profile,
+          s3: context.s3,
+          log: context.log,
+        });
+        atomicStrategyCreated = true;
+
         let preScheduleId;
         try {
           const drsClient = DrsClient.createFrom(context);
@@ -1854,6 +2004,7 @@ function SuggestionsController(ctx, sqs, env) {
             triggerImmediately: true,
             enableBrandPresence: true,
             metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
+            timeout: 12_000,
           });
           preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;
           if (!preScheduleId) {
@@ -1875,6 +2026,7 @@ function SuggestionsController(ctx, sqs, env) {
         const validSuggestionEntities = [
           ...validSuggestions,
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+          ...pathSuggestions.map(({ suggestion }) => suggestion),
         ];
 
         const markResults = await Promise.allSettled(
@@ -1929,9 +2081,23 @@ function SuggestionsController(ctx, sqs, env) {
             context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
           }
         }
+        // Delete the strategy if it was created so we don't leave an orphan.
+        if (atomicStrategyCreated) {
+          try {
+            await deleteAtomicStrategy({
+              siteId,
+              strategyId: geoExperimentId,
+              s3: context.s3,
+              log: context.log,
+            });
+          } catch (cleanupError) {
+            context.log.error(`[atomic-strategy-cleanup-failed] site: ${apexBaseUrl}, Failed to delete atomic strategy ${geoExperimentId}: ${cleanupError.message}`, cleanupError);
+          }
+        }
         const allSuggestionEntities = [
           ...validSuggestions,
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+          ...pathSuggestions.map(({ suggestion }) => suggestion),
         ];
         await Promise.allSettled(
           allSuggestionEntities
@@ -1965,12 +2131,14 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    // Deploy all suggestions (regular + domain-wide) via tokowaka client
+    // Deploy all suggestions (regular + domain-wide + path-level) via tokowaka client
     let succeededSuggestions = [];
     const allTargetSuggestions = [
       ...validSuggestions,
       ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+      ...pathSuggestions.map(({ suggestion }) => suggestion),
     ];
+    context.log.info(`[edge-deploy] Summary: valid=${validSuggestions.length}, domainWide=${domainWideSuggestions.length}, path=${pathSuggestions.length}, failed=${failedSuggestions.length}, targets=${allTargetSuggestions.length}`);
 
     try {
       const tokowakaClient = TokowakaClient.createFrom(context);
@@ -2024,7 +2192,7 @@ function SuggestionsController(ctx, sqs, env) {
         failed: failedSuggestions.length,
         ...(coveredSuggestionsCount > 0 && {
           autoCovered: coveredSuggestionsCount,
-          message: `${coveredSuggestionsCount} additional suggestion(s) automatically marked as deployed (covered by domain-wide configuration)`,
+          message: `${coveredSuggestionsCount} additional suggestion(s) automatically marked as deployed (covered by ${domainWideSuggestions.length > 0 ? 'domain-wide' : 'path-level'} configuration)`,
         }),
       },
     };
@@ -2294,130 +2462,52 @@ function SuggestionsController(ctx, sqs, env) {
         }
       }
     });
-    context.log.info(`[edge-rollback] validSuggestions count: ${validSuggestions.length},
-      failedSuggestions count: ${failedSuggestions.length}`);
+    const validPatterns = validSuggestions.filter(
+      (s) => Array.isArray(s.getData()?.allowedRegexPatterns),
+    );
+    const validPerUrl = validSuggestions.filter(
+      (s) => !Array.isArray(s.getData()?.allowedRegexPatterns),
+    );
+    context.log.info(
+      `[edge-rollback] valid: ${validSuggestions.length}`
+      + ` (pattern=${validPatterns.length}, perUrl=${validPerUrl.length}),`
+      + ` failed: ${failedSuggestions.length},`
+      + ` allSuggestions: ${allSuggestions.length}`,
+    );
+    validPatterns.forEach((s) => {
+      const d = s.getData();
+      context.log.info(
+        `[edge-rollback] Pattern: ${s.getId()}`
+        + ` patterns=${JSON.stringify(d?.allowedRegexPatterns)}`
+        + ` isDomainWide=${d?.isDomainWide}`,
+      );
+    });
     let succeededSuggestions = [];
 
-    // Separate domain-wide from regular suggestions
-    const domainWideSuggestions = validSuggestions.filter((s) => isDomainWideSuggestion(s));
-    const regularSuggestions = validSuggestions.filter((s) => !isDomainWideSuggestion(s));
-
-    // Handle domain-wide rollbacks separately (for prerender)
-    if (isNonEmptyArray(domainWideSuggestions)) {
-      try {
-        const tokowakaClient = TokowakaClient.createFrom(context);
-        const baseURL = site.getBaseURL();
-
-        for (const suggestion of domainWideSuggestions) {
-          try {
-            // Fetch existing metaconfig
-            // eslint-disable-next-line no-await-in-loop
-            const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
-
-            if (metaconfig && metaconfig.prerender) {
-              // Remove prerender configuration from metaconfig
-              delete metaconfig.prerender;
-
-              // Upload updated metaconfig
-              // eslint-disable-next-line no-await-in-loop
-              await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
-
-              context.log.info(`Removed prerender config from metaconfig for domain-wide suggestion ${suggestion.getId()}`);
-            }
-
-            // Remove edgeDeployed (and legacy tokowakaDeployed) from the domain-wide suggestion
-            const currentData = suggestion.getData();
-            delete currentData.edgeDeployed;
-            // TODO: To be removed, kept for backward compatibility
-            delete currentData.tokowakaDeployed;
-            delete currentData.edgeDeployed;
-            suggestion.setData(currentData);
-            suggestion.setUpdatedBy(profile?.email || 'tokowaka-rollback');
-            // eslint-disable-next-line no-await-in-loop
-            await suggestion.save();
-
-            succeededSuggestions.push(suggestion);
-
-            // Find and update all suggestions that were covered by this domain-wide deployment
-            const coveredSuggestions = allSuggestions.filter(
-              (s) => s.getData()?.coveredByDomainWide === suggestion.getId(),
-            );
-
-            if (isNonEmptyArray(coveredSuggestions)) {
-              context.log.info(`Rolling back ${coveredSuggestions.length} suggestions covered by domain-wide deployment`);
-
-              // eslint-disable-next-line no-await-in-loop
-              await Promise.all(
-                coveredSuggestions.map(async (coveredSuggestion) => {
-                  const coveredData = coveredSuggestion.getData();
-                  delete coveredData.edgeDeployed;
-                  // TODO: To be removed, kept for backward compatibility
-                  delete coveredData.tokowakaDeployed;
-                  delete coveredData.edgeDeployed;
-                  delete coveredData.coveredByDomainWide;
-                  coveredSuggestion.setData(coveredData);
-                  coveredSuggestion.setUpdatedBy(profile?.email || 'domain-wide-rollback');
-                  return coveredSuggestion.save();
-                }),
-              );
-            }
-          } catch (error) {
-            context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error rolling back domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
-            failedSuggestions.push({
-              uuid: suggestion.getId(),
-              index: suggestionIds.indexOf(suggestion.getId()),
-              message: `Rollback failed: ${error.message}`,
-              statusCode: 500,
-            });
-          }
-        }
-      } catch (error) {
-        context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during domain-wide rollback: ${error.message}`, error);
-        domainWideSuggestions.forEach((suggestion) => {
-          failedSuggestions.push({
-            uuid: suggestion.getId(),
-            index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Rollback failed: Internal server error',
-            statusCode: 500,
-          });
-        });
-      }
-    }
-
-    // Only attempt rollback if we have regular (non-domain-wide) suggestions
-    if (isNonEmptyArray(regularSuggestions)) {
+    // Delegate all rollback to the tokowaka client — domain-wide, path-level, and per-URL
+    // suggestions are all handled uniformly. The client also cleans up suggestions that were
+    // covered by a domain-wide or path-level pattern deployment.
+    if (isNonEmptyArray(validSuggestions)) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
 
-        // Rollback suggestions
         const result = await tokowakaClient.rollbackSuggestions(
           site,
           opportunity,
-          regularSuggestions,
+          validSuggestions,
+          {
+            allSuggestions,
+            updatedBy: profile?.email,
+          },
         );
 
-        // Process results
         const {
           succeededSuggestions: processedSuggestions,
           failedSuggestions: ineligibleSuggestions,
         } = result;
 
-        // Update successfully rolled back suggestions
-        // - remove edgeDeployed (and legacy tokowakaDeployed) timestamp
-        succeededSuggestions = await Promise.all(
-          processedSuggestions.map(async (suggestion) => {
-            const currentData = suggestion.getData();
-            delete currentData.edgeDeployed;
-            // TODO: To be removed, kept for backward compatibility
-            delete currentData.tokowakaDeployed;
-            delete currentData.edgeDeployed;
-            suggestion.setData(currentData);
-            suggestion.setUpdatedBy(profile?.email || 'tokowaka-rollback');
-            return suggestion.save();
-          }),
-        );
+        succeededSuggestions = processedSuggestions;
 
-        // Add ineligible suggestions to failed list
         ineligibleSuggestions.forEach((item) => {
           context.log.info(`[edge-rollback-failed] site: ${apexBaseUrl}, ${opportunity.getType()}`
           + ` suggestion ${item.suggestion.getId()} is ineligible: ${item.reason}`);
@@ -2425,14 +2515,13 @@ function SuggestionsController(ctx, sqs, env) {
             uuid: item.suggestion.getId(),
             index: suggestionIds.indexOf(item.suggestion.getId()),
             message: item.reason,
-            statusCode: 400,
+            statusCode: item.statusCode || 400,
           });
         });
 
         context.log.info(`[edge-rollback] Successfully rolled back ${succeededSuggestions.length} suggestions from Edge by ${profile?.email || 'tokowaka-rollback'}`);
       } catch (error) {
-        context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during Tokowaka rollback: ${error.message}`, error);
-        // If rollback fails, mark all valid suggestions as failed
+        context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during rollback: ${error.message}`, error);
         validSuggestions.forEach((suggestion) => {
           failedSuggestions.push({
             uuid: suggestion.getId(),

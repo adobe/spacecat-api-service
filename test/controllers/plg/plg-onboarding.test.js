@@ -11,10 +11,20 @@
  */
 
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+// Import real PlgOnboarding model statics for esmock stubs: normalizeDomain and
+// isValidDomain are pure utilities that the controller now delegates to. Stubbing
+// them out would silently disable validation — use the real implementations.
+import RealPlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { isSafeDomain } from '../../../src/controllers/plg/plg-onboarding.js';
+
+const PLG_MODEL_DOMAIN_HELPERS = {
+  normalizeDomain: RealPlgOnboardingModel.normalizeDomain,
+  isValidDomain: RealPlgOnboardingModel.isValidDomain,
+};
 
 use(sinonChai);
 
@@ -28,6 +38,7 @@ const TEST_ONBOARDING_ID = 'onboarding-uuid-1';
 const DEFAULT_ORG_ID = 'default-org-id';
 const DEMO_ORG_ID = '66331367-70e6-4a49-8445-4f6d9c265af9';
 const OTHER_CUSTOMER_ORG_ID = 'other-customer-org-id';
+const ASO_PRODUCT_CODE = 'ASO';
 
 describe('PlgOnboardingController', function describePlgOnboarding() {
   // esmock + extensive sinon stubs make individual tests slower than the 2000ms default.
@@ -371,7 +382,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         },
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
           Entitlement: {
-            PRODUCT_CODES: { ASO: 'aso_optimizer' },
+            PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
             TIERS: {
               FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
             },
@@ -379,6 +390,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         },
         '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
           default: {
+            ...PLG_MODEL_DOMAIN_HELPERS,
             STATUSES: {
               IN_PROGRESS: 'IN_PROGRESS',
               ONBOARDED: 'ONBOARDED',
@@ -402,6 +414,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               CLOSED: 'CLOSED',
               REOPENED: 'REOPENED',
               OFFBOARDED: 'OFFBOARDED',
+              PENDING: 'PENDING',
             },
           },
         },
@@ -450,7 +463,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     };
   }
 
-  function buildContext(data = {}, { authInfo } = {}) {
+  function buildContext(data = {}, { authInfo, headers } = {}) {
     return {
       data,
       dataAccess: mockDataAccess,
@@ -460,6 +473,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       attributes: {
         authInfo: authInfo !== undefined ? authInfo : mockAuthInfo(),
       },
+      pathInfo: { headers: headers || {} },
     };
   }
 
@@ -594,7 +608,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: {
                 FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
               },
@@ -602,6 +616,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -625,6 +640,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 CLOSED: 'CLOSED',
                 REOPENED: 'REOPENED',
                 OFFBOARDED: 'OFFBOARDED',
+                PENDING: 'PENDING',
               },
             },
           },
@@ -695,17 +711,27 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    const invalidHostnames = [
+    const invalidDomains = [
       '../../etc/passwd',
       'domain.com:8080',
-      'http://domain.com',
       '-invalid.com',
       `${'a'.repeat(254)}.com`,
       'domain..com',
+      'nba.com?q=1',
+      'nba.com#section',
+      'nba.com/kings?q=1',
+      'nba.com/kings#section',
+      'nba.com/..',
+      'nba.com/../etc/passwd',
+      'nba.com//kings',
+      'nba.com/',
+      'nba.com/.hidden',
+      'nba.com/v1..0',
+      'nba.com/v1.0.',
     ];
 
-    invalidHostnames.forEach((invalidDomain) => {
-      it(`returns 400 for invalid hostname: ${invalidDomain}`, async () => {
+    invalidDomains.forEach((invalidDomain) => {
+      it(`returns 400 for invalid domain: ${invalidDomain}`, async () => {
         const context = buildContext({ domain: invalidDomain });
 
         const res = await controller.onboard(context);
@@ -720,6 +746,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       'myhost.local',
       'service.internal',
       'foo.private.adobe.io',
+      'myhost.local/path',
+      'service.internal/api',
+      'foo.localhost',
+      'foo.localhost/api',
     ];
 
     unsafeDomains.forEach((unsafeDomain) => {
@@ -733,8 +763,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
     });
 
-    // These fail hostname validation before reaching SSRF check
-    const invalidAsHostnames = [
+    // These fail domain validation before reaching SSRF check
+    const invalidAsDomains = [
       'localhost',
       '127.0.0.1',
       '10.0.0.1',
@@ -745,7 +775,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       '[::1]',
     ];
 
-    invalidAsHostnames.forEach((domain) => {
+    invalidAsDomains.forEach((domain) => {
       it(`returns 400 for invalid/unsafe domain: ${domain}`, async () => {
         const context = buildContext({ domain });
 
@@ -753,6 +783,124 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
         expect(res.status).to.equal(400);
         expect(res.value).to.include('Invalid domain');
+      });
+    });
+
+    // Hex/octal/decimal IPv4 literals — WHATWG URL canonicalizes these to private
+    // IPs (e.g. 0xa9.254.169.254 → 169.254.169.254 AWS IMDS), bypassing raw-string
+    // denylists. Closed at the shared validator (alphabetic TLD requirement) and
+    // additionally at isSafeDomain (canonicalize-before-denylist + net.isIP check).
+    const hexIpAttacks = [
+      ['hex IMDS', '0xa9.254.169.254'],
+      ['hex loopback', '0x7f.0.0.1'],
+      ['hex RFC1918', '0xa.0.0.1'],
+      ['hex all-labels', '0xa9.0xfe.0xa9.0xfe'],
+      ['octal IPv4', '0177.0.0.1'],
+    ];
+
+    hexIpAttacks.forEach(([label, domain]) => {
+      it(`returns 400 for ${label} attack: ${domain}`, async () => {
+        const context = buildContext({ domain });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid domain');
+        // Lock that the request never reached the fetch path
+        expect(composeBaseURLStub).to.not.have.been.called;
+        expect(mockDataAccess.PlgOnboarding.create).to.not.have.been.called;
+      });
+    });
+  });
+
+  // --- Subpath domain support ---
+
+  describe('onboard - subpath domain support', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    const validSubpathDomains = [
+      'nba.com/kings',
+      'nba.com/us/kings',
+      'www.example.com/blog',
+      'nba.com/v1.0',
+      'nba.com/kings.html',
+    ];
+
+    validSubpathDomains.forEach((domain) => {
+      it(`accepts subpath domain: ${domain}`, async () => {
+        const context = buildContext({ domain });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(200);
+
+        // Lock in that the full subpath flows through end-to-end (no silent path-stripping)
+        expect(composeBaseURLStub).to.have.been.calledWith(domain);
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ domain }),
+        );
+      });
+    });
+
+    // Locks the prepareDomain canonicalization: mixed-case input must be lowercased
+    // BEFORE reaching composeBaseURL and PlgOnboarding.create, otherwise the model's
+    // schema validator (lowercase-only) would reject the write at the DB layer.
+    const mixedCaseCanonicalCases = [
+      { input: 'NBA.COM', expected: 'nba.com', desc: 'uppercase host' },
+      { input: 'NBA.COM/Kings', expected: 'nba.com/kings', desc: 'uppercase host + path' },
+      { input: 'nba.com/Kings', expected: 'nba.com/kings', desc: 'lowercase host, mixed-case path' },
+      { input: 'Https://NBA.COM/Kings', expected: 'nba.com/kings', desc: 'mixed-case scheme + host + path' },
+    ];
+
+    mixedCaseCanonicalCases.forEach(({ input, expected, desc }) => {
+      it(`canonicalizes mixed case: ${desc} (${input} → ${expected})`, async () => {
+        const context = buildContext({ domain: input });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(200);
+        expect(composeBaseURLStub).to.have.been.calledWith(expected);
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ domain: expected }),
+        );
+      });
+    });
+
+    it('accepts scheme-prefixed subpath input (strips https://)', async () => {
+      const context = buildContext({ domain: 'https://nba.com/kings' });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(composeBaseURLStub).to.have.been.calledWith('nba.com/kings');
+      expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+        sinon.match({ domain: 'nba.com/kings' }),
+      );
+    });
+
+    // Pins stripScheme behavior via the controller boundary (the helper itself is not exported).
+    const stripSchemeCases = [
+      { input: 'http://nba.com/kings', expected: 'nba.com/kings', desc: 'lowercase http://' },
+      { input: 'HTTP://nba.com/kings', expected: 'nba.com/kings', desc: 'uppercase HTTP://' },
+      { input: 'HtTpS://nba.com', expected: 'nba.com', desc: 'mixed-case scheme' },
+      { input: 'nba.com', expected: 'nba.com', desc: 'schemeless passthrough' },
+    ];
+
+    stripSchemeCases.forEach(({ input, expected, desc }) => {
+      it(`stripScheme: ${desc} -> ${expected}`, async () => {
+        const context = buildContext({ domain: input });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(200);
+        expect(composeBaseURLStub).to.have.been.calledWith(expected);
+      });
+    });
+
+    // Non-http schemes and protocol-relative inputs are NOT stripped; isValidDomain rejects them.
+    const stripSchemeRejectCases = [
+      { input: 'ftp://nba.com', desc: 'non-http scheme not stripped' },
+      { input: '//nba.com', desc: 'protocol-relative not stripped' },
+    ];
+
+    stripSchemeRejectCases.forEach(({ input, desc }) => {
+      it(`stripScheme: ${desc} -> 400`, async () => {
+        const context = buildContext({ domain: input });
+        const res = await controller.onboard(context);
+        expect(res.status).to.equal(400);
       });
     });
   });
@@ -773,9 +921,23 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(res.value).to.include('internal organizations');
     });
 
+    it('returns 400 for frescopa domain', async () => {
+      const context = buildContext({ domain: 'frescopa.com' });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.include('not available for frescopa domains');
+    });
+
+    it('returns 400 for frescopa subdomain', async () => {
+      const context = buildContext({ domain: 'shop.frescopa.com' });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.include('not available for frescopa domains');
+    });
+
     it('returns 400 when org already has a non-PLG ASO entitlement (paid customer)', async () => {
       const paidEntitlement = {
-        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
         getTier: sandbox.stub().returns('PAID'),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([paidEntitlement]);
@@ -788,7 +950,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
     it('proceeds when org has a PLG-tier ASO entitlement', async () => {
       const plgEntitlement = {
-        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
         getTier: sandbox.stub().returns('PLG'),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([plgEntitlement]);
@@ -800,7 +962,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
     it('proceeds when org has a FREE_TRIAL ASO entitlement (not treated as paid)', async () => {
       const trialEntitlement = {
-        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
         getTier: sandbox.stub().returns('FREE_TRIAL'),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([trialEntitlement]);
@@ -812,7 +974,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
     it('proceeds when org has a PRE_ONBOARD ASO entitlement (not treated as paid)', async () => {
       const preOnboardEntitlement = {
-        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
         getTier: sandbox.stub().returns('PRE_ONBOARD'),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([preOnboardEntitlement]);
@@ -879,7 +1041,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: {
                 FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
               },
@@ -887,6 +1049,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -987,7 +1150,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: {
                 FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
               },
@@ -995,6 +1158,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -1036,7 +1200,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const notifController = NotifController({ log: mockLog });
       mockDataAccess.Entitlement.allByOrganizationId.resolves([{
-        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
         getTier: sandbox.stub().returns('PAID'),
       }]);
 
@@ -1099,7 +1263,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: {
                 FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
               },
@@ -1107,6 +1271,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -1346,6 +1511,94 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('user@example.com');
+    });
+
+    it('sets createdBy when request comes from ASO UI on an existing record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'IN_PROGRESS', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
+    });
+
+    it('does not set createdBy when request does not come from ASO UI', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'IN_PROGRESS', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('does not set createdBy when x-client-type is a different value', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'IN_PROGRESS', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { headers: { 'x-client-type': 'some-other-client' } },
+      );
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('sets createdBy when request comes from ASO UI on a WAITLISTED record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'WAITLISTED', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      await controller.onboard(context);
+
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
+    });
+
+    it('sets createdBy when request comes from ASO UI on an ERROR record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'ERROR', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      await controller.onboard(context);
+
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
+    });
+
+    it('sets createdBy when request comes from ASO UI on an OUTDATED record', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'OUTDATED', createdBy: 'system' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'ABC123' }], email: 'ese@adobe.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+
+      await controller.onboard(context);
+
+      expect(existingOnboarding.setCreatedBy).to.have.been.calledWith('ese@adobe.com');
     });
 
     it('resumes existing onboarding record for same imsOrgId+domain', async () => {
@@ -1986,7 +2239,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: {
                 FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
               },
@@ -1994,6 +2247,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2006,7 +2260,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2395,7 +2649,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: {
                 FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
               },
@@ -2403,6 +2657,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2415,7 +2670,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2524,6 +2779,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2536,7 +2792,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -2632,6 +2888,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -2644,7 +2901,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 OUTDATED: 'OUTDATED',
               },
               REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED',
+                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
               },
             },
           },
@@ -3108,24 +3365,271 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // delivery type should NOT be fetched again at site creation (cached)
+      // called once in the RUM-fail path; Step 5a is skipped (siteCreated=true)
       expect(findDeliveryTypeStub).to.have.been.calledOnce;
     });
 
-    it('prefers existing site delivery type over findDeliveryType when RUM fails', async () => {
+    it('alerts via Slack when detected delivery type differs from stored type', async () => {
       rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
       findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.resolves('aem_edge');
       const existingSite = createMockSite({ deliveryType: 'aem_cs', orgId: TEST_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
-      const context = buildContext({ domain: TEST_DOMAIN });
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const AlertController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            created: (data) => ({ status: 201, value: data }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            noContent: () => ({ status: 204 }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+              },
+              REVIEW_DECISIONS: {
+                BYPASSED: 'BYPASSED',
+                UPHELD: 'UPHELD',
+              },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+            postSlackMessage: postSlackMessageStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
+          '../../../src/support/access-control-util.js': {
+            default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+          },
+          '../../../src/support/rum-config-service.js': { updateRumConfig: updateRumConfigStub },
+        },
+      )).default;
 
-      const res = await controller.onboard(context);
+      const alertController = AlertController({ log: mockLog });
+      const context = buildContext({ domain: TEST_DOMAIN });
+      context.env = {
+        ...context.env,
+        SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C_ALERT',
+        SLACK_BOT_TOKEN: 'xoxb-test',
+      };
+
+      const res = await alertController.onboard(context);
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      expect(findDeliveryTypeStub).to.not.have.been.called;
-      expect(mockLog.info).to.have.been.calledWithMatch(/Using existing site delivery type aem_cs/);
+      expect(findDeliveryTypeStub).to.have.been.calledOnceWith(TEST_BASE_URL);
+      // site must NOT be mutated — alert only
+      expect(existingSite.setDeliveryType).to.not.have.been.called;
+      expect(existingSite.setDeliveryConfig).to.not.have.been.called;
+      expect(existingSite.setHlxConfig).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Delivery type mismatch/);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      const [channelId, message] = postSlackMessageStub.firstCall.args;
+      expect(channelId).to.equal('C_ALERT');
+      expect(message).to.include('aem_cs');
+      expect(message).to.include('aem_edge');
+      expect(message).to.include(existingSite.getId());
+      expect(message).to.include(TEST_ORG_ID);
+    });
+
+    it('logs error and continues onboarding when delivery type mismatch Slack alert fails', async () => {
+      rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
+      findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.resolves('aem_edge');
+      const existingSite = createMockSite({ deliveryType: 'aem_cs', orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const postSlackMessageStub = sandbox.stub().rejects(new Error('Slack API down'));
+      const AlertController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            created: (data) => ({ status: 201, value: data }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            noContent: () => ({ status: 204 }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+              },
+              REVIEW_DECISIONS: {
+                BYPASSED: 'BYPASSED',
+                UPHELD: 'UPHELD',
+              },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+            postSlackMessage: postSlackMessageStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
+          '../../../src/support/access-control-util.js': {
+            default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+          },
+          '../../../src/support/rum-config-service.js': { updateRumConfig: updateRumConfigStub },
+        },
+      )).default;
+
+      const alertController = AlertController({ log: mockLog });
+      const context = buildContext({ domain: TEST_DOMAIN });
+      context.env = {
+        ...context.env,
+        SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C_ALERT',
+        SLACK_BOT_TOKEN: 'xoxb-test',
+      };
+
+      const res = await alertController.onboard(context);
+
+      // Onboarding must still succeed despite the Slack failure
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWithMatch(/Failed to post delivery type mismatch alert/);
+    });
+
+    it('does not alert when detected delivery type matches existing', async () => {
+      findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.resolves('aem_edge');
+      const existingSite = createMockSite({ deliveryType: 'aem_edge', orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingSite.setDeliveryType).to.not.have.been.called;
+      expect(mockLog.warn).to.not.have.been.calledWithMatch(/Delivery type mismatch/);
+    });
+
+    it('skips Step 5a entirely for a new site — no redundant findDeliveryType call', async () => {
+      findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.resolves('aem_edge');
+      // no existing site — Site.findByBaseURL returns null so Site.create is called
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      // findDeliveryType called once in Step 5 for site creation; Step 5a is skipped
+      expect(findDeliveryTypeStub).to.have.been.calledOnce;
+      expect(mockLog.info).to.not.have.been.calledWithMatch(/Clearing stale config/);
     });
 
     it('does not use site delivery type OTHER — calls findDeliveryType when RUM fails', async () => {
@@ -3141,8 +3645,24 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      expect(findDeliveryTypeStub).to.have.been.calledOnceWith(TEST_BASE_URL);
+      // called twice: once in the RUM-fail path (type is OTHER) and once in Step 5a
+      expect(findDeliveryTypeStub).to.have.been.calledTwice;
+      expect(findDeliveryTypeStub).to.have.been.calledWith(TEST_BASE_URL);
       expect(mockLog.info).to.not.have.been.calledWithMatch(/Using existing site delivery type/);
+    });
+
+    it('continues onboarding when findDeliveryType throws in Step 5a', async () => {
+      findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.rejects(new Error('network timeout'));
+      const existingSite = createMockSite({ deliveryType: 'aem_cs', orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingSite.setDeliveryType).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to detect delivery type/);
     });
   });
 
@@ -3207,6 +3727,56 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('stamps customer identity as createdBy when request comes from ASO UI', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo, headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      );
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('customer@example.com');
+    });
+
+    it('does not set createdBy when request is not from ASO UI', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('does not set createdBy when x-client-type is a different value', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo, headers: { 'x-client-type': 'some-other-client' } });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('does not set createdBy when pathInfo is absent', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      delete context.pathInfo;
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
+    });
+
+    it('does not set createdBy when headers are absent', async () => {
+      mockOnboarding.getStatus.returns('PRE_ONBOARDING');
+      const authInfo = { getProfile: sandbox.stub().returns({ tenants: [{ id: 'AAAAAAAABBBBBBBBCCCCCCCC' }], email: 'customer@example.com' }) };
+      const context = buildContext({ domain: TEST_DOMAIN }, { authInfo });
+      context.pathInfo = {};
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setCreatedBy).to.not.have.been.called;
     });
 
     it('allows onboarding when other domains exist but none are onboarded', async () => {
@@ -3356,7 +3926,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const mockAsoEntitlement = {
         getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
-        getProductCode: sandbox.stub().returns('aso_optimizer'), // matches mocked PRODUCT_CODES.ASO
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
         getTier: sandbox.stub().returns('PLG'),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
@@ -3409,7 +3979,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const mockAsoEntitlement = {
         getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
-        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
         getTier: sandbox.stub().returns('PLG'),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
@@ -3451,7 +4021,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const mockAsoEntitlement = {
         getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
-        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
         getTier: sandbox.stub().returns('PLG'),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
@@ -3829,7 +4399,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
 
       mockDataAccess.Entitlement.allByOrganizationId.resolves([
-        { getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID), getProductCode: sandbox.stub().returns('aso_optimizer'), getTier: sandbox.stub().returns('PLG') },
+        {
+          getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
+          getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
+          getTier: sandbox.stub().returns('PLG'),
+        },
       ]);
 
       // Simulate enrollment revocation failure on the first call (displacement),
@@ -4934,7 +5508,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: {
                 FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
               },
@@ -4942,6 +5516,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -5083,12 +5658,13 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             },
             '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
               Entitlement: {
-                PRODUCT_CODES: { ASO: 'aso_optimizer' },
+                PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
                 TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
               },
             },
             '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
               default: {
+                ...PLG_MODEL_DOMAIN_HELPERS,
                 STATUSES: {
                   IN_PROGRESS: 'IN_PROGRESS',
                   ONBOARDED: 'ONBOARDED',
@@ -5657,7 +6233,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: {
                 FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
               },
@@ -5665,6 +6241,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
             default: {
+              ...PLG_MODEL_DOMAIN_HELPERS,
               STATUSES: {
                 IN_PROGRESS: 'IN_PROGRESS',
                 ONBOARDED: 'ONBOARDED',
@@ -5687,6 +6264,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
                 CLOSED: 'CLOSED',
                 REOPENED: 'REOPENED',
                 OFFBOARDED: 'OFFBOARDED',
+                PENDING: 'PENDING',
               },
             },
           },
@@ -5761,7 +6339,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             },
             '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
               Entitlement: {
-                PRODUCT_CODES: { ASO: 'aso_optimizer' },
+                PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
                 TIERS: {
                   FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
                 },
@@ -5769,6 +6347,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             },
             '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
               default: {
+                ...PLG_MODEL_DOMAIN_HELPERS,
                 STATUSES: {
                   IN_PROGRESS: 'IN_PROGRESS',
                   ONBOARDED: 'ONBOARDED',
@@ -6018,6 +6597,88 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setUpdatedBy).to.have.been.calledWith('admin');
         const reviews = record.setReviews.firstCall.args[0];
         expect(reviews[0].reviewedBy).to.equal('admin');
+      });
+
+      it('PENDING: records review without changing status', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain is not an AEM site',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Emailed customer, awaiting response' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setReviews).to.have.been.calledOnce;
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(1);
+        expect(reviews[0].decision).to.equal('PENDING');
+        expect(reviews[0].justification).to.equal('Emailed customer, awaiting response');
+        expect(reviews[0].reviewedBy).to.equal('ese@adobe.com');
+        expect(record.setStatus).to.not.have.been.called;
+        expect(record.setWaitlistReason).to.not.have.been.called;
+        expect(record.save).to.have.been.calledOnce;
+      });
+
+      it('PENDING: preserves existing reviews', async () => {
+        const existingReview = {
+          reason: 'Domain is not an AEM site',
+          decision: 'PENDING',
+          reviewedBy: 'other-ese@adobe.com',
+          reviewedAt: '2026-05-01T10:00:00.000Z',
+          justification: 'First contact attempt',
+        };
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain is not an AEM site',
+          reviews: [existingReview],
+        });
+        record.getReviews.returns([existingReview]);
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Second follow-up sent' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(2);
+        expect(reviews[0]).to.deep.equal(existingReview);
+        expect(reviews[1].decision).to.equal('PENDING');
+        expect(reviews[1].justification).to.equal('Second follow-up sent');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
+      it('PENDING: succeeds even when waitlistReason is absent (no checkKey needed)', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: null,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'PENDING', justification: 'Emailed customer, awaiting response' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews[0].decision).to.equal('PENDING');
+        expect(record.setStatus).to.not.have.been.called;
+        expect(record.save).to.have.been.calledOnce;
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: replaces old domain and re-runs flow', async () => {
@@ -6319,7 +6980,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: revokes ASO enrollments when old domain has a linked site', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const asoEntitlement = { getProductCode: () => ASO_PRODUCT_CODE };
         const mockEnrollment = {
           getId: () => 'enroll-1',
           remove: sandbox.stub().resolves(),
@@ -6461,7 +7122,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: continues and logs warn when enrollment revocation throws', async () => {
         const failingEnrollment = {
           getId: () => 'enroll-fail',
-          getEntitlement: sandbox.stub().resolves({ getProductCode: () => 'aso_optimizer' }),
+          getEntitlement: sandbox.stub().resolves({ getProductCode: () => ASO_PRODUCT_CODE }),
           remove: sandbox.stub().rejects(new Error('DB error')),
         };
         const oldSite = createMockSite({ siteEnrollments: [failingEnrollment] });
@@ -7015,6 +7676,60 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setStatus).to.not.have.been.called;
       });
 
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: rejects scheme-prefixed internal IP (regression for isSafeDomain bypass)', async () => {
+        // Regression: previously `https://10.0.0.1` slipped past isSafeDomain because
+        // split('/')[0] returned `https:` instead of the IP. isValidDomain now runs first.
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Use alternate', siteConfig: { alternateDomain: 'https://10.0.0.1' } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid alternate domain');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: rejects syntactically-valid SSRF target (foo.localhost)', async () => {
+        // Covers the isSafeDomain branch: input passes isValidDomain (has a dot, alphabetic TLD)
+        // but matches the \.localhost$ blocklist entry.
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Use alternate', siteConfig: { alternateDomain: 'foo.localhost' } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid alternate domain');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
       it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: retires current domain and onboards alternate domain', async () => {
         const record = createMockOnboarding({
           status: 'WAITLISTED',
@@ -7044,6 +7759,40 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(record.setStatus).to.have.been.calledWith('OUTDATED');
         expect(record.setWaitlistReason).to.have.been.calledWith(null);
         expect(record.save).to.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: subpath alternate domain reaches composeBaseURL and create with full path', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'Use alternate subpath',
+            siteConfig: { alternateDomain: 'other-example.com/kings' },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        // Pin that the FULL subpath (not just hostname) flows through the bypass entry
+        // point — locks in I4 equivalence for the alternateDomain code path.
+        expect(composeBaseURLStub).to.have.been.calledWith('other-example.com/kings');
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ domain: 'other-example.com/kings' }),
+        );
       });
 
       it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: retires current record when imsOrgId is missing', async () => {
@@ -7505,7 +8254,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
 
       it('transitions ONBOARDED to OUTDATED with OFFBOARDED review and revokes ASO enrollments', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const asoEntitlement = { getProductCode: () => ASO_PRODUCT_CODE };
         const mockEnrollment = {
           getId: () => 'enroll-1',
           remove: sandbox.stub().resolves(),
@@ -7535,7 +8284,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
 
       it('transitions ONBOARDED to OUTDATED and warns when disabling summit-plg handler fails', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const asoEntitlement = { getProductCode: () => ASO_PRODUCT_CODE };
         const mockEnrollment = {
           getId: () => 'enroll-1',
           remove: sandbox.stub().resolves(),
@@ -7565,7 +8314,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           siteEnrollments: [{
             getId: () => 'enroll-fail',
             remove: sandbox.stub().rejects(new Error('revoke failed')),
-            getEntitlement: sandbox.stub().resolves({ getProductCode: () => 'aso_optimizer' }),
+            getEntitlement: sandbox.stub().resolves({ getProductCode: () => ASO_PRODUCT_CODE }),
           }],
         });
         const record = createMockOnboarding({ status: 'ONBOARDED', siteId: TEST_SITE_ID });
@@ -7982,7 +8731,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               status: 'WAITLISTED',
               siteId: newSiteId,
               organizationId: newOrgId,
-              steps: { orgResolved: true, rumVerified: true },
+              steps: { orgResolved: true, rumVerified: true, preOnboarded: true },
               botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4'], userAgent: 'bot' },
               waitlistReason: 'pending review',
               updatedBy: 'admin@example.com',
@@ -8005,7 +8754,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('admin@example.com');
           expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('admin@example.com');
           expect(mockOnboarding.setSteps).to.have.been.calledWith(
-            { orgResolved: true, rumVerified: true },
+            { orgResolved: true, rumVerified: true, preOnboarded: true },
           );
           expect(mockOnboarding.save).to.have.been.called;
         });
@@ -8078,6 +8827,63 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           expect(mockOnboarding.remove).to.have.been.called;
         });
       });
+    });
+  });
+
+  // Direct unit tests for the isSafeDomain defense-in-depth layer. These exercise
+  // branches that cannot be reached through the controller because isValidDomain
+  // rejects the relevant inputs upstream (hex IPs, malformed hostnames). The
+  // defense-in-depth contract still needs coverage so a future regression in
+  // isValidDomain does not silently expose the fetch path.
+  describe('isSafeDomain (direct unit tests for defense-in-depth)', () => {
+    it('returns false when new URL throws on a malformed rawHostname', () => {
+      // `[` makes WHATWG URL parser throw (unbalanced bracket).
+      expect(isSafeDomain('[')).to.be.false;
+    });
+
+    it('returns false when canonicalized hostname is an IPv4 literal', () => {
+      // Hex IPv4 canonicalizes to a private IP via new URL.
+      expect(isSafeDomain('0xa9.254.169.254')).to.be.false; // → 169.254.169.254 (AWS IMDS)
+      expect(isSafeDomain('0x7f.0.0.1')).to.be.false; // → 127.0.0.1
+      expect(isSafeDomain('0xa.0.0.1')).to.be.false; // → 10.0.0.1
+    });
+
+    it('returns false when canonicalized hostname is bare IPv4', () => {
+      expect(isSafeDomain('127.0.0.1')).to.be.false;
+      expect(isSafeDomain('10.0.0.1')).to.be.false;
+      expect(isSafeDomain('169.254.169.254')).to.be.false;
+    });
+
+    it('returns false when canonicalized hostname is a bracketed IPv6 literal', () => {
+      // new URL serializes IPv6 with brackets; the bracket-strip in isSafeDomain
+      // is what lets net.isIP recognize it. Without the strip, every private/
+      // link-local/IPv4-mapped IPv6 form would slip past the backstop.
+      expect(isSafeDomain('[fd00::1]')).to.be.false; // RFC 4193 ULA
+      expect(isSafeDomain('[fe80::1]')).to.be.false; // RFC 4291 link-local
+      expect(isSafeDomain('[::1]')).to.be.false; // loopback
+      expect(isSafeDomain('[::ffff:169.254.169.254]')).to.be.false; // IPv4-mapped IMDS
+      expect(isSafeDomain('[::ffff:7f00:1]')).to.be.false; // IPv4-mapped loopback
+    });
+
+    it('returns false for denylist string matches (non-IP)', () => {
+      expect(isSafeDomain('foo.localhost')).to.be.false;
+      expect(isSafeDomain('myhost.local')).to.be.false;
+      expect(isSafeDomain('service.internal')).to.be.false;
+      expect(isSafeDomain('foo.private.adobe.io')).to.be.false;
+      expect(isSafeDomain('localhost')).to.be.false;
+    });
+
+    it('returns true for legitimate public hostnames', () => {
+      expect(isSafeDomain('nba.com')).to.be.true;
+      expect(isSafeDomain('nba.com/kings')).to.be.true;
+      expect(isSafeDomain('1.2.3.4.example.com')).to.be.true;
+    });
+
+    it('extracts hostname from path-qualified domains before checking', () => {
+      // The path is stripped before canonicalization so an internal target in the
+      // hostname segment cannot be hidden behind a path.
+      expect(isSafeDomain('127.0.0.1/some/path')).to.be.false;
+      expect(isSafeDomain('myhost.local/api')).to.be.false;
     });
   });
 });

@@ -11,26 +11,19 @@
  */
 
 import {
-  accepted, badRequest, forbidden, internalServerError, ok,
+  accepted, badRequest, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { S3Client } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 import { parseAgentTypes } from './llmo-agent-types.js';
+import { checkDateRange } from './traffic-date-range.js';
 import { cachedOk } from '../../support/cached-response.js';
 
-/**
- * Site-scoped agentic traffic handler factories.
- * Queries mysticat-data-service PostgreSQL via PostgREST.
- *
- * All endpoints follow GET /sites/:siteId/agentic-traffic/:resource.
- * Access is validated by checking LLMO product entitlement on the site's organization.
- */
+// Site-scoped agentic traffic handlers. Queries mysticat-data-service via PostgREST.
 
-/**
- * Expected error message substrings from getSiteAndValidateAccess.
- * String matching is intentional until a shared error type exists.
- */
+// String-match against getSiteAndValidateAccess errors until a shared error type exists.
 const ERR_SITE_ACCESS = 'belonging to the organization';
 const ERR_NOT_FOUND = 'not found';
 
@@ -38,13 +31,11 @@ const VALID_INTERVALS = new Set(['day', 'week', 'month']);
 const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
 const VALID_SUCCESS_RATE_BUCKETS = new Set(['high', 'medium', 'low']);
 const EXPORT_VERSION = 'v1';
-const EXPORT_TYPE = 'agentic-traffic-urls-export';
+const EXPORT_CANONICAL_VERSION = 1;
+const EXPORT_KIND = 'agentic-traffic-urls';
+const EXPORT_TYPE = `${EXPORT_KIND}-export`;
+const EXPORT_FORMAT = 'csv';
 const EXPORT_ID_PATTERN = /^[a-f0-9]{64}$/;
-// Allowlists mirror the CASE whitelists in the DB RPCs — unknown values are already
-// rejected server-side, but we validate here too for defence-in-depth.
-// `parseAgentTypes` and the canonical agent-type list now live in
-// `./llmo-agent-types.js` so the URL Inspector handler can share them
-// without cross-controller imports.
 const VALID_SORT_COLUMNS_BY_URL = new Set([
   'host', 'url_path', 'total_hits', 'unique_agents',
   'success_rate', 'avg_ttfb_ms', 'category_name',
@@ -53,20 +44,14 @@ const VALID_SORT_COLUMNS_BY_USER_AGENT = new Set([
   'page_type', 'agent_type', 'unique_agents', 'total_hits',
 ]);
 const DEFAULT_BY_URL_LIMIT = 50;
-const MAX_BY_URL_LIMIT = 500;
+const MAX_BY_URL_LIMIT = 200;
+// Upper bound on the URL set accepted by the hits-by-urls endpoint. Must stay
+// <= the matching cap in rpc_agentic_hits_for_urls (2000) so the handler
+// rejects oversized input with a clean 400 before the RPC raises.
+const MAX_HITS_BY_URLS = 2000;
 
-/**
- * Maps UI platform filter codes (PLATFORM_CODES) to the values stored in the
- * agentic_traffic.platform column. Both ChatGPT paid/free codes map to the
- * same DB value; 'all' and unknown codes resolve to null (no filter).
- *
- * NOTE: This mapping is applied in parseAgenticTrafficParams and therefore
- * affects ALL site-scoped agentic traffic endpoints (kpis, kpis-trend,
- * by-region, by-category, by-page-type, by-status, by-user-agent, by-url,
- * filter-dimensions, weeks, movers, url-brand-presence). Before this mapping
- * existed, the raw UI code (e.g. "openai") was passed to the DB verbatim,
- * which never matched any rows. This is the intentional behavioural fix.
- */
+// UI platform code → DB value. 'all' / unknown → null (no filter). Applied
+// in parseAgenticTrafficParams, so it affects every site-scoped endpoint.
 const PLATFORM_CODE_TO_DB = {
   openai: 'ChatGPT',
   chatgpt: 'ChatGPT',
@@ -78,9 +63,7 @@ const PLATFORM_CODE_TO_DB = {
   amazon: 'Amazon',
 };
 
-// Re-exported from `./llmo-agent-types.js` so existing imports (the test
-// suite, the URL Inspector handler before it was switched to import the
-// shared module directly) keep working without churn.
+// Re-exported for existing imports.
 export { parseAgentTypes };
 
 function defaultDateRange() {
@@ -93,12 +76,8 @@ function defaultDateRange() {
   };
 }
 
-/**
- * Parse common agentic traffic query params from context.data.
- * Supports camelCase and snake_case aliases.
- */
-// Filter values reach the exportId hash + SQS message; coerce non-strings
-// to null and bound length (SQS limit is 256 KiB).
+// Filter values feed the exportId hash + SQS message — coerce non-strings to null
+// and cap length to keep messages under SQS's 256 KiB limit.
 const FILTER_STRING_MAX = 512;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -126,24 +105,18 @@ function parseAgenticTrafficParams(context) {
     platform: PLATFORM_CODE_TO_DB[q.platform] ?? null,
     categoryName: sanitizeFilterString(q.categoryName || q.category_name),
     agentType: sanitizeFilterString(q.agentType || q.agent_type),
-    // Additive inclusion list orthogonal to the single-value `agentType`. Used by the
-    // URL Inspector PG page to enforce `Agent Type ∈ {Chatbots, Research}`. Existing
-    // callers omit this and continue to receive the same data.
+    // Additive inclusion list, orthogonal to single-value `agentType`. Used by URL Inspector.
     agentTypes: parseAgentTypes(q.agentTypes ?? q.agent_types),
     userAgent: sanitizeFilterString(q.userAgent || q.user_agent),
     contentType: sanitizeFilterString(q.contentType || q.content_type),
     urlPathSearch: sanitizeFilterString(q.urlPathSearch || q.url_path_search),
-    // Normalise to null for unknown buckets — mirrors how PLATFORM_CODE_TO_DB handles
-    // unknown platform codes, preventing a DB exception (500) for invalid input.
+    // Unknown buckets → null (prevents DB 500 on invalid input).
     successRate: VALID_SUCCESS_RATE_BUCKETS.has(q.successRate || q.success_rate)
       ? (q.successRate || q.success_rate)
       : null,
   };
 }
 
-/**
- * Build the common RPC params object shared by all agentic traffic RPCs.
- */
 function buildRpcParams(siteId, parsed) {
   return {
     p_site_id: siteId,
@@ -160,7 +133,10 @@ function buildRpcParams(siteId, parsed) {
 
 function canonicalizeExportPayload(siteId, parsed) {
   return {
-    version: EXPORT_VERSION,
+    kind: EXPORT_KIND,
+    v: 1,
+    c: EXPORT_CANONICAL_VERSION,
+    format: EXPORT_FORMAT,
     siteId,
     startDate: parsed.startDate,
     endDate: parsed.endDate,
@@ -171,45 +147,74 @@ function canonicalizeExportPayload(siteId, parsed) {
     contentType: parsed.contentType,
     successRate: parsed.successRate,
     urlPathSearch: parsed.urlPathSearch,
-    format: 'csv',
   };
 }
 
-// Order-stable JSON serialisation. The canonical export payload is a flat
-// object of primitives, so the recursive object branch is enough — no array
-// handling needed.
-function stableStringify(value) {
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+// RFC 8785 JCS — strict on string/number/boolean/null/array/object. NaN/Infinity throw.
+export function jcsStringify(value) {
+  if (value === null) {
+    return 'null';
   }
-  return JSON.stringify(value);
+  if (typeof value === 'string') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false';
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new TypeError('JCS: non-finite numbers are not permitted');
+    }
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(jcsStringify).join(',')}]`;
+  }
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${jcsStringify(value[k])}`).join(',')}}`;
+  }
+  /* c8 ignore next -- unreachable for our payload shape */
+  throw new TypeError(`JCS: unsupported type ${typeof value}`);
 }
 
 function buildExportId(payload) {
-  return crypto.createHash('sha256').update(stableStringify(payload)).digest('hex');
+  return crypto.createHash('sha256').update(jcsStringify(payload)).digest('hex');
 }
 
-// EXPORT_VERSION is intentionally in both the key prefix (physical isolation)
-// and the canonical payload (forces hash invalidation on bump). Keep both.
+// `v{N}c{M}` path matches the s3-export-framework ADR.
+function buildExportPrefix(siteId, exportId) {
+  return `agentic-traffic/url-exports/${siteId}/${EXPORT_VERSION}c${EXPORT_CANONICAL_VERSION}/${exportId}`;
+}
+
 function buildExportKeys(siteId, exportId) {
-  const prefix = `agentic-traffic/url-exports/${siteId}/${EXPORT_VERSION}/${exportId}`;
+  const prefix = buildExportPrefix(siteId, exportId);
   return {
     csvKey: `${prefix}/urls.csv`,
     metadataKey: `${prefix}/metadata.json`,
   };
 }
 
-// Caps defend status-polling against a pathological prefix (malicious
-// continuation token, misbehaving worker).
+// Defense-in-depth on worker-written files[] — reject anything outside the
+// deterministic prefix or not matching urls.csv[_partN].
+function validateFilesAgainstPrefix(files, siteId, exportId) {
+  const prefix = `${buildExportPrefix(siteId, exportId)}/`;
+  const allowedFile = /^urls\.csv(?:_part\d+)?$/;
+  return files.filter((k) => {
+    if (typeof k !== 'string' || !k.startsWith(prefix)) {
+      return false;
+    }
+    return allowedFile.test(k.slice(prefix.length));
+  });
+}
+
+// Caps on status-polling against a pathological prefix.
 const MAX_EXPORT_LIST_PAGES = 5;
 const MAX_EXPORT_LIST_KEYS_PER_PAGE = 100;
 const PART_SUFFIX_PATTERN = /_part(\d+)$/;
 const REGEX_META_PATTERN = /[.*+?^${}()|[\]\\]/g;
 
 function getExportConfig(ctx) {
-  // S3_REPORT_BUCKET is the API service's existing env var name; the worker
-  // uses S3_REPORTING_BUCKET_NAME in its own Lambda env — both resolve to
-  // the same spacecat-{env}-reports bucket at deploy time.
   const s3Bucket = ctx.env?.S3_REPORT_BUCKET;
   const queueUrl = ctx.env?.REPORT_JOBS_QUEUE_URL;
   /* c8 ignore next -- default region when ctx.runtime is unset */
@@ -247,13 +252,55 @@ async function listExportCsvObjects(ctx, bucket, csvKey) {
   });
 }
 
+// CAS write of processing metadata. `casOnly` uses IfNoneMatch:* so the PUT
+// fails when the object exists (used on no-metadata path); stale/failed
+// retries overwrite. Returns false on race-loss, true on win.
+async function claimProcessingMetadata(ctx, bucket, metadataKey, exportId, siteId, casOnly) {
+  const { s3 } = ctx;
+  const body = JSON.stringify({
+    status: 'processing',
+    exportId,
+    siteId,
+    kind: EXPORT_KIND,
+    format: EXPORT_FORMAT,
+    createdAt: new Date().toISOString(),
+  });
+  const command = new s3.PutObjectCommand({
+    Bucket: bucket,
+    Key: metadataKey,
+    Body: body,
+    ContentType: 'application/json',
+    ...(casOnly ? { IfNoneMatch: '*' } : {}),
+  });
+  try {
+    await s3.s3Client.send(command);
+    return true;
+  } catch (error) {
+    // 412 is the canonical IfNoneMatch race-loss; SDK error names vary across versions.
+    if (error.$metadata?.httpStatusCode === 412 || error.name === 'PreconditionFailed') {
+      ctx.log.info(`Agentic traffic export: CAS race-loss on metadata.json (exportId=${exportId})`);
+      return false;
+    }
+    /* c8 ignore next 2 -- propagated to the route's catch-all */
+    throw error;
+  }
+}
+
+// Rolls back the CAS write when enqueue fails — otherwise a transient SQS
+// failure blocks the cache key until stale-processing expires.
+async function deleteProcessingMetadata(ctx, bucket, metadataKey) {
+  const { s3 } = ctx;
+  const command = new s3.DeleteObjectCommand({ Bucket: bucket, Key: metadataKey });
+  await s3.s3Client.send(command);
+}
+
 async function getExportMetadata(ctx, bucket, metadataKey) {
   const { s3 } = ctx;
+  let body;
   try {
     const command = new s3.GetObjectCommand({ Bucket: bucket, Key: metadataKey });
     const result = await s3.s3Client.send(command);
-    const body = await result.Body.transformToString();
-    return JSON.parse(body);
+    body = await result.Body.transformToString();
   } catch (error) {
     if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
       return null;
@@ -261,20 +308,40 @@ async function getExportMetadata(ctx, bucket, metadataKey) {
     /* c8 ignore next 2 -- propagated to the route's catch-all; not exercised in unit tests */
     throw error;
   }
+  try {
+    return JSON.parse(body);
+  } catch (parseError) {
+    ctx.log.warn(`Agentic traffic export: metadata.json is not valid JSON; treating as absent (key=${metadataKey})`);
+    return null;
+  }
 }
 
 // Presigned URLs are bearer credentials — short TTL bounds leak blast radius.
 const PRESIGNED_URL_TTL_SECONDS = 60 * 60;
 const MAX_EXPORT_DOWNLOAD_URLS = 50;
 
+// Sign customer URLs against s3-accelerate so the region is hidden, except
+// in IT (AWS_ENDPOINT_URL_S3 set) where accelerate doesn't exist.
+const acceleratedS3Clients = new Map();
+function getSigningClient(ctx, region) {
+  if (ctx.env?.AWS_ENDPOINT_URL_S3) {
+    return ctx.s3.s3Client;
+  }
+  if (!acceleratedS3Clients.has(region)) {
+    acceleratedS3Clients.set(region, new S3Client({ region, useAccelerateEndpoint: true }));
+  }
+  return acceleratedS3Clients.get(region);
+}
+
 async function buildExportReadyResponse(ctx, bucket, exportId, csvKeys, metadata = null) {
   const expiresIn = PRESIGNED_URL_TTL_SECONDS;
   const keysToSign = csvKeys.slice(0, MAX_EXPORT_DOWNLOAD_URLS);
+  const { s3Region } = getExportConfig(ctx);
+  const signingClient = getSigningClient(ctx, s3Region);
   const downloadUrls = await Promise.all(keysToSign.map(async (key) => {
     const command = new ctx.s3.GetObjectCommand({ Bucket: bucket, Key: key });
-    return ctx.s3.getSignedUrl(ctx.s3.s3Client, command, { expiresIn });
+    return ctx.s3.getSignedUrl(signingClient, command, { expiresIn });
   }));
-  // Computed after signing so callers see the floor of the URL window.
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
   return ok({
@@ -288,8 +355,7 @@ async function buildExportReadyResponse(ctx, bucket, exportId, csvKeys, metadata
   });
 }
 
-// Contract: worker writes CSV first, metadata.json last. Tighten to require
-// `metadata.status === 'success'` if that order ever changes.
+// Contract: worker writes CSV first, metadata.json last.
 function isExportReady(csvKeys, metadata) {
   return csvKeys.length > 0 && (!metadata || metadata.status === 'success');
 }
@@ -303,7 +369,6 @@ function isExportProcessing(metadata) {
 }
 
 // 30 min covers Aurora's 840s statement_timeout + Lambda overhead.
-// Older `processing` metadata is treated as abandoned so the cache key unblocks.
 const EXPORT_PROCESSING_STALE_MS = 30 * 60 * 1000;
 
 function isExportStaleProcessing(metadata) {
@@ -314,30 +379,15 @@ function isExportStaleProcessing(metadata) {
   return Number.isFinite(ageMs) && ageMs > EXPORT_PROCESSING_STALE_MS;
 }
 
-/**
- * Extra params for RPCs that accept the additive `p_agent_types TEXT[]` input
- * (currently `rpc_agentic_traffic_kpis_trend` and `rpc_agentic_traffic_by_url`).
- *
- * Returned as its own object so we don't accidentally send `p_agent_types` to
- * the other RPCs — PostgREST rejects calls with unknown named arguments, which
- * would 500 every dashboard whose RPC signature we haven't extended.
- */
+// Extra param for RPCs that accept `p_agent_types` (kpis-trend, by-url). Others would 500.
 function buildAgentTypesRpcParam(parsed) {
   return parsed.agentTypes !== null
     ? { p_agent_types: parsed.agentTypes }
     : {};
 }
 
-/**
- * Shared wrapper for agentic traffic handlers: PostgREST check + site/org access validation.
- * @param {Object} context - Request context
- * @param {Function} getSiteAndValidateAccess - Async (context) => { site, organization }
- * @param {string} handlerName - For error logging
- * @param {Function} handlerFn - Async (context, client, siteId, siteContext) => response
- *   siteContext = { site, organization } — forwarded from getSiteAndValidateAccess so
- *   handlers that need org data (e.g. url-brand-presence) avoid a second DB lookup.
- * @returns {Promise<Response>}
- */
+// PostgREST availability + site/org access check; forwards siteContext so
+// handlers needing org data avoid a second DB lookup.
 async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handlerName, handlerFn) {
   const { log, dataAccess } = context;
   const { Site } = dataAccess;
@@ -345,6 +395,12 @@ async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handler
   if (!Site?.postgrestService) {
     log.error('Agentic traffic APIs require PostgREST (DATA_SERVICE_PROVIDER=postgres)');
     return badRequest('Agentic traffic data is not available. PostgreSQL data service is required.');
+  }
+
+  const rangeError = checkDateRange(context.data);
+  if (rangeError) {
+    log.info(`Agentic traffic ${handlerName} rejected (date range guardrail): ${rangeError}`);
+    return badRequest(rangeError);
   }
 
   const { siteId } = context.params;
@@ -481,8 +537,7 @@ export function createAgenticTrafficByCategoryHandler(getSiteAndValidateAccess) 
       'by-category',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        // rpc_agentic_traffic_by_category has no p_category_name parameter —
-        // it groups by category, so filtering by it is not supported.
+        // by_category groups by category — no p_category_name parameter.
         const rpcParams = buildRpcParams(siteId, parsed);
         delete rpcParams.p_category_name;
         const { data, error } = await client.rpc(
@@ -672,11 +727,7 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
               && row.avg_citability_score !== undefined
               ? Number(row.avg_citability_score) : null,
             deployedAtEdge: row.deployed_at_edge ?? false,
-            // hits_trend is the [{ week_start, value }] payload generated by
-            // rpc_agentic_traffic_by_url's week_series CTE — forwarded as-is
-            // so the URL Inspector PG dashboard can derive its Owned-table
-            // sparkline + WoW direction from the same per-URL series the
-            // single-URL chart in URLDetailsPgDialog consumes.
+            // [{ week_start, value }] from week_series CTE — drives URL Inspector sparklines.
             hitsTrend: Array.isArray(row.hits_trend)
               ? row.hits_trend.map((point) => ({
                 weekStart: point.week_start,
@@ -691,12 +742,91 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
 }
 
 /**
- * POST /sites/:siteId/agentic-traffic/urls/export
+ * POST /sites/:siteId/agentic-traffic/hits-by-urls
  *
- * Creates or reuses a deterministic S3-backed URL export. The API does not run
- * the database export inline; it returns a cached download URL when present or
- * queues a reporting-worker job that calls the data-service DB-to-S3 RPC.
+ * Bounded keyed lookup of per-URL agentic totalHits + weekly hitsTrend for a
+ * caller-supplied set of canonical URLs (LLMO-5586). Backs the per-URL
+ * consumers (URL Inspector, opportunity sections, domain chart) that only need
+ * hits, so they no longer eager-page the expensive ranked `by-url` grid.
+ *
+ * Body: {
+ *   urls: [{ host, urlPath }],   // the URLs already on screen
+ *   startDate, endDate,          // same shape as the other agentic endpoints
+ *   platform?, agentType?, agentTypes?, userAgent?
+ * }
+ * Returns: { rows: [{ host, urlPath, totalHits, hitsTrend }] }
+ *
+ * Calls rpc_agentic_hits_for_urls, which matches rpc_agentic_traffic_by_url's
+ * fact-derived totals/trend exactly without the full-site scan + ranking.
  */
+export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) {
+  return async function getAgenticTrafficHitsByUrls(context) {
+    return withAgenticTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'hits-by-urls',
+      async (ctx, client, siteId) => {
+        const parsed = parseAgenticTrafficParams(ctx);
+
+        const rawUrls = ctx.data?.urls;
+        if (!Array.isArray(rawUrls)) {
+          return badRequest('urls must be an array of { host, urlPath } objects');
+        }
+        if (rawUrls.length > MAX_HITS_BY_URLS) {
+          return badRequest(`urls must contain at most ${MAX_HITS_BY_URLS} entries`);
+        }
+
+        // Normalise to the RPC's { host, url_path } shape; accept camelCase or
+        // snake_case for url_path and drop entries missing host or path.
+        const urls = rawUrls
+          .map((u) => ({ host: u?.host, url_path: u?.urlPath ?? u?.url_path }))
+          .filter((u) => hasText(u.host) && hasText(u.url_path));
+
+        if (urls.length === 0) {
+          // ok() not cachedOk(): this is a POST whose result varies by body,
+          // and cachedOk is documented as GET-only.
+          return ok({ rows: [] });
+        }
+
+        const rpcParams = {
+          p_site_id: siteId,
+          p_start_date: parsed.startDate,
+          p_end_date: parsed.endDate,
+          p_urls: urls,
+          p_platform: parsed.platform,
+          p_user_agent: parsed.userAgent,
+          ...buildAgentTypesRpcParam(parsed),
+        };
+
+        const { data, error } = await client.rpc('rpc_agentic_hits_for_urls', rpcParams);
+        if (error) {
+          ctx.log.error(`Agentic traffic hits-by-urls PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch agentic hits by URLs');
+        }
+        /* c8 ignore next */
+        const rows = data ?? [];
+        // raw vs valid surfaces caller-side URL-list bugs (entries dropped for
+        // missing host/path); returned is the RPC row count.
+        ctx.log.info(`Agentic traffic hits-by-urls: raw=${rawUrls.length} valid=${urls.length} returned=${rows.length}`);
+        return ok({
+          rows: rows.map((row) => ({
+            host: row.host || '',
+            urlPath: row.url_path || '',
+            totalHits: Number(row.total_hits ?? 0),
+            hitsTrend: Array.isArray(row.hits_trend)
+              ? row.hits_trend.map((point) => ({
+                weekStart: point.week_start ?? null,
+                value: Number(point.value ?? 0),
+              }))
+              : [],
+          })),
+        });
+      },
+    );
+  };
+}
+
+// POST /sites/:siteId/agentic-traffic/urls/export — cache-check S3 → enqueue SQS on miss.
 export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) {
   return async function exportAgenticTrafficUrls(context) {
     return withAgenticTrafficAuth(
@@ -707,7 +837,7 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
         const { s3, sqs } = ctx;
         /* c8 ignore start -- deploy-time misconfig guard, not exercised in unit tests */
         if (!s3?.s3Client || !s3?.ListObjectsV2Command || !s3?.GetObjectCommand
-          || !s3?.getSignedUrl || !sqs?.sendMessage) {
+          || !s3?.PutObjectCommand || !s3?.getSignedUrl || !sqs?.sendMessage) {
           return badRequest('Agentic traffic export requires S3 and SQS configuration');
         }
 
@@ -723,10 +853,19 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
         const { csvKey, metadataKey } = buildExportKeys(siteId, exportId);
 
         try {
-          const [csvKeys, metadata] = await Promise.all([
-            listExportCsvObjects(ctx, s3Bucket, csvKey),
-            getExportMetadata(ctx, s3Bucket, metadataKey),
-          ]);
+          const metadata = await getExportMetadata(ctx, s3Bucket, metadataKey);
+
+          // Fast path: sign worker-written files[] directly. Validated first.
+          if (metadata?.status === 'success'
+            && Array.isArray(metadata.files) && metadata.files.length > 0) {
+            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId);
+            if (safeFiles.length === metadata.files.length) {
+              return buildExportReadyResponse(ctx, s3Bucket, exportId, safeFiles, metadata);
+            }
+            ctx.log.warn(`Agentic traffic export: metadata.files contained out-of-prefix keys; falling back to ListObjectsV2 (exportId=${exportId})`);
+          }
+
+          const csvKeys = await listExportCsvObjects(ctx, s3Bucket, csvKey);
 
           if (isExportReady(csvKeys, metadata)) {
             return buildExportReadyResponse(ctx, s3Bucket, exportId, csvKeys, metadata);
@@ -739,22 +878,40 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
             });
           }
 
-          // Failed / stale-processing / no-metadata → re-enqueue. The worker
-          // overwrites metadata on retry; GET reports `failed` to the UI.
-          await sqs.sendMessage(queueUrl, {
-            type: EXPORT_TYPE,
-            data: {
-              siteId,
-              exportId,
-              filters: payload,
-              s3Bucket,
-              s3Key: csvKey,
-              metadataKey,
-              s3Region,
-              /* c8 ignore next -- 'unknown' fallback when authInfo is absent */
-              requestedBy: ctx.attributes?.authInfo?.profile?.email || 'unknown',
-            },
-          });
+          // CAS-claim: protects against double-enqueue AND don't clobber success metadata
+          // if CSVs were evicted. Stale/failed retries overwrite via casOnly=false.
+          const casOnly = metadata === null || metadata.status === 'success';
+          const claimed = await claimProcessingMetadata(
+            ctx,
+            s3Bucket,
+            metadataKey,
+            exportId,
+            siteId,
+            casOnly,
+          );
+          if (!claimed) {
+            return accepted({ exportId, status: 'processing' });
+          }
+
+          try {
+            await sqs.sendMessage(queueUrl, {
+              type: EXPORT_TYPE,
+              data: {
+                siteId,
+                exportId,
+                filters: payload,
+                s3Bucket,
+                s3Key: csvKey,
+                s3Region,
+                /* c8 ignore next -- 'unknown' fallback when authInfo is absent */
+                requestedBy: ctx.attributes?.authInfo?.profile?.email || 'unknown',
+              },
+            });
+          } catch (enqueueError) {
+            // Rollback so the next POST can retry instead of waiting for stale window.
+            await deleteProcessingMetadata(ctx, s3Bucket, metadataKey).catch(() => {});
+            throw enqueueError;
+          }
 
           return accepted({
             exportId,
@@ -771,11 +928,7 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
   };
 }
 
-/**
- * GET /sites/:siteId/agentic-traffic/urls/export/:exportId
- *
- * Polls S3 metadata and export objects for a deterministic export id.
- */
+// GET /sites/:siteId/agentic-traffic/urls/export/:exportId — polls S3 metadata.
 export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAccess) {
   return async function getAgenticTrafficUrlsExportStatus(context) {
     return withAgenticTrafficAuth(
@@ -804,10 +957,19 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
         const { csvKey, metadataKey } = buildExportKeys(siteId, exportId);
 
         try {
-          const [csvKeys, metadata] = await Promise.all([
-            listExportCsvObjects(ctx, s3Bucket, csvKey),
-            getExportMetadata(ctx, s3Bucket, metadataKey),
-          ]);
+          const metadata = await getExportMetadata(ctx, s3Bucket, metadataKey);
+
+          // Fast path: sign worker-written files[] directly. Validated first.
+          if (metadata?.status === 'success'
+            && Array.isArray(metadata.files) && metadata.files.length > 0) {
+            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId);
+            if (safeFiles.length === metadata.files.length) {
+              return buildExportReadyResponse(ctx, s3Bucket, exportId, safeFiles, metadata);
+            }
+            ctx.log.warn(`Agentic traffic export: metadata.files contained out-of-prefix keys; falling back to ListObjectsV2 (exportId=${exportId})`);
+          }
+
+          const csvKeys = await listExportCsvObjects(ctx, s3Bucket, csvKey);
 
           if (isExportReady(csvKeys, metadata)) {
             return buildExportReadyResponse(ctx, s3Bucket, exportId, csvKeys, metadata);
@@ -817,7 +979,9 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
             return ok({
               exportId,
               status: 'failed',
-              failureReason: metadata.failureReason ?? 'Export failed',
+              /* c8 ignore next 2 -- defaults for malformed worker metadata */
+              failureReason: metadata.failureReason ?? 'unknown',
+              failureMessage: metadata.failureMessage ?? 'Export failed',
             });
           }
 
@@ -825,8 +989,16 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
             return ok({
               exportId,
               status: 'failed',
-              failureReason: 'Export timed out — please retry',
+              failureReason: 'timeout',
+              failureMessage: 'Export timed out — please retry',
             });
+          }
+
+          // No metadata and no CSV → never POSTed (or evicted). Distinct from
+          // "POSTed, worker hasn't started yet" because POST writes processing
+          // metadata atomically before enqueueing.
+          if (!metadata && csvKeys.length === 0) {
+            return notFound(`No export found for exportId ${exportId}`);
           }
 
           return ok({
@@ -844,13 +1016,7 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
   };
 }
 
-/**
- * GET /sites/:siteId/agentic-traffic/filter-dimensions
- *
- * Delegates to rpc_agentic_traffic_distinct_filters, which returns all five
- * filter dimensions in a single round-trip with cascading behaviour: each
- * dimension list respects the other active filters but ignores its own.
- */
+// GET /sites/:siteId/agentic-traffic/filter-dimensions — cascading filter values in one RPC.
 export function createAgenticTrafficFilterDimensionsHandler(getSiteAndValidateAccess) {
   return async function getAgenticTrafficFilterDimensions(context) {
     return withAgenticTrafficAuth(
@@ -921,17 +1087,8 @@ export function createAgenticTrafficMoversHandler(getSiteAndValidateAccess) {
   };
 }
 
-/**
- * GET /sites/:siteId/agentic-traffic/weeks
- *
- * Returns the list of ISO weeks for which the site has agentic traffic data.
- * Powers the ContinuousWeekPicker (custom-weeks time range option).
- *
- * Queries agentic_traffic for the min and max traffic_date for the site,
- * then generates the full ISO week range between them.
- *
- * Returns: { weeks: [{ week: "2026-W10", startDate: "...", endDate: "..." }] }
- */
+// GET /sites/:siteId/agentic-traffic/weeks → ISO weeks between min/max traffic_date.
+// Returns: { weeks: [{ week, startDate, endDate }] }
 export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
   return async function getAgenticTrafficWeeks(context) {
     return withAgenticTrafficAuth(
@@ -988,16 +1145,7 @@ export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
   };
 }
 
-/**
- * GET /sites/:siteId/agentic-traffic/has-data
- *
- * Fast existence check — returns { hasData: boolean } indicating whether any
- * agentic traffic records exist for the site. Used by the PG dashboard to
- * decide whether to show the no-data overlay without waiting for all parallel
- * queries to settle.
- *
- * Runs a single PostgREST table query with limit(1) — no RPC required.
- */
+// GET /sites/:siteId/agentic-traffic/has-data → { hasData: boolean }. Single limit(1) query.
 export function createAgenticTrafficHasDataHandler(getSiteAndValidateAccess) {
   return async function getAgenticTrafficHasData(context) {
     return withAgenticTrafficAuth(
@@ -1023,18 +1171,8 @@ export function createAgenticTrafficHasDataHandler(getSiteAndValidateAccess) {
   };
 }
 
-/**
- * GET /sites/:siteId/agentic-traffic/url-brand-presence?url=&startDate=&endDate=&platform=
- *
- * Brand presence citation detail for a specific URL. Returns citation stats,
- * weekly citation trends, and the top prompts that cite this URL as a source
- * in brand presence LLM executions.
- *
- * The URL is resolved via source_urls.url_hash (md5 fast-lookup) so the caller
- * must pass a full URL (e.g. "https://www.example.com/path").
- * The organisation_id is derived from the site to keep auth consistent with all
- * other site-scoped agentic traffic endpoints.
- */
+// GET /sites/:siteId/agentic-traffic/url-brand-presence?url=&startDate=&endDate=&platform=
+// URL resolved via source_urls.url_hash (md5); organisation_id derived from site.
 export function createAgenticTrafficUrlBrandPresenceHandler(getSiteAndValidateAccess) {
   return async function getAgenticTrafficUrlBrandPresence(context) {
     return withAgenticTrafficAuth(

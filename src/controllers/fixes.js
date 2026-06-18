@@ -109,8 +109,34 @@ export class FixesController {
     let fixes = [];
 
     if (hasText(fixCreatedDate)) {
-      const fixEntitiesWithSuggestions = await this.#FixEntity
-        .getAllFixesWithSuggestionByCreatedAt(opportunityId, fixCreatedDate);
+      // Fetch all fixes with suggestions then filter in-memory by
+      // executedAt ?? createdAt date. The previous approach used the junction
+      // table (getAllFixesWithSuggestionByCreatedAt) which stores the date at
+      // fix-creation time when executedAt is still null. Once the deploy
+      // completes and executedAt is updated, the junction date no longer
+      // matches the UI accordion key (which uses executedAt), causing the
+      // accordion to show empty even though fixes exist.
+      const allFixesWithSuggestions = await this.#FixEntity
+        .getAllFixesWithSuggestionsByOpportunityId(opportunityId);
+
+      // Validate opportunity-site ownership before filtering/early return. Use the
+      // unfiltered result (or Opportunity.findById fallback) so an opportunity from
+      // a different site returns 404 even when no fix matches the requested date.
+      res = await checkOwnership(
+        allFixesWithSuggestions[0]?.fixEntity,
+        opportunityId,
+        siteId,
+        this.#Opportunity,
+      );
+      if (res) {
+        return res;
+      }
+
+      const fixEntitiesWithSuggestions = allFixesWithSuggestions.filter(({ fixEntity }) => {
+        const ts = fixEntity.getExecutedAt() ?? fixEntity.getCreatedAt();
+        const d = ts ? new Date(ts) : null;
+        return d && !Number.isNaN(d.getTime()) && d.toISOString().split('T')[0] === fixCreatedDate;
+      });
 
       if (fixEntitiesWithSuggestions.length === 0) {
         return ok([]);
@@ -125,25 +151,36 @@ export class FixesController {
         return fixEntity;
       });
 
-      // Check ownership for the first fix entity to ensure
-      // the opportunity belongs to the site
-      res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
-      if (res) {
-        return res;
-      }
-
       fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
       return ok(fixes);
     }
 
-    fixEntities = await this.#FixEntity.allByOpportunityId(opportunityId);
+    const fixEntitiesWithSuggestions = await this.#FixEntity
+      .getAllFixesWithSuggestionsByOpportunityId(opportunityId);
 
-    // Check whether the suggestion belongs to the opportunity,
-    // and the opportunity belongs to the site.
-    res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
+    // Validate opportunity-site ownership before any early return. checkOwnership
+    // falls back to Opportunity.findById when no fix is passed, so the empty-result
+    // case still returns 404 for an opportunity belonging to a different site.
+    res = await checkOwnership(
+      fixEntitiesWithSuggestions[0]?.fixEntity,
+      opportunityId,
+      siteId,
+      this.#Opportunity,
+    );
     if (res) {
       return res;
     }
+
+    if (fixEntitiesWithSuggestions.length === 0) {
+      return ok([]);
+    }
+
+    fixEntities = fixEntitiesWithSuggestions.map((item) => {
+      const { fixEntity } = item;
+      // eslint-disable-next-line no-underscore-dangle
+      fixEntity._suggestions = item.suggestions;
+      return fixEntity;
+    });
 
     fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);
