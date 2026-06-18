@@ -77,6 +77,33 @@ function safeError(msg) {
 }
 
 /**
+ * Derives the bare hostname (Semrush project domain) from a URL or host string.
+ * Mirrors brandDomainFromPayload in the brands controller so a draft's stashed
+ * primary URL resolves to the same domain at activation as it would at create.
+ * Returns null for empty/unparseable input.
+ */
+function domainFromUrl(value) {
+  if (!hasText(value)) {
+    return null;
+  }
+  try {
+    const u = new URL(value.includes('://') ? value : `https://${value}`);
+    return u.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stable identity for a market (market + languageCode), used to match a
+ * provisioned market against the deferred-provisioning stash. Case/space
+ * insensitive so 'US'/'us' and ' en'/'en' compare equal.
+ */
+function marketKey(market, languageCode) {
+  return `${String(market ?? '').trim().toLowerCase()}|${String(languageCode ?? '').trim().toLowerCase()}`;
+}
+
+/**
  * Extracts query params from the request URL. Does NOT fall back to
  * `context.data` (the request body) — body keys must never become query keys
  * on a GET (silent attribute-confusion vector).
@@ -745,15 +772,34 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const body = ctx.data || {};
-      const markets = Array.isArray(body.markets) ? body.markets : [];
+      const transport = buildTransport(ctx, imsToken);
+      const brand = await loadBrand(ctx, auth.brandUuid);
+      // Markets + primary URL come from the request body, but a pending (draft)
+      // brand activated from the wizard supplies none: fall back to what the
+      // wizard stashed at "Save as pending" (brands.pending_provisioning =
+      // { primaryUrl, markets }). A reactivation of an already-live brand
+      // re-supplies them in the body, so the body wins when present.
+      const pendingProvisioning = isNonEmptyObject(brand.getPendingProvisioning?.())
+        ? brand.getPendingProvisioning()
+        : null;
+      const hadPendingProvisioning = pendingProvisioning != null;
+      const storedMarkets = Array.isArray(pendingProvisioning?.markets)
+        ? pendingProvisioning.markets
+        : [];
+      const markets = Array.isArray(body.markets) && body.markets.length > 0
+        ? body.markets
+        : storedMarkets;
       if (markets.length === 0) {
         throw new ErrorWithStatusCode('markets must be a non-empty array', 400);
       }
       if (markets.length > MAX_MARKETS) {
         throw new ErrorWithStatusCode(`markets must not exceed ${MAX_MARKETS} entries`, 400);
       }
-      const transport = buildTransport(ctx, imsToken);
-      const brand = await loadBrand(ctx, auth.brandUuid);
+      // The Semrush project domain: the request's brandDomain, else derived from
+      // the stashed draft primary URL (the wizard's "Save as pending" URL).
+      const brandDomain = hasText(body.brandDomain)
+        ? body.brandDomain
+        : domainFromUrl(pendingProvisioning?.primaryUrl);
       // Brand aliases are brand-level: read once and apply to every market's
       // project (Semrush brand_names) in this batch.
       const brandAliases = await getBrandAliasNames(
@@ -792,7 +838,7 @@ function SerenityController(context, log, env) {
         const createBody = {
           market: m.market,
           languageCode: m.languageCode,
-          brandDomain: body.brandDomain,
+          brandDomain,
           brandNames: body.brandNames,
           brandDisplayName: body.brandDisplayName,
           name: m.name,
@@ -845,8 +891,31 @@ function SerenityController(context, log, env) {
         });
       }
 
+      // Per-market cleanup of the deferred-provisioning stash: drop every market
+      // that was just provisioned (201 = created now, 409 = already live), so a
+      // retry re-provisions ONLY the markets that still failed. When nothing
+      // remains, clear the whole blob (the draft is fully provisioned). Markets
+      // that failed this round stay stashed (with the primary URL) for retry.
+      const provisionedKeys = new Set(
+        results
+          .filter((r) => r.status === 201 || r.status === 409)
+          .map((r) => marketKey(r.market, r.languageCode)),
+      );
+      const remainingMarkets = storedMarkets.filter(
+        (m) => !provisionedKeys.has(marketKey(m.market, m.languageCode)),
+      );
+
       if (anyLive && typeof brand.setStatus === 'function') {
         brand.setStatus('active');
+        // Update the stash to just the not-yet-provisioned markets (or null when
+        // all are done). Saved atomically with the status flip below.
+        if (hadPendingProvisioning && typeof brand.setPendingProvisioning === 'function') {
+          brand.setPendingProvisioning(
+            remainingMarkets.length > 0
+              ? { primaryUrl: pendingProvisioning.primaryUrl ?? null, markets: remainingMarkets }
+              : null,
+          );
+        }
         try {
           await brand.save();
         } catch (saveError) {

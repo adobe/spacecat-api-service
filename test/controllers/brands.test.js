@@ -4563,6 +4563,86 @@ describe('Brands Controller', () => {
         expect(response.status).to.equal(201);
         expect(provisionStub.called).to.equal(false);
       });
+
+      it('saves a pending draft WITHOUT a primary URL: no provisioning, market stashed (201)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          // status pending, market chosen, but NO urls — the wizard's "Save as
+          // pending" from the Primary URL step.
+          data: {
+            name: 'New Brand',
+            status: 'pending',
+            urls: [],
+            semrushMarket: { market: 'us', languageCode: 'en' },
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        // Provisioning is deferred for a draft.
+        expect(provisionStub.called).to.equal(false);
+        // The market is stashed for activation; no primary URL yet.
+        const upsertArgs = upsertStub.firstCall.args[0];
+        expect(upsertArgs.brand.pendingProvisioning).to.deep.equal({
+          primaryUrl: null,
+          markets: [{ market: 'us', languageCode: 'en' }],
+        });
+        // A draft is never bound to a workspace at create time.
+        expect(upsertArgs.semrushWorkspaceId).to.equal(null);
+        expect(upsertArgs.forceBrandId).to.equal(null);
+      });
+
+      it('stashes the primary URL on a pending draft when one was entered (still no provisioning)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'New Brand',
+            status: 'pending',
+            urls: [{ value: 'https://acme.com/path' }],
+            semrushMarket: { market: 'us', languageCode: 'en' },
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(false);
+        expect(upsertStub.firstCall.args[0].brand.pendingProvisioning).to.deep.equal({
+          primaryUrl: 'https://acme.com/path',
+          markets: [{ market: 'us', languageCode: 'en' }],
+        });
+      });
+
+      it('still requires market and languageCode even for a pending draft', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', status: 'pending', semrushMarket: { market: 'us' } },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(provisionStub.called).to.equal(false);
+      });
     });
 
     it('returns 400 when brand name is missing', async () => {

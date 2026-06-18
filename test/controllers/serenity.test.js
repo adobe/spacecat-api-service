@@ -1063,6 +1063,104 @@ describe('SerenityController', () => {
       expect(brand.save).to.have.been.called;
     });
 
+    it('activate falls back to the stashed pending_provisioning when the body omits markets + brandDomain', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const setPendingProvisioning = sinon.stub();
+      const brand = makeBrandModel({
+        getPendingProvisioning: () => ({
+          primaryUrl: 'https://acme.com/path',
+          markets: [{ market: 'us', languageCode: 'en' }],
+        }),
+        setPendingProvisioning,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // A pending (draft) brand activated from the wizard: body carries no
+      // markets and no brandDomain — both come from the stash.
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandNames: ['X'] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreateMarketSubworkspace).to.have.been.calledOnce;
+      const createBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
+      expect(createBody.market).to.equal('us');
+      expect(createBody.languageCode).to.equal('en');
+      // brandDomain derived from the stashed primary URL (hostname only).
+      expect(createBody.brandDomain).to.equal('acme.com');
+      // The draft staging data is cleared on success, atomically with the flip.
+      expect(setPendingProvisioning).to.have.been.calledWith(null);
+      expect(brand.setStatus).to.have.been.calledWith('active');
+      expect(brand.save).to.have.been.called;
+    });
+
+    it('activate prefers body markets + brandDomain over the stash, and clears the stash when its market is provisioned', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const setPendingProvisioning = sinon.stub();
+      const brand = makeBrandModel({
+        getPendingProvisioning: () => ({
+          primaryUrl: 'https://stash.com',
+          markets: [{ market: 'us', languageCode: 'en' }],
+        }),
+        setPendingProvisioning,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'body.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreateMarketSubworkspace).to.have.been.calledOnce;
+      const createBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
+      expect(createBody.market).to.equal('us');
+      expect(createBody.brandDomain).to.equal('body.com');
+      // The stash market (us/en) was provisioned → nothing remains → cleared.
+      expect(setPendingProvisioning).to.have.been.calledWith(null);
+    });
+
+    it('activate removes ONLY the provisioned markets from the stash, keeping failed ones for retry', async () => {
+      // Stash has two draft markets; the first provisions (201), the second
+      // throws. The provisioned market is dropped; the failed one stays stashed
+      // (with the primary URL) so a retry re-provisions just that one.
+      handlers.handleCreateMarketSubworkspace
+        .onFirstCall().resolves({ status: 201, body: {} })
+        .onSecondCall().rejects(new ErrorWithStatusCode('upstream boom', 502));
+      const setPendingProvisioning = sinon.stub();
+      const brand = makeBrandModel({
+        getPendingProvisioning: () => ({
+          primaryUrl: 'https://acme.com',
+          markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
+        }),
+        setPendingProvisioning,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // Body omits markets → both come from the stash.
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandNames: ['X'] },
+      }));
+      // One live, one failed → 207.
+      expect(response.status).to.equal(207);
+      expect(setPendingProvisioning).to.have.been.calledOnceWith({
+        primaryUrl: 'https://acme.com',
+        markets: [{ market: 'de', languageCode: 'de' }],
+      });
+      // Brand still flips active (≥1 market live) even with markets remaining.
+      expect(brand.setStatus).to.have.been.calledWith('active');
+    });
+
+    it('activate does NOT clear a stash on a brand that has none (no setPendingProvisioning call)', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const setPendingProvisioning = sinon.stub();
+      const brand = makeBrandModel({ setPendingProvisioning });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(setPendingProvisioning).to.not.have.been.called;
+    });
+
     it('activate reads the brand aliases once and applies them to every market', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       getBrandAliasNamesStub.resolves(['Acme Inc']);

@@ -1390,56 +1390,79 @@ function BrandsController(ctx, log, env) {
       // brand never exists without a valid Semrush side. The pre-generated id is
       // the sub-workspace title key and is forced onto the row.
       let provisionedBrandId = null;
+      // A pending (draft) brand defers ALL Semrush provisioning: no
+      // sub-workspace, no project, and crucially no primary URL required. The
+      // wizard's "Save as pending" path lands here so a user can stash a brand
+      // before picking its primary URL.
+      const isPendingBrand = brandData.status === 'pending';
       const { semrushMarket } = brandData;
       if (isNonEmptyObject(semrushMarket)) {
         const { market, languageCode } = semrushMarket;
         if (!hasText(market) || !hasText(languageCode)) {
           return badRequest('semrushMarket requires market and languageCode');
         }
-        const brandDomain = brandDomainFromPayload(brandData);
-        if (!hasText(brandDomain)) {
-          return badRequest('A primary URL is required to provision a Semrush brand');
+        if (isPendingBrand) {
+          // Defer provisioning: persist the chosen (market, languageCode) AND
+          // the primary URL (if the user entered one before saving as pending)
+          // on the brand, so activation can provision the real sub-workspace +
+          // project later (stored in brands.pending_provisioning). The primary
+          // URL otherwise lives only on the Semrush side, so a site-less draft
+          // would have nowhere to keep it. The row lands as 'pending' because it
+          // has no anchor (no site_id, no semrush_workspace_id) — see
+          // upsertBrand's anchor check. Models are collected at activation.
+          const primaryUrl = (Array.isArray(brandData.urls) ? brandData.urls : [])
+            .map((u) => (typeof u === 'string' ? u : u?.value))
+            .find(hasText) || null;
+          brandData.pendingProvisioning = {
+            primaryUrl,
+            markets: [{ market, languageCode }],
+          };
+        } else {
+          const brandDomain = brandDomainFromPayload(brandData);
+          if (!hasText(brandDomain)) {
+            return badRequest('A primary URL is required to provision a Semrush brand');
+          }
+          // The project needs at least one AI model (LLM) to track. The wizard
+          // collects them; reject a Semrush create that omits them.
+          const modelIds = Array.isArray(brandData.semrushModelIds)
+            ? brandData.semrushModelIds.filter(hasText)
+            : [];
+          if (modelIds.length === 0) {
+            return badRequest('semrushModelIds must list at least one AI model to track');
+          }
+          // Brand aliases drive branded/non-branded prompt classification. Accept
+          // both shapes the create payload may carry: plain strings or {name}.
+          const brandAliases = Array.isArray(brandData.brandAliases)
+            ? brandData.brandAliases
+              .map((a) => (typeof a === 'string' ? a : a?.name))
+              .filter(hasText)
+            : [];
+          // Brand URLs (own sites + social + earned) are pushed onto the initial
+          // market's project benchmark. The row isn't written yet, so they come
+          // straight from the create payload (same V2 shape upsertBrand persists).
+          const brandUrlSources = {
+            urls: brandData.urls,
+            socialAccounts: brandData.socialAccounts,
+            earnedContent: brandData.earnedContent,
+          };
+          provisionedBrandId = randomUUID();
+          const provisioned = await provisionBrandSubworkspace(context, {
+            spaceCatId,
+            brandId: provisionedBrandId,
+            brandName: brandData.name,
+            market,
+            languageCode,
+            brandDomain,
+            modelIds,
+            brandAliases,
+            brandUrlSources,
+            // Competitors ("other brands to track") are merged into the initial
+            // market's CI competitor list. Like URLs, they come from the create
+            // payload (the brand row isn't written yet).
+            competitors: brandData.competitors,
+          }, log);
+          provisionedWorkspaceId = provisioned.semrushWorkspaceId;
         }
-        // The project needs at least one AI model (LLM) to track. The wizard
-        // collects them; reject a Semrush create that omits them.
-        const modelIds = Array.isArray(brandData.semrushModelIds)
-          ? brandData.semrushModelIds.filter(hasText)
-          : [];
-        if (modelIds.length === 0) {
-          return badRequest('semrushModelIds must list at least one AI model to track');
-        }
-        // Brand aliases drive branded/non-branded prompt classification. Accept
-        // both shapes the create payload may carry: plain strings or {name}.
-        const brandAliases = Array.isArray(brandData.brandAliases)
-          ? brandData.brandAliases
-            .map((a) => (typeof a === 'string' ? a : a?.name))
-            .filter(hasText)
-          : [];
-        // Brand URLs (own sites + social + earned) are pushed onto the initial
-        // market's project benchmark. The row isn't written yet, so they come
-        // straight from the create payload (same V2 shape upsertBrand persists).
-        const brandUrlSources = {
-          urls: brandData.urls,
-          socialAccounts: brandData.socialAccounts,
-          earnedContent: brandData.earnedContent,
-        };
-        provisionedBrandId = randomUUID();
-        const provisioned = await provisionBrandSubworkspace(context, {
-          spaceCatId,
-          brandId: provisionedBrandId,
-          brandName: brandData.name,
-          market,
-          languageCode,
-          brandDomain,
-          modelIds,
-          brandAliases,
-          brandUrlSources,
-          // Competitors ("other brands to track") are merged into the initial
-          // market's CI competitor list. Like URLs, they come from the create
-          // payload (the brand row isn't written yet).
-          competitors: brandData.competitors,
-        }, log);
-        provisionedWorkspaceId = provisioned.semrushWorkspaceId;
       }
 
       const created = await upsertBrand({

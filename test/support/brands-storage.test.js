@@ -304,6 +304,27 @@ describe('brands-storage', () => {
       expect(flatResult.semrushWorkspaceId).to.equal(null);
     });
 
+    it('maps pending_provisioning to pendingProvisioning (draft), null when absent', async () => {
+      const draft = { primaryUrl: 'https://acme.com', markets: [{ market: 'US', languageCode: 'en' }] };
+      const draftRow = makeBrandRow({ status: 'pending', pending_provisioning: draft });
+      const draftQuery = createChainableQuery({ data: draftRow, error: null });
+      const draftResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(draftQuery) },
+      );
+      expect(draftResult.pendingProvisioning).to.deep.equal(draft);
+
+      // Non-draft brand: no pending_provisioning column → null.
+      const flatQuery = createChainableQuery({ data: makeBrandRow(), error: null });
+      const flatResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(flatQuery) },
+      );
+      expect(flatResult.pendingProvisioning).to.equal(null);
+    });
+
     it('defaults to empty regions when competitor regions is missing', async () => {
       const dbRow = makeBrandRow({
         competitors: [{ name: 'Rival', url: null }], // no regions key — triggers || []
@@ -912,6 +933,96 @@ describe('brands-storage', () => {
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.status).to.equal('pending');
+    });
+
+    it('persists pending_provisioning (primaryUrl + markets) for a pending draft', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          status: 'pending',
+          pendingProvisioning: {
+            primaryUrl: 'https://acme.com',
+            markets: [{ market: 'US', languageCode: 'en' }],
+          },
+        },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.status).to.equal('pending');
+      expect(brandsUpsert.row.pending_provisioning).to.deep.equal({
+        primaryUrl: 'https://acme.com',
+        markets: [{ market: 'US', languageCode: 'en' }],
+      });
+    });
+
+    it('drops invalid markets and a blank primaryUrl from pending_provisioning, nulling it when empty', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          status: 'pending',
+          pendingProvisioning: {
+            primaryUrl: '   ',
+            markets: [{ market: '', languageCode: 'en' }, { market: 'US' }],
+          },
+        },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.pending_provisioning).to.equal(null);
+    });
+
+    it('omits pending_provisioning from the row when not supplied', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'site-1' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row).to.not.have.property('pending_provisioning');
+    });
+
+    it('throws 400 when pendingProvisioning is not an object', async () => {
+      const client = createCapturingClient({
+        brands: [{ data: null, error: null }],
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', pendingProvisioning: ['not', 'an', 'object'] },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(400);
     });
 
     it('normalizes brand guidance fields in upsert row', async () => {
@@ -1962,6 +2073,25 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.include({ name: 'NewName', status: 'pending' });
+    });
+
+    it('clears pending_provisioning when updates pass pendingProvisioning: null', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: makeBrandRow({ status: 'active' }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { pendingProvisioning: null },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.pending_provisioning).to.equal(null);
     });
 
     it('normalizes brand guidance fields in update patch', async () => {

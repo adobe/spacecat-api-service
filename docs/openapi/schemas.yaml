@@ -3823,6 +3823,29 @@ Brand:
         scope per-brand Semrush views to the sub-workspace.
       type: [string, 'null']
       readOnly: true
+    pendingProvisioning:
+      description: >-
+        Read-only. Deferred Semrush provisioning data for a pending (draft)
+        brand: the primary URL + initial market chosen at "Save as pending"
+        before the brand's sub-workspace + project exist. Fed into activation;
+        each market that provisions is removed and the field is nulled once none
+        remain (failed markets stay for retry). Null for a non-pending brand (or
+        a draft with no provisioning data yet). primaryUrl may be null (saved as
+        pending before a URL was entered).
+      type: [object, 'null']
+      readOnly: true
+      properties:
+        primaryUrl:
+          type: [string, 'null']
+        markets:
+          type: array
+          items:
+            type: object
+            properties:
+              market:
+                type: string
+              languageCode:
+                type: string
     imsOrgId:
       description: The IMS Organization ID of the brand
       $ref: '#/ImsOrganizationId'
