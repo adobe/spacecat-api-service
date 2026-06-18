@@ -484,34 +484,21 @@ function PreflightController(ctx, log, env) {
     }
 
     // Mint a spacecat-api-service IMS v3 service token for the Mystique CGW
-    // edge gate (SITES-43236 / mystique-deploy PR #463). Sent on the dedicated
-    // x-ims-authorization header — separate from `Authorization` above, which
-    // carries the customer site's page-auth token for DRS upstream.
+    // edge gate (SITES-43236 / SITES-46699 / mystique-deploy PR #463). Sent
+    // on the dedicated x-ims-authorization header — separate from
+    // `Authorization` above, which carries the customer site's page-auth
+    // token for DRS upstream.
     //
-    // Constructs a custom-env ImsClient with IMS_SCOPE='system' hardcoded
-    // because the default spacecat IMS client (`aem-project-collab-service`
-    // per Vault `dx_mysticat`) has no `IMS_SCOPE` provisioned for the v3
-    // client_credentials grant — empirically confirmed in dev where the
-    // wrapper-wired `context.imsClient` produced an IMS 400 (invalid_scope).
-    // 'system' is the Adobe IMS mandated scope for v3 service-client tokens
-    // (per ASO team Slack thread, 2026-06-17). This mirrors the existing
-    // pattern in `email-service.js` and `trial-users.js` of overriding IMS
-    // env at construction, but differs in intent: those callers have their
-    // own dedicated IMS clients (LLMO email, etc.) and MUST swap credentials
-    // entirely; we keep the default client and only override scope. That
-    // makes this hardcode a transitional bypass for missing Vault config,
-    // NOT the desired permanent shape.
-    //
-    // Reversibility: if `IMS_SCOPE=system` is provisioned in Vault for
-    // `aem-project-collab-service`, this hardcode can be reverted to the
-    // wrapper-wired `await context.imsClient.getServiceAccessTokenV3()` and
-    // the `imsClient` destructure + `isNonEmptyObject(imsClient)` constructor
-    // guard on `PreflightController` restored alongside (both removed in the
-    // same PR as this hardcode — see git history under `SITES-43236`). The
-    // revert also restores singleton token caching across warm-Lambda
-    // invocations, which this construction loses — accepted cost during the
-    // transition, since per-invocation mint sidesteps the not-expiry-aware
-    // cache concern from the prior review thread on PR #2611.
+    // Constructs a custom-env ImsClient with the dedicated PREFLIGHT_IMS_*
+    // credentials provisioned in Vault for this S2S use case (SITES-46699).
+    // The default IMS client wired into `context.imsClient` by
+    // `imsClientWrapper` is not registered for the `client_credentials`
+    // grant type, so v3 service-token minting cannot succeed against it.
+    // ASO team manages a dedicated client for this purpose, following the
+    // established spacecat one-IMS-client-per-purpose convention (see
+    // `email-service.js` / `trial-users.js` / cloud-manager-client /
+    // brand-client — each swaps IMS env at construction for their own
+    // dedicated identity).
     //
     // Mint before the AsyncJob / Preflight DB writes so a transient IMS
     // failure doesn't leave orphaned IN_PROGRESS records to clean up.
@@ -524,11 +511,17 @@ function PreflightController(ctx, log, env) {
     // this a narrow availability cost in practice.
     let imsServiceToken;
     try {
-      const scopedImsClient = ImsClient.createFrom({
+      const preflightImsEnv = {
+        ...env,
+        IMS_CLIENT_ID: env.PREFLIGHT_IMS_CLIENT_ID,
+        IMS_CLIENT_SECRET: env.PREFLIGHT_IMS_CLIENT_SECRET,
+        IMS_SCOPE: env.PREFLIGHT_IMS_SCOPE,
+      };
+      const preflightImsClient = ImsClient.createFrom({
         ...context,
-        env: { ...context.env, IMS_SCOPE: 'system' },
+        env: preflightImsEnv,
       });
-      const tokenPayload = await scopedImsClient.getServiceAccessTokenV3();
+      const tokenPayload = await preflightImsClient.getServiceAccessTokenV3();
       imsServiceToken = tokenPayload?.access_token;
       // Post-condition: a successful mint must yield a non-empty access_token.
       // Guards against an SDK shape change (e.g. `{ accessToken }` or `{}`)

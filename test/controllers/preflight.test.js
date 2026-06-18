@@ -1133,11 +1133,12 @@ describe('Preflight Controller', () => {
       mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
       hasAccessStub = sandbox.stub().resolves(true);
 
-      // SITES-43236: createPreflight constructs a custom-env ImsClient with
-      // IMS_SCOPE='system' hardcoded at the mint call site (see preflight.js
-      // for rationale). Tests esmock `ImsClient.createFrom` to return the
-      // shared mockImsClient stub; tests control mint behavior by overriding
-      // getServiceAccessTokenV3 on that stub per case.
+      // SITES-43236 / SITES-46699: createPreflight constructs a custom-env
+      // ImsClient with the dedicated PREFLIGHT_IMS_* credentials at the mint
+      // call site (see preflight.js for rationale). Tests esmock
+      // `ImsClient.createFrom` to return the shared mockImsClient stub; tests
+      // control mint behavior by overriding getServiceAccessTokenV3 on that
+      // stub per case.
       mockImsClient = {
         getServiceAccessTokenV3: sandbox.stub().resolves({
           access_token: 'test-ims-service-token',
@@ -1146,9 +1147,10 @@ describe('Preflight Controller', () => {
         }),
       };
       // Stub-ify ImsClient.createFrom so tests can assert that the source
-      // passes IMS_SCOPE='system' through to the factory (the load-bearing
-      // contract of the hardcode; if a future refactor accidentally drops
-      // the override, this stub's call args won't match and assertions fail).
+      // passes the dedicated PREFLIGHT_IMS_* credentials through to the
+      // factory (the load-bearing contract of SITES-46699; if a future
+      // refactor accidentally swaps the wrong env keys, this stub's call
+      // args won't match and assertions fail).
       createFromStub = sandbox.stub().returns(mockImsClient);
 
       // SITES-46202: createPreflight no longer consults Configuration / TierClient
@@ -1176,6 +1178,10 @@ describe('Preflight Controller', () => {
           AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
           MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
           AWS_ENV: 'prod',
+          // SITES-46699: dedicated IMS client credentials used by callMysticatAnalyze.
+          PREFLIGHT_IMS_CLIENT_ID: 'test-preflight-client-id',
+          PREFLIGHT_IMS_CLIENT_SECRET: 'test-preflight-client-secret',
+          PREFLIGHT_IMS_SCOPE: 'test-preflight-scope',
         },
       );
     });
@@ -1601,13 +1607,20 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(202);
       expect(mockImsClient.getServiceAccessTokenV3).to.have.been.calledOnce;
-      // Load-bearing contract of this PR: the custom-env ImsClient construction
-      // MUST pass IMS_SCOPE='system' through to ImsClient.createFrom — that's
-      // the hardcoded scope value that lets the v3 client_credentials grant
-      // succeed against `aem-project-collab-service` (per SITES-43236). If a
-      // future refactor accidentally drops the override, this assertion fails.
+      // Load-bearing contract (SITES-46699): the custom-env ImsClient
+      // construction MUST pass the dedicated PREFLIGHT_IMS_* credentials
+      // through to ImsClient.createFrom — that's the whole point of the
+      // dedicated-client approach. If a future refactor accidentally swaps
+      // the wrong env keys (or reverts to the wrapper-wired default client),
+      // this assertion fails.
       expect(createFromStub).to.have.been.calledWith(
-        sinon.match({ env: sinon.match({ IMS_SCOPE: 'system' }) }),
+        sinon.match({
+          env: sinon.match({
+            IMS_CLIENT_ID: 'test-preflight-client-id',
+            IMS_CLIENT_SECRET: 'test-preflight-client-secret',
+            IMS_SCOPE: 'test-preflight-scope',
+          }),
+        }),
       );
       const [, calledOptions] = fetchStub.secondCall.args;
       // Bearer prefix mirrors the v3-token convention; verified against the
