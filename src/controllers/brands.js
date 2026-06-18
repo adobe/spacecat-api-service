@@ -64,6 +64,7 @@ import {
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
 import { createIntentClassifier, resolveBatchTimeoutMs } from '../support/intent-classifier.js';
+import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
 import {
   listCategories,
   createCategory,
@@ -125,6 +126,32 @@ function BrandsController(ctx, log, env) {
   const { Organization, Site } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  // Best-effort P1 alerting signal (LLMO-5587): a write path tried to silently demote
+  // an active brand to pending and was rejected. Alarm on the count (Mysticat/Brands ->
+  // BrandDemotionBlocked); attribute the specific caller via the WARN log that follows.
+  // Modeled on the LLMO-5150 EMF pattern. Never affects the response.
+  const BRAND_METRICS_NAMESPACE = 'Mysticat/Brands';
+  const emitBrandDemotionBlocked = (context, operation) => {
+    try {
+      emitMetric(
+        {
+          name: 'BrandDemotionBlocked',
+          dimensions: {
+            Operation: operation,
+            Product: context?.pathInfo?.headers?.['x-product'],
+          },
+        },
+        { environment: resolveEnvironment(env), namespace: BRAND_METRICS_NAMESPACE },
+      );
+      log.warn(`BrandDemotionBlocked: ${operation} attempted an active->pending demotion `
+        + `(org=${context?.params?.spaceCatId}, brand=${context?.params?.brandId}, `
+        + `updatedBy=${context?.attributes?.authInfo?.profile?.email || 'system'}); rejected — `
+        + 'use PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status for intentful transitions.');
+    } catch {
+      // best-effort: metric/log emission must never affect the request path
+    }
+  };
 
   // Best-effort intent classifier for prompts that arrive without an intent
   // (human-added). Returns null when disabled by config or Azure OpenAI is not
@@ -1454,6 +1481,9 @@ function BrandsController(ctx, log, env) {
 
       return createResponse(created, 201);
     } catch (error) {
+      if (error.code === 'brand_status_demotion_not_allowed') {
+        emitBrandDemotionBlocked(context, 'createBrand');
+      }
       log.error(`Error creating brand for organization ${spaceCatId}:`, error);
       // Compensation: a sub-workspace was provisioned upstream but the brand row
       // failed to persist (e.g. a unique-constraint 409 or transient PostgREST
@@ -1626,6 +1656,9 @@ function BrandsController(ctx, log, env) {
 
       return ok(updated);
     } catch (error) {
+      if (error.code === 'brand_status_demotion_not_allowed') {
+        emitBrandDemotionBlocked(context, 'updateBrand');
+      }
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
     }

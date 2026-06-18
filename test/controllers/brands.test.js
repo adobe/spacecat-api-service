@@ -4338,11 +4338,27 @@ describe('Brands Controller', () => {
       const response = await brandsController.createBrandForOrg({
         ...context,
         params: { spaceCatId: ORGANIZATION_ID },
-        data: { name: 'New Brand' },
+        // baseSiteId keeps the brand active (an active brand requires a base site);
+        // without it the upsert would compute `pending` onto the same-name active
+        // brand the mock returns, which the LLMO-5587 demotion guard rejects.
+        data: { name: 'New Brand', baseSiteId: 'b2222222-2222-4222-b222-222222222222' },
         dataAccess: mockDataAccess,
         attributes: { authInfo: { profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(201);
+    });
+
+    it('returns 409 when a by-name create would demote an active brand to pending (LLMO-5587)', async () => {
+      // beforeEach resolves an existing brand of the same name with status 'active';
+      // a create carrying status:'pending' must not silently demote it.
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', status: 'pending' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(409);
     });
 
     it('returns 400 when brand data is missing', async () => {
@@ -5032,6 +5048,19 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       expect(getBrandCompetitorsStub).to.not.have.been.called;
       expect(ciSyncStub).to.not.have.been.called;
+    });
+
+    it('returns 409 when demoting an active brand to pending (LLMO-5587)', async () => {
+      // beforeEach mock resolves a persisted brand with status 'active'; a generic
+      // PATCH carrying status:'pending' must be rejected (and emit BrandDemotionBlocked).
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(409);
     });
 
     it('returns 400 when brandId is missing', async () => {
