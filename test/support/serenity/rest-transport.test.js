@@ -286,6 +286,37 @@ describe('Semrush REST transport', () => {
       const result = await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
       expect(result).to.equal(null);
     });
+
+    it('captures the upstream content-type on the error (e.g. nginx 405 text/html quota rejection)', async () => {
+      fetchStub.resolves({
+        ok: false,
+        status: 405,
+        headers: { get: (h) => (h.toLowerCase() === 'content-type' ? 'text/html' : null) },
+        text: async () => '<html><body>405 Not Allowed</body></html>',
+      });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      try {
+        await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err).to.be.instanceOf(SerenityTransportError);
+        expect(err.status).to.equal(405);
+        expect(err.contentType).to.equal('text/html');
+      }
+    });
+
+    it('sets contentType to null when the response exposes no headers', async () => {
+      fetchStub.resolves(fetchFail(500, { code: 'boom' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      try {
+        await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err.contentType).to.equal(null);
+      }
+    });
   });
 
   describe('listPromptsByTags', () => {
@@ -383,6 +414,26 @@ describe('Semrush REST transport', () => {
         new RegExp(`/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/publish$`),
       );
       expect(init.body).to.equal(undefined);
+    });
+  });
+
+  describe('getProjectStatus', () => {
+    it('GETs /v1/workspaces/{ws}/projects/{pid} (v1 default view) and returns the raw project', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID, publish_status: 'live', published_at: '2026-06-10T00:00:00Z' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getProjectStatus(WORKSPACE_ID, PROJECT_ID);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(init.method).to.equal('GET');
+      // v1 default view — no /publish suffix, no ?live param, no /ai_models.
+      expect(url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}`,
+      );
+      expect(init.body).to.be.undefined;
+      expect(result).to.deep.equal({
+        id: PROJECT_ID, publish_status: 'live', published_at: '2026-06-10T00:00:00Z',
+      });
     });
   });
 

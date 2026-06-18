@@ -26,11 +26,18 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  * NOT leak `.body` to clients — it is kept here only for server-side logging.
  */
 export class SerenityTransportError extends Error {
-  constructor(status, message, body) {
+  constructor(status, message, body, contentType) {
     super(message);
     this.name = 'SerenityTransportError';
     this.status = status;
     this.body = body;
+    // Raw upstream `content-type` header. Kept so callers can distinguish an
+    // application error (JSON envelope) from an infrastructure rejection that
+    // never reached the app — notably nginx's bare `405 text/html`, which
+    // Semrush returns for a publish on a workspace with zero `ai.projects`
+    // quota (a permanent allocation failure, not a transient outage). See
+    // errors.js `isPublishQuotaExhausted`.
+    this.contentType = contentType;
   }
 }
 
@@ -144,6 +151,7 @@ async function request(method, url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_
       response.status,
       `Semrush ${method} ${url} failed: ${response.status}`,
       parsed,
+      response.headers?.get?.('content-type') ?? null,
     );
   }
   return parsed;
@@ -221,6 +229,25 @@ export function createSerenityTransport({ env, imsToken }) {
     async publishProject(semrushWorkspaceId, projectId) {
       const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/publish`;
       return request('POST', url, imsToken, undefined);
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/projects/{pid} — fetches a single project,
+     * including its `publish_status` attribute. Publish is asynchronous and
+     * Semrush emits no completion webhook, so publish completion is observed by
+     * re-reading this resource (see handlers/publish-status.js for the
+     * classify + poll helpers built on top of this).
+     *
+     * Uses the v1 DEFAULT view (no `live` query param) deliberately: the v2
+     * list and the v1 `live=true` view return a live-view materialisation that
+     * defaults the location and empties config for a never-published draft,
+     * whereas the v1 default view echoes the draft's real settings and
+     * `publish_status` faithfully (verified against the tenant, serenity-docs
+     * §10). Returns the raw project JSON.
+     */
+    async getProjectStatus(semrushWorkspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}`;
+      return request('GET', url, imsToken, undefined);
     },
 
     /**

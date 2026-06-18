@@ -4587,6 +4587,23 @@ describe('LLMO Onboarding Functions', () => {
       expect(body).to.not.have.property('projectType');
     });
 
+    // LLMO-5492: the fan-out ALWAYS provisions drafts (publish: false). The
+    // single authoritative publish happens later in the finalize step (push
+    // prompts → set models → publish once), so a project is never published
+    // empty or half-populated. There is no longer a flag to flip this.
+    it('always passes publish:false to handleCreateMarket', async () => {
+      const hcp = sinon.stub().resolves({ status: 201, body: {} });
+      const performSerenityFanOut = await loadFanOut(hcp);
+
+      await performSerenityFanOut(
+        makeContext(),
+        { ...baseArgs, markets: [{ market: 'US', language: 'en' }] },
+      );
+
+      const options = hcp.firstCall.args[6];
+      expect(options).to.deep.equal({ publish: false });
+    });
+
     it('treats 409 (slice already exists) as an idempotent success', async () => {
       const hcp = sinon.stub().resolves({ status: 409, body: { error: 'sliceExists' } });
       const performSerenityFanOut = await loadFanOut(hcp);

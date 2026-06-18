@@ -526,6 +526,29 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
   });
 
+  // LLMO-5492: the finalize step pushes prompts with publish deferred so it can
+  // set models and then publish each project exactly once.
+  it('creates the prompt but skips publish when publish:false', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tags: ['a'],
+      }],
+    }, fakeLog(), { publish: false });
+
+    expect(result.created).to.have.lengthOf(1);
+    expect(transport.createTaggedPrompts).to.have.been.calledOnce;
+    expect(transport.publishProject).to.not.have.been.called;
+  });
+
   it('skips inputs whose (geoTargetId, languageCode) slice has no row on the brand', async () => {
     const usEn = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',

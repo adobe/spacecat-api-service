@@ -1342,6 +1342,11 @@ export async function performSerenityFanOut(context, {
   }
   const { transport, brandSlug, brandDomain } = ctx;
 
+  // LLMO-5492: the onboarding fan-out ALWAYS provisions drafts (publish: false).
+  // The single authoritative publish happens later in the finalize step (push
+  // prompts → set models → publish once), so a project is never published empty
+  // or half-populated. (The standalone POST /serenity/markets still publishes at
+  // create time — handleCreateMarket's `publish` defaults to true.)
   for (const { market, languageCode } of requested) {
     const body = {
       name: `${brandSlug} · ${market} · ${languageCode}`,
@@ -1385,6 +1390,7 @@ export async function performSerenityFanOut(context, {
         workspaceId,
         body,
         log,
+        { publish: false },
       );
     } catch (e) {
       // Record the throw and fall through to the per-tuple metric; the loop continues.

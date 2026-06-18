@@ -29,6 +29,7 @@ import {
   clearTagCache,
 } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -239,6 +240,57 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(upstreamBody.brand_names).to.deep.equal(['Adobe']);
   });
 
+  // LLMO-5492: defer-publish path — create + write row, but never publish.
+  it('skips publish but still writes the row and returns 201 when publish:false', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-draft' }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      name: 'Adobe-US-en',
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+    }, fakeLog(), { publish: false });
+
+    expect(result.status).to.equal(201);
+    expect(transport.createProject).to.have.been.calledOnce;
+    // The whole point: the draft is never published at create time.
+    expect(transport.publishProject).to.not.have.been.called;
+    expect(dataAccess.BrandSemrushProject.create).to.have.been.calledOnceWithExactly({
+      brandId: BRAND,
+      semrushProjectId: 'proj-draft',
+      geoTargetId: 2840,
+      languageCode: 'en',
+    });
+  });
+
+  it('publishes by default (no options) — preserves the standalone endpoint contract', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-pub' }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-pub');
+  });
+
   // Branch coverage: validateCreateBody has a "name provided but invalid"
   // check that's distinct from "name omitted" (omitted is fine; provided as
   // an empty string is a 400).
@@ -430,6 +482,36 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(log.error).to.have.been.calledWithMatch(
       'handleCreateMarket: orphaned upstream project after publish failure',
       sinon.match({ cleanedUp: false }),
+    );
+  });
+
+  // LLMO-5492: a zero-quota publish rejection (nginx 405 + text/html) is a
+  // PERMANENT allocation failure. We must NOT run the best-effort deleteProject
+  // — delete-then-retry would loop create→405→delete against a workspace that
+  // simply has no `ai.projects` allocation. Leave the draft in place, log as
+  // permanent, and propagate.
+  it('zero-quota publish (405 text/html): skips cleanup, leaves draft, throws as permanent', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    const quota405 = new SerenityTransportError(405, 'publish 405', '<html/>', 'text/html');
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-noquota' }),
+      publishProject: sinon.stub().rejects(quota405),
+      deleteProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    await expect(handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, log)).to.be.rejectedWith(SerenityTransportError);
+
+    // Critical: no delete (would start the create→405→delete loop), no DB row.
+    expect(transport.deleteProject).to.have.callCount(0);
+    expect(dataAccess.BrandSemrushProject.create).to.have.callCount(0);
+    expect(log.error).to.have.been.calledWithMatch(
+      /workspace has no ai.projects quota/,
+      sinon.match({ semrushProjectId: 'proj-noquota', code: ERROR_CODES.PUBLISH_QUOTA_EXHAUSTED }),
     );
   });
 
@@ -1157,11 +1239,17 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
 });
 
 describe('handlers/markets.js — handleUpdateModels', () => {
-  function makeTransport({ currentItems = [], addResult = {}, deleteResult = undefined } = {}) {
+  function makeTransport({
+    currentItems = [], addResult = {}, deleteResult = undefined, publishStatus = 'draft',
+  } = {}) {
     return {
       listAiModels: sinon.stub().resolves({ items: currentItems }),
       addAiModel: sinon.stub().resolves(addResult),
       deleteAiModelsByIds: sinon.stub().resolves(deleteResult),
+      // Default to a draft so a plain model change does NOT republish unless a
+      // test opts into a live status — keeps the diff-only tests unaffected.
+      getProjectStatus: sinon.stub().resolves({ publish_status: publishStatus }),
+      publishProject: sinon.stub().resolves(),
     };
   }
 
@@ -1503,5 +1591,173 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.deleteAiModelsByIds).not.to.have.been.called;
     expect(result.items).to.have.length(1);
     expect(result.items[0].id).to.equal('cat-a');
+  });
+
+  // --- LLMO-5492: republish a LIVE project so a model change actually goes live
+
+  it('republishes a LIVE project after a model change so the edit goes live', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [], publishStatus: 'live' });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    const result = await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+
+    expect(transport.getProjectStatus).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1');
+    expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1');
+    expect(result.items).to.have.length(1);
+  });
+
+  it('republishes a project in live_with_unpublished_updates after a model change', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [], publishStatus: 'live_with_unpublished_updates' });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+
+    expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1');
+  });
+
+  it('does NOT republish a DRAFT project (its single authoritative publish belongs to finalize)', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [], publishStatus: 'draft' });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+
+    expect(transport.getProjectStatus).to.have.been.calledOnce;
+    expect(transport.publishProject).to.not.have.been.called;
+  });
+
+  it('does NOT check status or republish on a no-op diff (short-circuit)', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({
+      currentItems: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+      publishStatus: 'live',
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+
+    expect(transport.getProjectStatus).to.not.have.been.called;
+    expect(transport.publishProject).to.not.have.been.called;
+  });
+
+  it('never republishes when publish:false, even on a LIVE project (finalize defers publish)', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [], publishStatus: 'live' });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+      { publish: false },
+    );
+
+    expect(transport.getProjectStatus).to.not.have.been.called;
+    expect(transport.publishProject).to.not.have.been.called;
+  });
+
+  it('returns the updated items even when the republish itself fails (best-effort)', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [], publishStatus: 'live' });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+    transport.publishProject.rejects(new SerenityTransportError(503, 'publish down'));
+    const log = fakeLog();
+
+    const result = await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      log,
+    );
+
+    // The model change succeeded; the republish failure must not fail the call.
+    expect(result.items).to.have.length(1);
+    expect(log.error).to.have.been.calledWithMatch(/republish failed/);
   });
 });

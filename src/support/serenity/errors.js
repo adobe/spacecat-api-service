@@ -34,6 +34,25 @@ export function isUpstreamGone(e) {
 }
 
 /**
+ * Recognises the zero-quota publish rejection — a `POST .../publish` against a
+ * workspace with no `ai.projects` allocation. Semrush surfaces this as a bare
+ * nginx **`405` with `text/html`** (no JSON envelope): a quota rejection wearing
+ * the wrong status code (verified live 2026-06-11, serenity-docs §10).
+ *
+ * This is a PERMANENT resource-allocation failure, NOT a transient upstream
+ * outage: the workspace must be re-provisioned with quota before publish can
+ * ever succeed. Callers must therefore alert-and-stop rather than retry —
+ * retrying loops create→405→delete forever. The `405 text/html` signature is
+ * the discriminator: a genuine 405 from the app layer (e.g. wrong method on a
+ * real route) carries a JSON body, so the `text/html` check keeps this narrow.
+ */
+export function isPublishQuotaExhausted(e) {
+  return e instanceof SerenityTransportError
+    && e.status === 405
+    && /text\/html/i.test(e.contentType || '');
+}
+
+/**
  * Frozen catalog of error-token strings handlers attach to
  * `ErrorWithStatusCode.code` so the controller's `mapError` emits them
  * verbatim in the response envelope (instead of the generic
@@ -50,4 +69,8 @@ export function isUpstreamGone(e) {
  */
 export const ERROR_CODES = Object.freeze({
   MARKET_NOT_FOUND: 'marketNotFound',
+  // Attached to a publishFailed entry (finalize) / logged by handleCreateMarket
+  // when publish is rejected for a zero `ai.projects` allocation. Marks the
+  // failure as permanent so the trigger/worker alerts instead of retrying.
+  PUBLISH_QUOTA_EXHAUSTED: 'publishQuotaExhausted',
 });
