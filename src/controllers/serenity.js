@@ -776,15 +776,15 @@ function SerenityController(context, log, env) {
       const brand = await loadBrand(ctx, auth.brandUuid);
       // Markets + primary URL come from the request body, but a pending (draft)
       // brand activated from the wizard supplies none: fall back to what the
-      // wizard stashed at "Save as pending" (brands.pending_provisioning =
+      // wizard stashed at "Save as pending" (brands.pending_semrush_provisioning =
       // { primaryUrl, markets }). A reactivation of an already-live brand
       // re-supplies them in the body, so the body wins when present.
-      const pendingProvisioning = isNonEmptyObject(brand.getPendingProvisioning?.())
-        ? brand.getPendingProvisioning()
+      const pendingSemrushProvisioning = isNonEmptyObject(brand.getPendingSemrushProvisioning?.())
+        ? brand.getPendingSemrushProvisioning()
         : null;
-      const hadPendingProvisioning = pendingProvisioning != null;
-      const storedMarkets = Array.isArray(pendingProvisioning?.markets)
-        ? pendingProvisioning.markets
+      const hadPendingSemrushProvisioning = pendingSemrushProvisioning != null;
+      const storedMarkets = Array.isArray(pendingSemrushProvisioning?.markets)
+        ? pendingSemrushProvisioning.markets
         : [];
       const markets = Array.isArray(body.markets) && body.markets.length > 0
         ? body.markets
@@ -799,7 +799,7 @@ function SerenityController(context, log, env) {
       // the stashed draft primary URL (the wizard's "Save as pending" URL).
       const brandDomain = hasText(body.brandDomain)
         ? body.brandDomain
-        : domainFromUrl(pendingProvisioning?.primaryUrl);
+        : domainFromUrl(pendingSemrushProvisioning?.primaryUrl);
       // Brand aliases are brand-level: read once and apply to every market's
       // project (Semrush brand_names) in this batch.
       const brandAliases = await getBrandAliasNames(
@@ -909,12 +909,14 @@ function SerenityController(context, log, env) {
         brand.setStatus('active');
         // Update the stash to just the not-yet-provisioned markets (or null when
         // all are done). Saved atomically with the status flip below.
-        if (hadPendingProvisioning && typeof brand.setPendingProvisioning === 'function') {
-          brand.setPendingProvisioning(
-            remainingMarkets.length > 0
-              ? { primaryUrl: pendingProvisioning.primaryUrl ?? null, markets: remainingMarkets }
-              : null,
-          );
+        const canSetStash = hadPendingSemrushProvisioning
+          && typeof brand.setPendingSemrushProvisioning === 'function';
+        if (canSetStash) {
+          const stashPrimaryUrl = pendingSemrushProvisioning.primaryUrl ?? null;
+          const remainingStash = remainingMarkets.length > 0
+            ? { primaryUrl: stashPrimaryUrl, markets: remainingMarkets }
+            : null;
+          brand.setPendingSemrushProvisioning(remainingStash);
         }
         try {
           await brand.save();

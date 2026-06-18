@@ -3823,7 +3823,7 @@ Brand:
         scope per-brand Semrush views to the sub-workspace.
       type: [string, 'null']
       readOnly: true
-    pendingProvisioning:
+    pendingSemrushProvisioning:
       description: >-
         Read-only. Deferred Semrush provisioning data for a pending (draft)
         brand: the primary URL + initial market chosen at "Save as pending"

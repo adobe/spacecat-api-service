@@ -46,7 +46,7 @@ function normalizeNullableText(value, fieldName) {
 
 /**
  * Normalizes the deferred Semrush provisioning data of a pending (draft) brand
- * into the shape persisted in `brands.pending_provisioning` (a JSONB object
+ * into the shape persisted in `brands.pending_semrush_provisioning` (a JSONB object
  * `{ primaryUrl?, markets: [{ market, languageCode }] }`). These are the primary
  * URL + initial market the add-brand wizard collected before a
  * sub-workspace/project exist; activation reads them back to provision the real
@@ -60,7 +60,7 @@ function normalizeNullableText(value, fieldName) {
  * @returns {{primaryUrl: (string|null), markets: Array<{market: string,
  *   languageCode: string}>}|null|undefined}
  */
-function normalizePendingProvisioning(value) {
+function normalizePendingSemrushProvisioning(value) {
   if (value === undefined) {
     return undefined;
   }
@@ -68,7 +68,7 @@ function normalizePendingProvisioning(value) {
     return null;
   }
   if (typeof value !== 'object' || Array.isArray(value)) {
-    const error = new Error('pendingProvisioning must be an object or null');
+    const error = new Error('pendingSemrushProvisioning must be an object or null');
     error.status = 400;
     throw error;
   }
@@ -188,7 +188,7 @@ function mapDbBrandToV2(row) {
     // languageCode }] } the wizard collected before provisioning; null once
     // activation has provisioned it (or for a non-pending brand). Lets the UI
     // re-hydrate the draft's primary URL + market on the activation form.
-    pendingProvisioning: row.pending_provisioning || null,
+    pendingSemrushProvisioning: row.pending_semrush_provisioning || null,
     status: row.status || 'active',
     origin: row.origin || 'human',
     description: row.description || null,
@@ -740,9 +740,11 @@ export async function upsertBrand({
   // URL + desired (market, languageCode) the wizard collected before a
   // sub-workspace / project exist. Persisted as JSONB so activation can
   // provision it later, then cleared. Undefined leaves the column untouched.
-  const pendingProvisioning = normalizePendingProvisioning(brand.pendingProvisioning);
-  if (pendingProvisioning !== undefined) {
-    row.pending_provisioning = pendingProvisioning;
+  const pendingSemrushProvisioning = normalizePendingSemrushProvisioning(
+    brand.pendingSemrushProvisioning,
+  );
+  if (pendingSemrushProvisioning !== undefined) {
+    row.pending_semrush_provisioning = pendingSemrushProvisioning;
   }
 
   // A Semrush-anchored create (serenity-first, semrushWorkspaceId set) is NEVER
@@ -873,10 +875,12 @@ export async function updateBrand({
   }
 
   // Deferred Semrush provisioning data (pending/draft brands). Activation passes
-  // `pendingProvisioning: null` to clear it once the real projects are
+  // `pendingSemrushProvisioning: null` to clear it once the real projects are
   // provisioned.
-  if (updates.pendingProvisioning !== undefined) {
-    patch.pending_provisioning = normalizePendingProvisioning(updates.pendingProvisioning);
+  if (updates.pendingSemrushProvisioning !== undefined) {
+    patch.pending_semrush_provisioning = normalizePendingSemrushProvisioning(
+      updates.pendingSemrushProvisioning,
+    );
   }
 
   // Clear legacy columns on any brand update so old data doesn't linger.

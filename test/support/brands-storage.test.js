@@ -304,25 +304,25 @@ describe('brands-storage', () => {
       expect(flatResult.semrushWorkspaceId).to.equal(null);
     });
 
-    it('maps pending_provisioning to pendingProvisioning (draft), null when absent', async () => {
+    it('maps pending_semrush_provisioning to pendingSemrushProvisioning (draft), null when absent', async () => {
       const draft = { primaryUrl: 'https://acme.com', markets: [{ market: 'US', languageCode: 'en' }] };
-      const draftRow = makeBrandRow({ status: 'pending', pending_provisioning: draft });
+      const draftRow = makeBrandRow({ status: 'pending', pending_semrush_provisioning: draft });
       const draftQuery = createChainableQuery({ data: draftRow, error: null });
       const draftResult = await getBrandById(
         ORG_ID,
         BRAND_ID,
         { from: sinon.stub().returns(draftQuery) },
       );
-      expect(draftResult.pendingProvisioning).to.deep.equal(draft);
+      expect(draftResult.pendingSemrushProvisioning).to.deep.equal(draft);
 
-      // Non-draft brand: no pending_provisioning column → null.
+      // Non-draft brand: no pending_semrush_provisioning column → null.
       const flatQuery = createChainableQuery({ data: makeBrandRow(), error: null });
       const flatResult = await getBrandById(
         ORG_ID,
         BRAND_ID,
         { from: sinon.stub().returns(flatQuery) },
       );
-      expect(flatResult.pendingProvisioning).to.equal(null);
+      expect(flatResult.pendingSemrushProvisioning).to.equal(null);
     });
 
     it('defaults to empty regions when competitor regions is missing', async () => {
@@ -935,7 +935,7 @@ describe('brands-storage', () => {
       expect(brandsUpsert.row.status).to.equal('pending');
     });
 
-    it('persists pending_provisioning (primaryUrl + markets) for a pending draft', async () => {
+    it('persists pending_semrush_provisioning (primaryUrl + markets) for a pending draft', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -949,7 +949,7 @@ describe('brands-storage', () => {
         brand: {
           name: 'Test',
           status: 'pending',
-          pendingProvisioning: {
+          pendingSemrushProvisioning: {
             primaryUrl: 'https://acme.com',
             markets: [{ market: 'US', languageCode: 'en' }],
           },
@@ -959,13 +959,13 @@ describe('brands-storage', () => {
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.status).to.equal('pending');
-      expect(brandsUpsert.row.pending_provisioning).to.deep.equal({
+      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
         primaryUrl: 'https://acme.com',
         markets: [{ market: 'US', languageCode: 'en' }],
       });
     });
 
-    it('drops invalid markets and a blank primaryUrl from pending_provisioning, nulling it when empty', async () => {
+    it('drops invalid markets and a blank primaryUrl from pending_semrush_provisioning, nulling it when empty', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -979,7 +979,7 @@ describe('brands-storage', () => {
         brand: {
           name: 'Test',
           status: 'pending',
-          pendingProvisioning: {
+          pendingSemrushProvisioning: {
             primaryUrl: '   ',
             markets: [{ market: '', languageCode: 'en' }, { market: 'US' }],
           },
@@ -988,10 +988,10 @@ describe('brands-storage', () => {
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_provisioning).to.equal(null);
+      expect(brandsUpsert.row.pending_semrush_provisioning).to.equal(null);
     });
 
-    it('omits pending_provisioning from the row when not supplied', async () => {
+    it('omits pending_semrush_provisioning from the row when not supplied', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -1007,17 +1007,17 @@ describe('brands-storage', () => {
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row).to.not.have.property('pending_provisioning');
+      expect(brandsUpsert.row).to.not.have.property('pending_semrush_provisioning');
     });
 
-    it('throws 400 when pendingProvisioning is not an object', async () => {
+    it('throws 400 when pendingSemrushProvisioning is not an object', async () => {
       const client = createCapturingClient({
         brands: [{ data: null, error: null }],
       });
 
       const err = await upsertBrand({
         organizationId: ORG_ID,
-        brand: { name: 'Test', pendingProvisioning: ['not', 'an', 'object'] },
+        brand: { name: 'Test', pendingSemrushProvisioning: ['not', 'an', 'object'] },
         postgrestClient: client,
       }).catch((e) => e);
 
@@ -2075,7 +2075,7 @@ describe('brands-storage', () => {
       expect(result).to.include({ name: 'NewName', status: 'pending' });
     });
 
-    it('clears pending_provisioning when updates pass pendingProvisioning: null', async () => {
+    it('clears pending_semrush_provisioning when updates pass pendingSemrushProvisioning: null', async () => {
       const client = createCapturingClient({
         brands: [
           { data: { id: BRAND_ID }, error: null },
@@ -2086,12 +2086,12 @@ describe('brands-storage', () => {
       await updateBrand({
         organizationId: ORG_ID,
         brandId: BRAND_ID,
-        updates: { pendingProvisioning: null },
+        updates: { pendingSemrushProvisioning: null },
         postgrestClient: client,
       });
 
       const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
-      expect(brandsUpdate.row.pending_provisioning).to.equal(null);
+      expect(brandsUpdate.row.pending_semrush_provisioning).to.equal(null);
     });
 
     it('normalizes brand guidance fields in update patch', async () => {

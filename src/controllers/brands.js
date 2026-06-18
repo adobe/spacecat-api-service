@@ -1405,7 +1405,7 @@ function BrandsController(ctx, log, env) {
           // Defer provisioning: persist the chosen (market, languageCode) AND
           // the primary URL (if the user entered one before saving as pending)
           // on the brand, so activation can provision the real sub-workspace +
-          // project later (stored in brands.pending_provisioning). The primary
+          // project later (stored in brands.pending_semrush_provisioning). The primary
           // URL otherwise lives only on the Semrush side, so a site-less draft
           // would have nowhere to keep it. The row lands as 'pending' because it
           // has no anchor (no site_id, no semrush_workspace_id) — see
@@ -1413,7 +1413,7 @@ function BrandsController(ctx, log, env) {
           const primaryUrl = (Array.isArray(brandData.urls) ? brandData.urls : [])
             .map((u) => (typeof u === 'string' ? u : u?.value))
             .find(hasText) || null;
-          brandData.pendingProvisioning = {
+          brandData.pendingSemrushProvisioning = {
             primaryUrl,
             markets: [{ market, languageCode }],
           };

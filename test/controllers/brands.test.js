@@ -4591,7 +4591,7 @@ describe('Brands Controller', () => {
         expect(provisionStub.called).to.equal(false);
         // The market is stashed for activation; no primary URL yet.
         const upsertArgs = upsertStub.firstCall.args[0];
-        expect(upsertArgs.brand.pendingProvisioning).to.deep.equal({
+        expect(upsertArgs.brand.pendingSemrushProvisioning).to.deep.equal({
           primaryUrl: null,
           markets: [{ market: 'us', languageCode: 'en' }],
         });
@@ -4622,7 +4622,7 @@ describe('Brands Controller', () => {
 
         expect(response.status).to.equal(201);
         expect(provisionStub.called).to.equal(false);
-        expect(upsertStub.firstCall.args[0].brand.pendingProvisioning).to.deep.equal({
+        expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
           primaryUrl: 'https://acme.com/path',
           markets: [{ market: 'us', languageCode: 'en' }],
         });
