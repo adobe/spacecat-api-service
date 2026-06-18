@@ -1,3 +1,24 @@
+# [1.582.0](https://github.com/adobe/spacecat-api-service/compare/v1.581.0...v1.582.0) (2026-06-18)
+
+
+### Features
+
+* fetch prompts by topic in research endpoint | LLMO-5671 ([#2629](https://github.com/adobe/spacecat-api-service/issues/2629)) ([13e88ed](https://github.com/adobe/spacecat-api-service/commit/13e88ed55a9916bd439b1ad8adf0a55b7c52e2b0))
+
+# [1.581.0](https://github.com/adobe/spacecat-api-service/compare/v1.580.0...v1.581.0) (2026-06-18)
+
+
+### Features
+
+* add POST agentic-traffic/hits-by-urls endpoint | LLMO-5586 ([#2615](https://github.com/adobe/spacecat-api-service/issues/2615)) ([6f4dbd8](https://github.com/adobe/spacecat-api-service/commit/6f4dbd88563af5adeed5721ffbafae54ac9755f6))
+
+# [1.580.0](https://github.com/adobe/spacecat-api-service/compare/v1.579.0...v1.580.0) (2026-06-18)
+
+
+### Features
+
+* Add cwv-trends-audit to paid profile ([#2633](https://github.com/adobe/spacecat-api-service/issues/2633)) ([e632f13](https://github.com/adobe/spacecat-api-service/commit/e632f132be10365239fbb2984578effc86050e5e))
+
 # [1.579.0](https://github.com/adobe/spacecat-api-service/compare/v1.578.2...v1.579.0) (2026-06-18)
 
 

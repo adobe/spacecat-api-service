@@ -122,6 +122,49 @@ export function resolveTopicIdsDimensionFilter(sp) {
   return { ok: true, dimensionFilterQl };
 }
 
+/**
+ * Validates topic ids for the `promptsByTopicIDs` gRPC call: digits-only, capped count.
+ * Reads the singular `topicId` and/or repeated `topicIds` query params. Returns the ids as
+ * `bigint[]` (the proto `topic_ids` field is `repeated uint64`). Empty when no param given.
+ *
+ * Mirrors {@link resolveTopicIdsDimensionFilter} (same validation rules / error bodies) but
+ * yields the id array rather than a dimensionFilterQl string.
+ * @param {URLSearchParams} sp
+ * @returns {{ ok: true, topicIds: bigint[] } | { ok: false, status: number, body: object }}
+ */
+export function resolveTopicIds(sp) {
+  const single = sp.get('topicId');
+  const raw = [...sp.getAll('topicIds'), ...(single ? [single] : [])]
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+  if (raw.length === 0) {
+    return { ok: true, topicIds: [] };
+  }
+  if (raw.length > MAX_TOPIC_IDS_DIMENSION_FILTER) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'topic_ids_limit_exceeded',
+        message: `At most ${MAX_TOPIC_IDS_DIMENSION_FILTER} topicId values are allowed`,
+      },
+    };
+  }
+  for (const id of raw) {
+    if (!TOPIC_HASH_ID_PATTERN.test(id)) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: 'invalid_topic_ids',
+          message: 'Each topicId value must be a non-negative integer string',
+        },
+      };
+    }
+  }
+  return { ok: true, topicIds: raw.map((id) => BigInt(id)) };
+}
+
 export const PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT = 500;
 export const MAX_COMPETITOR_DOMAINS = 5;
 export const TOPIC_OPPORTUNITY_PROMPTS_MAX_PAGES = 15;
