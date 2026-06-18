@@ -665,12 +665,6 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-brands-competitors'
   /llmo/ai-visibility/competitors/metrics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-metrics'
-  /llmo/ai-visibility/competitors/gap-topics:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-gap-topics'
-  /llmo/ai-visibility/competitors/gap-source-domains:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-gap-source-domains'
-  /llmo/ai-visibility/competitors/gap-prompts:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-gap-prompts'
   /llmo/ai-visibility/meta:
     $ref: './ai-visibility-api.yaml#/ai-visibility-meta'
   /llmo/ai-visibility/prompts/responses/latest:
@@ -713,8 +707,16 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts'
   /llmo/ai-visibility/v1/prompt/gap-prompts-export:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
+  /llmo/ai-visibility/v1/prompt/gap-prompts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-totals'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
+  /llmo/ai-visibility/v1/source/gap-source-domains:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains'
+  /llmo/ai-visibility/v1/source/gap-source-domains-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-export'
+  /llmo/ai-visibility/v1/source/gap-source-domains-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-totals'
   /llmo/ai-visibility/v1/meta/meta:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-meta-meta'
 

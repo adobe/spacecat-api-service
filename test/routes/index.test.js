@@ -480,9 +480,6 @@ describe('getRouteHandlers', () => {
     getBrandsSourceOpportunities: sinon.stub(),
     getBrandsCompetitors: sinon.stub(),
     getCompetitorsMetrics: sinon.stub(),
-    getCompetitorsGapTopics: sinon.stub(),
-    getCompetitorsGapSourceDomains: sinon.stub(),
-    getCompetitorsGapPrompts: sinon.stub(),
     getMeta: sinon.stub(),
     getPromptsResponsesLatest: sinon.stub(),
     getPromptsResponses: sinon.stub(),
@@ -502,7 +499,11 @@ describe('getRouteHandlers', () => {
     getV1PromptBrandPromptsExport: sinon.stub(),
     getV1PromptGapPrompts: sinon.stub(),
     getV1PromptGapPromptsExport: sinon.stub(),
+    getV1PromptGapPromptsTotals: sinon.stub(),
     getV1PromptPromptResponse: sinon.stub(),
+    getV1SourceGapSourceDomains: sinon.stub(),
+    getV1SourceGapSourceDomainsExport: sinon.stub(),
+    getV1SourceGapSourceDomainsTotals: sinon.stub(),
     getV1BrandStatsByCountry: sinon.stub(),
     getV1BrandStatsByLlm: sinon.stub(),
     getV1MetaMeta: sinon.stub(),
@@ -650,9 +651,6 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/brands/source-opportunities',
       'GET /llmo/ai-visibility/brands/competitors',
       'GET /llmo/ai-visibility/competitors/metrics',
-      'GET /llmo/ai-visibility/competitors/gap-topics',
-      'GET /llmo/ai-visibility/competitors/gap-source-domains',
-      'GET /llmo/ai-visibility/competitors/gap-prompts',
       'GET /llmo/ai-visibility/meta',
       'GET /llmo/ai-visibility/prompts/responses/latest',
       'GET /llmo/ai-visibility/prompts/responses',
@@ -672,7 +670,11 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export',
+      'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals',
       'GET /llmo/ai-visibility/v1/prompt/prompt-response',
+      'GET /llmo/ai-visibility/v1/source/gap-source-domains',
+      'GET /llmo/ai-visibility/v1/source/gap-source-domains-export',
+      'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals',
       'GET /llmo/ai-visibility/v1/brand/stats-by-country',
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm',
       'GET /llmo/ai-visibility/v1/meta/meta',
@@ -720,9 +722,6 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/brands/source-opportunities']).to.equal(mockAiVisibilityController.getBrandsSourceOpportunities);
     expect(staticRoutes['GET /llmo/ai-visibility/brands/competitors']).to.equal(mockAiVisibilityController.getBrandsCompetitors);
     expect(staticRoutes['GET /llmo/ai-visibility/competitors/metrics']).to.equal(mockAiVisibilityController.getCompetitorsMetrics);
-    expect(staticRoutes['GET /llmo/ai-visibility/competitors/gap-topics']).to.equal(mockAiVisibilityController.getCompetitorsGapTopics);
-    expect(staticRoutes['GET /llmo/ai-visibility/competitors/gap-source-domains']).to.equal(mockAiVisibilityController.getCompetitorsGapSourceDomains);
-    expect(staticRoutes['GET /llmo/ai-visibility/competitors/gap-prompts']).to.equal(mockAiVisibilityController.getCompetitorsGapPrompts);
     expect(staticRoutes['GET /llmo/ai-visibility/meta']).to.equal(mockAiVisibilityController.getMeta);
     expect(staticRoutes['GET /llmo/ai-visibility/prompts/responses/latest']).to.equal(mockAiVisibilityController.getPromptsResponsesLatest);
     expect(staticRoutes['GET /llmo/ai-visibility/prompts/responses']).to.equal(mockAiVisibilityController.getPromptsResponses);
@@ -742,7 +741,11 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptBrandPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts']).to.equal(mockAiVisibilityController.getV1PromptGapPrompts);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptGapPromptsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals']).to.equal(mockAiVisibilityController.getV1PromptGapPromptsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompt-response']).to.equal(mockAiVisibilityController.getV1PromptPromptResponse);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomains);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains-export']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomainsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains-totals']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomainsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/stats-by-country']).to.equal(mockAiVisibilityController.getV1BrandStatsByCountry);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/stats-by-llm']).to.equal(mockAiVisibilityController.getV1BrandStatsByLlm);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/meta/meta']).to.equal(mockAiVisibilityController.getV1MetaMeta);
