@@ -500,6 +500,14 @@ function PreflightController(ctx, log, env) {
     // brand-client — each swaps IMS env at construction for their own
     // dedicated identity).
     //
+    // Uses getServicePrincipalAccessToken(imsOrgId) rather than
+    // getServiceAccessTokenV3() because the PREFLIGHT IMS client is
+    // ownerless — it has no default org bound at registration, so per the
+    // IMS Client Credentials wiki (wiki x/Olwxn) every v3 mint must
+    // explicitly carry org_id. The required Service Principal Binding
+    // between the client and PREFLIGHT_IMS_ORG_ID is provisioned out-of-band
+    // (SITES-46699 acceptance criterion).
+    //
     // Mint before the AsyncJob / Preflight DB writes so a transient IMS
     // failure doesn't leave orphaned IN_PROGRESS records to clean up.
     //
@@ -527,7 +535,9 @@ function PreflightController(ctx, log, env) {
         ...context,
         env: preflightImsEnv,
       });
-      const tokenPayload = await preflightImsClient.getServiceAccessTokenV3();
+      const tokenPayload = await preflightImsClient.getServicePrincipalAccessToken(
+        env.PREFLIGHT_IMS_ORG_ID,
+      );
       imsServiceToken = tokenPayload?.access_token;
       // Post-condition: a successful mint must yield a non-empty access_token.
       // Guards against an SDK shape change (e.g. `{ accessToken }` or `{}`)
