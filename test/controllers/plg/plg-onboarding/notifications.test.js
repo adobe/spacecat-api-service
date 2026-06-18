@@ -13,21 +13,20 @@
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
-import esmock from 'esmock';
 import {
-  PLG_MODEL_DOMAIN_HELPERS,
   TEST_DOMAIN,
   TEST_IMS_ORG_ID,
   TEST_ORG_ID,
   TEST_SITE_ID,
   TEST_ONBOARDING_ID,
-  ASO_PRODUCT_CODE,
   createSharedMocks,
+  resetStubDefaults,
   createMockSite as createMockSiteShared,
   createMockOnboarding as createMockOnboardingShared,
   createMockDataAccess,
   mockAuthInfo as mockAuthInfoShared,
 } from './shared-fixtures.js';
+import { createPlgEsmock } from './plg-esmock-factory.js';
 
 use(sinonChai);
 
@@ -36,30 +35,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   this.timeout(10000);
 
   let sandbox;
-
-  // Stubs for external dependencies
-  let rumRetrieveDomainkeyStub;
-  let composeBaseURLStub;
-  let detectBotBlockerStub;
-  let detectLocaleStub;
-  let resolveCanonicalUrlStub;
-  let createOrFindOrganizationStub;
-  let enableAuditsStub;
-  let enableImportsStub;
-  let triggerAuditsStub;
-  let autoResolveAuthorUrlStub;
-  let resolveWwwUrlStub;
-  let updateCodeConfigStub;
-  let findDeliveryTypeStub;
-  let deriveProjectNameStub;
-  let loadProfileConfigStub;
-  let queueDeliveryConfigWriterStub;
-  let triggerBrandProfileAgentStub;
-  let tierClientCreateForSiteStub;
-  let tierClientCreateForOrgStub;
-  let ldCreateFromStub;
-  let configToDynamoItemStub;
-  let updateRumConfigStub;
+  let stubs;
 
   // Mock objects
   let mockLog;
@@ -83,161 +59,48 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     return mockAuthInfoShared(sandbox, imsOrgId);
   }
 
-  beforeEach(async () => {
+  before(async () => {
     sandbox = sinon.createSandbox();
-
-    const shared = createSharedMocks(sandbox);
+    stubs = createSharedMocks(sandbox);
     ({
-      rumRetrieveDomainkeyStub,
-      updateRumConfigStub,
-      composeBaseURLStub,
-      detectBotBlockerStub,
-      detectLocaleStub,
-      resolveCanonicalUrlStub,
-      createOrFindOrganizationStub,
-      enableAuditsStub,
-      enableImportsStub,
-      triggerAuditsStub,
-      autoResolveAuthorUrlStub,
-      resolveWwwUrlStub,
-      updateCodeConfigStub,
-      findDeliveryTypeStub,
-      deriveProjectNameStub,
-      queueDeliveryConfigWriterStub,
-      loadProfileConfigStub,
-      triggerBrandProfileAgentStub,
-      ldCreateFromStub,
-      tierClientCreateForSiteStub,
-      tierClientCreateForOrgStub,
-      configToDynamoItemStub,
+      mockSiteConfig, mockOrganization, mockProject, mockLog, mockEnv,
+    } = stubs);
+  });
+
+  after(() => sandbox.restore());
+
+  beforeEach(() => {
+    sandbox.reset();
+    resetStubDefaults(stubs);
+    ({
       mockLog,
       mockEnv,
       mockSiteConfig,
       mockOrganization,
       mockProject,
-    } = shared);
+    } = stubs);
 
-    // Default mock site (for new site flow: findByBaseURL returns null)
     mockSite = createMockSite();
-
-    // PlgOnboarding mock
     mockOnboarding = createMockOnboarding();
-
-    // DataAccess
     mockDataAccess = createMockDataAccess(sandbox, {
       mockSite, mockOrganization, mockProject, mockOnboarding,
     });
   });
 
-  afterEach(() => {
-    sandbox.restore();
-  });
-
   describe('onboard - Slack notifications', () => {
     let postSlackMessageStub;
-    let SlackController;
+    let SlackControllerFactory;
 
-    beforeEach(async () => {
+    before(async () => {
       postSlackMessageStub = sandbox.stub().resolves();
+      SlackControllerFactory = await createPlgEsmock(stubs, {
+        hasAdminAccess: false,
+        postSlackMessageStub,
+      });
+    });
 
-      SlackController = (await esmock(
-        '../../../../src/controllers/plg/plg-onboarding.js',
-        {
-          '@adobe/spacecat-shared-utils': {
-            composeBaseURL: composeBaseURLStub,
-            detectBotBlocker: detectBotBlockerStub,
-            detectLocale: detectLocaleStub,
-            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
-            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
-            resolveCanonicalUrl: resolveCanonicalUrlStub,
-          },
-          '@adobe/spacecat-shared-http-utils': {
-            badRequest: (msg) => ({ status: 400, value: msg }),
-            createResponse: (body, status) => ({ status, value: body }),
-            created: (data) => ({ status: 201, value: data }),
-            forbidden: (msg) => ({ status: 403, value: msg }),
-            internalServerError: (msg) => ({ status: 500, value: msg }),
-            notFound: (msg) => ({ status: 404, value: msg }),
-            noContent: () => ({ status: 204 }),
-            ok: (data) => ({ status: 200, value: data }),
-          },
-          '@adobe/spacecat-shared-launchdarkly-client': {
-            default: ldCreateFromStub,
-          },
-          '@adobe/spacecat-shared-rum-api-client': {
-            default: {
-              createFrom: sandbox.stub().returns({
-                retrieveDomainkey: rumRetrieveDomainkeyStub,
-              }),
-            },
-          },
-          '@adobe/spacecat-shared-tier-client': {
-            default: {
-              createForSite: tierClientCreateForSiteStub,
-              createForOrg: tierClientCreateForOrgStub,
-            },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-            Config: { toDynamoItem: configToDynamoItemStub },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-            Entitlement: {
-              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
-              TIERS: {
-                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
-              },
-            },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
-            default: {
-              ...PLG_MODEL_DOMAIN_HELPERS,
-              STATUSES: {
-                IN_PROGRESS: 'IN_PROGRESS',
-                ONBOARDED: 'ONBOARDED',
-                PRE_ONBOARDING: 'PRE_ONBOARDING',
-                ERROR: 'ERROR',
-                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
-                WAITLISTED: 'WAITLISTED',
-                INACTIVE: 'INACTIVE',
-                REJECTED: 'REJECTED',
-                OUTDATED: 'OUTDATED',
-              },
-              REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
-              },
-            },
-          },
-          '../../../../src/controllers/llmo/llmo-onboarding.js': {
-            createOrFindOrganization: createOrFindOrganizationStub,
-            enableAudits: enableAuditsStub,
-            enableImports: enableImportsStub,
-            triggerAudits: triggerAuditsStub,
-          },
-          '../../../../src/support/utils.js': {
-            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
-            resolveWwwUrl: resolveWwwUrlStub,
-            updateCodeConfig: updateCodeConfigStub,
-            findDeliveryType: findDeliveryTypeStub,
-            deriveProjectName: deriveProjectNameStub,
-            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
-          },
-          '../../../../src/utils/slack/base.js': {
-            loadProfileConfig: loadProfileConfigStub,
-            postSlackMessage: postSlackMessageStub,
-          },
-          '../../../../src/support/brand-profile-trigger.js': {
-            triggerBrandProfileAgent: triggerBrandProfileAgentStub,
-          },
-          '../../../../src/support/access-control-util.js': {
-            default: {
-              fromContext: () => ({ hasAdminAccess: () => false }),
-            },
-          },
-          '../../../../src/support/rum-config-service.js': {
-            updateRumConfig: updateRumConfigStub,
-          },
-        },
-      )).default;
+    beforeEach(() => {
+      postSlackMessageStub.reset();
     });
 
     function buildSlackContext(onboarding) {
@@ -269,13 +132,13 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         organizationId: TEST_ORG_ID,
         siteId: TEST_SITE_ID,
       });
-      detectBotBlockerStub.resolves({
+      stubs.detectBotBlockerStub.resolves({
         crawlable: false,
         type: 'cloudflare',
         ipsToAllowlist: ['1.2.3.4', '5.6.7.8'],
       });
 
-      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+      await SlackControllerFactory({ log: mockLog }).onboard(buildSlackContext(onboarding));
 
       expect(postSlackMessageStub).to.have.been.called;
       const [channelId, message] = postSlackMessageStub.firstCall.args;
@@ -295,12 +158,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         status: 'WAITING_FOR_IP_ALLOWLISTING',
         botBlocker: { type: 'akamai' },
       });
-      detectBotBlockerStub.resolves({
+      stubs.detectBotBlockerStub.resolves({
         crawlable: false,
         type: 'akamai',
       });
 
-      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+      await SlackControllerFactory({ log: mockLog }).onboard(buildSlackContext(onboarding));
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
@@ -319,9 +182,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         status: 'ERROR',
         error: { message: 'An internal error occurred' },
       });
-      createOrFindOrganizationStub.rejects(new Error('DB failure'));
+      stubs.createOrFindOrganizationStub.rejects(new Error('DB failure'));
 
-      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+      await SlackControllerFactory({ log: mockLog }).onboard(buildSlackContext(onboarding));
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
@@ -334,10 +197,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         status: 'WAITLISTED',
         waitlistReason: `Domain ${TEST_DOMAIN} is not an AEM site`,
       });
-      rumRetrieveDomainkeyStub.rejects(new Error('No domainkey'));
-      findDeliveryTypeStub.resolves('other');
+      stubs.rumRetrieveDomainkeyStub.rejects(new Error('No domainkey'));
+      stubs.findDeliveryTypeStub.resolves('other');
 
-      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+      await SlackControllerFactory({ log: mockLog }).onboard(buildSlackContext(onboarding));
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
@@ -351,13 +214,14 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         status: 'WAITING_FOR_IP_ALLOWLISTING',
         botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4'] },
       });
-      detectBotBlockerStub.resolves({
+      stubs.detectBotBlockerStub.resolves({
         crawlable: false,
         type: 'cloudflare',
         ipsToAllowlist: ['1.2.3.4'],
       });
 
-      const res = await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+      const res = await SlackControllerFactory({ log: mockLog })
+        .onboard(buildSlackContext(onboarding));
 
       expect(res.status).to.equal(200);
       expect(mockLog.error).to.have.been.calledWith(
@@ -372,8 +236,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         waitlistReason: `Domain ${TEST_DOMAIN} is not an AEM site`,
         organizationId: TEST_ORG_ID,
       });
-      rumRetrieveDomainkeyStub.rejects(new Error('No domainkey'));
-      findDeliveryTypeStub.resolves('other');
+      stubs.rumRetrieveDomainkeyStub.rejects(new Error('No domainkey'));
+      stubs.findDeliveryTypeStub.resolves('other');
 
       const ctx = buildSlackContext(onboarding);
       ctx.dataAccess = {
@@ -384,7 +248,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         },
       };
 
-      await SlackController({ log: mockLog }).onboard(ctx);
+      await SlackControllerFactory({ log: mockLog }).onboard(ctx);
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
@@ -414,7 +278,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         },
       };
 
-      await SlackController({ log: mockLog }).onboard(ctx);
+      await SlackControllerFactory({ log: mockLog }).onboard(ctx);
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
@@ -436,7 +300,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const ctx = buildSlackContext(onboarding);
       ctx.env = { ...ctx.env, EXPERIENCE_URL: 'https://experience-stage.adobe.com' };
 
-      await SlackController({ log: mockLog }).onboard(ctx);
+      await SlackControllerFactory({ log: mockLog }).onboard(ctx);
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
@@ -487,7 +351,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         attributes: { authInfo: mockAuthInfo() },
       };
 
-      await SlackController({ log: mockLog }).onboard(ctx);
+      await SlackControllerFactory({ log: mockLog }).onboard(ctx);
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
@@ -503,7 +367,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         steps: { siteOrgReassigned: true, entitlementCreated: true },
       });
 
-      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+      await SlackControllerFactory({ log: mockLog }).onboard(buildSlackContext(onboarding));
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
@@ -519,7 +383,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         steps: { authorUrlResolved: true, entitlementCreated: true },
       });
 
-      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+      await SlackControllerFactory({ log: mockLog }).onboard(buildSlackContext(onboarding));
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
@@ -535,7 +399,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         steps: { siteOrgReassigned: true, authorUrlResolved: true },
       });
 
-      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+      await SlackControllerFactory({ log: mockLog }).onboard(buildSlackContext(onboarding));
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
@@ -551,353 +415,112 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         steps: { entitlementCreated: true, orgResolved: true },
       });
 
-      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+      await SlackControllerFactory({ log: mockLog }).onboard(buildSlackContext(onboarding));
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.not.include('Notes:');
     });
 
-    it('REJECTED notification includes review decision, justification, and reviewer', async () => {
-      const AdminSlackController = (await esmock(
-        '../../../../src/controllers/plg/plg-onboarding.js',
-        {
-          '@adobe/spacecat-shared-utils': {
-            composeBaseURL: composeBaseURLStub,
-            detectBotBlocker: detectBotBlockerStub,
-            detectLocale: detectLocaleStub,
-            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
-            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
-            resolveCanonicalUrl: resolveCanonicalUrlStub,
-          },
-          '@adobe/spacecat-shared-http-utils': {
-            badRequest: (msg) => ({ status: 400, value: msg }),
-            createResponse: (body, status) => ({ status, value: body }),
-            created: (data) => ({ status: 201, value: data }),
-            forbidden: (msg) => ({ status: 403, value: msg }),
-            internalServerError: (msg) => ({ status: 500, value: msg }),
-            notFound: (msg) => ({ status: 404, value: msg }),
-            noContent: () => ({ status: 204 }),
-            ok: (data) => ({ status: 200, value: data }),
-          },
-          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
-          '@adobe/spacecat-shared-rum-api-client': {
-            default: {
-              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
-            },
-          },
-          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub, createForOrg: tierClientCreateForOrgStub } },
-          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-            Config: { toDynamoItem: configToDynamoItemStub },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-            Entitlement: {
-              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
-              TIERS: {
-                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
-              },
-            },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
-            default: {
-              ...PLG_MODEL_DOMAIN_HELPERS,
-              STATUSES: {
-                IN_PROGRESS: 'IN_PROGRESS',
-                ONBOARDED: 'ONBOARDED',
-                PRE_ONBOARDING: 'PRE_ONBOARDING',
-                ERROR: 'ERROR',
-                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
-                WAITLISTED: 'WAITLISTED',
-                INACTIVE: 'INACTIVE',
-                REJECTED: 'REJECTED',
-                OUTDATED: 'OUTDATED',
-              },
-              REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
-              },
-            },
-          },
-          '../../../../src/controllers/llmo/llmo-onboarding.js': {
-            createOrFindOrganization: createOrFindOrganizationStub,
-            enableAudits: enableAuditsStub,
-            enableImports: enableImportsStub,
-            triggerAudits: triggerAuditsStub,
-          },
-          '../../../../src/support/utils.js': {
-            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
-            resolveWwwUrl: resolveWwwUrlStub,
-            updateCodeConfig: updateCodeConfigStub,
-            findDeliveryType: findDeliveryTypeStub,
-            deriveProjectName: deriveProjectNameStub,
-            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
-          },
-          '../../../../src/utils/slack/base.js': {
-            loadProfileConfig: loadProfileConfigStub,
-            postSlackMessage: postSlackMessageStub,
-          },
-          '../../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
-          '../../../../src/support/access-control-util.js': {
-            default: { fromContext: () => ({ hasAdminAccess: () => true }) },
-          },
-          '../../../../src/support/rum-config-service.js': {
-            updateRumConfig: updateRumConfigStub,
-          },
-        },
-      )).default;
+    describe('admin update/transition notifications', () => {
+      let AdminSlackControllerFactory;
 
-      const record = createMockOnboarding({
-        status: 'WAITLISTED',
-        waitlistReason: 'another domain is already onboarded for this IMS org',
-        reviews: null,
-      });
-      // Simulate setStatus updating the status so notification reads REJECTED
-      let currentStatus = 'WAITLISTED';
-      let currentReviews = null;
-      record.getStatus.callsFake(() => currentStatus);
-      record.setStatus.callsFake((s) => {
-        currentStatus = s;
-      });
-      record.getReviews.callsFake(() => currentReviews);
-      record.setReviews.callsFake((r) => {
-        currentReviews = r;
-      });
-      mockDataAccess.PlgOnboarding.findById.resolves(record);
-
-      await AdminSlackController({ log: mockLog }).update({
-        dataAccess: mockDataAccess,
-        params: { onboardingId: TEST_ONBOARDING_ID },
-        data: { decision: 'UPHELD', justification: 'Domain is not ready' },
-        attributes: { authInfo: { getProfile: () => ({ email: 'ese@adobe.com' }) } },
-        env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
-        log: mockLog,
+      before(async () => {
+        AdminSlackControllerFactory = await createPlgEsmock(stubs, {
+          hasAdminAccess: true,
+          postSlackMessageStub,
+        });
       });
 
-      expect(postSlackMessageStub).to.have.been.called;
-      const [, message] = postSlackMessageStub.firstCall.args;
-      expect(message).to.include('Rejected');
-      expect(message).to.include('Domain is not ready');
-      expect(message).to.not.include('Decision:');
-      expect(message).to.not.include('Reviewed by:');
-    });
+      it('REJECTED notification includes review decision, justification, and reviewer', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'another domain is already onboarded for this IMS org',
+          reviews: null,
+        });
+        // Simulate setStatus updating the status so notification reads REJECTED
+        let currentStatus = 'WAITLISTED';
+        let currentReviews = null;
+        record.getStatus.callsFake(() => currentStatus);
+        record.setStatus.callsFake((s) => {
+          currentStatus = s;
+        });
+        record.getReviews.callsFake(() => currentReviews);
+        record.setReviews.callsFake((r) => {
+          currentReviews = r;
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
 
-    it('REJECTED notification omits review details when there are no prior reviews', async () => {
-      const AdminSlackController = (await esmock(
-        '../../../../src/controllers/plg/plg-onboarding.js',
-        {
-          '@adobe/spacecat-shared-utils': {
-            composeBaseURL: composeBaseURLStub,
-            detectBotBlocker: detectBotBlockerStub,
-            detectLocale: detectLocaleStub,
-            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
-            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
-            resolveCanonicalUrl: resolveCanonicalUrlStub,
-          },
-          '@adobe/spacecat-shared-http-utils': {
-            badRequest: (msg) => ({ status: 400, value: msg }),
-            createResponse: (body, status) => ({ status, value: body }),
-            created: (data) => ({ status: 201, value: data }),
-            forbidden: (msg) => ({ status: 403, value: msg }),
-            internalServerError: (msg) => ({ status: 500, value: msg }),
-            notFound: (msg) => ({ status: 404, value: msg }),
-            noContent: () => ({ status: 204 }),
-            ok: (data) => ({ status: 200, value: data }),
-          },
-          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
-          '@adobe/spacecat-shared-rum-api-client': {
-            default: {
-              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
-            },
-          },
-          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub, createForOrg: tierClientCreateForOrgStub } },
-          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-            Config: { toDynamoItem: configToDynamoItemStub },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-            Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: {
-                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
-              },
-            },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
-            default: {
-              ...PLG_MODEL_DOMAIN_HELPERS,
-              STATUSES: {
-                IN_PROGRESS: 'IN_PROGRESS',
-                ONBOARDED: 'ONBOARDED',
-                PRE_ONBOARDING: 'PRE_ONBOARDING',
-                ERROR: 'ERROR',
-                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
-                WAITLISTED: 'WAITLISTED',
-                INACTIVE: 'INACTIVE',
-                REJECTED: 'REJECTED',
-                OUTDATED: 'OUTDATED',
-              },
-              REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
-              },
-            },
-          },
-          '../../../../src/controllers/llmo/llmo-onboarding.js': {
-            createOrFindOrganization: createOrFindOrganizationStub,
-            enableAudits: enableAuditsStub,
-            enableImports: enableImportsStub,
-            triggerAudits: triggerAuditsStub,
-          },
-          '../../../../src/support/utils.js': {
-            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
-            resolveWwwUrl: resolveWwwUrlStub,
-            updateCodeConfig: updateCodeConfigStub,
-            findDeliveryType: findDeliveryTypeStub,
-            deriveProjectName: deriveProjectNameStub,
-            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
-          },
-          '../../../../src/utils/slack/base.js': {
-            loadProfileConfig: loadProfileConfigStub,
-            postSlackMessage: postSlackMessageStub,
-          },
-          '../../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
-          '../../../../src/support/access-control-util.js': {
-            default: { fromContext: () => ({ hasAdminAccess: () => true }) },
-          },
-        },
-      )).default;
+        await AdminSlackControllerFactory({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'UPHELD', justification: 'Domain is not ready' },
+          attributes: { authInfo: { getProfile: () => ({ email: 'ese@adobe.com' }) } },
+          env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
+          log: mockLog,
+        });
 
-      const record = createMockOnboarding({
-        status: 'WAITLISTED',
-        waitlistReason: 'domain is not an AEM site',
-        reviews: null,
-      });
-      let currentStatus = 'WAITLISTED';
-      record.getStatus.callsFake(() => currentStatus);
-      record.setStatus.callsFake((s) => {
-        currentStatus = s;
-      });
-      mockDataAccess.PlgOnboarding.findById.resolves(record);
-
-      await AdminSlackController({ log: mockLog }).update({
-        dataAccess: mockDataAccess,
-        params: { onboardingId: TEST_ONBOARDING_ID },
-        data: { decision: 'UPHELD', justification: 'Inactivating per request' },
-        attributes: { authInfo: { getProfile: () => ({ email: 'ese@adobe.com' }) } },
-        env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
-        log: mockLog,
+        expect(postSlackMessageStub).to.have.been.called;
+        const [, message] = postSlackMessageStub.firstCall.args;
+        expect(message).to.include('Rejected');
+        expect(message).to.include('Domain is not ready');
+        expect(message).to.not.include('Decision:');
+        expect(message).to.not.include('Reviewed by:');
       });
 
-      expect(postSlackMessageStub).to.have.been.called;
-      const [, message] = postSlackMessageStub.firstCall.args;
-      expect(message).to.include('Rejected');
-      expect(message).to.not.include('Justification:');
-    });
+      it('REJECTED notification omits review details when there are no prior reviews', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'domain is not an AEM site',
+          reviews: null,
+        });
+        let currentStatus = 'WAITLISTED';
+        record.getStatus.callsFake(() => currentStatus);
+        record.setStatus.callsFake((s) => {
+          currentStatus = s;
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
 
-    it('OUTDATED notification omits review section when no reviews', async () => {
-      const AdminSlackController = (await esmock(
-        '../../../../src/controllers/plg/plg-onboarding.js',
-        {
-          '@adobe/spacecat-shared-utils': {
-            composeBaseURL: composeBaseURLStub,
-            detectBotBlocker: detectBotBlockerStub,
-            detectLocale: detectLocaleStub,
-            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
-            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
-            resolveCanonicalUrl: resolveCanonicalUrlStub,
-          },
-          '@adobe/spacecat-shared-http-utils': {
-            badRequest: (msg) => ({ status: 400, value: msg }),
-            createResponse: (body, status) => ({ status, value: body }),
-            created: (data) => ({ status: 201, value: data }),
-            forbidden: (msg) => ({ status: 403, value: msg }),
-            internalServerError: (msg) => ({ status: 500, value: msg }),
-            notFound: (msg) => ({ status: 404, value: msg }),
-            noContent: () => ({ status: 204 }),
-            ok: (data) => ({ status: 200, value: data }),
-          },
-          '@adobe/spacecat-shared-launchdarkly-client': { default: ldCreateFromStub },
-          '@adobe/spacecat-shared-rum-api-client': {
-            default: {
-              createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
-            },
-          },
-          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub } },
-          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-            Config: { toDynamoItem: configToDynamoItemStub },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-            Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
-            },
-          },
-          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
-            default: {
-              ...PLG_MODEL_DOMAIN_HELPERS,
-              STATUSES: {
-                IN_PROGRESS: 'IN_PROGRESS',
-                ONBOARDED: 'ONBOARDED',
-                PRE_ONBOARDING: 'PRE_ONBOARDING',
-                ERROR: 'ERROR',
-                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
-                WAITLISTED: 'WAITLISTED',
-                INACTIVE: 'INACTIVE',
-                REJECTED: 'REJECTED',
-                OUTDATED: 'OUTDATED',
-              },
-              REVIEW_DECISIONS: {
-                BYPASSED: 'BYPASSED', UPHELD: 'UPHELD', CLOSED: 'CLOSED', REOPENED: 'REOPENED', OFFBOARDED: 'OFFBOARDED', PENDING: 'PENDING',
-              },
-            },
-          },
-          '../../../../src/controllers/llmo/llmo-onboarding.js': {
-            createOrFindOrganization: createOrFindOrganizationStub,
-            enableAudits: enableAuditsStub,
-            enableImports: enableImportsStub,
-            triggerAudits: triggerAuditsStub,
-          },
-          '../../../../src/support/utils.js': {
-            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
-            resolveWwwUrl: resolveWwwUrlStub,
-            updateCodeConfig: updateCodeConfigStub,
-            findDeliveryType: findDeliveryTypeStub,
-            deriveProjectName: deriveProjectNameStub,
-            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
-          },
-          '../../../../src/utils/slack/base.js': {
-            loadProfileConfig: loadProfileConfigStub,
-            postSlackMessage: postSlackMessageStub,
-          },
-          '../../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
-          '../../../../src/support/access-control-util.js': {
-            default: { fromContext: () => ({ hasAdminAccess: () => true }) },
-          },
-        },
-      )).default;
+        await AdminSlackControllerFactory({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'UPHELD', justification: 'Inactivating per request' },
+          attributes: { authInfo: { getProfile: () => ({ email: 'ese@adobe.com' }) } },
+          env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
+          log: mockLog,
+        });
 
-      // Simulate a WAITLISTED record where getReviews always returns null
-      // (tests the null-guard in postPlgOnboardingNotification for OUTDATED status)
-      let currentStatus = 'WAITLISTED';
-      const record = createMockOnboarding({ status: 'WAITLISTED' });
-      record.getStatus.callsFake(() => currentStatus);
-      record.setStatus.callsFake((s) => {
-        currentStatus = s;
-      });
-      record.getReviews.returns(null);
-      mockDataAccess.PlgOnboarding.findById.resolves(record);
-
-      await AdminSlackController({ log: mockLog }).transitionStatus({
-        dataAccess: mockDataAccess,
-        params: { onboardingId: TEST_ONBOARDING_ID },
-        data: { status: 'OUTDATED', justification: 'Closing old waitlist entry' },
-        attributes: { authInfo: { getProfile: () => ({ email: 'admin@adobe.com' }) } },
-        env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
-        log: mockLog,
+        expect(postSlackMessageStub).to.have.been.called;
+        const [, message] = postSlackMessageStub.firstCall.args;
+        expect(message).to.include('Rejected');
+        expect(message).to.not.include('Justification:');
       });
 
-      expect(postSlackMessageStub).to.have.been.called;
-      const [, message] = postSlackMessageStub.firstCall.args;
-      expect(message).to.include('Outdated');
-      // No justification appended when getReviews returns null
-      expect(message).to.not.include('Justification:');
+      it('OUTDATED notification omits review section when no reviews', async () => {
+        let currentStatus = 'WAITLISTED';
+        const record = createMockOnboarding({ status: 'WAITLISTED' });
+        record.getStatus.callsFake(() => currentStatus);
+        record.setStatus.callsFake((s) => {
+          currentStatus = s;
+        });
+        record.getReviews.returns(null);
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        await AdminSlackControllerFactory({ log: mockLog }).transitionStatus({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { status: 'OUTDATED', justification: 'Closing old waitlist entry' },
+          attributes: { authInfo: { getProfile: () => ({ email: 'admin@adobe.com' }) } },
+          env: { SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST', SLACK_BOT_TOKEN: 'xoxb-test' },
+          log: mockLog,
+        });
+
+        expect(postSlackMessageStub).to.have.been.called;
+        const [, message] = postSlackMessageStub.firstCall.args;
+        expect(message).to.include('Outdated');
+        // No justification appended when getReviews returns null
+        expect(message).to.not.include('Justification:');
+      });
     });
   });
 });

@@ -137,6 +137,8 @@ export function createMockOnboarding(sandbox, overrides = {}) {
 export function createSharedMocks(sandbox) {
   // RUM API client stubs
   const rumRetrieveDomainkeyStub = sandbox.stub().resolves('test-domainkey');
+  const rumApiClientCreateFromStub = sandbox.stub()
+    .returns({ retrieveDomainkey: rumRetrieveDomainkeyStub });
   const updateRumConfigStub = sandbox.stub().resolves(true);
 
   // Shared-utils stubs
@@ -236,7 +238,9 @@ export function createSharedMocks(sandbox) {
   };
 
   return {
+    sandbox,
     rumRetrieveDomainkeyStub,
+    rumApiClientCreateFromStub,
     updateRumConfigStub,
     composeBaseURLStub,
     detectBotBlockerStub,
@@ -355,4 +359,77 @@ export function buildContext(
     },
     pathInfo: { headers: headers || {} },
   };
+}
+
+/**
+ * Re-applies default stub behaviors after sandbox.reset().
+ * Call this at the start of every beforeEach that follows a before-hoisted esmock setup.
+ * Also re-applies mock object stubs (mockOrganization, mockProject, mockSiteConfig) whose
+ * behaviors are cleared by sandbox.reset() along with everything else.
+ *
+ * @param {object} stubs - the stubs bag (return value of createSharedMocks + { sandbox })
+ */
+export function resetStubDefaults(stubs) {
+  const { mockOrganization, mockProject, mockSiteConfig } = stubs;
+
+  stubs.composeBaseURLStub.returns(TEST_BASE_URL);
+  stubs.resolveWwwUrlStub.resolves(TEST_DOMAIN);
+  stubs.rumRetrieveDomainkeyStub.resolves('test-domainkey');
+  stubs.rumApiClientCreateFromStub.returns({ retrieveDomainkey: stubs.rumRetrieveDomainkeyStub });
+  stubs.updateRumConfigStub.resolves(true);
+  stubs.detectBotBlockerStub.resolves({ crawlable: true });
+  stubs.detectLocaleStub.resolves({ language: 'en', region: 'US' });
+  stubs.resolveCanonicalUrlStub.resolves(TEST_BASE_URL);
+  stubs.createOrFindOrganizationStub.resolves(mockOrganization);
+  stubs.enableAuditsStub.resolves();
+  stubs.enableImportsStub.resolves();
+  stubs.triggerAuditsStub.resolves();
+  stubs.autoResolveAuthorUrlStub.resolves(null);
+  stubs.updateCodeConfigStub.resolves();
+  stubs.findDeliveryTypeStub.resolves('aem_edge');
+  stubs.deriveProjectNameStub.returns(TEST_DOMAIN);
+  stubs.queueDeliveryConfigWriterStub.resolves({ ok: true });
+  stubs.loadProfileConfigStub.returns(PLG_PROFILE);
+  stubs.triggerBrandProfileAgentStub.resolves('exec-123');
+  stubs.ldCreateFromStub.returns({
+    getFeatureFlag: stubs.ldGetFeatureFlagStub,
+    updateVariationValue: stubs.ldUpdateVariationValueStub,
+  });
+  stubs.ldGetFeatureFlagStub.resolves({ variations: [{ value: {} }] });
+  stubs.ldUpdateVariationValueStub.resolves({});
+  stubs.tierClientCreateForSiteStub.resolves({
+    createEntitlement: stubs.tierClientCreateEntitlementStub,
+    checkValidEntitlement: stubs.sandbox.stub().resolves({
+      entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID },
+      siteEnrollment: { getId: () => 'enroll-1' },
+    }),
+  });
+  stubs.tierClientCreateForOrgStub.returns({
+    createEntitlement: stubs.tierClientCreateEntitlementStub,
+    checkValidEntitlement: stubs.sandbox.stub().resolves({
+      entitlement: {
+        getId: () => 'ent-1',
+        getOrganizationId: () => TEST_ORG_ID,
+        getTier: () => 'PLG',
+      },
+    }),
+  });
+  stubs.tierClientCreateEntitlementStub.resolves({
+    entitlement: {
+      getId: () => 'ent-1',
+      getOrganizationId: () => TEST_ORG_ID,
+      getTier: () => 'PLG',
+    },
+    siteEnrollment: { getId: () => 'enroll-1' },
+  });
+  stubs.configToDynamoItemStub.returns({ config: 'dynamo' });
+
+  // Re-apply mock object stub defaults
+  mockOrganization.getId.returns(TEST_ORG_ID);
+  mockOrganization.getImsOrgId.returns(TEST_IMS_ORG_ID);
+  mockOrganization.getName.returns('Test Org');
+  mockProject.getId.returns(TEST_PROJECT_ID);
+  mockProject.getProjectName.returns(TEST_DOMAIN);
+  mockSiteConfig.getFetchConfig.returns({});
+  mockSiteConfig.getImports.returns([]);
 }

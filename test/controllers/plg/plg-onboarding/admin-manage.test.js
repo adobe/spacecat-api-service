@@ -26,7 +26,7 @@ import {
   createMockOnboarding as createMockOnboardingShared,
   createMockDataAccess,
 } from './shared-fixtures.js';
-import { createPlgEsmock } from './admin-esmock-factory.js';
+import { createPlgEsmock } from './plg-esmock-factory.js';
 
 use(sinonChai);
 
@@ -79,6 +79,7 @@ describe('PlgOnboardingController - transitionStatus and admin management', func
       updateVariationValue: stubs.ldUpdateVariationValueStub,
     });
     stubs.rumRetrieveDomainkeyStub.resolves('test-domainkey');
+    stubs.rumApiClientCreateFromStub.returns({ retrieveDomainkey: stubs.rumRetrieveDomainkeyStub });
     stubs.detectBotBlockerStub.resolves({ crawlable: true });
     stubs.findDeliveryTypeStub.resolves('aem_edge');
     stubs.deriveProjectNameStub.returns('example.com');

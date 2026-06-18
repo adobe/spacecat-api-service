@@ -13,23 +13,18 @@
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
-import esmock from 'esmock';
 import {
-  PLG_MODEL_DOMAIN_HELPERS,
-  PLG_PROFILE,
   TEST_DOMAIN,
-  TEST_BASE_URL,
-  TEST_IMS_ORG_ID,
-  TEST_ORG_ID,
-  TEST_PROJECT_ID,
   OTHER_CUSTOMER_ORG_ID,
   ASO_PRODUCT_CODE,
   createSharedMocks,
+  resetStubDefaults,
   createMockSite as createMockSiteShared,
   createMockOnboarding as createMockOnboardingShared,
   createMockDataAccess,
   buildContext as buildContextShared,
 } from './shared-fixtures.js';
+import { createPlgEsmock } from './plg-esmock-factory.js';
 
 use(sinonChai);
 
@@ -38,32 +33,11 @@ describe('PlgOnboardingController (onboarding-flow-domain-conflict)', function d
   this.timeout(10000);
 
   let sandbox;
+  let stubs;
   let PlgOnboardingControllerFactory;
 
-  let rumRetrieveDomainkeyStub;
-  let composeBaseURLStub;
-  let detectBotBlockerStub;
-  let detectLocaleStub;
-  let resolveCanonicalUrlStub;
+  // Stub references kept as locals for convenience in test bodies
   let createOrFindOrganizationStub;
-  let enableAuditsStub;
-  let enableImportsStub;
-  let triggerAuditsStub;
-  let autoResolveAuthorUrlStub;
-  let resolveWwwUrlStub;
-  let updateCodeConfigStub;
-  let findDeliveryTypeStub;
-  let deriveProjectNameStub;
-  let loadProfileConfigStub;
-  let queueDeliveryConfigWriterStub;
-  let triggerBrandProfileAgentStub;
-  let tierClientCreateForSiteStub;
-  let tierClientCreateForOrgStub;
-  let tierClientCreateEntitlementStub;
-  let ldCreateFromStub;
-  let configToDynamoItemStub;
-  let updateRumConfigStub;
-
   let mockLog;
   let mockEnv;
   let mockSiteConfig;
@@ -90,194 +64,37 @@ describe('PlgOnboardingController (onboarding-flow-domain-conflict)', function d
   // between tests so esmock's captured references stay valid.
   before(async () => {
     sandbox = sinon.createSandbox();
-    const shared = createSharedMocks(sandbox);
+    stubs = createSharedMocks(sandbox);
     ({
-      rumRetrieveDomainkeyStub,
-      updateRumConfigStub,
-      composeBaseURLStub,
-      detectBotBlockerStub,
-      detectLocaleStub,
-      resolveCanonicalUrlStub,
-      createOrFindOrganizationStub,
-      enableAuditsStub,
-      enableImportsStub,
-      triggerAuditsStub,
-      autoResolveAuthorUrlStub,
-      resolveWwwUrlStub,
-      updateCodeConfigStub,
-      findDeliveryTypeStub,
-      deriveProjectNameStub,
-      queueDeliveryConfigWriterStub,
-      loadProfileConfigStub,
-      triggerBrandProfileAgentStub,
-      ldCreateFromStub,
-      tierClientCreateEntitlementStub,
-      tierClientCreateForSiteStub,
-      tierClientCreateForOrgStub,
-      configToDynamoItemStub,
       mockLog,
       mockEnv,
       mockSiteConfig,
       mockOrganization,
       mockProject,
-    } = shared);
+      createOrFindOrganizationStub,
+    } = stubs);
 
-    PlgOnboardingControllerFactory = (await esmock(
-      '../../../../src/controllers/plg/plg-onboarding.js',
-      {
-        '@adobe/spacecat-shared-utils': {
-          composeBaseURL: composeBaseURLStub,
-          detectBotBlocker: detectBotBlockerStub,
-          detectLocale: detectLocaleStub,
-          hasText: (val) => typeof val === 'string' && val.trim().length > 0,
-          isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
-          resolveCanonicalUrl: resolveCanonicalUrlStub,
-        },
-        '@adobe/spacecat-shared-http-utils': {
-          badRequest: (msg) => ({ status: 400, value: msg }),
-          createResponse: (body, status) => ({ status, value: body }),
-          forbidden: (msg) => ({ status: 403, value: msg }),
-          internalServerError: (msg) => ({ status: 500, value: msg }),
-          notFound: (msg) => ({ status: 404, value: msg }),
-          ok: (data) => ({ status: 200, value: data }),
-        },
-        '@adobe/spacecat-shared-launchdarkly-client': {
-          default: ldCreateFromStub,
-        },
-        '@adobe/spacecat-shared-rum-api-client': {
-          default: {
-            createFrom: sandbox.stub().returns({
-              retrieveDomainkey: rumRetrieveDomainkeyStub,
-            }),
-          },
-        },
-        '@adobe/spacecat-shared-tier-client': {
-          default: {
-            createForSite: tierClientCreateForSiteStub,
-            createForOrg: tierClientCreateForOrgStub,
-          },
-        },
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: { toDynamoItem: configToDynamoItemStub },
-        },
-        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-          Entitlement: {
-            PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
-            TIERS: {
-              FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
-            },
-          },
-        },
-        '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
-          default: {
-            ...PLG_MODEL_DOMAIN_HELPERS,
-            STATUSES: {
-              IN_PROGRESS: 'IN_PROGRESS',
-              ONBOARDED: 'ONBOARDED',
-              PRE_ONBOARDING: 'PRE_ONBOARDING',
-              ERROR: 'ERROR',
-              WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
-              WAITLISTED: 'WAITLISTED',
-              INACTIVE: 'INACTIVE',
-              REJECTED: 'REJECTED',
-              OUTDATED: 'OUTDATED',
-            },
-            REVIEW_REASONS: {
-              DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
-              AEM_SITE_CHECK: 'AEM_SITE_CHECK',
-              DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
-              BOT_BLOCKER: 'BOT_BLOCKER',
-            },
-            REVIEW_DECISIONS: {
-              BYPASSED: 'BYPASSED',
-              UPHELD: 'UPHELD',
-              CLOSED: 'CLOSED',
-              REOPENED: 'REOPENED',
-              OFFBOARDED: 'OFFBOARDED',
-              PENDING: 'PENDING',
-            },
-          },
-        },
-        '../../../../src/controllers/llmo/llmo-onboarding.js': {
-          createOrFindOrganization: createOrFindOrganizationStub,
-          enableAudits: enableAuditsStub,
-          enableImports: enableImportsStub,
-          triggerAudits: triggerAuditsStub,
-        },
-        '../../../../src/support/utils.js': {
-          autoResolveAuthorUrl: autoResolveAuthorUrlStub,
-          resolveWwwUrl: resolveWwwUrlStub,
-          updateCodeConfig: updateCodeConfigStub,
-          findDeliveryType: findDeliveryTypeStub,
-          deriveProjectName: deriveProjectNameStub,
-          queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
-        },
-        '../../../../src/utils/slack/base.js': {
-          loadProfileConfig: loadProfileConfigStub,
-        },
-        '../../../../src/support/brand-profile-trigger.js': {
-          triggerBrandProfileAgent: triggerBrandProfileAgentStub,
-        },
-        '../../../../src/support/access-control-util.js': {
-          default: {
-            fromContext: () => ({ hasAdminAccess: () => false, hasAdminReadAccess: () => false }),
-          },
-        },
-        '../../../../src/support/rum-config-service.js': {
-          updateRumConfig: updateRumConfigStub,
-        },
-      },
-    )).default;
+    PlgOnboardingControllerFactory = await createPlgEsmock(stubs, {
+      hasAdminAccess: false,
+      hasAdminReadAccess: false,
+    });
   });
+
+  after(() => sandbox.restore());
 
   // Reset stub call history and default behaviour between tests.
   // Do NOT restore/recreate the sandbox — esmock captured the original stub references.
   beforeEach(() => {
     sandbox.reset();
-
-    composeBaseURLStub.returns(TEST_BASE_URL);
-    detectBotBlockerStub.resolves({ crawlable: true });
-    detectLocaleStub.resolves({ language: 'en', region: 'US' });
-    resolveCanonicalUrlStub.resolves(TEST_BASE_URL);
-    rumRetrieveDomainkeyStub.resolves('test-domainkey');
-    updateRumConfigStub.resolves(true);
-    autoResolveAuthorUrlStub.resolves(null);
-    resolveWwwUrlStub.resolves(TEST_DOMAIN);
-    updateCodeConfigStub.resolves();
-    findDeliveryTypeStub.resolves('aem_edge');
-    deriveProjectNameStub.returns('example.com');
-    queueDeliveryConfigWriterStub.resolves({ ok: true });
-    loadProfileConfigStub.returns(PLG_PROFILE);
-    triggerBrandProfileAgentStub.resolves('exec-123');
-    configToDynamoItemStub.returns({ config: 'dynamo' });
-    tierClientCreateEntitlementStub.resolves({
-      entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID, getTier: () => 'PLG' },
-      siteEnrollment: { getId: () => 'enroll-1' },
-    });
-    tierClientCreateForSiteStub.resolves({
-      createEntitlement: tierClientCreateEntitlementStub,
-      checkValidEntitlement: sandbox.stub().resolves({
-        entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID },
-        siteEnrollment: { getId: () => 'enroll-1' },
-      }),
-    });
-    tierClientCreateForOrgStub.returns({
-      createEntitlement: tierClientCreateEntitlementStub,
-      checkValidEntitlement: sandbox.stub().resolves({
-        entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID, getTier: () => 'PLG' },
-      }),
-    });
-    createOrFindOrganizationStub.resolves(mockOrganization);
-    enableAuditsStub.resolves();
-    enableImportsStub.resolves();
-    triggerAuditsStub.resolves();
-    mockOrganization.getId.returns(TEST_ORG_ID);
-    mockOrganization.getImsOrgId.returns(TEST_IMS_ORG_ID);
-    mockOrganization.getName.returns('Test Org');
-    mockSiteConfig.getFetchConfig.returns({});
-    mockSiteConfig.updateFetchConfig.returns(undefined);
-    mockProject.getId.returns(TEST_PROJECT_ID);
-    mockProject.getProjectName.returns('example.com');
+    resetStubDefaults(stubs);
+    ({
+      mockLog,
+      mockEnv,
+      mockSiteConfig,
+      mockOrganization,
+      mockProject,
+      createOrFindOrganizationStub,
+    } = stubs);
 
     mockSite = createMockSite();
     mockOnboarding = createMockOnboarding();

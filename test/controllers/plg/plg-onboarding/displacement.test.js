@@ -13,19 +13,18 @@
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
-import esmock from 'esmock';
 import {
-  PLG_MODEL_DOMAIN_HELPERS,
   TEST_DOMAIN,
   TEST_ORG_ID,
   TEST_SITE_ID,
-  ASO_PRODUCT_CODE,
   createSharedMocks,
+  resetStubDefaults,
   createMockSite as createMockSiteShared,
   createMockOnboarding as createMockOnboardingShared,
   createMockDataAccess,
   buildContext as buildContextShared,
 } from './shared-fixtures.js';
+import { createPlgEsmock } from './plg-esmock-factory.js';
 
 use(sinonChai);
 
@@ -34,36 +33,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   this.timeout(10000);
 
   let sandbox;
-  let PlgOnboardingController;
-
-  // Stubs for external dependencies
-  let rumRetrieveDomainkeyStub;
-  let composeBaseURLStub;
-  let detectBotBlockerStub;
-  let detectLocaleStub;
-  let resolveCanonicalUrlStub;
-  let createOrFindOrganizationStub;
-  let enableAuditsStub;
-  let enableImportsStub;
-  let triggerAuditsStub;
-  let autoResolveAuthorUrlStub;
-  let resolveWwwUrlStub;
-  let updateCodeConfigStub;
-  let findDeliveryTypeStub;
-  let deriveProjectNameStub;
-  let loadProfileConfigStub;
-  let queueDeliveryConfigWriterStub;
-  let triggerBrandProfileAgentStub;
-  let tierClientCreateForSiteStub;
-  let tierClientCreateForOrgStub;
-  let ldGetFeatureFlagStub;
-  let ldCreateFromStub;
-  let configToDynamoItemStub;
-  let updateRumConfigStub;
+  let stubs;
+  let PlgOnboardingControllerFactory;
 
   // Mock objects
   let mockLog;
-  let mockEnv;
   let mockSiteConfig;
   let mockSite;
   let mockOrganization;
@@ -80,171 +54,41 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   }
 
   function buildContext(data = {}, options = {}) {
-    return buildContextShared(sandbox, mockDataAccess, mockLog, mockEnv, data, options);
+    return buildContextShared(sandbox, mockDataAccess, mockLog, stubs.mockEnv, data, options);
   }
 
-  beforeEach(async () => {
+  before(async () => {
     sandbox = sinon.createSandbox();
-
-    const shared = createSharedMocks(sandbox);
+    stubs = createSharedMocks(sandbox);
     ({
-      rumRetrieveDomainkeyStub,
-      updateRumConfigStub,
-      composeBaseURLStub,
-      detectBotBlockerStub,
-      detectLocaleStub,
-      resolveCanonicalUrlStub,
-      createOrFindOrganizationStub,
-      enableAuditsStub,
-      enableImportsStub,
-      triggerAuditsStub,
-      autoResolveAuthorUrlStub,
-      resolveWwwUrlStub,
-      updateCodeConfigStub,
-      findDeliveryTypeStub,
-      deriveProjectNameStub,
-      queueDeliveryConfigWriterStub,
-      loadProfileConfigStub,
-      triggerBrandProfileAgentStub,
-      ldGetFeatureFlagStub,
-      ldCreateFromStub,
-      tierClientCreateForSiteStub,
-      tierClientCreateForOrgStub,
-      configToDynamoItemStub,
-      mockLog,
-      mockEnv,
-      mockSiteConfig,
-      mockOrganization,
-      mockProject,
-    } = shared);
+      mockSiteConfig, mockOrganization, mockProject, mockLog,
+    } = stubs);
+    PlgOnboardingControllerFactory = await createPlgEsmock(stubs, {
+      hasAdminAccess: false,
+      hasAdminReadAccess: false,
+    });
+  });
 
-    // Default mock site (for new site flow: findByBaseURL returns null)
+  after(() => sandbox.restore());
+
+  beforeEach(() => {
+    sandbox.reset();
+    resetStubDefaults(stubs);
+    ({
+      mockSiteConfig, mockOrganization, mockProject, mockLog,
+    } = stubs);
+
     mockSite = createMockSite();
-
-    // PlgOnboarding mock
     mockOnboarding = createMockOnboarding();
-
-    // DataAccess
     mockDataAccess = createMockDataAccess(sandbox, {
       mockSite, mockOrganization, mockProject, mockOnboarding,
     });
-
-    PlgOnboardingController = (await esmock(
-      '../../../../src/controllers/plg/plg-onboarding.js',
-      {
-        '@adobe/spacecat-shared-utils': {
-          composeBaseURL: composeBaseURLStub,
-          detectBotBlocker: detectBotBlockerStub,
-          detectLocale: detectLocaleStub,
-          hasText: (val) => typeof val === 'string' && val.trim().length > 0,
-          isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
-          resolveCanonicalUrl: resolveCanonicalUrlStub,
-        },
-        '@adobe/spacecat-shared-http-utils': {
-          badRequest: (msg) => ({ status: 400, value: msg }),
-          createResponse: (body, status) => ({ status, value: body }),
-          forbidden: (msg) => ({ status: 403, value: msg }),
-          internalServerError: (msg) => ({ status: 500, value: msg }),
-          notFound: (msg) => ({ status: 404, value: msg }),
-          ok: (data) => ({ status: 200, value: data }),
-        },
-        '@adobe/spacecat-shared-launchdarkly-client': {
-          default: ldCreateFromStub,
-        },
-        '@adobe/spacecat-shared-rum-api-client': {
-          default: {
-            createFrom: sandbox.stub().returns({
-              retrieveDomainkey: rumRetrieveDomainkeyStub,
-            }),
-          },
-        },
-        '@adobe/spacecat-shared-tier-client': {
-          default: {
-            createForSite: tierClientCreateForSiteStub,
-            createForOrg: tierClientCreateForOrgStub,
-          },
-        },
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: { toDynamoItem: configToDynamoItemStub },
-        },
-        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-          Entitlement: {
-            PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
-            TIERS: {
-              FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
-            },
-          },
-        },
-        '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
-          default: {
-            ...PLG_MODEL_DOMAIN_HELPERS,
-            STATUSES: {
-              IN_PROGRESS: 'IN_PROGRESS',
-              ONBOARDED: 'ONBOARDED',
-              PRE_ONBOARDING: 'PRE_ONBOARDING',
-              ERROR: 'ERROR',
-              WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
-              WAITLISTED: 'WAITLISTED',
-              INACTIVE: 'INACTIVE',
-              REJECTED: 'REJECTED',
-              OUTDATED: 'OUTDATED',
-            },
-            REVIEW_REASONS: {
-              DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
-              AEM_SITE_CHECK: 'AEM_SITE_CHECK',
-              DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
-              BOT_BLOCKER: 'BOT_BLOCKER',
-            },
-            REVIEW_DECISIONS: {
-              BYPASSED: 'BYPASSED',
-              UPHELD: 'UPHELD',
-              CLOSED: 'CLOSED',
-              REOPENED: 'REOPENED',
-              OFFBOARDED: 'OFFBOARDED',
-              PENDING: 'PENDING',
-            },
-          },
-        },
-        '../../../../src/controllers/llmo/llmo-onboarding.js': {
-          createOrFindOrganization: createOrFindOrganizationStub,
-          enableAudits: enableAuditsStub,
-          enableImports: enableImportsStub,
-          triggerAudits: triggerAuditsStub,
-        },
-        '../../../../src/support/utils.js': {
-          autoResolveAuthorUrl: autoResolveAuthorUrlStub,
-          resolveWwwUrl: resolveWwwUrlStub,
-          updateCodeConfig: updateCodeConfigStub,
-          findDeliveryType: findDeliveryTypeStub,
-          deriveProjectName: deriveProjectNameStub,
-          queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
-        },
-        '../../../../src/utils/slack/base.js': {
-          loadProfileConfig: loadProfileConfigStub,
-        },
-        '../../../../src/support/brand-profile-trigger.js': {
-          triggerBrandProfileAgent: triggerBrandProfileAgentStub,
-        },
-        '../../../../src/support/access-control-util.js': {
-          default: {
-            fromContext: () => ({ hasAdminAccess: () => false, hasAdminReadAccess: () => false }),
-          },
-        },
-        '../../../../src/support/rum-config-service.js': {
-          updateRumConfig: updateRumConfigStub,
-        },
-      },
-    )).default;
-  });
-
-  afterEach(() => {
-    sandbox.restore();
   });
 
   describe('onboard - preonboarding fast path', () => {
     let controller;
     beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
     it('fast-tracks preonboarded site: adds enrollment and sets ONBOARDED', async () => {
@@ -262,7 +106,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(response.status).to.equal(200);
       expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
-      expect(triggerAuditsStub).to.not.have.been.called;
+      expect(stubs.triggerAuditsStub).to.not.have.been.called;
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;
       expect(preonboardedOnboarding.setSteps).to.have.been.calledWith(
@@ -283,13 +127,13 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       );
       // Fast path walks entitlement siblings to enforce one-enrollment-per-org.
       expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.have.been.called;
-      expect(ldGetFeatureFlagStub).to.have.been.called;
+      expect(stubs.ldGetFeatureFlagStub).to.have.been.called;
       // Organization must be resolved in fast path now
-      expect(createOrFindOrganizationStub).to.have.been.called;
+      expect(stubs.createOrFindOrganizationStub).to.have.been.called;
       // PlgOnboarding's organizationId is anchored to the resolved customer org up-front.
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       // Should NOT run other full onboarding steps
-      expect(detectBotBlockerStub).to.not.have.been.called;
+      expect(stubs.detectBotBlockerStub).to.not.have.been.called;
     });
 
     it('fast-tracks preonboarded site with null steps', async () => {
@@ -325,7 +169,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       // Falls through to full onboarding which succeeds
       expect(response.status).to.equal(200);
-      expect(createOrFindOrganizationStub).to.have.been.called;
+      expect(stubs.createOrFindOrganizationStub).to.have.been.called;
     });
 
     it('falls through to full onboarding when PRE_ONBOARDING but no siteId', async () => {
@@ -341,7 +185,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       // Falls through to full onboarding
       expect(response.status).to.equal(200);
-      expect(createOrFindOrganizationStub).to.have.been.called;
+      expect(stubs.createOrFindOrganizationStub).to.have.been.called;
     });
 
     it('reassigns preonboarded site from internal org to customer org', async () => {
@@ -361,14 +205,14 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
         .onSecondCall().resolves(refreshedSite);
 
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+      stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const response = await controller.onboard(context);
 
       expect(response.status).to.equal(200);
-      expect(createOrFindOrganizationStub).to.have.been.called;
+      expect(stubs.createOrFindOrganizationStub).to.have.been.called;
       expect(siteInInternalOrg.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(siteInInternalOrg.save).to.have.been.called;
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
@@ -398,7 +242,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const response = await controller.onboard(context);
 
       expect(response.status).to.equal(200);
-      expect(createOrFindOrganizationStub).to.have.been.called;
+      expect(stubs.createOrFindOrganizationStub).to.have.been.called;
       // Site org should NOT be changed (already in customer org)
       expect(siteInCustomerOrg.setOrganizationId).to.not.have.been.called;
       // PlgOnboarding org is anchored to the resolved customer org regardless of
@@ -422,8 +266,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const demoSite = createMockSite({ id: DEMO_SITE_ID, orgId: INTERNAL_ORG_ID });
       mockDataAccess.Site.findById.resolves(demoSite);
 
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = DEMO_SITE_ID;
+      stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = DEMO_SITE_ID;
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const response = await controller.onboard(context);
@@ -449,8 +293,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const siteInOtherOrg = createMockSite({ id: TEST_SITE_ID, orgId: OTHER_CUSTOMER_ORG });
       mockDataAccess.Site.findById.resolves(siteInOtherOrg);
 
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+      stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
+      stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const response = await controller.onboard(context);
@@ -467,7 +311,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       // even when we then waitlist — the record is the trace of the request attempt.
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       // Should NOT create entitlement or enrollment
-      expect(tierClientCreateForOrgStub).to.not.have.been.called;
+      expect(stubs.tierClientCreateForOrgStub).to.not.have.been.called;
       expect(mockDataAccess.SiteEnrollment.create).to.not.have.been.called;
     });
 
@@ -494,8 +338,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       mockDataAccess.Site.findById.resolves(siteInOtherOrg);
       mockDataAccess.Organization.findById.resolves(existingOrg);
 
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+      stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
+      stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const response = await controller.onboard(context);
@@ -531,8 +375,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       mockDataAccess.Site.findById.resolves(siteInOtherOrg);
       mockDataAccess.Organization.findById.resolves(existingOrg);
 
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+      stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
+      stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const response = await controller.onboard(context);
@@ -557,7 +401,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         createEntitlement: sandbox.stub().rejects(new Error('service down')),
         checkValidEntitlement: sandbox.stub().rejects(new Error('service down')),
       };
-      tierClientCreateForOrgStub.returns(orgClientStub);
+      stubs.tierClientCreateForOrgStub.returns(orgClientStub);
 
       const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
 
@@ -584,7 +428,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         createEntitlement: sandbox.stub().rejects(new Error('service down')),
         checkValidEntitlement: sandbox.stub().rejects(new Error('service down')),
       };
-      tierClientCreateForOrgStub.returns(orgClientStub);
+      stubs.tierClientCreateForOrgStub.returns(orgClientStub);
 
       const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
 
@@ -621,8 +465,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const refreshedSiteFullPath = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
       mockDataAccess.Site.findById.resolves(refreshedSiteFullPath);
 
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+      stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const response = await controller.onboard(context);
