@@ -167,6 +167,10 @@ describe('GetSiteAuditsCommand', () => {
 
       // Verify the message contains summary with correct counts
       expect(messageText).to.include('📊 *Summary:* 2 enabled, 2 disabled (4 total audit types)');
+      // Verify the scheduled-vs-on-demand explanatory note is present
+      expect(messageText).to.include(':information_source: *Note:* These lists describe *scheduled* audit runs.');
+      expect(messageText).to.include('You can still run any audit one-off');
+      expect(messageText).to.include('run audit example.com <auditType>');
       expect(messageText).to.include('*Enabled Audits:* ✅');
       expect(messageText).to.include('• lhs-mobile');
       expect(messageText).to.include('• cwv');
