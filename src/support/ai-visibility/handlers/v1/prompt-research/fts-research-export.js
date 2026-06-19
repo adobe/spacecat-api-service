@@ -57,6 +57,9 @@ export async function runFtsResearchExport(sp, clients, config) {
   const {
     requestSchema, exportSchema, sortMap, defaultSortKey, callExport, label, textFilterColumn,
   } = config;
+  if (textFilterColumn === undefined) {
+    throw new Error('runFtsResearchExport: config.textFilterColumn is required');
+  }
 
   const searchQuery = sp.get('searchQuery')?.trim();
   if (!searchQuery) {
