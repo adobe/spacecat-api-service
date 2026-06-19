@@ -7594,8 +7594,11 @@ describe('LlmoController', () => {
       expect(body.message).to.include('12-digit');
     });
 
-    it('returns 400 when the template bucket is not configured', async () => {
-      const result = await controller.getEdgeOptimizeBootstrapUrl({ ...bootstrapContext, env: {} });
+    it('returns 400 when template hosting is not configured (no S3 client)', async () => {
+      // While the TEMPORARY hardcoded bucket default is in place the bucket is always
+      // set, so the "not configured" guard is exercised via the missing S3 client.
+      // TODO: restore the `env: {}` (empty-bucket) variant once the temp default is removed.
+      const result = await controller.getEdgeOptimizeBootstrapUrl({ ...bootstrapContext, s3: {} });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
