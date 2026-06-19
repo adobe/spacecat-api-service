@@ -564,6 +564,64 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(rawCall.args[0].params.Prefix).to.equal('IMS123@AdobeOrg/raw/cloudflare/20260421/');
   });
 
+  it('reports both genuine misses and no-raw sites in the insight when mixed', async () => {
+    const fastly = makeSite('site-fastly', 'https://fastly.com', { cdnBucketConfig: { cdnProvider: 'fastly', bucketName: 'fastly-bucket' } });
+    const akamai = makeSite('site-akamai', 'https://akamai.com', { cdnBucketConfig: { cdnProvider: 'akamai', bucketName: 'akamai-bucket' } });
+    context.dataAccess.Site.all.resolves([fastly, akamai]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+    readConfigStub.resolves({ config: {} });
+
+    // Aggregates absent for both → incomplete. Route raw checks by bucket:
+    // fastly present (genuine miss), akamai absent (no raw logs).
+    s3SendStub.reset();
+    s3SendStub.callsFake((cmd) => {
+      const { Bucket, Prefix } = cmd?.params || {};
+      if (Prefix && Prefix.startsWith('raw/')) {
+        return Promise.resolve(Bucket === 'fastly-bucket'
+          ? { KeyCount: 1, Contents: [{ Key: 'raw/object' }] }
+          : { KeyCount: 0, Contents: [] });
+      }
+      return Promise.resolve({ CommonPrefixes: [] });
+    });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing (raw logs present, not aggregated): *1*');
+    expect(output).to.include('No raw logs — nothing to process: *1*');
+    expect(output).to.include('1 site(s) have raw logs but no aggregate hours');
+    expect(output).to.include('1 site(s) have no raw logs for 2026-04-21 — nothing to aggregate (expected, no action)');
+  });
+
+  it('logs a warning and proceeds when the org IMS lookup throws', async () => {
+    const site = {
+      getId: () => 'site-org-fail',
+      getBaseURL: () => 'https://org-fail.com',
+      getOrganizationId: () => 'internal-org-x',
+      getConfig: () => ({
+        getLlmoConfig: () => ({}),
+        getLlmoCdnBucketConfig: () => ({ cdnProvider: 'fastly', bucketName: 'cdn-logs-adobe-prod' }),
+      }),
+    };
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+    context.dataAccess.Organization.findById.rejects(new Error('db down'));
+    readConfigStub.resolves({ config: {} });
+    s3SendStub.resolves({ CommonPrefixes: [] });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    expect(context.log.warn).to.have.been.calledWith(
+      sinon.match('Could not resolve IMS org id for site site-org-fail'),
+    );
+  });
+
   it('classifies an incomplete site as unknown when the raw-log check fails', async () => {
     const site = makeSite('site-raw-fail', 'https://raw-fail.com');
     context.dataAccess.Site.all.resolves([site]);
