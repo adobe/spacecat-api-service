@@ -4363,9 +4363,16 @@ describe('Brands Controller', () => {
         semrushModelIds: ['model-a', 'model-b'],
       };
 
-      async function buildController({ provisionBrandSubworkspace, upsertBrand }) {
+      async function buildController({
+        provisionBrandSubworkspace, upsertBrand, ensureMarketSite,
+      }) {
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': { provisionBrandSubworkspace },
+          // Stub the site mirror by default so these tests stay isolated from the
+          // Site/brand_sites side effect; a test that cares passes its own stub.
+          '../../src/support/serenity/site-linkage.js': {
+            ensureMarketSite: ensureMarketSite || sinon.stub().resolves('site-x'),
+          },
           ...(upsertBrand ? { '../../src/support/brands-storage.js': { upsertBrand } } : {}),
         });
         return Mocked.default(context, loggerStub, mockEnv);
@@ -4401,6 +4408,57 @@ describe('Brands Controller', () => {
         const upsertArgs = upsertStub.firstCall.args[0];
         expect(upsertArgs.forceBrandId).to.equal(provisionArgs.brandId);
         expect(upsertArgs.semrushWorkspaceId).to.equal('ws-1');
+      });
+
+      it('mirrors the provisioned brand domain as a Site (+ brand_sites link) after the row is written', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const ensureSiteStub = sinon.stub().resolves('site-x');
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: upsertStub,
+          ensureMarketSite: ensureSiteStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(ensureSiteStub).to.have.been.calledOnce;
+        // runs after the brand row is persisted (compensation safety)
+        expect(ensureSiteStub.calledAfter(upsertStub)).to.equal(true);
+        const opts = ensureSiteStub.firstCall.args[1];
+        expect(opts.organizationId).to.equal(ORGANIZATION_ID);
+        expect(opts.domain).to.equal('acme.com');
+        expect(opts.brandId).to.equal(provisionStub.firstCall.args[1].brandId);
+      });
+
+      it('does NOT mirror a Site for a pending (draft) brand — nothing is provisioned yet', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
+        const ensureSiteStub = sinon.stub().resolves('site-x');
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: upsertStub,
+          ensureMarketSite: ensureSiteStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData, status: 'pending' },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub).to.not.have.been.called;
+        expect(ensureSiteStub).to.not.have.been.called;
       });
 
       it('forwards the brand URL sources (urls + social + earned) to provisioning', async () => {

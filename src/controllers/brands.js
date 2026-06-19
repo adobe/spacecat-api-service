@@ -54,6 +54,7 @@ import {
   getBrandCompetitors,
 } from '../support/brands-storage.js';
 import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
+import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import {
@@ -1383,6 +1384,9 @@ function BrandsController(ctx, log, env) {
       // brand never exists without a valid Semrush side. The pre-generated id is
       // the sub-workspace title key and is forced onto the row.
       let provisionedBrandId = null;
+      // The initial market's domain, resolved once during provisioning and reused
+      // by the site-mirror hook below (avoids re-deriving from the payload).
+      let provisionedBrandDomain = null;
       // A pending (draft) brand defers ALL Semrush provisioning: no
       // sub-workspace, no project, and crucially no primary URL required. The
       // wizard's "Save as pending" path lands here so a user can stash a brand
@@ -1419,6 +1423,7 @@ function BrandsController(ctx, log, env) {
           if (!hasText(brandDomain)) {
             return badRequest('A primary URL is required to provision a Semrush brand');
           }
+          provisionedBrandDomain = brandDomain;
           // The project needs at least one AI model (LLM) to track. The wizard
           // collects them; reject a Semrush create that omits them.
           const modelIds = Array.isArray(brandData.semrushModelIds)
@@ -1471,6 +1476,22 @@ function BrandsController(ctx, log, env) {
         forceBrandId: provisionedBrandId,
         semrushWorkspaceId: provisionedWorkspaceId,
       });
+
+      // When a Semrush sub-workspace + initial market were provisioned, mirror that
+      // initial market as a SpaceCat Site (+ brand_sites link) keyed on the
+      // market's domain, so the Semrush project has a resolvable site entity.
+      // Best-effort: never throws (a throw here would trip the workspace-release
+      // compensation below for a live brand).
+      if (hasText(provisionedWorkspaceId)) {
+        await ensureMarketSite(context, {
+          organizationId: spaceCatId,
+          brandId: provisionedBrandId,
+          // The initial market's domain, resolved during provisioning above.
+          domain: provisionedBrandDomain,
+          updatedBy,
+          log,
+        });
+      }
 
       return createResponse(created, 201);
     } catch (error) {

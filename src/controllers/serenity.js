@@ -61,6 +61,7 @@ import {
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
+import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -541,6 +542,18 @@ function SerenityController(context, log, env) {
           brandPointerReloader(ctx, auth.brandUuid),
           { brandAliases, brandUrlSources, competitors },
         );
+        // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
+        // market's own domain, once its Semrush project is created. Best-effort:
+        // never fails a live market.
+        if (result?.status === 201) {
+          await ensureMarketSite(ctx, {
+            organizationId: brand.getOrganizationId(),
+            brandId: auth.brandUuid,
+            domain: ctx.data?.brandDomain,
+            updatedBy: 'serenity-create-market',
+            log,
+          });
+        }
       } else {
         result = await handleCreateMarket(
           transport,
@@ -941,6 +954,21 @@ function SerenityController(context, log, env) {
             error: saveError?.message,
           });
         }
+      }
+      // Mirror the activated markets as a SpaceCat Site (+ brand_sites link) once
+      // at least one is live. Every market provisioned by this activation was
+      // created against the single resolved `brandDomain` (the body/stash primary
+      // URL), so one idempotent ensure on that domain covers them. Markets added
+      // later via createMarket carry their own domain and are mirrored there.
+      // Best-effort: never fails the activation.
+      if (anyLive) {
+        await ensureMarketSite(ctx, {
+          organizationId: brand.getOrganizationId(),
+          brandId: auth.brandUuid,
+          domain: brandDomain,
+          updatedBy: 'serenity-activate',
+          log,
+        });
       }
       // Success-level summary so a completed activation can be correlated with
       // upstream state during incident investigation (counts + workspace).

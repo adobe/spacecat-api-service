@@ -39,6 +39,7 @@ function makeBrandModel(overrides = {}) {
   return {
     getId: () => BRAND,
     getName: () => 'Test Brand',
+    getOrganizationId: () => ORG,
     getSemrushWorkspaceId: () => 'subworkspace-ws-1',
     setSemrushWorkspaceId: sinon.stub(),
     setStatus: sinon.stub(),
@@ -127,6 +128,7 @@ describe('SerenityController', () => {
   let getBrandUrlSourcesStub;
   let getBrandCompetitorsStub;
   let accessControlHasAccessStub;
+  let ensureMarketSiteStub;
   let MockTransportError;
   let SerenityController;
 
@@ -148,6 +150,7 @@ describe('SerenityController', () => {
       .resolves({ urls: [], socialAccounts: [], earnedContent: [] });
     getBrandCompetitorsStub = sinon.stub().resolves([]);
     accessControlHasAccessStub = sinon.stub().resolves(true);
+    ensureMarketSiteStub = sinon.stub().resolves('site-uuid-1');
     MockTransportError = class extends Error {
       constructor(status, message, body) {
         super(message);
@@ -217,6 +220,9 @@ describe('SerenityController', () => {
         getBrandAliasNames: getBrandAliasNamesStub,
         getBrandUrlSources: getBrandUrlSourcesStub,
         getBrandCompetitors: getBrandCompetitorsStub,
+      },
+      '../../src/support/serenity/site-linkage.js': {
+        ensureMarketSite: ensureMarketSiteStub,
       },
     })).default;
   });
@@ -859,6 +865,32 @@ describe('SerenityController', () => {
       expect(args[2]).to.equal(WORKSPACE); // parentWorkspaceId
     });
 
+    it('createMarket mirrors the new market as a Site (+ brand_sites link) on 201', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(201);
+      expect(ensureMarketSiteStub).to.have.been.calledOnce;
+      const opts = ensureMarketSiteStub.firstCall.args[1];
+      expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
+    });
+
+    it('createMarket does NOT mirror a Site when the upstream create did not return 201', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 409, body: { error: 'sliceExists' } });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(409);
+      expect(ensureMarketSiteStub).to.not.have.been.called;
+    });
+
     it('createMarket forwards the brand aliases so the project carries them', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
       getBrandAliasNamesStub.resolves(['Acme Inc', 'ACME']);
@@ -1063,6 +1095,33 @@ describe('SerenityController', () => {
       expect(brand.save).to.have.been.called;
     });
 
+    it('activate mirrors the brand domain as a Site once (not per market) when any market goes live', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel();
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
+      }));
+      expect(response.status).to.equal(200);
+      // All markets share the brand domain, so exactly one ensure for two markets.
+      expect(ensureMarketSiteStub).to.have.been.calledOnce;
+      const opts = ensureMarketSiteStub.firstCall.args[1];
+      expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
+    });
+
+    it('activate does NOT mirror a Site when no market goes live', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 502, body: { error: 'serenityUpstreamError' } });
+      const brand = makeBrandModel();
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(207);
+      expect(ensureMarketSiteStub).to.not.have.been.called;
+    });
+
     it('activate falls back to the stashed pending_semrush_provisioning when the body omits markets + brandDomain', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const setPendingSemrushProvisioning = sinon.stub();
@@ -1087,6 +1146,10 @@ describe('SerenityController', () => {
       expect(createBody.languageCode).to.equal('en');
       // brandDomain derived from the stashed primary URL (hostname only).
       expect(createBody.brandDomain).to.equal('acme.com');
+      // The site mirror is fed the same resolved domain (not the raw stash URL),
+      // so the activate path and the create path agree on the base URL.
+      expect(ensureMarketSiteStub).to.have.been.calledOnce;
+      expect(ensureMarketSiteStub.firstCall.args[1]).to.include({ domain: 'acme.com' });
       // The draft staging data is cleared on success, atomically with the flip.
       expect(setPendingSemrushProvisioning).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('active');

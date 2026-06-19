@@ -284,6 +284,30 @@ describe('brands-storage', () => {
       expect(result.earnedContent).to.deep.equal([{ name: 'Blog', url: 'https://blog.example.com', regions: [] }]);
     });
 
+    it('excludes Serenity market-site rows (type=serenity) from urls[] and siteIds', async () => {
+      // A brand is a shell with no domain of its own; each market has its own
+      // domain → its own site, linked via a type=serenity brand_sites row. Those
+      // rows are a pure backend linkage and must not surface in the brand response.
+      const dbRow = makeBrandRow({
+        brand_sites: [
+          {
+            site_id: 'own-site', paths: ['/'], type: 'base', sites: { base_url: 'https://acme.com' },
+          },
+          {
+            site_id: 'market-site', paths: ['/'], type: 'serenity', sites: { base_url: 'https://acme.fr' },
+          },
+        ],
+      });
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const result = await getBrandById(ORG_ID, BRAND_ID, { from: sinon.stub().returns(query) });
+
+      // market-site excluded from siteIds; its domain absent from urls[].
+      expect(result.siteIds).to.deep.equal(['own-site']);
+      const urlValues = result.urls.map((u) => u.value);
+      expect(urlValues).to.include('https://acme.com');
+      expect(urlValues).to.not.include('https://acme.fr');
+    });
+
     it('maps semrush_workspace_id to semrushWorkspaceId (sub-workspace), null when absent', async () => {
       const subWsRow = makeBrandRow({ semrush_workspace_id: 'ws-sub-123' });
       const subWsQuery = createChainableQuery({ data: subWsRow, error: null });
@@ -677,7 +701,9 @@ describe('brands-storage', () => {
   // Like createTableMockClient, but records rows passed to write methods so
   // tests can assert exactly what was written.
   function createCapturingClient(tableMap) {
-    const calls = { upsert: [], update: [] };
+    const calls = {
+      upsert: [], update: [], delete: [], or: [],
+    };
     const callCounts = {};
     const makeQuery = (table) => {
       const responses = tableMap[table] || [{ data: null, error: null }];
@@ -700,6 +726,18 @@ describe('brands-storage', () => {
           if (prop === 'update') {
             return (row) => {
               calls.update.push({ table, row });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'delete') {
+            return () => {
+              calls.delete.push({ table });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'or') {
+            return (filter) => {
+              calls.or.push({ table, filter });
               return new Proxy({}, handler);
             };
           }
@@ -1393,6 +1431,41 @@ describe('brands-storage', () => {
       ]);
     });
 
+    it('preserves a Serenity market-site link (type=serenity) through syncBrandSites instead of downgrading it', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+        sites: { data: [{ id: 'site-uuid-1', base_url: 'https://adobe.com' }], error: null },
+        // The protected-rows SELECT returns this market site; reused for the
+        // delete/upsert calls too (single-object response).
+        brand_sites: { data: [{ site_id: 'site-uuid-1' }], error: null },
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        // The submitted brand URL resolves to the SAME site as the preserved
+        // market row, so the re-upsert would otherwise downgrade type to 'base'.
+        brand: { name: 'Test', urls: [{ value: 'https://adobe.com', type: 'base' }] },
+        postgrestClient: client,
+      });
+
+      // The delete must spare serenity rows via the type filter — assert the actual
+      // filter string, otherwise this test would still pass if the carve-out were
+      // dropped and the delete wiped every row (including the serenity link).
+      const bsDelete = client.capturedCalls.or.find((c) => c.table === 'brand_sites');
+      expect(bsDelete, 'a brand_sites delete filter was issued').to.exist;
+      expect(bsDelete.filter).to.include('type.neq.serenity');
+      expect(bsDelete.filter).to.include('type.is.null');
+
+      const bsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brand_sites');
+      expect(bsUpsert, 'a brand_sites upsert was issued').to.exist;
+      const row = (bsUpsert.row || []).find((r) => r.site_id === 'site-uuid-1');
+      // type stays 'serenity' (preserved), NOT downgraded to the URL's 'base'.
+      expect(row.type).to.equal('serenity');
+    });
+
     it('uses first type when multiple URLs share same base with different types', async () => {
       const fullBrandRow = makeBrandRow({
         brand_sites: [{
@@ -1453,7 +1526,12 @@ describe('brands-storage', () => {
     it('throws when brand_sites delete fails during syncBrandSites', async () => {
       const postgrestClient = createTableMockClient({
         brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
-        brand_sites: { data: null, error: { message: 'delete error' } },
+        brand_sites: [
+          // call 0 = protected-rows SELECT (succeeds), call 1 = DELETE (fails). The
+          // SELECT is now prepended, so the error must be on the DELETE specifically.
+          { data: [], error: null },
+          { data: null, error: { message: 'delete error' } },
+        ],
       });
 
       await expect(upsertBrand({
@@ -1461,6 +1539,37 @@ describe('brands-storage', () => {
         brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
         postgrestClient,
       })).to.be.rejectedWith('Failed to sync brand_sites: delete error');
+    });
+
+    it('proceeds (delete unprotected) when the protected-rows SELECT fails silently', async () => {
+      // The protected-rows SELECT error is deliberately swallowed: a failed lookup
+      // must not block the brand edit. protectedSiteIds ends up empty, so the
+      // re-upserted row carries the URL's type (no serenity preservation) rather
+      // than throwing. This pins that silent-swallow contract.
+      const client = createCapturingClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+        sites: { data: [{ id: 'site-uuid-1', base_url: 'https://adobe.com' }], error: null },
+        brand_sites: [
+          { data: null, error: { message: 'select error' } }, // SELECT fails
+          { data: null, error: null }, // DELETE succeeds
+          { data: null, error: null }, // UPSERT succeeds
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://adobe.com', type: 'base' }] },
+        postgrestClient: client,
+      });
+
+      const bsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brand_sites');
+      expect(bsUpsert, 'a brand_sites upsert was issued').to.exist;
+      const row = (bsUpsert.row || []).find((r) => r.site_id === 'site-uuid-1');
+      // Empty protectedSiteIds → type comes from the URL ('base'), not 'serenity'.
+      expect(row.type).to.equal('base');
     });
 
     it('falls back to base URL when URL string is invalid in syncBrandSites', async () => {

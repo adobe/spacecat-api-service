@@ -12,6 +12,8 @@
 
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
+import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+
 /**
  * PostgREST select string — joins all normalized child tables.
  */
@@ -115,13 +117,20 @@ function parseUrlParts(urlString) {
  * `brand_sites` expansion, where every entry is by definition onboarded.
  */
 function mapDbBrandToV2(row) {
-  const siteIds = (row.brand_sites || []).map((bs) => bs.site_id).filter(hasText);
+  // Exclude Semrush market-site rows from the brand response: a market's domain
+  // is NOT a brand URL (the brand is a shell with no domain of its own), so these
+  // rows must not surface in urls[] or siteIds. They are a pure backend linkage —
+  // integrations resolve them via the sites / brand_sites tables directly.
+  const ownBrandSites = (row.brand_sites || [])
+    .filter((bs) => bs.type !== SERENITY_BRAND_SITE_TYPE);
+
+  const siteIds = ownBrandSites.map((bs) => bs.site_id).filter(hasText);
 
   // Index brand_sites by normalized base URL so brand_urls entries can be
   // tagged onboarded/siteId by matching their base. brand_sites.site_id is
   // NOT NULL in the schema, so no defensive filter on it here.
   const siteByBase = new Map();
-  (row.brand_sites || []).forEach((bs) => {
+  ownBrandSites.forEach((bs) => {
     const base = bs.sites?.base_url;
     if (!hasText(base)) {
       return;
@@ -135,7 +144,7 @@ function mapDbBrandToV2(row) {
   // Legacy fallback: expand brand_sites paths into URL entries (one per path,
   // or one for the base URL when no paths are set). Used when brand_urls is
   // empty — i.e. the brand predates the brand_urls child table.
-  const brandSitesUrls = (row.brand_sites || []).flatMap((bs) => {
+  const brandSitesUrls = ownBrandSites.flatMap((bs) => {
     const base = bs.sites?.base_url;
     if (!hasText(base)) {
       return [];
@@ -251,10 +260,35 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
  * (via composeBaseURL) so that multiple paths under the same site share one brand_sites row.
  */
 async function syncBrandSites(organizationId, brandId, urls, postgrestClient, updatedBy) {
+  // Serenity market-site rows (type='serenity') are owned by the serenity market
+  // lifecycle, NOT by the brand's URL list. A market's domain is generally not in
+  // brand.urls, so the delete-all-then-reinsert below would wipe these links on
+  // every brand edit. Preserve them: collect the protected site ids first, exclude
+  // them from the delete, and keep their type from being downgraded on re-upsert
+  // (when a brand URL happens to resolve to the same site as a market).
+  //
+  // The delete is type-based (IS DISTINCT FROM 'serenity'), so a serenity row
+  // inserted concurrently by ensureMarketSite is never deleted here. The only
+  // residual race is a downgrade: if a concurrent ensureMarketSite inserts a
+  // serenity row for a site that is ALSO a brand URL, between this SELECT and the
+  // upsert below, the upsert may re-tag it to the URL's type. That requires a
+  // simultaneous brand edit + market write whose domains collide — by design
+  // unusual — and self-heals on the next market write (ensureMarketSite re-upserts
+  // type='serenity'). Not worth a cross-request lock PostgREST can't cheaply give.
+  const { data: protectedRows } = await postgrestClient
+    .from('brand_sites')
+    .select('site_id')
+    .eq('brand_id', brandId)
+    .eq('type', SERENITY_BRAND_SITE_TYPE);
+  const protectedSiteIds = new Set((protectedRows || []).map((r) => r.site_id));
+
   const { error: deleteError } = await postgrestClient
     .from('brand_sites')
     .delete()
-    .eq('brand_id', brandId);
+    .eq('brand_id', brandId)
+    // Delete every non-semrush row (including NULL-type rows; a bare .neq would
+    // skip NULLs). type IS DISTINCT FROM 'serenity'.
+    .or(`type.is.null,type.neq.${SERENITY_BRAND_SITE_TYPE}`);
   if (deleteError) {
     throw new Error(`Failed to sync brand_sites: ${deleteError.message}`);
   }
@@ -304,7 +338,11 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     brand_id: brandId,
     site_id: s.id,
     paths: pathsByBase.get(s.base_url) || [],
-    type: typeByBase.get(s.base_url) || null,
+    // A brand URL may resolve to the same site as a preserved market row. Keep
+    // that row tagged 'serenity' rather than downgrading it to the URL's type.
+    type: protectedSiteIds.has(s.id)
+      ? SERENITY_BRAND_SITE_TYPE
+      : (typeByBase.get(s.base_url) || null),
     updated_by: updatedBy,
   }));
 

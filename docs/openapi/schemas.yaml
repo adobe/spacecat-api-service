@@ -10642,6 +10642,15 @@ SerenityMarket:
     semrushProjectId:
       type: string
       description: Upstream Semrush AIO project id for this slice (sub-workspace mode only).
+    domain:
+      description: |
+        The market's own domain (its primary URL host, e.g. "example.com").
+        Each market has its own primary URL/domain — the brand itself has none.
+        Additive, sub-workspace mode only. Surfaced so the market overview can
+        display it. Null when the upstream project carries no domain.
+      oneOf:
+        - type: string
+        - type: 'null'
 
 SerenityMarketListResponse:
   type: object

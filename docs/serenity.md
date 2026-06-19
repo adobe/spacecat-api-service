@@ -137,6 +137,17 @@ Ordering (mirrors the create flow in reverse):
 
 The DELETE is **not soft**. The UI must confirm with the user before invoking — the linked upstream project (and all its prompts) is permanently destroyed.
 
+## SpaceCat Site mirroring (`brand_sites`)
+
+For backwards compatibility and integrations, every Semrush market (project) is mirrored as a SpaceCat **Site** on our side. The domain model is the key thing to hold onto:
+
+- A **brand is a shell** with **no domain of its own** — like its Semrush sub-workspace. **Each market has its own primary URL/domain**, and that domain maps to a single Site (global `sites.base_url` uniqueness ⇒ at most one Site per domain). A brand whose markets span distinct domains therefore owns several market Sites.
+- The Site is linked to the owning brand via a **`brand_sites` row tagged `type='serenity'`** (`src/support/serenity/site-linkage.js` → `ensureMarketSite`; the marker names the owning feature, not the provider). The marker is load-bearing:
+  - **`syncBrandSites` preserves it.** That function rebuilds `brand_sites` from `brand.urls` on every brand edit (delete-all-then-reinsert). A market's domain is generally **not** in `brand.urls`, so an unmarked row would be silently deleted on the next edit. The marker excludes these rows from the delete and keeps their type from being downgraded on re-upsert.
+  - **`mapDbBrandToV2` excludes it.** A market's domain is not a brand URL, so `type='serenity'` rows never surface in the brand V2 response (`urls[]` / `siteIds`). Integrations resolve them via the `sites` / `brand_sites` tables directly.
+- **Lifecycle:** the Site (+ link) is ensured on **brand creation** (initial market), **activation** (the activated markets' domain), and **market creation** (that market's domain). It is **never auto-deleted** — market deletion leaves the Site and its link in place.
+- **Best-effort:** the Semrush project is the primary outcome and has already succeeded when mirroring runs, so a Site/link failure is logged and swallowed (never fails a live market). `Site.create` uses `deliveryType: 'other'` (not an AEM target).
+
 ## Activate / deactivate (sub-workspace dual-mode)
 
 A brand runs in one of two modes, decided entirely by `brands.semrush_workspace_id`:
