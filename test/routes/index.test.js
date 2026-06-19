@@ -503,6 +503,10 @@ describe('getRouteHandlers', () => {
     getV1PromptGapPrompts: sinon.stub(),
     getV1PromptGapPromptsExport: sinon.stub(),
     getV1PromptPromptResponse: sinon.stub(),
+    getV1PromptResearchPromptsExport: sinon.stub(),
+    getV1PromptResearchBrandsExport: sinon.stub(),
+    getV1PromptResearchSourceDomainsExport: sinon.stub(),
+    getV1PromptResearchTopicsExport: sinon.stub(),
     getV1BrandStatsByCountry: sinon.stub(),
     getV1BrandStatsByLlm: sinon.stub(),
     getV1MetaMeta: sinon.stub(),
@@ -673,6 +677,10 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export',
       'GET /llmo/ai-visibility/v1/prompt/prompt-response',
+      'GET /llmo/ai-visibility/v1/prompt-research/prompts-export',
+      'GET /llmo/ai-visibility/v1/prompt-research/brands-export',
+      'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export',
+      'GET /llmo/ai-visibility/v1/prompt-research/topics-export',
       'GET /llmo/ai-visibility/v1/brand/stats-by-country',
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm',
       'GET /llmo/ai-visibility/v1/meta/meta',
@@ -743,6 +751,10 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts']).to.equal(mockAiVisibilityController.getV1PromptGapPrompts);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptGapPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompt-response']).to.equal(mockAiVisibilityController.getV1PromptPromptResponse);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/prompts-export']).to.equal(mockAiVisibilityController.getV1PromptResearchPromptsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/brands-export']).to.equal(mockAiVisibilityController.getV1PromptResearchBrandsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/source-domains-export']).to.equal(mockAiVisibilityController.getV1PromptResearchSourceDomainsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/topics-export']).to.equal(mockAiVisibilityController.getV1PromptResearchTopicsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/stats-by-country']).to.equal(mockAiVisibilityController.getV1BrandStatsByCountry);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/stats-by-llm']).to.equal(mockAiVisibilityController.getV1BrandStatsByLlm);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/meta/meta']).to.equal(mockAiVisibilityController.getV1MetaMeta);
@@ -803,6 +815,10 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
+      'GET /v2/orgs/:spaceCatId/serenity/models',
+      'GET /v2/orgs/:spaceCatId/serenity/languages',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
@@ -1126,6 +1142,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/agentic-traffic/by-status',
       'GET /sites/:siteId/agentic-traffic/by-user-agent',
       'GET /sites/:siteId/agentic-traffic/by-url',
+      'POST /sites/:siteId/agentic-traffic/hits-by-urls',
       'GET /sites/:siteId/agentic-traffic/filter-dimensions',
       'GET /sites/:siteId/agentic-traffic/weeks',
       'GET /sites/:siteId/agentic-traffic/movers',

@@ -448,6 +448,126 @@ v2-serenity-tags:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
+# ─── Brand activation (sub-workspace mode) ────────────────────────────
+
+v2-serenity-activate:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags: [serenity]
+    summary: Activate a brand into sub-workspace mode
+    description: |
+      Ensures the brand has its own resourced Semrush sub-workspace (creating
+      it on first call and persisting `brands.semrush_workspace_id`, which flips
+      the brand into sub-workspace mode), then per supplied market creates-or-resumes a
+      draft and publishes it once. Markets are caller-supplied (reactivation
+      re-supplies them — there is no stored market memory). Idempotent on the
+      workspace; per-market it is 409-safe (an already-live slice is reported,
+      not duplicated). Returns 200 when ≥1 market went live (brand set `active`),
+      or 207 when none did (brand stays `pending`).
+    operationId: activateSerenityBrand
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityActivateRequest' }
+    responses:
+      '200':
+        description: At least one market is live; brand set active.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
+      '207':
+        description: No market went live; brand left pending. Body lists per-market outcomes.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or parent workspace not found.
+      '409':
+        description: >-
+          Misconfiguration: the brand's sub-workspace equals the organization
+          parent workspace. Refused to avoid acting on the shared parent pool.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-deactivate:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags: [serenity]
+    summary: Deactivate a brand (decommission its sub-workspace)
+    description: |
+      Decommissions the brand's sub-workspace: deletes every project and
+      releases the allocation back to the parent pool, then DISCONNECTS the
+      brand by clearing its `semrush_workspace_id` pointer. The sub-workspace
+      itself is never deleted (it is left empty and unowned); a future activate
+      allocates a fresh one. Sets the brand status to `pending`. No-op (200) for
+      a brand with no sub-workspace. Convergent and idempotent.
+    operationId: deactivateSerenityBrand
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Brand decommissioned (or already had no sub-workspace); status pending.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityDeactivateResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization or brand not found.
+      '409':
+        description: >-
+          Refused to protect dependents: the brand's sub-workspace equals the
+          organization parent workspace, or it still has active linked (child)
+          sub-workspaces. Decommission would empty/release a shared or
+          depended-on pool, so it is blocked.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
 v2-serenity-models:
   parameters:
     - name: spaceCatId
@@ -507,4 +627,110 @@ v2-serenity-models:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  put:
+    tags: [serenity]
+    summary: Replace the AI-model set for one slice
+    description: |
+      Diff-based sync of the AI models tracked for a (geoTargetId, languageCode)
+      slice: models absent from `modelIds` are removed, models present but not
+      yet assigned are added, already-assigned models are left untouched.
+      `modelIds` are catalog model ids (the `id` from `GET /serenity/models`),
+      NOT assignment-row ids. Duplicates are de-duplicated; the slice's project
+      is published after any change so the new set goes live. Returns the final
+      model list in the same shape as `GET`.
+    operationId: updateSerenityModels
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityUpdateModelsRequest' }
+    responses:
+      '200':
+        description: Model set updated; returns the final list.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityModelListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, workspace, or market slice not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-org-models:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List the global AI-model catalog (org-level)
+    description: |
+      Returns the global catalog of ALL AI models available for tracking
+      (`GET /v1/ai_models`, not workspace-scoped) — the brand-independent
+      catalog used to populate "available models" selectors before any brand or
+      market is configured. Falls back to an empty list if the upstream endpoint
+      is unavailable. Org access is enforced; IMS authentication is required.
+    operationId: listSerenityOrgModels
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Models retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityModelListResponse' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-org-languages:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List the supported Semrush language catalog (org-level)
+    description: |
+      Returns the languages Semrush AIO supports (`GET /v1/languages`), so the
+      UI only offers languages the gateway accepts (an unsupported language is
+      rejected at create time). Each item carries the catalog `id` (nullable)
+      and the English `name` used as the resolution key. Tolerates a 404/405
+      from the upstream by returning an empty list. Org access is enforced; IMS
+      authentication is required.
+    operationId: listSerenityOrgLanguages
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Languages retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityLanguageListResponse' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found.
       '500': { $ref: './responses.yaml#/500' }

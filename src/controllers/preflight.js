@@ -17,7 +17,7 @@ import {
   badRequest, internalServerError, notFound, ok, accepted, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { AsyncJob } from '@adobe/spacecat-shared-data-access';
-import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
+import { retrievePageAuthentication, ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../support/access-control-util.js';
 import { PreflightDto } from '../dto/preflight.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
@@ -48,7 +48,7 @@ function PreflightController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess, sqs, imsClient } = ctx;
+  const { dataAccess, sqs } = ctx;
 
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
@@ -56,10 +56,6 @@ function PreflightController(ctx, log, env) {
 
   if (!isNonEmptyObject(sqs)) {
     throw new Error('SQS client required');
-  }
-
-  if (!isNonEmptyObject(imsClient)) {
-    throw new Error('IMS client required');
   }
 
   if (!isNonEmptyObject(env)) {
@@ -487,12 +483,27 @@ function PreflightController(ctx, log, env) {
       }
     }
 
-    // Mint a spacecat-api-service IMS v3 service token for the Mystique CGW
-    // edge gate (SITES-43236 / mystique-deploy PR #463). Sent on the dedicated
-    // x-ims-authorization header — separate from `Authorization` above, which
-    // carries the customer site's page-auth token for DRS upstream. The
-    // ImsClient caches the token in-memory on the wrapper instance, so warm
-    // Lambda invocations short-circuit the IMS round-trip.
+    // Mint a spacecat-api-service IMS service token for the Mystique CGW
+    // edge gate (SITES-43236 / SITES-46699 / mystique-deploy PR #463). Sent
+    // on the dedicated x-ims-authorization header — separate from
+    // `Authorization` above, which carries the customer site's page-auth
+    // token for DRS upstream.
+    //
+    // Constructs a custom-env ImsClient with the dedicated PREFLIGHT_IMS_*
+    // credentials provisioned in Vault for this S2S use case (SITES-46699).
+    // ASO team manages a dedicated IMS client (`aem_site_optimizer_preflight`)
+    // for this purpose, following the established spacecat
+    // one-IMS-client-per-purpose convention (see `email-service.js` /
+    // `trial-users.js` / cloud-manager-client / brand-client — each swaps
+    // IMS env at construction for their own dedicated identity).
+    //
+    // Uses getServiceAccessToken (v2 authorization_code) against the
+    // IMSS-provisioned permanent authorization code (Service Token row on
+    // the client) — the synthetic service-account identity is encoded in
+    // the code itself, so no org_id is needed at mint time and no Service
+    // Principal Binding is required. The CGW-Flex edge gate validates the
+    // `client_id` claim, which is identical across v2 and v3 tokens for
+    // this client, so v2 satisfies the gate.
     //
     // Mint before the AsyncJob / Preflight DB writes so a transient IMS
     // failure doesn't leave orphaned IN_PROGRESS records to clean up.
@@ -505,7 +516,21 @@ function PreflightController(ctx, log, env) {
     // this a narrow availability cost in practice.
     let imsServiceToken;
     try {
-      const tokenPayload = await imsClient.getServiceAccessTokenV3();
+      const preflightImsEnv = {
+        ...env,
+        IMS_CLIENT_ID: env.PREFLIGHT_IMS_CLIENT_ID,
+        IMS_CLIENT_SECRET: env.PREFLIGHT_IMS_CLIENT_SECRET,
+        IMS_CLIENT_CODE: env.PREFLIGHT_IMS_CLIENT_CODE,
+        // IMS_SCOPE is unused by v2 getServiceAccessToken (scope is bound
+        // to the permanent code at IMSS registration time), but kept here
+        // for forward-compat if/when this client moves to v3.
+        IMS_SCOPE: env.PREFLIGHT_IMS_SCOPE,
+      };
+      const preflightImsClient = ImsClient.createFrom({
+        ...context,
+        env: preflightImsEnv,
+      });
+      const tokenPayload = await preflightImsClient.getServiceAccessToken();
       imsServiceToken = tokenPayload?.access_token;
       // Post-condition: a successful mint must yield a non-empty access_token.
       // Guards against an SDK shape change (e.g. `{ accessToken }` or `{}`)
