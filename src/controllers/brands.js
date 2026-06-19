@@ -491,6 +491,10 @@ function BrandsController(ctx, log, env) {
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);
     } catch (error) {
+      if (error?.status === 409) {
+        log.warn(`Prompt unique-constraint conflict for brand ${brandId}: ${error.message}`);
+        return createErrorResponse(error);
+      }
       log.error(`Error creating prompts for brand ${brandId}:`, error);
       return createErrorResponse(error);
     }

@@ -1829,6 +1829,100 @@ describe('prompts-storage', () => {
       expect(result.prompts[0].categoryId).to.be.undefined;
       expect(result.prompts[0].topicId).to.be.undefined;
     });
+
+    it('throws a typed 409 when INSERT returns a 23505 unique-constraint error', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: () => ({
+                select: () => thenable({
+                  data: null,
+                  error: {
+                    code: '23505',
+                    message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+                  },
+                }),
+              }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const err = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'p-1', prompt: 'Synthetic prompt text', regions: ['us'] }],
+        postgrestClient: client,
+      }).catch((e) => e);
+      expect(err).to.be.instanceOf(Error);
+      expect(err.status).to.equal(409);
+    });
+
+    it('deduplicates duplicate text+regions in toInsert and does not throw', async () => {
+      // Mock: >1 row in INSERT → 23505 (simulates uq_prompt_text_region_per_brand);
+      // exactly 1 row → success. RED before the intra-batch dedup fix; GREEN after.
+      const insertStub = sinon.stub().callsFake((rows) => ({
+        select: () => thenable(
+          Array.isArray(rows) && rows.length > 1
+            ? {
+              data: null,
+              error: {
+                code: '23505',
+                message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+              },
+            }
+            : { data: rows.map((r) => ({ prompt_id: r.prompt_id })), error: null },
+        ),
+      }));
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-topic-alpha', prompt: 'Synthetic test prompt text', regions: ['us'], topic: 'Alpha',
+          },
+          {
+            id: 'p-topic-beta', prompt: 'Synthetic test prompt text', regions: ['us'], topic: 'Beta',
+          },
+        ],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+      expect(result.prompts).to.have.lengthOf(1);
+      const insertedRows = insertStub.firstCall.args[0];
+      expect(insertedRows).to.have.lengthOf(1);
+      // p-topic-alpha wins: both topic_id=null, 'p-topic-alpha' < 'p-topic-beta' alphabetically
+      expect(insertedRows[0].prompt_id).to.equal('p-topic-alpha');
+    });
   });
 
   describe('updatePromptById', () => {

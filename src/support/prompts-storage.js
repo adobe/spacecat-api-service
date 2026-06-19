@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { classifyIntents } from './intent-classifier.js';
+import { throwOnPgConstraintViolation } from './errors.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
@@ -762,6 +763,9 @@ export async function upsertPrompts({
         .select(),
     );
     if (error) {
+      throwOnPgConstraintViolation(error, {
+        23505: { status: 409, message: 'A prompt with the same text and region already exists for this brand.' },
+      });
       throw new Error(`Failed to insert prompts: ${error.message}`);
     }
     created = inserted?.length ?? toInsert.length;
