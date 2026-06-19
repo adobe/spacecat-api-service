@@ -2023,6 +2023,56 @@ describe('prompts-storage', () => {
         dropped_topic_id: T_BETA,
       });
     });
+
+    it('routes case-variant text to update not insert when an active row already exists', async () => {
+      // Scenario: DB has "hello world" (lowercase); incoming prompt uses "Hello World" (mixed).
+      // The DB constraint uses lower(text), so they collide. getKey must lowercase the text
+      // component to match existingByKey correctly and route to toUpdate, not toInsert.
+      // RED on current (case-sensitive) getKey: misses existingByKey → INSERT stub is called.
+      // GREEN after fix: matches existingByKey → UPDATE path, INSERT stub never reached.
+      const existingRow = {
+        id: 'row-uuid-existing',
+        prompt_id: 'p-existing',
+        text: 'hello world',
+        regions: ['us'],
+        status: 'active',
+      };
+      const toInsertResult = (rows) => ({
+        select: () => thenable({
+          data: rows.map((r) => ({ prompt_id: r.prompt_id })),
+          error: null,
+        }),
+      });
+      const insertStub = sinon.stub().callsFake(toInsertResult);
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [existingRow], error: null }),
+                    in: () => thenable({ data: [existingRow], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Hello World', regions: ['us'] }],
+        postgrestClient: client,
+      });
+      expect(insertStub.notCalled).to.be.true;
+      expect(result.created).to.equal(0);
+      expect(result.updated).to.equal(1);
+    });
   });
 
   describe('updatePromptById', () => {

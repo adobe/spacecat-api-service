@@ -660,7 +660,7 @@ export async function upsertPrompts({
 
   const getKey = (p) => {
     const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();
-    return `${String(p.prompt || p.text || '').trim()}:${norm.join(',')}`;
+    return `${String(p.prompt || p.text || '').trim().toLowerCase()}:${norm.join(',')}`;
   };
 
   const existingById = new Map((existing || []).map((p) => [p.prompt_id, p]));
