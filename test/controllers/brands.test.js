@@ -4951,6 +4951,36 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(404);
     });
 
+    it('returns 404 when the brand is soft-deleted (no resurrection via status transition)', async () => {
+      const maybeSingleStub = sandbox.stub();
+      // resolveBrandUuid succeeds...
+      maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // ...but the status update is filtered out by .neq('status','deleted') → no row.
+      maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'active' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(404);
+    });
+
     it('returns 403 when user lacks access', async () => {
       const authContextUser = {
         attributes: {

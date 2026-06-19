@@ -765,6 +765,10 @@ export async function setBrandStatus({
     .update({ status, updated_by: updatedBy })
     .eq('organization_id', organizationId)
     .eq('id', brandId)
+    // Do not resurrect a soft-deleted brand via a status transition — a deleted
+    // brand matches no row here, so the caller gets a 404 (use a dedicated
+    // undelete flow if reactivation is ever needed).
+    .neq('status', 'deleted')
     .select('id')
     .maybeSingle();
 

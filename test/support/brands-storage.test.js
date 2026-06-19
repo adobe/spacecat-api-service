@@ -1868,5 +1868,19 @@ describe('brands-storage', () => {
         organizationId: ORG_ID, brandId: BRAND_ID, status: 'pending', postgrestClient,
       })).to.be.rejectedWith('Failed to set brand status: boom');
     });
+
+    it('does not resurrect a soft-deleted brand (the .neq filter matches no row → null)', async () => {
+      // A deleted brand is excluded by .neq('status','deleted'), so the update
+      // affects no row and the function returns null (controller → 404).
+      const postgrestClient = createTableMockClient({
+        brands: { data: null, error: null },
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      });
+
+      expect(result).to.be.null;
+    });
   });
 });
