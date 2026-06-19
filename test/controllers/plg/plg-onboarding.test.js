@@ -5550,6 +5550,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,
             queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+            ASO_DEMO_ORG: DEMO_ORG_ID,
           },
           '../../../src/utils/slack/base.js': {
             loadProfileConfig: loadProfileConfigStub,

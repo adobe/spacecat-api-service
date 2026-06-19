@@ -351,6 +351,7 @@ function PlgOnboardingController(ctx) {
     // permitted on the PLG onboarding flow - this endpoint stays on hasAdminAccess()
     // so that the PLG admin surface (status / waitlist / bypass / etc.) is gated
     // exclusively by the full-admin role.
+    // Admin/API key holders can access any org's status
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       const profile = authInfo.getProfile();
