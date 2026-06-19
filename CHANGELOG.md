@@ -1,3 +1,10 @@
+## [1.584.2](https://github.com/adobe/spacecat-api-service/compare/v1.584.1...v1.584.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* **prerender:** ai-only-missing mode should include FIXED suggestions ([#2644](https://github.com/adobe/spacecat-api-service/issues/2644)) ([cb6db46](https://github.com/adobe/spacecat-api-service/commit/cb6db46b8ff296b8926cc65cc352a7eef173f53d)), closes [adobe/spacecat-audit-worker#2703](https://github.com/adobe/spacecat-audit-worker/issues/2703)
+
 ## [1.584.1](https://github.com/adobe/spacecat-api-service/compare/v1.584.0...v1.584.1) (2026-06-19)
 
 
