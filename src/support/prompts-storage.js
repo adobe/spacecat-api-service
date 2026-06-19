@@ -725,9 +725,13 @@ export async function upsertPrompts({
   // Deterministic tie-break: sort by (topic_id, prompt_id) asc, keep first.
   // Each drop is logged (warn) with a text hash — auditable without echoing
   // customer data. Dropped entries are removed from processed so counts stay
-  // honest.
+  // honest. Guard is > 1: a single-row batch cannot collide with itself.
   if (toInsert.length > 1) {
-    const dedupKey = (row) => `${String(row.text || '').toLowerCase()}:${[...(row.regions || [])].sort().join(',')}`;
+    const dedupKey = (row) => {
+      const t = String(row.text || '').trim().toLowerCase();
+      const r = [...(row.regions || [])].map((x) => String(x).toLowerCase()).sort().join(',');
+      return `${t}:${r}`;
+    };
     const sortedForDedup = [...toInsert].sort((a, b) => {
       const tCmp = String(a.topic_id ?? '').localeCompare(String(b.topic_id ?? ''));
       return tCmp !== 0 ? tCmp : String(a.prompt_id).localeCompare(String(b.prompt_id));
