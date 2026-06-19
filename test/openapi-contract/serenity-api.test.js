@@ -46,6 +46,7 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
         findById: sinon.stub().resolves({
           getId: () => BRAND,
           getName: () => 'Test Brand',
+          getOrganizationId: () => ORG,
           getSemrushWorkspaceId: () => null,
           setSemrushWorkspaceId: sinon.stub(),
           setStatus: sinon.stub(),

@@ -547,7 +547,9 @@ function SerenityController(context, log, env) {
         // never fails a live market.
         if (result?.status === 201) {
           await ensureMarketSite(ctx, {
-            organizationId: brand.getOrganizationId(),
+            // Optional-chained so a missing/throwing accessor can't 500 a market
+            // that is already live upstream — the mirror is best-effort.
+            organizationId: brand.getOrganizationId?.(),
             brandId: auth.brandUuid,
             domain: ctx.data?.brandDomain,
             updatedBy: 'serenity-create-market',
@@ -963,7 +965,9 @@ function SerenityController(context, log, env) {
       // Best-effort: never fails the activation.
       if (anyLive) {
         await ensureMarketSite(ctx, {
-          organizationId: brand.getOrganizationId(),
+          // Optional-chained so a missing/throwing accessor can't 500 an
+          // activation whose markets are already live upstream — best-effort.
+          organizationId: brand.getOrganizationId?.(),
           brandId: auth.brandUuid,
           domain: brandDomain,
           updatedBy: 'serenity-activate',
