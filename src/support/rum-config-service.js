@@ -38,7 +38,12 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
  * @returns {Promise<boolean>} true if a RUM domain key was found.
  */
 export async function updateRumConfig(site, context, { save = true } = {}) {
-  const { hasDomainKey } = await resolveRumDomainKey(site, context);
+  let hasDomainKey = false;
+  try {
+    ({ hasDomainKey } = await resolveRumDomainKey(site, context));
+  } catch (e) {
+    context.log.warn(`[rum-config-service] resolveRumDomainKey failed: ${e.message}`);
+  }
 
   if (save) {
     const siteConfig = site.getConfig();

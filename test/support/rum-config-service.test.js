@@ -95,6 +95,17 @@ describe('rum-config-service', () => {
       expect(site.save).to.have.been.calledOnce;
     });
 
+    it('returns false and saves when resolveRumDomainKey throws unexpectedly', async () => {
+      resolveRumDomainKeyStub.rejects(new Error('unexpected internal error'));
+
+      const result = await updateRumConfig(site, context);
+
+      expect(result).to.be.false;
+      expect(context.log.warn).to.have.been.calledWithMatch(/resolveRumDomainKey failed/);
+      expect(siteConfig.updateRumConfig).to.have.been.calledOnceWith(false);
+      expect(site.save).to.have.been.calledOnce;
+    });
+
     it('skips config mutation and save when { save: false } is passed', async () => {
       resolveRumDomainKeyStub.resolves({ hasDomainKey: true, timedOut: false });
 
