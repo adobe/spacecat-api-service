@@ -65,6 +65,13 @@ describe('CheckCdnLogsStatusCommand', () => {
     s3SendStub = sinon.stub();
     s3ClientRegions = [];
 
+    // Raw-log presence checks list a non-`aggregated/` prefix. Default them to
+    // "present" so an incomplete site is treated as a genuine miss unless a test
+    // overrides this; aggregate listings keep using the per-test default behavior.
+    s3SendStub
+      .withArgs(sinon.match((cmd) => !(cmd?.params?.Prefix || '').startsWith('aggregated/')))
+      .resolves({ KeyCount: 1, Contents: [{ Key: 'raw/object' }] });
+
     CheckCdnLogsStatusCommand = (await esmock(
       '../../../../src/support/slack/commands/check-cdn-logs-status.js',
       {
@@ -92,6 +99,7 @@ describe('CheckCdnLogsStatusCommand', () => {
           findByBaseURL: sinon.stub().resolves(null),
         },
         Configuration: { findLatest: sinon.stub() },
+        Organization: { findById: sinon.stub().resolves(null) },
       },
       log: { error: sinon.stub(), warn: sinon.stub() },
       s3: {
@@ -370,7 +378,7 @@ describe('CheckCdnLogsStatusCommand', () => {
 
     const summaryCall = slackContext.say.args.find((a) => a[0].includes('Complete: *1*'));
     expect(summaryCall).to.exist;
-    expect(summaryCall[0]).to.include('Incomplete: *0*');
+    expect(summaryCall[0]).to.include('Missing (raw logs present, not aggregated): *0*');
   });
 
   it('handles S3 response without CommonPrefixes (uses empty fallback)', async () => {
@@ -389,7 +397,7 @@ describe('CheckCdnLogsStatusCommand', () => {
 
     // All 24 hours missing → site is incomplete
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Incomplete: *1*');
+    expect(output).to.include('Missing (raw logs present, not aggregated): *1*');
   });
 
   it('paginates S3 listing when NextContinuationToken is present', async () => {
@@ -441,7 +449,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     const cmd = CheckCdnLogsStatusCommand(context);
     await cmd.handleExecution(['2026-04-21'], slackContext);
 
-    const summaryCall = slackContext.say.args.find((a) => a[0].includes('Incomplete: *1*'));
+    const summaryCall = slackContext.say.args.find((a) => a[0].includes('Missing (raw logs present, not aggregated): *1*'));
     expect(summaryCall).to.exist;
     expect(summaryCall[0]).to.include('fastly-site.com');
   });
@@ -469,7 +477,115 @@ describe('CheckCdnLogsStatusCommand', () => {
 
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('1 site(s) have inputs ready for DB import');
-    expect(output).to.include('1 site(s) have no aggregate hours');
+    expect(output).to.include('1 site(s) have raw logs but no aggregate hours');
+  });
+
+  it('classifies an incomplete site with no raw logs as expected (no action)', async () => {
+    const site = makeSite('site-no-raw', 'https://no-raw.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'fastly' } } });
+    // Aggregates absent → incomplete; raw absent → nothing to aggregate (expected).
+    s3SendStub.resolves({ CommonPrefixes: [] });
+    s3SendStub
+      .withArgs(sinon.match((cmd) => !(cmd?.params?.Prefix || '').startsWith('aggregated/')))
+      .resolves({ KeyCount: 0, Contents: [] });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing (raw logs present, not aggregated): *0*');
+    expect(output).to.include('No raw logs — nothing to process: *1*');
+    // No genuine misses → "all good" branch, which appends the expected-gap note.
+    expect(output).to.include('1 site(s) had no raw logs for 2026-04-21 (nothing to aggregate — expected)');
+    expect(output).to.include('Sites with no raw logs (nothing to aggregate — expected)');
+  });
+
+  it('resolves the raw prefix from a configured standardized bucket + orgId', async () => {
+    // Raw bucket/orgId come from the SITE cdnBucketConfig (mirrors audit-worker's
+    // resolveCdnBucketName); standardized bucket (mixed-alnum) + orgId →
+    // `{orgId}/raw/{provider}/...`.
+    const site = makeSite('site-cfg', 'https://configured.com', {
+      cdnBucketConfig: {
+        cdnProvider: 'aem-cs-fastly',
+        bucketName: 'cdn-logs-acme1',
+        orgId: 'org-abc',
+      },
+    });
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: {} });
+    s3SendStub.resolves({ CommonPrefixes: [] });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    const rawCall = s3SendStub.getCalls()
+      .find((c) => !(c.args[0].params.Prefix || '').startsWith('aggregated/'));
+    expect(rawCall.args[0].params.Bucket).to.equal('cdn-logs-acme1');
+    expect(rawCall.args[0].params.Prefix).to.equal('org-abc/raw/aem-cs-fastly/2026/04/21/');
+  });
+
+  it('falls back to the org IMS id as pathId for a standardized bucket without orgId', async () => {
+    const site = {
+      getId: () => 'site-ims',
+      getBaseURL: () => 'https://ims-org.com',
+      getOrganizationId: () => 'internal-org-1',
+      getConfig: () => ({
+        getLlmoConfig: () => ({}),
+        getLlmoCdnBucketConfig: () => ({ cdnProvider: 'cloudflare', bucketName: 'cdn-logs-adobe-prod' }),
+      }),
+    };
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+    context.dataAccess.Organization.findById.resolves({ getImsOrgId: () => 'IMS123@AdobeOrg' });
+
+    readConfigStub.resolves({
+      config: { cdnBucketConfig: { cdnProvider: 'cloudflare', bucketName: 'cdn-logs-adobe-prod' } },
+    });
+    s3SendStub.resolves({ CommonPrefixes: [] });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    expect(context.dataAccess.Organization.findById).to.have.been.calledWith('internal-org-1');
+    const rawCall = s3SendStub.getCalls()
+      .find((c) => !(c.args[0].params.Prefix || '').startsWith('aggregated/'));
+    // cloudflare → concatenated day partition under `{imsOrgId}/raw/{provider}/`
+    expect(rawCall.args[0].params.Prefix).to.equal('IMS123@AdobeOrg/raw/cloudflare/20260421/');
+  });
+
+  it('classifies an incomplete site as unknown when the raw-log check fails', async () => {
+    const site = makeSite('site-raw-fail', 'https://raw-fail.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'fastly' } } });
+    s3SendStub.resolves({ CommonPrefixes: [] });
+    s3SendStub
+      .withArgs(sinon.match((cmd) => !(cmd?.params?.Prefix || '').startsWith('aggregated/')))
+      .rejects(new Error('AccessDenied'));
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Raw-log status unknown (check failed): *1*');
+    expect(output).to.include('raw-log check failed');
+    expect(context.log.warn).to.have.been.calledWith(
+      sinon.match('Raw-log presence check failed for site site-raw-fail'),
+    );
   });
 
   it('shows all missing hours when <= 6 are absent (no truncation)', async () => {
@@ -494,7 +610,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     await cmd.handleExecution(['2026-04-21'], slackContext);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Incomplete: *1*');
+    expect(output).to.include('Missing (raw logs present, not aggregated): *1*');
     // All missing hours shown inline, not truncated
     expect(output).to.include('21, 22, 23');
   });
@@ -558,7 +674,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     await cmd.handleExecution(['2026-04-21'], slackContext);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Incomplete: *1*');
+    expect(output).to.include('Missing (raw logs present, not aggregated): *1*');
     expect(output).to.include('[daily-only]');
     expect(output).to.include('imperva');
   });
@@ -667,7 +783,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     );
     // unknown provider → 24 hours expected → all missing
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Incomplete: *2*');
+    expect(output).to.include('Missing (raw logs present, not aggregated): *2*');
     expect(output).to.include('LLMO config unavailable for *2* sites');
     expect(output).to.include('config unavailable, using fallback');
   });
@@ -705,7 +821,7 @@ describe('CheckCdnLogsStatusCommand', () => {
 
     // unknown (fallback) → all 24 hours expected → incomplete
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Incomplete: *1*');
+    expect(output).to.include('Missing (raw logs present, not aggregated): *1*');
   });
 
   it('uses safe fallback config when a site has no config accessor', async () => {
@@ -725,7 +841,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     await cmd.handleExecution(['2026-04-21'], slackContext);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Incomplete: *1*');
+    expect(output).to.include('Missing (raw logs present, not aggregated): *1*');
     expect(output).to.include('https://noconfig.com');
   });
 
@@ -804,7 +920,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     await cmd.handleExecution(['2026-04-21'], slackContext);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('30 hourly site(s) are missing one or more hourly aggregates');
+    expect(output).to.include('30 site(s) have raw logs but only partial aggregate coverage');
     expect(output).to.include('… 22 more. Re-run with `siteId=<siteId>` for focused details.');
     expect(output).not.to.include('site-29');
   });

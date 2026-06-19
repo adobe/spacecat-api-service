@@ -175,6 +175,125 @@ async function getCdnSettings(site, s3Client, s3Bucket, env, log) {
 }
 
 /**
+ * Validates if a bucket name is a standard Adobe CDN logs bucket (mirrors
+ * spacecat-audit-worker's cdn-utils.isStandardAdobeCdnBucket). Standardized
+ * buckets store raw logs under a `{pathId}/raw/{serviceProvider}/` prefix;
+ * legacy/BYOCDN buckets store them under a flat `raw/` prefix.
+ *
+ * @param {string} bucketName
+ * @returns {boolean}
+ */
+function isStandardAdobeCdnBucket(bucketName) {
+  if (/^cdn-logs-adobe-(prod|dev|stage)$/.test(bucketName)) {
+    return true;
+  }
+  if (/^cdn-logs-[a-zA-Z0-9-]+$/.test(bucketName)) {
+    const suffix = bucketName.substring('cdn-logs-'.length);
+    if (/[a-zA-Z]/.test(suffix) && /[0-9]/.test(suffix)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Resolves the raw CDN logs bucket and pathId for a site. Mirrors the resolution
+ * in spacecat-audit-worker (resolveCdnBucketName + pathId): the configured
+ * `bucketName` wins, else the standardized `cdn-logs-adobe-{env}` bucket; pathId
+ * is the configured `orgId`, else the org's IMS org id.
+ *
+ * @param {Object} site
+ * @param {Object} env
+ * @param {Object} Organization - data-access Organization model
+ * @param {Object} log
+ * @returns {Promise<{rawBucket: string, pathId: string|null}>}
+ */
+async function resolveRawLogLocation(site, env, Organization, log) {
+  const cdnBucketConfig = getSiteCdnBucketConfig(site);
+  const rawBucket = cdnBucketConfig.bucketName
+    || `cdn-logs-adobe-${env.AWS_ENV || 'prod'}`;
+
+  let pathId = cdnBucketConfig.orgId || null;
+  if (!pathId && isStandardAdobeCdnBucket(rawBucket)) {
+    try {
+      const orgId = site.getOrganizationId?.();
+      const org = orgId ? await Organization.findById(orgId) : null;
+      pathId = org?.getImsOrgId?.() || null;
+    } catch (e) {
+      log.warn(`Could not resolve IMS org id for site ${site.getId()}: ${e.message}`);
+    }
+  }
+  return { rawBucket, pathId };
+}
+
+/**
+ * Builds the S3 key prefix at which raw logs for a site/day live, accounting for
+ * provider-specific layouts (mirrors spacecat-audit-worker cdn-analysis handler):
+ * cloudflare = `{y}{m}{d}/`, byocdn-other/hourly providers = `{y}/{m}/{d}/`,
+ * imperva = flat (no date partition). Raw is only reliably resolvable at day
+ * granularity, which matches how the aggregation pipeline reasons about raw logs.
+ *
+ * @param {string} rawBucket
+ * @param {string|null} pathId
+ * @param {string} serviceProvider - e.g. 'aem-cs-fastly', 'byocdn-other'
+ * @param {string} cdnFamily - e.g. 'fastly', 'cloudflare', 'imperva'
+ * @param {{year: string, month: string, day: string}} ymd
+ * @returns {string} S3 key prefix to list for raw-log presence.
+ */
+function buildRawDayPrefix(rawBucket, pathId, serviceProvider, cdnFamily, ymd) {
+  const { year, month, day } = ymd;
+  const base = isStandardAdobeCdnBucket(rawBucket) && pathId
+    ? `${pathId}/raw/${serviceProvider}/`
+    : 'raw/';
+  if (cdnFamily === 'cloudflare') {
+    return `${base}${year}${month}${day}/`;
+  }
+  if (cdnFamily === 'imperva') {
+    return base;
+  }
+  return `${base}${year}/${month}/${day}/`;
+}
+
+/**
+ * Returns true if at least one object exists under the given bucket/prefix.
+ *
+ * @param {import('@aws-sdk/client-s3').S3Client} s3Client
+ * @param {string} bucket
+ * @param {string} prefix
+ * @returns {Promise<boolean>}
+ */
+async function rawDataExists(s3Client, bucket, prefix) {
+  const response = await s3Client.send(new ListObjectsV2Command({
+    Bucket: bucket,
+    Prefix: prefix,
+    MaxKeys: 1,
+  }));
+  return (response.KeyCount ?? response.Contents?.length ?? 0) > 0;
+}
+
+/**
+ * For an incomplete site, determines whether raw logs exist for the day, so the
+ * caller can tell a genuine aggregation miss (raw present, aggregate missing)
+ * apart from an expected gap (no raw logs to aggregate).
+ *
+ * @returns {Promise<'present'|'absent'|'unknown'>}
+ */
+async function resolveRawStatus(site, result, deps) {
+  const {
+    env, Organization, getS3ClientForRegion, ymd, log,
+  } = deps;
+  try {
+    const { rawBucket, pathId } = await resolveRawLogLocation(site, env, Organization, log);
+    const prefix = buildRawDayPrefix(rawBucket, pathId, result.cdnProvider, result.cdnFamily, ymd);
+    const exists = await rawDataExists(getS3ClientForRegion(result.region), rawBucket, prefix);
+    return exists ? 'present' : 'absent';
+  } catch (e) {
+    log.warn(`Raw-log presence check failed for site ${result.siteId}: ${e.message}`);
+    return 'unknown';
+  }
+}
+
+/**
  * Factory function to create the CheckCdnLogsStatusCommand object.
  *
  * @param {Object} context - The context object.
@@ -192,7 +311,7 @@ function CheckCdnLogsStatusCommand(context) {
   const {
     dataAccess, log, s3, env = {},
   } = context;
-  const { Site, Configuration } = dataAccess;
+  const { Site, Configuration, Organization } = dataAccess;
 
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
@@ -338,40 +457,70 @@ function CheckCdnLogsStatusCommand(context) {
       const incomplete = results.filter((r) => r.status === 'incomplete');
       const errors = results.filter((r) => r.status === 'error');
       const configReadFailures = results.filter((r) => r.configReadFailed);
-      const missingAll = incomplete.filter((r) => r.presentCount === 0);
-      const partialCoverage = incomplete.filter((r) => r.presentCount > 0);
-      const dailyOnlyMissing = incomplete.filter((r) => r.isDailyOnly);
-      const hourlyMissing = incomplete.filter((r) => !r.isDailyOnly);
+
+      // A site with missing aggregate hours is only a genuine miss when raw logs
+      // actually exist for the day; if there are no raw logs there was nothing to
+      // aggregate (expected). Resolve raw presence only for the incomplete subset
+      // (one S3 list per site) — complete sites are already proven processed.
+      const siteById = new Map(enabledSites.map((s) => [s.getId(), s]));
+      const rawDeps = {
+        env,
+        Organization,
+        getS3ClientForRegion,
+        ymd: { year, month, day },
+        log,
+      };
+      const rawStatusById = new Map();
+      for (let i = 0; i < incomplete.length; i += BATCH_SIZE) {
+        const batch = incomplete.slice(i, i + BATCH_SIZE);
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.all(batch.map(async (r) => {
+          rawStatusById.set(r.siteId, await resolveRawStatus(siteById.get(r.siteId), r, rawDeps));
+        }));
+      }
+
+      const genuinelyMissing = incomplete.filter((r) => rawStatusById.get(r.siteId) === 'present');
+      const noRawLogs = incomplete.filter((r) => rawStatusById.get(r.siteId) === 'absent');
+      const rawUnknown = incomplete.filter((r) => rawStatusById.get(r.siteId) === 'unknown');
+      const missingAll = genuinelyMissing.filter((r) => r.presentCount === 0);
+      const partialCoverage = genuinelyMissing.filter((r) => r.presentCount > 0);
 
       const lines = [
         `*CDN Logs Aggregate Status — ${dateStr}*`,
         `:white_check_mark: Complete: *${complete.length}*`,
-        `:warning: Incomplete: *${incomplete.length}*`,
+        `:warning: Missing (raw logs present, not aggregated): *${genuinelyMissing.length}*`,
+        `:ghost: No raw logs — nothing to process: *${noRawLogs.length}*`,
         `:x: Errors: *${errors.length}*`,
         `Sites checked: *${results.length}*`,
       ];
+      if (rawUnknown.length > 0) {
+        lines.push(`:grey_question: Raw-log status unknown (check failed): *${rawUnknown.length}*`);
+      }
       if (configReadFailures.length > 0) {
         lines.push(`:warning: LLMO config unavailable for *${configReadFailures.length}* site${configReadFailures.length === 1 ? '' : 's'}; using site/default config fallback.`);
       }
 
       lines.push('', '*Actionable insight:*');
-      if (incomplete.length === 0 && errors.length === 0) {
-        lines.push(`All *${complete.length}* checked site(s) have expected CDN log aggregates. Action: proceed to DB import/status checks for ${dateStr}.`);
+      if (genuinelyMissing.length === 0 && rawUnknown.length === 0 && errors.length === 0) {
+        const expectedNote = noRawLogs.length > 0
+          ? ` ${noRawLogs.length} site(s) had no raw logs for ${dateStr} (nothing to aggregate — expected).`
+          : '';
+        lines.push(`All site(s) with raw logs have expected CDN log aggregates. Action: proceed to DB import/status checks for ${dateStr}.${expectedNote}`);
       } else {
         if (complete.length > 0) {
           lines.push(`${complete.length} site(s) have inputs ready for DB import.`);
         }
         if (missingAll.length > 0) {
-          lines.push(`${missingAll.length} site(s) have no aggregate hours. Action: wait for or investigate upstream CDN aggregation before DB backfill.`);
+          lines.push(`${missingAll.length} site(s) have raw logs but no aggregate hours. Action: investigate upstream CDN aggregation before DB backfill.`);
         }
         if (partialCoverage.length > 0) {
-          lines.push(`${partialCoverage.length} site(s) have partial aggregate coverage. Action: rerun this check before backfill; only backfill after expected hours are present.`);
+          lines.push(`${partialCoverage.length} site(s) have raw logs but only partial aggregate coverage. Action: rerun this check before backfill; only backfill after expected hours are present.`);
         }
-        if (dailyOnlyMissing.length > 0) {
-          lines.push(`${dailyOnlyMissing.length} daily-only site(s) are missing hour 23.`);
+        if (noRawLogs.length > 0) {
+          lines.push(`${noRawLogs.length} site(s) have no raw logs for ${dateStr} — nothing to aggregate (expected, no action).`);
         }
-        if (hourlyMissing.length > 0) {
-          lines.push(`${hourlyMissing.length} hourly site(s) are missing one or more hourly aggregates.`);
+        if (rawUnknown.length > 0) {
+          lines.push(`${rawUnknown.length} site(s) could not be classified (raw-log check failed). Action: check API logs/S3 access for those sites.`);
         }
         if (configReadFailures.length > 0) {
           lines.push(`${configReadFailures.length} site(s) used fallback config. Action: verify LLMO config/S3 access for those sites.`);
@@ -391,7 +540,7 @@ function CheckCdnLogsStatusCommand(context) {
         renderOmittedSites,
       );
 
-      addDetails('*Sites with missing aggregate hours:*', incomplete, (r) => {
+      const renderIncompleteRow = (r) => {
         const providerName = r.cdnProvider === r.cdnFamily
           ? r.cdnProvider
           : `${r.cdnProvider} => ${r.cdnFamily}`;
@@ -407,7 +556,11 @@ function CheckCdnLogsStatusCommand(context) {
           `  missing: [${missingStr}]`,
           `  present: ${r.presentCount}/${r.expectedCount}`,
         ].join('\n');
-      });
+      };
+
+      addDetails('*Sites missing aggregates (raw logs present — action needed):*', genuinelyMissing, renderIncompleteRow);
+      addDetails('*Sites with no raw logs (nothing to aggregate — expected):*', noRawLogs, renderIncompleteRow);
+      addDetails('*Sites with unknown raw-log status (check failed):*', rawUnknown, renderIncompleteRow);
 
       addDetails('*Sites with errors:*', errors, (r) => [
         `• \`${r.baseURL}\``,
