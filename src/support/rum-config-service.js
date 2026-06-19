@@ -10,17 +10,14 @@
  * governing permissions and limitations under the License.
  */
 
-import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import { resolveRumDomainKey } from '@adobe/spacecat-shared-rum-api-client';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-
-const RUM_CHECK_TIMEOUT_MS = 3000;
 
 /**
  * Checks whether the site has a RUM domain key and optionally persists the result.
  *
- * Tries candidates in priority order (override-first, www variants as fallback) and
- * stops on the first successful domain key lookup. The 3 s timeout is a shared budget
- * across the full candidate loop, not a per-domain limit.
+ * Candidate resolution and timeout logic live in the shared
+ * {@link resolveRumDomainKey} helper; this function owns only the save semantics.
  *
  * When called with the default { save: true }, this function applies the rumConfig
  * update and saves the site internally.
@@ -41,70 +38,10 @@ const RUM_CHECK_TIMEOUT_MS = 3000;
  * @returns {Promise<boolean>} true if a RUM domain key was found.
  */
 export async function updateRumConfig(site, context, { save = true } = {}) {
-  const { log } = context;
-
-  const siteConfig = site.getConfig();
-  const overrideBaseURL = siteConfig.getFetchConfig()?.overrideBaseURL;
-
-  let overrideHostname = null;
-  if (overrideBaseURL) {
-    try {
-      overrideHostname = new URL(overrideBaseURL).hostname;
-    } catch {
-      log.warn(`[rum-config-service] Malformed overrideBaseURL for site ${site.getId()}: ${overrideBaseURL}, falling back to baseURL`);
-    }
-  }
-
-  const baseHostname = new URL(site.getBaseURL()).hostname;
-  const withWwwFallback = (d) => (d && !d.startsWith('www.') ? `www.${d}` : null);
-
-  const domains = [...new Set([
-    overrideHostname,
-    withWwwFallback(overrideHostname),
-    baseHostname,
-    withWwwFallback(baseHostname),
-  ].filter(Boolean))];
-
-  let hasDomainKey = false;
-  let timeoutId;
-  let cancelled = false;
-
-  const rumApiClient = RUMAPIClient.createFrom(context);
-
-  try {
-    await Promise.race([
-      (async () => {
-        for (const domain of domains) {
-          if (cancelled) {
-            break;
-          }
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            await rumApiClient.retrieveDomainkey(domain);
-            hasDomainKey = true;
-            return;
-          } catch (e) {
-            log.info(`[rum-config-service] RUM check failed for ${domain}: ${e.message}`);
-          }
-        }
-        if (!hasDomainKey) {
-          log.warn(`[rum-config-service] No domain key found across all candidates: ${domains.join(', ')}`);
-        }
-      })(),
-      new Promise((_, reject) => {
-        timeoutId = setTimeout(() => {
-          cancelled = true;
-          reject(new Error('RUM check timed out'));
-        }, RUM_CHECK_TIMEOUT_MS);
-      }),
-    ]);
-  } catch (e) {
-    log.warn(`[rum-config-service] RUM check failed: ${e.message}`);
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  const { hasDomainKey } = await resolveRumDomainKey(site, context);
 
   if (save) {
+    const siteConfig = site.getConfig();
     siteConfig.updateRumConfig(hasDomainKey);
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
