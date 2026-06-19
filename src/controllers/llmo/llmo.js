@@ -2098,7 +2098,10 @@ function LlmoController(ctx) {
         return forbidden('Only LLMO administrators can generate the edge optimize bootstrap URL');
       }
 
-      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET;
+      // TEMPORARY (testing only): hardcoded fallback so the dev/ci deploy returns a URL
+      // before EDGE_OPTIMIZE_TEMPLATE_BUCKET is wired into Vault/secrets.
+      // TODO: REMOVE this default before merge/prod — the value must come from env config.
+      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET || 'llmo-edgeoptimize-cf-template-stage';
       if (!hasText(bucket) || !s3?.s3Client) {
         return badRequest('Edge optimize template hosting is not configured for this environment');
       }
@@ -2110,8 +2113,11 @@ function LlmoController(ctx) {
       const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 3600);
       const externalId = crypto.randomUUID();
       const roleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
+      // TEMPORARY (testing only): default the trust to the dev signer account so the
+      // cross-account test works (dev signs, stage is the customer where the role is made).
+      // TODO: REMOVE this default before merge/prod — set EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN via env.
       const trustedPrincipalArn = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN
-        || `arn:aws:iam::${accountId}:root`;
+        || 'arn:aws:iam::682033462621:root';
 
       // Presign the (private) template so the customer's CloudFormation can read it
       // cross-account via the signature — no public bucket, no customer S3 access.
