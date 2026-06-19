@@ -282,9 +282,16 @@ async function resolveRawStatus(site, result, deps) {
   const {
     env, Organization, getS3ClientForRegion, ymd, log,
   } = deps;
+  /* c8 ignore next 3 -- defensive: every incomplete result's siteId is in siteById */
+  if (!site) {
+    return 'unknown';
+  }
   try {
     const { rawBucket, pathId } = await resolveRawLogLocation(site, env, Organization, log);
     const prefix = buildRawDayPrefix(rawBucket, pathId, result.cdnProvider, result.cdnFamily, ymd);
+    // The raw bucket (CDN/BYOCDN bucket) is a different bucket than the aggregate
+    // bucket, but both live in the site's configured CDN region — so the same
+    // per-region client (keyed on result.region) is correct for both paths.
     const exists = await rawDataExists(getS3ClientForRegion(result.region), rawBucket, prefix);
     return exists ? 'present' : 'absent';
   } catch (e) {
@@ -549,12 +556,17 @@ function CheckCdnLogsStatusCommand(context) {
         const missingStr = r.missingHours.length <= 6
           ? r.missingHours.join(', ')
           : `${r.missingHours.slice(0, 6).join(', ')} (+${r.missingHours.length - 6} more)`;
+        // Imperva raw logs are delivered flat (no date partition), so the raw-log
+        // presence signal for imperva is not scoped to this specific day.
+        const rawCaveat = r.cdnFamily === 'imperva'
+          ? '\n  note: imperva raw logs are flat (not date-partitioned); raw presence is not day-scoped'
+          : '';
         return [
           `• \`${r.baseURL}\``,
           `  siteId: \`${r.siteId}\``,
           `  CDN: ${providerTag}${configWarning}`,
           `  missing: [${missingStr}]`,
-          `  present: ${r.presentCount}/${r.expectedCount}`,
+          `  present: ${r.presentCount}/${r.expectedCount}${rawCaveat}`,
         ].join('\n');
       };
 

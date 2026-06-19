@@ -596,6 +596,25 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(output).to.include('1 site(s) have no raw logs for 2026-04-21 — nothing to aggregate (expected, no action)');
   });
 
+  it('flags the imperva raw-log day-scope caveat in detail rows', async () => {
+    // imperva is daily-only (expects hour 23). Aggregates absent → incomplete;
+    // raw present (beforeEach default) → genuine miss with the flat-layout caveat.
+    const site = makeSite('site-imperva', 'https://imperva.com', { cdnBucketConfig: { cdnProvider: 'imperva' } });
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+    readConfigStub.resolves({ config: {} });
+    s3SendStub.resolves({ CommonPrefixes: [] });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing (raw logs present, not aggregated): *1*');
+    expect(output).to.include('imperva raw logs are flat (not date-partitioned)');
+  });
+
   it('logs a warning and proceeds when the org IMS lookup throws', async () => {
     const site = {
       getId: () => 'site-org-fail',
