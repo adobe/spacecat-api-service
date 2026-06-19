@@ -153,6 +153,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ preOnboarded: true });
       expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ entitlementCreated: true });
+      // Config handlers enrolled, no audit trigger
+      const config = await mockDataAccess.Configuration.findLatest();
+      expect(config.enableHandlerForSite).to.have.been.calledWith('summit-plg', mockSite);
+      expect(stubs.triggerAuditsStub).to.not.have.been.called;
     });
 
     it('falls through to full onboarding when preonboarded site not found', async () => {

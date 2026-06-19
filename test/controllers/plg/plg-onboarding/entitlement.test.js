@@ -25,6 +25,7 @@ import {
   buildContext as buildContextShared,
 } from './shared-fixtures.js';
 import { createPlgEsmock } from './plg-esmock-factory.js';
+import { PLG_CONFIG_HANDLERS } from '../../../../src/controllers/plg/plg-onboarding/site-setup.js';
 
 use(sinonChai);
 
@@ -301,14 +302,16 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
-    it('enrolls site in summit-plg config handler', async () => {
+    it('enrolls site in all PLG config handlers', async () => {
       const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
       const config = await mockDataAccess.Configuration.findLatest();
-      expect(config.enableHandlerForSite).to.have.been.calledWith('summit-plg', mockSite);
+      for (const handler of PLG_CONFIG_HANDLERS) {
+        expect(config.enableHandlerForSite).to.have.been.calledWith(handler, mockSite);
+      }
     });
 
     it('continues onboarding when summit-plg enrollment fails', async () => {
