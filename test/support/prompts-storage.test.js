@@ -1924,6 +1924,60 @@ describe('prompts-storage', () => {
       expect(insertedRows[0].prompt_id).to.equal('p-topic-alpha');
     });
 
+    it('dedup-drop fires once per duplicate and splice reduces toInsert to exactly one row', async () => {
+      // Three prompts with the same synthetic text+regions. Only the winner
+      // (lexicographically first prompt_id when all topic_ids are null) reaches
+      // INSERT. The drop path (lines 740-749) fires twice and the splice mutations
+      // (lines 755-757) reduce toInsert to 1, covering the uncovered block.
+      const warnSpy = sandbox.spy(console, 'warn');
+      const toRow = (r) => ({ prompt_id: r.prompt_id });
+      const insertStub = sinon.stub().callsFake((rows) => ({
+        select: () => thenable({ data: rows.map(toRow), error: null }),
+      }));
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      // Input order is [p-c, p-a, p-b] — winner is always p-a (lex-first prompt_id)
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          { id: 'p-c', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+          { id: 'p-a', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+          { id: 'p-b', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+        ],
+        postgrestClient: client,
+      });
+
+      // one row inserted, two dropped
+      expect(result.created).to.equal(1);
+      expect(insertStub.firstCall.args[0]).to.have.lengthOf(1);
+      expect(insertStub.firstCall.args[0][0].prompt_id).to.equal('p-a');
+
+      // drop-log fired twice — once for each duplicate
+      const dropLogs = warnSpy.args.filter(([msg]) => msg === '[upsertPrompts] dedup-drop');
+      expect(dropLogs).to.have.lengthOf(2);
+      dropLogs.forEach(([, payload]) => {
+        expect(payload.winning_prompt_id).to.equal('p-a');
+      });
+    });
+
     it('picks winner by (topic_id, promptId) asc regardless of input order', async () => {
       // Two UUIDs with an unambiguous lexicographic ordering: T_ALPHA < T_BETA.
       // The dedup sort key is (topic_id, promptId) asc, so T_ALPHA must always win.
