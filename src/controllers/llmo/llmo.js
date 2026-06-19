@@ -2099,9 +2099,11 @@ function LlmoController(ctx) {
       }
 
       // TEMPORARY (testing only): hardcoded fallback so the dev/ci deploy returns a URL
-      // before EDGE_OPTIMIZE_TEMPLATE_BUCKET is wired into Vault/secrets.
+      // before EDGE_OPTIMIZE_TEMPLATE_BUCKET is wired into Vault/secrets. This bucket lives
+      // in the dev account (682033462621) where the service deploys and signs, so the dev
+      // role reads it same-account; the stage customer fetches it via the presigned URL.
       // TODO: REMOVE this default before merge/prod — the value must come from env config.
-      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET || 'llmo-edgeoptimize-cf-template-stage';
+      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET || 'llmo-edgeoptimize-cf-template';
       if (!hasText(bucket) || !s3?.s3Client) {
         return badRequest('Edge optimize template hosting is not configured for this environment');
       }
