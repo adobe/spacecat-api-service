@@ -134,7 +134,8 @@
 			"sitemap": {},
 			"toc": {},
 			"wikipedia-analysis": {},
-			"money-pages": {}
+			"money-pages": {},
+			"cwv-trends-audit": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
@@ -143,6 +144,8 @@
 			"all-traffic": {},
             "traffic-analysis": {},
 			"user-engagement": {},
+			"cwv-trends-onboard": {},
+			"cwv-trends-daily": {},
 			"cwv-weekly": {},
 			"ahref-paid-pages": {}
 		},

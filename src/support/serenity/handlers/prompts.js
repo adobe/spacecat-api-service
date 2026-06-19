@@ -13,18 +13,29 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
+import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 
-const DEFAULT_PAGE_LIMIT = 50;
-const MAX_PAGE_LIMIT = 1000;
-const MAX_TAG_IDS = 50;
+// TWIN FILE: the slice→project orchestration here is paralleled by the
+// subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
+// DEFERRED, not accidental — this flat path (BrandSemrushProject DB lookup) is
+// slated for removal once every brand is migrated to sub-workspaces. Until then,
+// a behavioural change here almost always needs the same change in the twin; keep
+// them in lockstep.
+//
+// Exported (additively) so the subworkspace-mode handlers (prompts-subworkspace.js) share
+// the exact same limits — the only thing that differs between flat and subworkspace
+// is slice→project resolution (DB row vs live listing), never the contract.
+export const DEFAULT_PAGE_LIMIT = 50;
+export const MAX_PAGE_LIMIT = 1000;
+export const MAX_TAG_IDS = 50;
 // Caps the inflight upstream calls when fanning out a bulk create.
 // 8 keeps per-call wall time reasonable without overwhelming upstream rate
 // limits — the prior `serenity` testing exhausted Semrush's shared limit
 // with higher concurrency.
-const BULK_CREATE_CONCURRENCY = 8;
+export const BULK_CREATE_CONCURRENCY = 8;
 // Matches the OpenAPI declaration (`maxItems: 500` on
 // SerenityCreatePromptsRequest.prompts and SerenityBulkDeletePromptsRequest.prompts).
 // Enforced here because the api-service does not run OpenAPI request validation
@@ -32,7 +43,7 @@ const BULK_CREATE_CONCURRENCY = 8;
 // tens of thousands of items inside API Gateway's request envelope and the
 // handler would faithfully build per-project Maps + upstream payloads for all
 // of them. Defense-in-depth, not a correctness gate.
-const BULK_PROMPTS_MAX_ITEMS = 500;
+export const BULK_PROMPTS_MAX_ITEMS = 500;
 
 // Builds { tagName → semrushTagId } from the upstream prompt item.
 // Object-form tags (the normal Semrush shape) carry both name and id.
@@ -53,7 +64,7 @@ function buildTagMapOf(item) {
   }, {});
 }
 
-function buildPromptDto(geoTargetId, languageCode, item) {
+export function buildPromptDto(geoTargetId, languageCode, item) {
   const text = item?.name || '';
   if (!text) {
     return null;
@@ -157,7 +168,7 @@ export async function handleListPrompts(
   };
 }
 
-async function publishAffected(transport, semrushWorkspaceId, projectIds, log) {
+export async function publishAffected(transport, semrushWorkspaceId, projectIds, log) {
   const unique = Array.from(new Set(projectIds.filter(Boolean)));
   const errors = [];
   await Promise.all(unique.map(async (pid) => {
@@ -165,13 +176,13 @@ async function publishAffected(transport, semrushWorkspaceId, projectIds, log) {
       await transport.publishProject(semrushWorkspaceId, pid);
     } catch (e) {
       log?.warn?.('publishProject failed', { projectId: pid, error: e.message });
-      errors.push({ projectId: pid, message: e.message });
+      errors.push({ projectId: pid, message: redactUpstreamMessage(e) });
     }
   }));
   return errors;
 }
 
-function normalizePromptInput(input) {
+export function normalizePromptInput(input) {
   const text = String(input?.text || '').trim();
   const languageCode = normalizeLanguageCode(input?.languageCode);
   const geoTargetId = normalizeGeoTargetId(Number(input?.geoTargetId));
@@ -186,7 +197,7 @@ function normalizePromptInput(input) {
   };
 }
 
-async function mapLimit(items, limit, mapper) {
+export async function mapLimit(items, limit, mapper) {
   const out = new Array(items.length);
   let i = 0;
   const workers = Array.from(
@@ -283,7 +294,7 @@ export async function handleCreatePrompts(
           geoTargetId: input.geoTargetId,
           languageCode: input.languageCode,
           status: e.status || 500,
-          message: e.message,
+          message: redactUpstreamMessage(e),
         },
       };
     }
@@ -318,11 +329,13 @@ export async function handleCreatePrompts(
     affectedProjectIds,
     log,
   );
-  for (const e of publishErrors) {
+  // publishAffected returns already-redacted { projectId, message } records;
+  // pubErr is a record, not a raw error, so pubErr.message is safe to surface.
+  for (const pubErr of publishErrors) {
     failed.push({
       text: '',
       status: 502,
-      message: `publish: ${e.message}`,
+      message: `publish: ${pubErr.message}`,
     });
   }
 
@@ -537,7 +550,7 @@ export async function handleBulkDeletePrompts(
           geoTargetId: t.geoTargetId,
           languageCode: t.languageCode,
           status: e.status || 500,
-          message: e.message,
+          message: redactUpstreamMessage(e),
         });
       });
     }
@@ -556,11 +569,12 @@ export async function handleBulkDeletePrompts(
     Array.from(projectsToPublish),
     log,
   );
-  publishErrors.forEach((e) => {
+  // pubErr is an already-redacted { projectId, message } record (see above).
+  publishErrors.forEach((pubErr) => {
     failed.push({
       semrushPromptId: '',
       status: 502,
-      message: `publish: ${e.message}`,
+      message: `publish: ${pubErr.message}`,
     });
   });
 
