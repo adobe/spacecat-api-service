@@ -1,3 +1,10 @@
+# [1.584.0](https://github.com/adobe/spacecat-api-service/compare/v1.583.1...v1.584.0) (2026-06-19)
+
+
+### Features
+
+* **serenity:** defer Semrush provisioning for pending (draft) brands ([#2635](https://github.com/adobe/spacecat-api-service/issues/2635)) ([74fc1b2](https://github.com/adobe/spacecat-api-service/commit/74fc1b2203df26757ad3fb19c47d43afc5a721d0))
+
 ## [1.583.1](https://github.com/adobe/spacecat-api-service/compare/v1.583.0...v1.583.1) (2026-06-19)
 
 
