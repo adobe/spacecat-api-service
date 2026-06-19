@@ -2395,7 +2395,7 @@ site-llmo-edge-optimize-bootstrap-url:
                 trustedPrincipalArn: 'arn:aws:iam::120569600543:root'
                 stackName: adobe-edgeoptimize-connector-role
                 quickCreateUrl: 'https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=...'
-                presignTtlSeconds: 3600
+                presignTtlSeconds: 900
       '400':
         $ref: './responses.yaml#/400'
       '401':

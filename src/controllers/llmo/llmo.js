@@ -2112,7 +2112,10 @@ function LlmoController(ctx) {
       const region = 'us-east-1';
       const roleName = env.EDGE_OPTIMIZE_ROLE_NAME || 'AdobeLLMOptimizerCloudFrontConnectorRole';
       const stackName = env.EDGE_OPTIMIZE_STACK_NAME || 'adobe-edgeoptimize-connector-role';
-      const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 3600);
+      // Short-lived presign: the customer opens the link immediately, so a tight TTL
+      // shrinks the exposure window if the URL leaks (it only grants GetObject on this
+      // one template object until expiry — see security notes). Override via env.
+      const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 900);
       const externalId = crypto.randomUUID();
       const roleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
       // TEMPORARY (testing only): default the trust to the dev signer account so the
