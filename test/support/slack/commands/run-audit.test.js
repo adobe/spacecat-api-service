@@ -87,7 +87,7 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
-      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for current-tab suggestions missing an AI summary. CSV uploads are batched at 320 URLs.');
+      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for NEW/FIXED suggestions missing an AI summary. CSV uploads are batched at 320 URLs.');
     });
   });
 
@@ -993,7 +993,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
     });
 
-    it('mode:ai-only-missing fetches current-tab suggestions missing an aiSummary', async () => {
+    it('mode:ai-only-missing fetches NEW and FIXED suggestions missing an aiSummary', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
           makeSuggestion('https://site.com/no-summary', 'NEW'),
@@ -1002,6 +1002,7 @@ describe('RunAuditCommand', () => {
           makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
           makeSuggestion('https://site.com/pattern', 'NEW', { coveredByPattern: true }),
           makeSuggestion('https://site.com/fixed', 'FIXED'),
+          makeSuggestion('https://site.com/fixed-with-summary', 'FIXED', { aiSummary: 'done' }),
         ]),
       ]);
 
@@ -1010,7 +1011,13 @@ describe('RunAuditCommand', () => {
 
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
       const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
-      expect(urls).to.deep.equal(['https://site.com/no-summary']);
+      expect(urls).to.have.members([
+        'https://site.com/no-summary',
+        'https://site.com/covered',
+        'https://site.com/deployed',
+        'https://site.com/pattern',
+        'https://site.com/fixed',
+      ]);
       const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
       expect(msgData.mode).to.equal('ai-only');
     });
@@ -1048,7 +1055,7 @@ describe('RunAuditCommand', () => {
       expect(urls).to.deep.equal(['https://site.com/empty-summary']);
     });
 
-    it('mode:ai-only-missing reports nothing when all current-tab suggestions already have an aiSummary', async () => {
+    it('mode:ai-only-missing reports nothing when all NEW/FIXED suggestions already have an aiSummary', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
           makeSuggestion('https://site.com/page-1', 'NEW', { aiSummary: 'summary for page 1' }),
@@ -1064,11 +1071,12 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say).to.have.been.calledWithMatch(/missing AI summary/);
     });
 
-    it('mode:ai-only-missing reports nothing when all suggestions are covered or filtered', async () => {
+    it('mode:ai-only-missing reports nothing when all suggestions have aiSummary or wrong status', async () => {
       dataAccessStub.Opportunity.allBySiteId.resolves([
         makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/covered', 'NEW', { coveredByDomainWide: true }),
-          makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
+          makeSuggestion('https://site.com/has-summary', 'NEW', { aiSummary: 'done' }),
+          makeSuggestion('https://site.com/outdated', 'OUTDATED'),
+          makeSuggestion('https://site.com/skipped', 'SKIPPED'),
         ]),
       ]);
 
