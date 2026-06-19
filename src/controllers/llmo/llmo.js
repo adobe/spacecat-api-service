@@ -2117,7 +2117,7 @@ function LlmoController(ctx) {
       const roleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
       // TEMPORARY (testing only): default the trust to the dev signer account so the
       // cross-account test works (dev signs, stage is the customer where the role is made).
-      // TODO: REMOVE this default before merge/prod — set EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN via env.
+      // TODO: REMOVE before merge/prod — set EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN via env.
       const trustedPrincipalArn = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN
         || 'arn:aws:iam::682033462621:root';
 
