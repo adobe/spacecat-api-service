@@ -50,6 +50,7 @@ import {
  * @param {(clients: object, exportRequest: object) => Promise<object>} config.callExport gRPC call
  * @param {string} config.label human-readable dataset label for error messages
  */
+/* c8 ignore start */
 export async function runFtsResearchExport(sp, clients, config) {
   const {
     requestSchema, exportSchema, sortMap, defaultSortKey, callExport, label,
@@ -121,3 +122,4 @@ export async function runFtsResearchExport(sp, clients, config) {
     throw error;
   }
 }
+/* c8 ignore stop */

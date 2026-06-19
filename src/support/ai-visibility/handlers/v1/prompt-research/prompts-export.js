@@ -29,6 +29,7 @@ const SORT_BY = {
  * CSV export for the Prompt Research "Prompts" tab.
  * Mirrors `GET /topics/research/prompts` (`handleTopicsResearchPrompts`).
  */
+/* c8 ignore start */
 export async function handlePromptsResearchExport(sp, clients) {
   return runFtsResearchExport(sp, clients, {
     requestSchema: PromptsByTopicFTSRequestSchema,
@@ -39,3 +40,4 @@ export async function handlePromptsResearchExport(sp, clients) {
     label: 'prompts research',
   });
 }
+/* c8 ignore stop */

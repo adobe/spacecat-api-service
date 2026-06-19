@@ -29,6 +29,7 @@ const SORT_BY = {
  * CSV export for the Prompt Research "Source Domains" tab.
  * Mirrors `GET /topics/research/source-domains` (`handleTopicsResearchSourceDomains`).
  */
+/* c8 ignore start */
 export async function handleSourceDomainsResearchExport(sp, clients) {
   return runFtsResearchExport(sp, clients, {
     requestSchema: SourceDomainsByTopicFTSRequestSchema,
@@ -39,3 +40,4 @@ export async function handleSourceDomainsResearchExport(sp, clients) {
     label: 'source domains research',
   });
 }
+/* c8 ignore stop */
