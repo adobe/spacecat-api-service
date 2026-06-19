@@ -308,6 +308,31 @@ describe('brands-storage', () => {
       expect(urlValues).to.not.include('https://acme.fr');
     });
 
+    it('surfaces a Serenity row when its domain is ALSO an explicit brand URL', async () => {
+      // A market domain that the brand also lists as a brand URL IS a brand URL —
+      // it must keep onboarded/siteId status rather than vanishing behind the
+      // serenity exclusion. syncBrandSites collapses the overlap into one
+      // serenity-typed row (one per (brand, site)); mapDbBrandToV2 surfaces it
+      // because brand_urls references the same base.
+      const dbRow = makeBrandRow({
+        brand_urls: [{ url: 'https://acme.com' }],
+        brand_sites: [
+          {
+            site_id: 'shared-site', paths: ['/'], type: 'serenity', sites: { base_url: 'https://acme.com' },
+          },
+        ],
+      });
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const result = await getBrandById(ORG_ID, BRAND_ID, { from: sinon.stub().returns(query) });
+
+      // The brand URL stays onboarded and the site appears in siteIds.
+      expect(result.siteIds).to.deep.equal(['shared-site']);
+      const acme = result.urls.find((u) => u.value === 'https://acme.com');
+      expect(acme).to.exist;
+      expect(acme.onboarded).to.equal(true);
+      expect(acme.siteId).to.equal('shared-site');
+    });
+
     it('maps semrush_workspace_id to semrushWorkspaceId (sub-workspace), null when absent', async () => {
       const subWsRow = makeBrandRow({ semrush_workspace_id: 'ws-sub-123' });
       const subWsQuery = createChainableQuery({ data: subWsRow, error: null });
@@ -1541,35 +1566,20 @@ describe('brands-storage', () => {
       })).to.be.rejectedWith('Failed to sync brand_sites: delete error');
     });
 
-    it('proceeds (delete unprotected) when the protected-rows SELECT fails silently', async () => {
-      // The protected-rows SELECT error is deliberately swallowed: a failed lookup
-      // must not block the brand edit. protectedSiteIds ends up empty, so the
-      // re-upserted row carries the URL's type (no serenity preservation) rather
-      // than throwing. This pins that silent-swallow contract.
-      const client = createCapturingClient({
-        brands: [
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-        sites: { data: [{ id: 'site-uuid-1', base_url: 'https://adobe.com' }], error: null },
-        brand_sites: [
-          { data: null, error: { message: 'select error' } }, // SELECT fails
-          { data: null, error: null }, // DELETE succeeds
-          { data: null, error: null }, // UPSERT succeeds
-        ],
+    it('throws (fails closed) when the protected-rows SELECT fails during syncBrandSites', async () => {
+      // A swallowed SELECT error would leave protectedSiteIds empty and let the
+      // re-upsert downgrade a serenity row's type, silently unprotecting a
+      // market-mirror link. Fail closed instead (consistent with delete/upsert).
+      const postgrestClient = createTableMockClient({
+        brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
+        brand_sites: { data: null, error: { message: 'select error' } }, // SELECT fails first
       });
 
-      await upsertBrand({
+      await expect(upsertBrand({
         organizationId: ORG_ID,
-        brand: { name: 'Test', urls: [{ value: 'https://adobe.com', type: 'base' }] },
-        postgrestClient: client,
-      });
-
-      const bsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brand_sites');
-      expect(bsUpsert, 'a brand_sites upsert was issued').to.exist;
-      const row = (bsUpsert.row || []).find((r) => r.site_id === 'site-uuid-1');
-      // Empty protectedSiteIds → type comes from the URL ('base'), not 'serenity'.
-      expect(row.type).to.equal('base');
+        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to sync brand_sites: cannot read protected rows: select error');
     });
 
     it('falls back to base URL when URL string is invalid in syncBrandSites', async () => {

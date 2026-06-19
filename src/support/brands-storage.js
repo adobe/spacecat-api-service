@@ -117,12 +117,27 @@ function parseUrlParts(urlString) {
  * `brand_sites` expansion, where every entry is by definition onboarded.
  */
 function mapDbBrandToV2(row) {
+  // The set of base URLs the brand explicitly lists as its own (brand_urls).
+  const brandUrlBases = new Set(
+    (row.brand_urls || [])
+      .map((bu) => composeBaseURL(parseUrlParts(bu.url).base))
+      .filter(hasText),
+  );
+
   // Exclude Semrush market-site rows from the brand response: a market's domain
   // is NOT a brand URL (the brand is a shell with no domain of its own), so these
   // rows must not surface in urls[] or siteIds. They are a pure backend linkage —
   // integrations resolve them via the sites / brand_sites tables directly.
+  //
+  // Exception: when the brand ALSO lists that exact domain as a brand URL, it IS a
+  // brand URL (not just a hidden market mirror) and must keep its onboarded/siteId
+  // status in the response. syncBrandSites collapses such an overlap into a single
+  // serenity-typed row (one row per (brand, site)); surfacing it here is what keeps
+  // a brand URL from silently flipping to onboarded:false the moment a market is
+  // created for the same domain.
   const ownBrandSites = (row.brand_sites || [])
-    .filter((bs) => bs.type !== SERENITY_BRAND_SITE_TYPE);
+    .filter((bs) => bs.type !== SERENITY_BRAND_SITE_TYPE
+      || (hasText(bs.sites?.base_url) && brandUrlBases.has(composeBaseURL(bs.sites.base_url))));
 
   const siteIds = ownBrandSites.map((bs) => bs.site_id).filter(hasText);
 
@@ -275,11 +290,19 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   // simultaneous brand edit + market write whose domains collide — by design
   // unusual — and self-heals on the next market write (ensureMarketSite re-upserts
   // type='serenity'). Not worth a cross-request lock PostgREST can't cheaply give.
-  const { data: protectedRows } = await postgrestClient
+  const { data: protectedRows, error: protectedError } = await postgrestClient
     .from('brand_sites')
     .select('site_id')
     .eq('brand_id', brandId)
     .eq('type', SERENITY_BRAND_SITE_TYPE);
+  // Fail closed (consistent with the delete/upsert error handling below): a
+  // swallowed SELECT error would leave protectedSiteIds empty, and the re-upsert
+  // would then downgrade a serenity row to the brand URL's type — silently
+  // unprotecting a market-mirror link. A failed brand edit is recoverable; a
+  // corrupted serenity marker surfaces later as a vanished market site.
+  if (protectedError) {
+    throw new Error(`Failed to sync brand_sites: cannot read protected rows: ${protectedError.message}`);
+  }
   const protectedSiteIds = new Set((protectedRows || []).map((r) => r.site_id));
 
   const { error: deleteError } = await postgrestClient
