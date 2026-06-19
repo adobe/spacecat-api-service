@@ -96,6 +96,7 @@ function OpportunitiesController(ctx) {
    */
   const getAllForSite = async (context) => {
     const siteId = context.params?.siteId;
+    const locale = context.data?.locale || null;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -111,7 +112,7 @@ function OpportunitiesController(ctx) {
 
     const allOpptys = await Opportunity.allBySiteId(siteId);
     const opptys = (await filterForSummitPlg(site, allOpptys, context))
-      .map((oppty) => OpportunityDto.toJSON(oppty));
+      .map((oppty) => OpportunityDto.toJSON(oppty, locale));
 
     return ok(opptys);
   };
@@ -124,6 +125,7 @@ function OpportunitiesController(ctx) {
   const getByStatus = async (context) => {
     const siteId = context.params?.siteId;
     const status = context.params?.status;
+    const locale = context.data?.locale || null;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -142,7 +144,7 @@ function OpportunitiesController(ctx) {
 
     const allOpptys = await Opportunity.allBySiteIdAndStatus(siteId, status);
     const opptys = (await filterForSummitPlg(site, allOpptys, context))
-      .map((oppty) => OpportunityDto.toJSON(oppty));
+      .map((oppty) => OpportunityDto.toJSON(oppty, locale));
 
     return ok(opptys);
   };
@@ -155,6 +157,7 @@ function OpportunitiesController(ctx) {
   const getByID = async (context) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
+    const locale = context.data?.locale || null;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -184,7 +187,7 @@ function OpportunitiesController(ctx) {
         ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
       }
     }
-    return ok(OpportunityDto.toJSON(oppty));
+    return ok(OpportunityDto.toJSON(oppty, locale));
   };
 
   /**
