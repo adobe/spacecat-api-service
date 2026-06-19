@@ -255,7 +255,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
+    Opportunity, Suggestion, SuggestionGrant, Site, GeoExperiment,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -1193,10 +1193,11 @@ function SuggestionsController(ctx, sqs, env) {
       if (invalidEntry !== undefined) {
         return badRequest('Each page must be a valid URL string or an object with pageUrl (valid URL) and optional imageUrls (array of valid URLs)');
       }
-      const configuration = await Configuration.findLatest();
-      if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-        return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-      }
+      // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+      // intentionally. Auto-fix deploys are user-initiated one-off actions; gating them
+      // on the scheduled-audit enabled-list blocked legitimate ad-hoc deploys for sites
+      // that simply weren't on that list. Access control (`auto_fix` permission) above
+      // still rejects unauthorized callers.
       const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
       // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
       await sqs.sendMessage(queueUrl, {
@@ -1227,10 +1228,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    const configuration = await Configuration.findLatest();
-    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-      return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-    }
+    // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+    // intentionally — see the matching note in the assess-urls branch above.
     const suggestions = await Suggestion.allByOpportunityId(
       opportunityId,
     );

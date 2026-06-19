@@ -17,6 +17,8 @@ import { deriveProjectName } from '../../../support/utils.js';
 // continues even if the configuration table is briefly unwritable.
 export const PLG_CONFIG_HANDLERS = [
   'summit-plg',
+  'top-pages',
+  'broken-backlinks',
   'broken-backlinks-auto-suggest',
   'broken-backlinks-auto-fix',
   'alt-text-auto-fix',
