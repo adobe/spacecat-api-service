@@ -64,14 +64,29 @@ const extractMinimalData = (data, opportunityType) => {
 export const SuggestionDto = {
   /**
    * Converts a Suggestion object into a JSON object with optional projection.
+   *
+   * Translations for AI-generated fields (title, rationale, description, etc.) are stored by
+   * audit workers in `suggestion.data.i18n` as a map of locale → { field: value, ... }.
+   * When `locale` is supplied the matching translation is merged on top of `data` and
+   * `data.i18n` is stripped so the response shape stays stable.
+   * Falls back to the original English values when the locale is absent or not found.
+   *
    * @param {Readonly<Suggestion>} suggestion - Suggestion object.
    * @param {string} [view='full'] - Projection view: 'minimal', 'summary', or 'full'.
    * @param {object} [opportunity] - Optional opportunity entity for type-specific filtering.
+   * @param {string|null} [locale] - Optional locale code (e.g. 'fr_fr', 'ja_jp').
    * @returns {object} JSON object with fields based on the selected view.
    */
-  toJSON: (suggestion, view = 'full', opportunity = null) => {
-    const data = suggestion.getData();
+  toJSON: (suggestion, view = 'full', opportunity = null, locale = null) => {
+    const rawData = suggestion.getData();
     const opportunityType = opportunity?.getType() || null;
+
+    // Apply locale projection and strip the internal i18n key from the response
+    // eslint-disable-next-line no-unused-vars
+    const { i18n, ...baseData } = rawData ?? {};
+    const data = (locale && i18n?.[locale])
+      ? { ...baseData, ...i18n[locale] }
+      : baseData;
 
     const skipReason = suggestion.getSkipReason?.();
     const skipDetail = suggestion.getSkipDetail?.();
