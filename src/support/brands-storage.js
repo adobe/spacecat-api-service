@@ -45,6 +45,50 @@ function normalizeNullableText(value, fieldName) {
 }
 
 /**
+ * Normalizes the deferred Semrush provisioning data of a pending (draft) brand
+ * into the shape persisted in `brands.pending_semrush_provisioning` (a JSONB object
+ * `{ primaryUrl?, markets: [{ market, languageCode }] }`). These are the primary
+ * URL + initial market the add-brand wizard collected before a
+ * sub-workspace/project exist; activation reads them back to provision the real
+ * Semrush projects, then clears the column.
+ *
+ * Returns `undefined` when the caller did not supply the field (leave the column
+ * untouched), `null` when explicitly cleared or nothing useful remains, or the
+ * cleaned object otherwise.
+ *
+ * @param {unknown} value - `{ primaryUrl?, markets }`, null, or undefined.
+ * @returns {{primaryUrl: (string|null), markets: Array<{market: string,
+ *   languageCode: string}>}|null|undefined}
+ */
+function normalizePendingSemrushProvisioning(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    const error = new Error('pendingSemrushProvisioning must be an object or null');
+    error.status = 400;
+    throw error;
+  }
+  const markets = (Array.isArray(value.markets) ? value.markets : [])
+    .map((m) => ({
+      market: typeof m?.market === 'string' ? m.market.trim() : '',
+      languageCode: typeof m?.languageCode === 'string' ? m.languageCode.trim() : '',
+    }))
+    .filter((m) => hasText(m.market) && hasText(m.languageCode));
+  const primaryUrl = typeof value.primaryUrl === 'string' && hasText(value.primaryUrl)
+    ? value.primaryUrl.trim()
+    : null;
+  // Nothing worth persisting → treat as cleared.
+  if (markets.length === 0 && !hasText(primaryUrl)) {
+    return null;
+  }
+  return { primaryUrl, markets };
+}
+
+/**
  * Splits a full URL string into its base URL and path.
  * e.g. "https://example.com/products" -> { base: "https://example.com", path: "/products" }
  * A root path "/" is treated as no path (empty string).
@@ -135,6 +179,16 @@ function mapDbBrandToV2(row) {
     name: row.name,
     baseSiteId: row.base_site?.id || row.site_id || null,
     baseUrl: row.base_site?.base_url || null,
+    // Read-only: the brand's own Semrush sub-workspace (dual-mode). Null for
+    // brands still in flat mode (no sub-workspace minted yet). Consumers use it
+    // to scope per-brand Semrush views to the sub-workspace.
+    semrushWorkspaceId: row.semrush_workspace_id || null,
+    // Read-only: deferred Semrush provisioning data for a pending (draft) brand
+    // (serenity dual-mode). Object { primaryUrl, markets: [{ market,
+    // languageCode }] } the wizard collected before provisioning; null once
+    // activation has provisioned it (or for a non-pending brand). Lets the UI
+    // re-hydrate the draft's primary URL + market on the activation form.
+    pendingSemrushProvisioning: row.pending_semrush_provisioning || null,
     status: row.status || 'active',
     origin: row.origin || 'human',
     description: row.description || null,
@@ -432,6 +486,97 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
 }
 
 /**
+ * Reads a brand's alias names (the `brand_aliases.alias` values) — the extra
+ * names the brand is known by, beyond its display name. Returned as a
+ * de-duplicated array of non-empty strings (empty when the brand has none),
+ * suitable for a Semrush project's `brand_names`. Brand aliases are brand-level,
+ * so the same set applies to every market/project created for the brand.
+ *
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<string[]>} alias names (empty array when none).
+ */
+export async function getBrandAliasNames(brandId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return [];
+  }
+  const { data, error } = await postgrestClient
+    .from('brand_aliases')
+    .select('alias')
+    .eq('brand_id', brandId);
+  if (error) {
+    throw new Error(`Failed to get brand aliases: ${error.message}`);
+  }
+  const seen = new Set();
+  return (data || [])
+    .map((row) => row.alias)
+    .filter((alias) => hasText(alias) && !seen.has(alias) && seen.add(alias));
+}
+
+/**
+ * Reads a brand's URL sources — the user-submitted brand URLs, social accounts,
+ * and earned-content sources — for propagation to the brand's Semrush projects.
+ * Returned in the same V2 shape the create payload carries, so the same
+ * `collectBrandUrlEntries` helper handles both the create body and a persisted
+ * brand. `urls` carry no region (they apply to every market); social/earned
+ * carry `regions` for per-market filtering. Empty arrays when the brand has none.
+ *
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<{urls: object[], socialAccounts: object[], earnedContent: object[]}>}
+ */
+export async function getBrandUrlSources(brandId, postgrestClient) {
+  const empty = { urls: [], socialAccounts: [], earnedContent: [] };
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return empty;
+  }
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select('brand_urls(url), brand_social_accounts(url, regions), brand_earned_sources(url, regions)')
+    .eq('id', brandId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to get brand URL sources: ${error.message}`);
+  }
+  if (!data) {
+    return empty;
+  }
+  return {
+    urls: (data.brand_urls || []).map((u) => ({ value: u.url })),
+    socialAccounts: (data.brand_social_accounts || [])
+      .map((s) => ({ url: s.url, regions: s.regions || [] })),
+    earnedContent: (data.brand_earned_sources || [])
+      .map((e) => ({ url: e.url, regions: e.regions || [] })),
+  };
+}
+
+/**
+ * Reads a brand's competitors ("other brands to track") for propagation to the
+ * brand's Semrush projects' CI competitor lists. Returns `{ url, regions }` per
+ * competitor (the only fields the CI sync needs — Semrush competitors are
+ * domain-only). Empty array when the brand has none.
+ *
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<{url: string, regions: string[]}[]>}
+ */
+export async function getBrandCompetitors(brandId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return [];
+  }
+  const { data, error } = await postgrestClient
+    .from('competitors')
+    .select('url, regions')
+    .eq('brand_id', brandId);
+  if (error) {
+    throw new Error(`Failed to get brand competitors: ${error.message}`);
+  }
+  return (data || [])
+    .filter((c) => hasText(c?.url))
+    .map((c) => ({ url: c.url, regions: c.regions || [] }));
+}
+
+/**
  * Resolves the single active brand for a given (organization, site) pair.
  *
  * Lookup is `brands.site_id === siteId` AND `status === 'active'` AND
@@ -503,6 +648,15 @@ export async function upsertBrand({
   postgrestClient,
   updatedBy = 'system',
   log = console,
+  // Serenity-first provisioning: when a brand is created in Semrush-prompts mode
+  // the sub-workspace + project are provisioned BEFORE the row is written, so the
+  // controller supplies the pre-generated brand id (used as the sub-workspace
+  // title key) and the resulting sub-workspace pointer to persist atomically with
+  // the row. Both default to null (normal create — DB generates the id, the brand
+  // stays in flat mode). These are explicit params, NOT read from `brand`, so a
+  // client-supplied id can never force a row id.
+  forceBrandId = null,
+  semrushWorkspaceId = null,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -533,10 +687,15 @@ export async function upsertBrand({
     throw new Error(`Failed to look up existing brand "${brand.name}": ${existingError.message}`);
   }
 
-  // A brand cannot be active without a base site ID — but respect persisted state
-  // on the update path (the DB row may already have site_id set).
-  const hasBaseSite = hasText(brand.baseSiteId) || hasText(existing?.site_id);
-  const status = (!hasBaseSite && (brand.status || 'active') === 'active')
+  // An active brand must be anchored by either a SpaceCat base site OR a Semrush
+  // sub-workspace (serenity dual-mode): a Semrush brand has no SpaceCat site, but
+  // its sub-workspace (semrush_workspace_id, set on the serenity-first create
+  // path) is a valid anchor — mirrors the relaxed chk_active_brand_has_site_id
+  // DB constraint. Respect persisted site_id on the update path.
+  const hasAnchor = hasText(brand.baseSiteId)
+    || hasText(existing?.site_id)
+    || hasText(semrushWorkspaceId);
+  const status = (!hasAnchor && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
 
@@ -554,6 +713,16 @@ export async function upsertBrand({
     updated_by: updatedBy,
   };
 
+  // Serenity-first create: force the pre-generated id (so the row matches the
+  // sub-workspace title key) and bind the brand to its sub-workspace in the same
+  // write. Both only ever set on a fresh Semrush-mode create.
+  if (hasText(forceBrandId)) {
+    row.id = forceBrandId;
+  }
+  if (hasText(semrushWorkspaceId)) {
+    row.semrush_workspace_id = semrushWorkspaceId;
+  }
+
   const brandContext = normalizeNullableText(brand.brandContext, 'brandContext');
   if (brandContext !== undefined) {
     row.brand_context = brandContext;
@@ -567,14 +736,33 @@ export async function upsertBrand({
     row.mention_sentiment_guidance = mentionSentimentGuidance;
   }
 
+  // Deferred Semrush provisioning data for a pending (draft) brand: the primary
+  // URL + desired (market, languageCode) the wizard collected before a
+  // sub-workspace / project exist. Persisted as JSONB so activation can
+  // provision it later, then cleared. Undefined leaves the column untouched.
+  const pendingSemrushProvisioning = normalizePendingSemrushProvisioning(
+    brand.pendingSemrushProvisioning,
+  );
+  if (pendingSemrushProvisioning !== undefined) {
+    row.pending_semrush_provisioning = pendingSemrushProvisioning;
+  }
+
+  // A Semrush-anchored create (serenity-first, semrushWorkspaceId set) is NEVER
+  // anchored by a SpaceCat site: its primary URL is the Semrush project domain,
+  // which may coincidentally match an onboarded site. Setting site_id from that
+  // match would collide with the site's existing primary brand (409
+  // brands_base_site_unique) — so ignore baseSiteId entirely on this path.
+  const anchoredBySemrush = hasText(semrushWorkspaceId);
+
   // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
   // when the brand has no site_id yet — re-onboarding/re-upserting an existing
   // brand by name must NOT re-point its primary site (LLMO-5556: this silently
   // overwrote mongodb.com -> learn.mongodb.com and merck.com -> keytruda.com).
-  if (hasText(brand.baseSiteId) && !hasText(existing?.site_id)) {
+  if (!anchoredBySemrush && hasText(brand.baseSiteId) && !hasText(existing?.site_id)) {
     row.site_id = brand.baseSiteId;
   } else if (
-    hasText(brand.baseSiteId)
+    !anchoredBySemrush
+    && hasText(brand.baseSiteId)
     && hasText(existing?.site_id)
     && existing.site_id !== brand.baseSiteId
   ) {
@@ -684,6 +872,15 @@ export async function updateBrand({
   if (updates.region !== undefined) {
     patch.regions = (updates.region || [])
       .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
+  }
+
+  // Deferred Semrush provisioning data (pending/draft brands). Activation passes
+  // `pendingSemrushProvisioning: null` to clear it once the real projects are
+  // provisioned.
+  if (updates.pendingSemrushProvisioning !== undefined) {
+    patch.pending_semrush_provisioning = normalizePendingSemrushProvisioning(
+      updates.pendingSemrushProvisioning,
+    );
   }
 
   // Clear legacy columns on any brand update so old data doesn't linger.

@@ -14,7 +14,7 @@
 
 import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import { TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM, BRAND_TOPICS_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
-import { PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
+import { PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM, PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
 import { BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/brand/enums_pb.js';
 import { SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
@@ -22,7 +22,7 @@ import {
   optionalLlmFromQuery, llmToEngine,
   sourceDomainsByTopicFtsRows,
   LLM_ENUM, FTS_LLMS, TOPIC_INTENT_SLUG,
-  settledValueOrElse,
+  settledValueOrElse, resolveTopicIds,
 } from '../grpc-utils.js';
 
 /* ------------------------------------------------------------------ */
@@ -39,6 +39,14 @@ const PROMPTS_SORT_BY = {
   MENTIONED_BRANDS_COUNT: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT,
   SOURCES_COUNT: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.SOURCES_COUNT,
   RELEVANCE_SCORE: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.RELEVANCE_SCORE,
+};
+
+// `promptsByTopicIDs` uses its own order-by enum (no RELEVANCE_SCORE — relevance is a
+// topic-level, not prompt-level, sort). Numeric values otherwise match PROMPTS_SORT_BY.
+const PROMPTS_BY_TOPIC_IDS_SORT_BY = {
+  PROMPT: PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY_ENUM.PROMPT,
+  MENTIONED_BRANDS_COUNT: PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT,
+  SOURCES_COUNT: PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY_ENUM.SOURCES_COUNT,
 };
 
 const BRANDS_SORT_BY = {
@@ -298,6 +306,22 @@ function mapPromptRow(p) {
   };
 }
 
+// Maps a `PromptsByTopicIDsResponse.Prompt` row. Unlike the FTS prompt row, this gRPC
+// response carries no `topicName` / `topicVolume`, so those are omitted here — callers
+// fetching by topic already know the topic (and backfill name/volume from the parent row).
+function mapTopicIdsPromptRow(p) {
+  return {
+    prompt: p.prompt,
+    promptHash: String(p.promptHash ?? ''),
+    serpId: String(p.serpId ?? ''),
+    topicId: String(p.topicId ?? ''),
+    engine: llmToEngine(p.llm),
+    mentions: num(p.mentionedBrandsCount),
+    citedPages: num(p.sourcesCount),
+    ...(p.briefResponse ? { responseExcerpt: p.briefResponse } : {}),
+  };
+}
+
 function mapBrandsByTopicFtsRow(b) {
   const sourceDomains = num(b.sourceDomainsCount);
   return {
@@ -549,50 +573,18 @@ function reduceGroupSortKey(values, sort) {
   return values.reduce((acc, v) => (v < acc ? v : acc), Number.POSITIVE_INFINITY);
 }
 
-export async function handleTopicsResearchPrompts(sp, clients) {
-  const searchQuery = sp.get('searchQuery')?.trim();
-  if (!searchQuery) {
-    return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
-  }
-  const sort = resolveFtsSort(sp, PROMPTS_SORT_BY, 'MENTIONED_BRANDS_COUNT');
-  if (sort.error) { return sort.error; }
-  const order = { by: sort.by, direction: sort.direction };
-  const country = resolveCountryForFts(sp);
-  const { limit, offset } = parseLimitOffset(sp);
-  const llm = optionalLlmFromQuery(sp);
-  if (llm) {
-    const engineSlug = llmToEngine(llm);
-    const pr = await Promise.allSettled([
-      clients.promptClient.promptsByTopicFTSTotals({ country, llm, query: searchQuery }),
-      clients.promptClient.promptsByTopicFTS({
-        country, llm, query: searchQuery, order, range: { limit, offset },
-      }),
-    ]);
-    if (pr[1].status !== 'fulfilled') {
-      throw pr[1].reason;
-    }
-    const raw = pr[1].value;
-    const totalsRaw = settledValueOrElse(pr[0], { total: 0 });
-    const data = (raw.prompts || []).map((p) => {
-      const row = mapPromptRow(p);
-      row.engine = engineSlug || row.engine;
-      return row;
-    });
-    return {
-      status: 200,
-      body: {
-        data, total: num(totalsRaw.total), offset, limit,
-      },
-    };
-  }
-  const prPair = await Promise.all([
-    Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicFTSTotals({ country, llm: l, query: searchQuery }).catch(() => ({ total: 0 })))),
-    Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicFTS({
-      country, llm: l, query: searchQuery, order, range: { limit, offset },
-    }).catch(() => ({ prompts: [] })))),
-  ]);
-  const totalsResults = prPair[0];
-  const listResults = prPair[1];
+/**
+ * Merges per-LLM prompt list pages into one de-duplicated, sorted, capped page.
+ * Shared by the searchQuery (FTS) and topicId (`promptsByTopicIDs`) prompt paths —
+ * upstream they differ only in the gRPC call and the row mapper passed here.
+ * @param {Array<{ prompts?: object[] }>} listResults parallel to FTS_LLMS
+ * @param {Array<{ total?: * }>} totalsResults parallel to FTS_LLMS
+ * @param {{ sortByKey: string, dirMult: 1 | -1 }} sort
+ * @param {(p: object) => object} mapRow maps a raw gRPC prompt to an API row
+ * @param {number} limit page size
+ * @returns {{ data: object[], total: number }}
+ */
+function mergeMultiLlmPromptRows(listResults, totalsResults, sort, mapRow, limit) {
   const total = totalsResults.reduce((sum, r) => sum + num(r.total), 0);
   const sortKey = promptsResearchSortKey(sort);
   const isStringSort = sort.sortByKey === 'PROMPT';
@@ -600,7 +592,7 @@ export async function handleTopicsResearchPrompts(sp, clients) {
   for (let i = 0; i < FTS_LLMS.length; i += 1) {
     const engineSlug = llmToEngine(FTS_LLMS[i]);
     for (const p of (listResults[i]?.prompts || [])) {
-      const row = mapPromptRow(p);
+      const row = mapRow(p);
       row.engine = engineSlug || row.engine;
       const promptNorm = String(row.prompt ?? '').trim().toLowerCase();
       const key = row.promptHash && row.serpId
@@ -651,7 +643,109 @@ export async function handleTopicsResearchPrompts(sp, clients) {
       }
     } else if (picked.length < limit) { picked.push(g.rows[0]); }
   }
-  const data = picked.map(stripPromptDedupeKeys);
+  return { data: picked.map(stripPromptDedupeKeys), total };
+}
+
+/**
+ * Fetches one page of prompts for the given topic ids via `promptsByTopicIDs`
+ * (+ `promptsByTopicIDsTotal`) in a SINGLE call. For the all-engines view this uses
+ * `LLM_ENUM.ALL` so the backend aggregates and paginates server-side. A per-LLM fan-out
+ * + client merge cannot paginate correctly here: each LLM receives the same `offset`, and
+ * the summed total over-counts the merged set, so page 2+ comes back empty. Pass a specific
+ * `llm` to scope to a single engine.
+ * @returns {Promise<{ data: object[], total: number }>}
+ */
+async function promptsByTopicIdsPage({
+  clients, topicIds, country, llm, order, limit, offset,
+}) {
+  const llmEnum = llm ?? LLM_ENUM.ALL;
+  // For a single-engine request, force the requested engine on every row; for ALL, each row
+  // carries its own engine (mapped from `p.llm` in mapTopicIdsPromptRow).
+  const singleEngineSlug = llm ? llmToEngine(llm) : '';
+  const pr = await Promise.allSettled([
+    clients.promptClient.promptsByTopicIDsTotal({ country, llm: llmEnum, topicIds }),
+    clients.promptClient.promptsByTopicIDs({
+      country, llm: llmEnum, topicIds, order, range: { limit, offset },
+    }),
+  ]);
+  if (pr[1].status !== 'fulfilled') {
+    throw pr[1].reason;
+  }
+  const raw = pr[1].value;
+  const totalsRaw = settledValueOrElse(pr[0], { total: 0 });
+  const data = (raw.prompts || []).map((p) => {
+    const row = mapTopicIdsPromptRow(p);
+    if (singleEngineSlug) { row.engine = singleEngineSlug; }
+    return row;
+  });
+  return { data, total: num(totalsRaw.total) };
+}
+
+export async function handleTopicsResearchPrompts(sp, clients) {
+  const topicFilter = resolveTopicIds(sp);
+  if (!topicFilter.ok) { return { status: topicFilter.status, body: topicFilter.body }; }
+  const hasTopicIds = topicFilter.topicIds.length > 0;
+
+  const searchQuery = sp.get('searchQuery')?.trim();
+  // searchQuery is required only for the free-text path; fetching by topicId does not need it.
+  if (!hasTopicIds && !searchQuery) {
+    return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
+  }
+
+  const country = resolveCountryForFts(sp);
+  const { limit, offset } = parseLimitOffset(sp);
+  const llm = optionalLlmFromQuery(sp);
+
+  if (hasTopicIds) {
+    const sort = resolveFtsSort(sp, PROMPTS_BY_TOPIC_IDS_SORT_BY, 'MENTIONED_BRANDS_COUNT');
+    if (sort.error) { return sort.error; }
+    const order = { by: sort.by, direction: sort.direction };
+    const { data, total } = await promptsByTopicIdsPage({
+      clients, topicIds: topicFilter.topicIds, country, llm, order, limit, offset,
+    });
+    return {
+      status: 200,
+      body: {
+        data, total, offset, limit,
+      },
+    };
+  }
+
+  const sort = resolveFtsSort(sp, PROMPTS_SORT_BY, 'MENTIONED_BRANDS_COUNT');
+  if (sort.error) { return sort.error; }
+  const order = { by: sort.by, direction: sort.direction };
+  if (llm) {
+    const engineSlug = llmToEngine(llm);
+    const pr = await Promise.allSettled([
+      clients.promptClient.promptsByTopicFTSTotals({ country, llm, query: searchQuery }),
+      clients.promptClient.promptsByTopicFTS({
+        country, llm, query: searchQuery, order, range: { limit, offset },
+      }),
+    ]);
+    if (pr[1].status !== 'fulfilled') {
+      throw pr[1].reason;
+    }
+    const raw = pr[1].value;
+    const totalsRaw = settledValueOrElse(pr[0], { total: 0 });
+    const data = (raw.prompts || []).map((p) => {
+      const row = mapPromptRow(p);
+      row.engine = engineSlug || row.engine;
+      return row;
+    });
+    return {
+      status: 200,
+      body: {
+        data, total: num(totalsRaw.total), offset, limit,
+      },
+    };
+  }
+  const prPair = await Promise.all([
+    Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicFTSTotals({ country, llm: l, query: searchQuery }).catch(() => ({ total: 0 })))),
+    Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicFTS({
+      country, llm: l, query: searchQuery, order, range: { limit, offset },
+    }).catch(() => ({ prompts: [] })))),
+  ]);
+  const { data, total } = mergeMultiLlmPromptRows(prPair[1], prPair[0], sort, mapPromptRow, limit);
   return {
     status: 200,
     body: {

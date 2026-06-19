@@ -1133,22 +1133,24 @@ describe('Preflight Controller', () => {
       mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
       hasAccessStub = sandbox.stub().resolves(true);
 
-      // SITES-43236: createPreflight constructs a custom-env ImsClient with
-      // IMS_SCOPE='system' hardcoded at the mint call site (see preflight.js
-      // for rationale). Tests esmock `ImsClient.createFrom` to return the
-      // shared mockImsClient stub; tests control mint behavior by overriding
-      // getServiceAccessTokenV3 on that stub per case.
+      // SITES-43236 / SITES-46699: createPreflight constructs a custom-env
+      // ImsClient with the dedicated PREFLIGHT_IMS_* credentials at the mint
+      // call site (see preflight.js for rationale). Tests esmock
+      // `ImsClient.createFrom` to return the shared mockImsClient stub; tests
+      // control mint behavior by overriding getServiceAccessToken on that
+      // stub per case (v2 authorization_code service-token mint).
       mockImsClient = {
-        getServiceAccessTokenV3: sandbox.stub().resolves({
+        getServiceAccessToken: sandbox.stub().resolves({
           access_token: 'test-ims-service-token',
           token_type: 'bearer',
           expires_in: 3600,
         }),
       };
       // Stub-ify ImsClient.createFrom so tests can assert that the source
-      // passes IMS_SCOPE='system' through to the factory (the load-bearing
-      // contract of the hardcode; if a future refactor accidentally drops
-      // the override, this stub's call args won't match and assertions fail).
+      // passes the dedicated PREFLIGHT_IMS_* credentials through to the
+      // factory (the load-bearing contract of SITES-46699; if a future
+      // refactor accidentally swaps the wrong env keys, this stub's call
+      // args won't match and assertions fail).
       createFromStub = sandbox.stub().returns(mockImsClient);
 
       // SITES-46202: createPreflight no longer consults Configuration / TierClient
@@ -1176,6 +1178,11 @@ describe('Preflight Controller', () => {
           AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
           MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
           AWS_ENV: 'prod',
+          // SITES-46699: dedicated IMS client credentials used by callMysticatAnalyze.
+          PREFLIGHT_IMS_CLIENT_ID: 'test-preflight-client-id',
+          PREFLIGHT_IMS_CLIENT_SECRET: 'test-preflight-client-secret',
+          PREFLIGHT_IMS_CLIENT_CODE: 'test-preflight-client-code',
+          PREFLIGHT_IMS_SCOPE: 'test-preflight-scope',
         },
       );
     });
@@ -1600,15 +1607,24 @@ describe('Preflight Controller', () => {
         attributes: { authInfo: mockAuthInfo },
       });
       expect(response.status).to.equal(202);
-      expect(mockImsClient.getServiceAccessTokenV3).to.have.been.calledOnce;
-      // Load-bearing contract of this PR: the custom-env ImsClient construction
-      // MUST pass IMS_SCOPE='system' through to ImsClient.createFrom — that's
-      // the hardcoded scope value that lets the v3 client_credentials grant
-      // succeed against `aem-project-collab-service` (per SITES-43236). If a
-      // future refactor accidentally drops the override, this assertion fails.
+      // Load-bearing contracts (SITES-46699):
+      //   1. Custom-env ImsClient construction passes the dedicated
+      //      PREFLIGHT_IMS_* credentials through to ImsClient.createFrom.
+      //   2. Mint uses getServiceAccessToken (v2 authorization_code against
+      //      the IMSS-provisioned permanent code — no org_id, no SP binding).
+      // If a future refactor swaps to v3 client_credentials or wires the
+      // wrong env keys, one of these assertions fails.
       expect(createFromStub).to.have.been.calledWith(
-        sinon.match({ env: sinon.match({ IMS_SCOPE: 'system' }) }),
+        sinon.match({
+          env: sinon.match({
+            IMS_CLIENT_ID: 'test-preflight-client-id',
+            IMS_CLIENT_SECRET: 'test-preflight-client-secret',
+            IMS_CLIENT_CODE: 'test-preflight-client-code',
+            IMS_SCOPE: 'test-preflight-scope',
+          }),
+        }),
       );
+      expect(mockImsClient.getServiceAccessToken).to.have.been.calledOnce;
       const [, calledOptions] = fetchStub.secondCall.args;
       // Bearer prefix mirrors the v3-token convention; verified against the
       // mystique-deploy CGW-Flex validator (Authorization on /v1/apply uses
@@ -1672,7 +1688,7 @@ describe('Preflight Controller', () => {
     });
 
     it('returns 500 PREFLIGHT_INTERNAL_ERROR when IMS service-token mint fails', async () => {
-      mockImsClient.getServiceAccessTokenV3.rejects(new Error('IMS down'));
+      mockImsClient.getServiceAccessToken.rejects(new Error('IMS down'));
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
@@ -1687,7 +1703,7 @@ describe('Preflight Controller', () => {
     it('does not create AsyncJob or Preflight records when IMS mint fails', async () => {
       // Mint happens before DB writes — a transient IMS failure must not
       // leave orphaned IN_PROGRESS records that the caller can't reconcile.
-      mockImsClient.getServiceAccessTokenV3.rejects(new Error('IMS down'));
+      mockImsClient.getServiceAccessToken.rejects(new Error('IMS down'));
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
@@ -1698,7 +1714,7 @@ describe('Preflight Controller', () => {
     });
 
     it('does not call Mysticat when IMS mint fails', async () => {
-      mockImsClient.getServiceAccessTokenV3.rejects(new Error('IMS down'));
+      mockImsClient.getServiceAccessToken.rejects(new Error('IMS down'));
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
@@ -1717,7 +1733,7 @@ describe('Preflight Controller', () => {
       // SDK shape drift guard (e.g. `{ accessToken: ... }` after a version bump
       // or `{}` on partial responses) — must surface as an explicit 500, not
       // silently drop the header.
-      mockImsClient.getServiceAccessTokenV3.resolves({});
+      mockImsClient.getServiceAccessToken.resolves({});
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },

@@ -391,7 +391,7 @@ x-ai-vis-fts-prompts-sort-by: &ftsPromptsSortByParam
   required: false
   description: |
     `PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY` for Semrush v2 `PromptsByTopicFTSRequest.order.by`.
-    Default when omitted: `RELEVANCE_SCORE`. Returns `400 invalid_sort_by` for any other value.
+    Default when omitted: `MENTIONED_BRANDS_COUNT`. Returns `400 invalid_sort_by` for any other value.
 
     Note: on the all-engines path (no `engine` query param) the sort is applied
     server-side per LLM and the merged page is re-sorted in-process, so ordering
@@ -399,7 +399,7 @@ x-ai-vis-fts-prompts-sort-by: &ftsPromptsSortByParam
   schema:
     type: string
     enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT, RELEVANCE_SCORE]
-    default: RELEVANCE_SCORE
+    default: MENTIONED_BRANDS_COUNT
 
 x-ai-vis-fts-brands-sort-by: &ftsBrandsSortByParam
   name: sortBy
@@ -959,20 +959,52 @@ ai-visibility-topics-stats:
 ai-visibility-topics-research-prompts:
   get:
     tags: [ai-visibility]
-    summary: Get prompts for a topic research query
+    summary: Get prompts for a topic research query or a specific topic
     description: |
-      Returns prompts associated with a topic full-text search query.
-      All-models queries merge and deduplicate across LLMs; total is
-      the sum of per-LLM totals.
-      Data from `PromptService/PromptsByTopicFTS` and `PromptsByTopicFTSTotals`.
+      Returns prompts for topic research. Two modes:
 
-      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT`, `RELEVANCE_SCORE`, `RELEVANCE_SCORE` (default))
-      and `sortDirection` (`ASC` / `DESC`, default `DESC`). On the all-engines path, sort is
-      applied per LLM and the merged page is re-sorted in-process; cross-page ordering is
-      approximate.
+      - **Free-text (default):** provide `searchQuery` to get prompts associated
+        with a topic full-text search. Data from `PromptService/PromptsByTopicFTS`
+        and `PromptsByTopicFTSTotals`.
+      - **By topic:** provide `topicId` to get the prompts for that specific topic.
+        `searchQuery` is then **not required** (and is ignored). Data from
+        `PromptService/PromptsByTopicIDs` and `PromptsByTopicIDsTotal`.
+
+      At least one of `searchQuery` or `topicId` is required; if both are sent, `topicId`
+      wins and `searchQuery` is ignored. All-models queries merge and deduplicate across
+      LLMs; total is the sum of per-LLM totals.
+
+      Sortable via `sortBy` (`PROMPT`, `MENTIONED_BRANDS_COUNT` (default), `SOURCES_COUNT`,
+      `RELEVANCE_SCORE`) and `sortDirection` (`ASC` / `DESC`, default `DESC`).
+      `RELEVANCE_SCORE` is not supported on the `topicId` path (relevance is topic-level).
+      On the all-engines path, sort is applied per LLM and the merged page is re-sorted
+      in-process; cross-page ordering is approximate.
     operationId: getAiVisibilityTopicsResearchPrompts
     parameters:
-      - *searchQueryParam
+      - name: searchQuery
+        in: query
+        required: false
+        description: |
+          Full-text search query for topic research. Required unless `topicId` is provided.
+        schema:
+          type: string
+          example: coffee
+      - *topicIdOptionalParam
+      - name: topicIds
+        in: query
+        required: false
+        description: |
+          Batch form of `topicId`: repeat the param to fetch prompts for several topics at once
+          (e.g. `?topicIds=12345&topicIds=67890`). Singular `topicId` is the common case; values
+          from both are combined. Digits only. Capped at 50 ids per request.
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+            pattern: '^\d+$'
+            example: '12345'
       - *countryParam
       - *regionParam
       - *engineParam
@@ -1057,6 +1089,139 @@ ai-visibility-topics-research-source-domains:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilitySourceDomainsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-research-prompts-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export topic research prompts as CSV
+    description: |
+      Exports the prompts for a topic research query using Semrush `PromptService`
+      `PromptsByTopicFTSExport` — the export counterpart of
+      `/llmo/ai-visibility/topics/research/prompts`. The same `searchQuery`, market,
+      `engine`, `PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY` sorting and `limit` / `offset`
+      apply. Omitting `engine` exports every engine merged in a single call.
+      The response is the native Semrush `ExportResponse` protobuf JSON with CSV
+      `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`;
+      callers page with `limit` / `offset` and stitch the per-page CSVs.
+    operationId: getAiVisibilityV1PromptResearchPromptsExport
+    parameters:
+      - *searchQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *ftsPromptsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Topic research prompts CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityPromptResearchExportResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-research-brands-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export topic research brands as CSV
+    description: |
+      Exports the brands mentioned for a topic research query using Semrush
+      `BrandService` `BrandsByTopicFTSExport` — the export counterpart of
+      `/llmo/ai-visibility/topics/research/brands`. The same `searchQuery`, market,
+      `engine`, `BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY` sorting and `limit` / `offset`
+      apply. Omitting `engine` exports every engine merged in a single call.
+      The response is the native Semrush `ExportResponse` protobuf JSON with CSV
+      `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1PromptResearchBrandsExport
+    parameters:
+      - *searchQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *ftsBrandsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Topic research brands CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityPromptResearchExportResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-research-source-domains-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export topic research source domains as CSV
+    description: |
+      Exports the source domains cited for a topic research query using Semrush
+      `SourceService` `SourceDomainsByTopicFTSExport` — the export counterpart of
+      `/llmo/ai-visibility/topics/research/source-domains`. The same `searchQuery`,
+      market, `engine`, `SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY` sorting and
+      `limit` / `offset` apply. Omitting `engine` exports every engine merged in a
+      single call. The response is the native Semrush `ExportResponse` protobuf JSON
+      with CSV `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1PromptResearchSourceDomainsExport
+    parameters:
+      - *searchQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *ftsSourceDomainsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Topic research source domains CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityPromptResearchExportResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-research-topics-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export topic research topics as CSV
+    description: |
+      Exports the related topics for a topic research query using Semrush
+      `TopicService` `TopicsByFTSExport` — the export counterpart of
+      `/llmo/ai-visibility/topics/research`. The same `searchQuery`, market, `engine`,
+      `TOPICS_BY_FTS_REQUEST_ORDER_BY` sorting and `limit` / `offset` apply. Omitting
+      `engine` exports every engine merged in a single call. The response is the native
+      Semrush `ExportResponse` protobuf JSON with CSV `fileContent` base64-encoded, plus
+      `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1PromptResearchTopicsExport
+    parameters:
+      - *searchQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *ftsTopicsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Topic research topics CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityPromptResearchExportResponse'
       <<: *errorResponses
     security:
       - api_key: []

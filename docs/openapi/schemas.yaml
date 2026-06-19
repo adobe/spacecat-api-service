@@ -3816,6 +3816,39 @@ Brand:
       description: Read-only. The base URL of the primary site, resolved from baseSiteId.
       type: string
       readOnly: true
+    semrushWorkspaceId:
+      description: >-
+        Read-only. The brand's own Semrush sub-workspace id (dual-mode). Null
+        for brands still in flat mode (no sub-workspace minted yet). Used to
+        scope per-brand Semrush views to the sub-workspace.
+      type: [string, 'null']
+      readOnly: true
+    pendingSemrushProvisioning:
+      description: >-
+        Read-only. Deferred Semrush provisioning data for a pending (draft)
+        brand: the primary URL + initial market chosen at "Save as pending"
+        before the brand's sub-workspace + project exist. Fed into activation;
+        each market that provisions is removed and the field is nulled once none
+        remain (failed markets stay for retry). Null for a non-pending brand (or
+        a draft with no provisioning data yet). primaryUrl may be null (saved as
+        pending before a URL was entered).
+      type: [object, 'null']
+      readOnly: true
+      properties:
+        primaryUrl:
+          type: [string, 'null']
+        markets:
+          type: array
+          items:
+            type: object
+            required:
+              - market
+              - languageCode
+            properties:
+              market:
+                type: string
+              languageCode:
+                type: string
     imsOrgId:
       description: The IMS Organization ID of the brand
       $ref: '#/ImsOrganizationId'
@@ -10374,6 +10407,30 @@ AiVisibilityV1SourceGapSourceDomainsExportResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityPromptResearchExportResponse:
+  type: object
+  description: |
+    Prompt Research CSV export from the `GET /llmo/ai-visibility/v1/prompt-research/*-export`
+    endpoints (prompts, brands, source-domains, topics). Native Semrush v2 `ExportResponse`
+    protobuf JSON plus `srFilters` from the API layer. The CSV columns are produced by Semrush
+    and passed through unchanged. Omitting `engine` exports all engines in a single call.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: prompts_by_topic_fts_coffee_us.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityCompetitorsMetrics:
   type: object
   description: Competitor comparison time-series response
@@ -10704,6 +10761,16 @@ SerenityBulkDeletePromptsResponse:
           status: { type: integer }
           message: { type: string }
 
+SerenityMarketStatus:
+  type: string
+  description: |
+    Publish state of the market's upstream project, surfaced only in
+    sub-workspace mode where markets are read live from the brand's own
+    workspace. Maps 1:1 from the upstream `publish_status`
+    (`initial_publish_failed` → `publish_failed`). Absent in flat mode,
+    where market existence is a pure DB-row contract.
+  enum: [draft, publishing, publish_failed, live, live_with_unpublished_updates]
+
 SerenityMarket:
   type: object
   description: |
@@ -10728,6 +10795,15 @@ SerenityMarket:
       oneOf:
         - $ref: '#/DateTime'
         - type: 'null'
+    # Additive, sub-workspace mode only. In flat mode the list
+    # is a pure DB read and omits both. status reflects the live publish state;
+    # semrushProjectId is the upstream project id for the slice (same value the
+    # market-detail endpoint exposes). Optional so flat-mode responses still validate.
+    status:
+      $ref: '#/SerenityMarketStatus'
+    semrushProjectId:
+      type: string
+      description: Upstream Semrush AIO project id for this slice (sub-workspace mode only).
 
 SerenityMarketListResponse:
   type: object
@@ -10754,6 +10830,107 @@ SerenityMarketDetail:
         semrushProjectId:
           type: string
           description: Upstream Semrush AIO project id for this slice (provider-specific by design).
+        initialized:
+          description: |
+            AIO readiness for this slice's project (sub-workspace mode only). `true`/`false`
+            from the upstream init-status probe, or `null` when the probe is
+            unavailable or the read failed (best-effort enrichment — never fails
+            the detail read). Absent in flat mode.
+          oneOf:
+            - type: boolean
+            - type: 'null'
+
+SerenityActivateRequest:
+  type: object
+  description: |
+    Activates a brand into sub-workspace mode: ensures the brand's own
+    Semrush sub-workspace exists (creating + resourcing it on first call),
+    then per supplied market creates-or-resumes a draft and publishes it once.
+    Markets are caller-supplied — reactivation re-supplies them (there is no
+    stored market memory). Sets the brand status to `active` once ≥1 market is live.
+  required: [brandDomain, brandNames, markets]
+  properties:
+    brandDomain:
+      type: string
+      description: Primary domain for the brand's upstream projects.
+    brandNames:
+      type: array
+      minItems: 1
+      items: { type: string }
+      description: Brand name variants tracked upstream; the first is the display name.
+    brandDisplayName:
+      type: string
+      description: Prefix for each market's default project name when `name` is omitted.
+    markets:
+      type: array
+      minItems: 1
+      maxItems: 50
+      description: |
+        Markets to bring live for this brand. Capped at 50 per request: each
+        market drives sequential upstream create+publish calls, so a larger
+        array is rejected with 400 (rather than risking a Lambda timeout).
+      items:
+        type: object
+        required: [market, languageCode]
+        properties:
+          market:
+            type: string
+            pattern: '^[A-Za-z]{2}$'
+            description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.
+          languageCode:
+            type: string
+            pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+          name:
+            type: string
+            description: Optional display name for this market's upstream project.
+
+SerenityActivateResponse:
+  type: object
+  required: [brandId, status, markets]
+  properties:
+    brandId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [active, pending]
+      description: |
+        `active` when at least one market went live; `pending` when none did
+        (the response is HTTP 207 in that case). Mirrors the persisted brand status.
+    markets:
+      type: array
+      description: Per-market outcome, in request order.
+      items:
+        type: object
+        required: [market, languageCode, status]
+        properties:
+          market:
+            type: string
+          languageCode:
+            type: string
+          status:
+            type: integer
+            description: Per-market HTTP-style status (201 live, 409 already-live, 4xx validation).
+          body:
+            type: object
+            additionalProperties: true
+            description: The per-market handler result body.
+
+SerenityDeactivateResponse:
+  type: object
+  description: |
+    Result of decommissioning a brand's sub-workspace: every project is
+    deleted and the allocation released back to the parent pool, but the
+    workspace and its `semrush_workspace_id` pointer are KEPT for reuse
+    (never-delete). The brand status is set to `pending`.
+  required: [brandId, status]
+  properties:
+    brandId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [pending]
 
 SerenityCreateMarketRequest:
   type: object
@@ -10820,6 +10997,46 @@ SerenityModelListResponse:
     items:
       type: array
       items: { $ref: '#/SerenityModel' }
+
+SerenityLanguage:
+  type: object
+  required: [name]
+  properties:
+    id:
+      type: [string, 'null']
+      description: Semrush language catalog id (null when the catalog omits it).
+    name:
+      type: string
+      description: English language name as Semrush spells it (the match key).
+
+SerenityLanguageListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityLanguage' }
+
+SerenityUpdateModelsRequest:
+  type: object
+  description: |
+    Desired AI-model set for one (geoTargetId, languageCode) slice. The server
+    diffs this against the currently-assigned models and applies the minimal
+    add/remove, then publishes. `modelIds` are catalog model ids (the `id` from
+    `GET /serenity/models`), not assignment-row ids.
+  required: [geoTargetId, languageCode, modelIds]
+  properties:
+    geoTargetId:
+      type: integer
+      minimum: 1
+    languageCode:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    modelIds:
+      type: array
+      maxItems: 50
+      items: { type: string }
+      description: Catalog model ids to track for this slice. Empty array clears all.
 
 SerenityErrorResponse:
   type: object

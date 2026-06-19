@@ -108,7 +108,7 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for current-tab suggestions missing an AI summary. CSV uploads are batched at 320 URLs.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for NEW/FIXED suggestions missing an AI summary. CSV uploads are batched at 320 URLs.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only|ai-only-current|ai-only-missing] [key:value ...]`,
   });
@@ -230,7 +230,7 @@ function RunAuditCommand(context) {
   };
 
   /**
-   * Fetches unique URLs from current-tab prerender suggestions that are also
+   * Fetches unique URLs from NEW or FIXED prerender suggestions that are
    * missing an AI summary (aiSummary is absent or empty).
    * @param {string} siteId - The site ID.
    * @returns {Promise<string[]>} Deduplicated URLs.
@@ -246,9 +246,12 @@ function RunAuditCommand(context) {
       // eslint-disable-next-line no-await-in-loop
       const suggestions = await opp.getSuggestions();
       suggestions
-        .filter((s) => isCurrentTabSuggestion(s) && !s.getData().aiSummary)
+        .filter((s) => PRERENDER_SUGGESTION_STATUSES.includes(s.getStatus()))
         .forEach((s) => {
-          urls.add(s.getData().url);
+          const url = s.getData()?.url;
+          if (url && isValidUrl(url) && !url.includes('*') && !s.getData().aiSummary) {
+            urls.add(url);
+          }
         });
     }
 
@@ -281,7 +284,18 @@ function RunAuditCommand(context) {
         await Promise.all(
           auditTypesToRun.map(async (enabledAuditType) => {
             try {
-              await triggerAuditForSite(site, enabledAuditType, undefined, slackContext, context);
+              // Skip audit types explicitly disabled for this site (deny-list).
+              if (configuration.isHandlerDisabledForSite(enabledAuditType, site)) {
+                log.info(`Skipping audit ${enabledAuditType} for site ${baseURL}: explicitly disabled.`);
+                return;
+              }
+              await triggerAuditForSite(
+                site,
+                enabledAuditType,
+                undefined,
+                slackContext,
+                context,
+              );
             } catch (error) {
               log.error(`Error running audit ${enabledAuditType.id} for site ${baseURL}`, error);
               await postErrorMessage(say, error);
@@ -296,13 +310,16 @@ function RunAuditCommand(context) {
           return;
         }
 
-        // Check entitlements for all product codes
+        // Check site enrollment for all product codes. We check `siteEnrollment`
+        // (not `entitlement`) for parity with the audit worker's downstream gate
+        // (see audit-utils#checkProductCodeEntitlements). Org-level entitlement
+        // alone is insufficient — the specific site must be enrolled.
         const entitlementChecks = await Promise.all(
           handler.productCodes.map(async (productCode) => {
             try {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const tierResult = await tierClient.checkValidEntitlement();
-              return tierResult.entitlement || false;
+              return tierResult.siteEnrollment || false;
             } catch (error) {
               context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
               return false;
@@ -310,13 +327,25 @@ function RunAuditCommand(context) {
           }),
         );
 
-        // Block audit if site has no entitlement for any of the product codes
-        if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+        // Block audit if site has no enrollment for any of the product codes
+        if (!entitlementChecks.some((hasEnrollment) => hasEnrollment)) {
           await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
           return;
         }
 
-        await triggerAuditForSite(site, auditType, auditData, slackContext, context);
+        // Block audit if the handler is explicitly disabled for this site (deny-list).
+        if (configuration.isHandlerDisabledForSite(auditType, site)) {
+          await say(`:x: Audit \`${auditType}\` is explicitly disabled for site \`${baseURL}\`. Re-enable it via the audit configuration before running on-demand.`);
+          return;
+        }
+
+        await triggerAuditForSite(
+          site,
+          auditType,
+          auditData,
+          slackContext,
+          context,
+        );
       }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
@@ -336,23 +365,20 @@ function RunAuditCommand(context) {
         return;
       }
 
-      if (!configuration.isHandlerEnabledForSite(auditType, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-        return;
-      }
-
       const handler = configuration.getHandlers()?.[auditType];
       if (!isNonEmptyArray(handler?.productCodes)) {
         await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${auditType}'.`);
         return;
       }
 
+      // Check site enrollment for all product codes (see runAuditForSite for rationale
+      // on using `siteEnrollment` instead of `entitlement`).
       const entitlementChecks = await Promise.all(
         handler.productCodes.map(async (productCode) => {
           try {
             const tierClient = await TierClient.createForSite(context, site, productCode);
             const tierResult = await tierClient.checkValidEntitlement();
-            return tierResult.entitlement || false;
+            return tierResult.siteEnrollment || false;
           } catch (error) {
             context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
             return false;
@@ -360,8 +386,14 @@ function RunAuditCommand(context) {
         }),
       );
 
-      if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+      if (!entitlementChecks.some((hasEnrollment) => hasEnrollment)) {
         await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
+        return;
+      }
+
+      // Block audit if the handler is explicitly disabled for this site (deny-list).
+      if (configuration.isHandlerDisabledForSite(auditType, site)) {
+        await say(`:x: Audit \`${auditType}\` is explicitly disabled for site \`${baseURL}\`. Re-enable it via the audit configuration before running on-demand.`);
         return;
       }
 
@@ -478,7 +510,7 @@ function RunAuditCommand(context) {
           [PRERENDER_MODES.ALL]: 'with status NEW or FIXED',
           [PRERENDER_MODES.AI_ONLY]: 'with status NEW or FIXED',
           [PRERENDER_MODES.AI_ONLY_CURRENT]: 'matching current-tab filters',
-          [PRERENDER_MODES.AI_ONLY_MISSING]: 'matching current-tab filters with missing AI summary',
+          [PRERENDER_MODES.AI_ONLY_MISSING]: 'with status NEW or FIXED and missing AI summary',
         };
         const modeLabel = MODE_LABELS[prerenderMode];
         await say(`:hourglass_flowing_sand: Fetching ${modeLabel}`
