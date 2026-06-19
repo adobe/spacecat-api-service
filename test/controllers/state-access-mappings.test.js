@@ -115,6 +115,7 @@ async function loadController(supportStubs = {}) {
     updateFacsAccessMappingCapabilities: sinon.stub().resolves(null),
     listFacsAccessMappingAuditEvents: sinon.stub().resolves([]),
     insertFacsAccessMappingAuditEvent: sinon.stub().resolves({}),
+    getFacsAccessMappingById: sinon.stub().resolves(null),
     requirePostgrestForFacsMappings: () => null,
     ...supportStubs,
   };
@@ -784,12 +785,30 @@ describe('StateAccessMappingsController', () => {
       expect(stubs.listFacsAccessMappings.called).to.be.true;
     });
 
-    it('flow 8.3: a state-layer can_manage_users holder passes the gate (empty JWT)', async () => {
-      // The caller's own user binding carries can_manage_users — management
-      // authority is state-granted, not FACS. The gate consults the state layer.
+    it('flow 8.3: a state-layer manager passes the gate for a resource they manage', async () => {
+      // The caller's own user binding carries can_manage_users on VALID_UUID_RES.
+      // A resource-scoped read on that resource is allowed.
       const managerRow = makeRow({
         subject_type: 'user',
         subject_id: CALLER_USER,
+        resource_id: VALID_UUID_RES,
+        granted_capabilities: ['llmo/can_manage_users'],
+      });
+      const { Controller } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow]),
+      });
+      const ctx = denyCtx({
+        queryParams: { resourceType: 'brand', resourceId: VALID_UUID_RES },
+      });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('flow 8.3: a state-layer manager is denied an org-wide (subject-only) read', async () => {
+      const managerRow = makeRow({
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        resource_id: VALID_UUID_RES,
         granted_capabilities: ['llmo/can_manage_users'],
       });
       const { Controller } = await loadController({
@@ -799,7 +818,24 @@ describe('StateAccessMappingsController', () => {
         queryParams: { subjectType: 'org', subjectId: CALLER_ORG_CANONICAL },
       });
       const res = await Controller(ctx).listMappings(ctx);
-      expect(res.status).to.equal(200);
+      expect(res.status).to.equal(403);
+    });
+
+    it('flow 8.3: a state-layer manager is denied a read on a resource they do NOT manage', async () => {
+      const managerRow = makeRow({
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        resource_id: VALID_UUID_RES,
+        granted_capabilities: ['llmo/can_manage_users'],
+      });
+      const { Controller } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow]),
+      });
+      const ctx = denyCtx({
+        queryParams: { resourceType: 'brand', resourceId: 'cccccccc-cccc-4ccc-9ccc-cccccccccccc' },
+      });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(403);
     });
   });
 
@@ -867,6 +903,133 @@ describe('StateAccessMappingsController', () => {
       });
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(201);
+    });
+  });
+
+  describe('flow 8.3: state-layer managers are scoped to resources they manage', () => {
+    const MANAGED = VALID_UUID_RES;
+    const UNMANAGED = 'cccccccc-cccc-4ccc-9ccc-cccccccccccc';
+    // The caller manages MANAGED via a state-layer can_manage_users binding.
+    const managerRow = () => makeRow({
+      subject_type: 'user',
+      subject_id: CALLER_USER,
+      resource_id: MANAGED,
+      granted_capabilities: ['llmo/can_manage_users'],
+    });
+    const stateMgrCtx = (over = {}) => makeContext({
+      facsPermissions: [], isAdmin: false, ...over,
+    });
+
+    it('createMapping allows a binding on a managed resource', async () => {
+      const created = makeRow({ resource_id: MANAGED });
+      const { Controller } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow()]),
+        createFacsAccessMappings: sinon.stub().resolves({ created: [created], skipped: [] }),
+      });
+      const ctx = stateMgrCtx({
+        body: {
+          subjectType: 'user',
+          subjectId: 'grantee@AdobeID',
+          resourceType: 'brand',
+          resourceId: MANAGED,
+          grantedCapabilities: ['llmo/can_view'],
+        },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+    });
+
+    it('createMapping 403s on a resource the caller does NOT manage', async () => {
+      const { Controller, stubs } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow()]),
+      });
+      const ctx = stateMgrCtx({
+        body: {
+          subjectType: 'user',
+          subjectId: 'grantee@AdobeID',
+          resourceType: 'brand',
+          resourceId: UNMANAGED,
+          grantedCapabilities: ['llmo/can_view'],
+        },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
+    });
+
+    it('patchMapping allows editing a binding on a managed resource', async () => {
+      const updated = makeRow({ resource_id: MANAGED, granted_capabilities: ['llmo/can_view'] });
+      const { Controller } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow()]),
+        getFacsAccessMappingById: sinon.stub().resolves(makeRow({ resource_id: MANAGED })),
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
+      const ctx = stateMgrCtx({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_view'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('patchMapping 403s when the target row is on an unmanaged resource', async () => {
+      const { Controller, stubs } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow()]),
+        getFacsAccessMappingById: sinon.stub().resolves(makeRow({ resource_id: UNMANAGED })),
+      });
+      const ctx = stateMgrCtx({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_view'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('patchMapping 404s when the target row does not exist', async () => {
+      const { Controller } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow()]),
+        getFacsAccessMappingById: sinon.stub().resolves(null),
+      });
+      const ctx = stateMgrCtx({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_view'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('revokeMapping allows revoking a binding on a managed resource', async () => {
+      const { Controller } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow()]),
+        getFacsAccessMappingById: sinon.stub().resolves(makeRow({ resource_id: MANAGED })),
+        revokeFacsAccessMappingById: sinon.stub().resolves(
+          makeRow({ resource_id: MANAGED, revoked_at: '2026-01-02T00:00:00Z' }),
+        ),
+      });
+      const ctx = stateMgrCtx({ pathParams: { id: VALID_UUID_MAPPING } });
+      const res = await Controller(ctx).revokeMapping(ctx);
+      expect(res.status).to.equal(204);
+    });
+
+    it('revokeMapping 403s when the target row is on an unmanaged resource', async () => {
+      const { Controller, stubs } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow()]),
+        getFacsAccessMappingById: sinon.stub().resolves(makeRow({ resource_id: UNMANAGED })),
+      });
+      const ctx = stateMgrCtx({ pathParams: { id: VALID_UUID_MAPPING } });
+      const res = await Controller(ctx).revokeMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.revokeFacsAccessMappingById.called).to.be.false;
+    });
+
+    it('getAuditLogs 403s for a state-layer manager (org-wide read is FACS-only)', async () => {
+      const { Controller } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow()]),
+      });
+      const ctx = stateMgrCtx({ pathParams: { organizationId: '99999999-8888-4777-9666-555555555555' } });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(403);
     });
   });
 

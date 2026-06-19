@@ -130,6 +130,45 @@ export async function listFacsAccessMappings(postgrestClient, filters = {}) {
 }
 
 /**
+ * Fetches a single **active** binding by primary key, scoped to the caller's
+ * org + product. Used to authorize PATCH / DELETE before mutating: the caller's
+ * management authority is evaluated against the row's `resource_id`
+ * (hybrid-model §8.3 — a state-layer manager may only act on resources where
+ * they hold `can_manage_users`). Returns the row, or `null` when no active row
+ * matches (unknown id, revoked, or a different org / product).
+ *
+ * @param {object} postgrestClient
+ * @param {object} args
+ * @param {string} args.id        - Binding row id.
+ * @param {string} args.imsOrgId  - REQUIRED — org scope guard.
+ * @param {string} args.product   - REQUIRED — product scope guard.
+ * @returns {Promise<object|null>}
+ */
+export async function getFacsAccessMappingById(postgrestClient, { id, imsOrgId, product }) {
+  if (!id) {
+    throw new Error('getFacsAccessMappingById: id is required');
+  }
+  if (!imsOrgId) {
+    throw new Error('getFacsAccessMappingById: imsOrgId is required');
+  }
+  if (!product) {
+    throw new Error('getFacsAccessMappingById: product is required');
+  }
+  const { data, error } = await postgrestClient
+    .from('facs_access_mappings')
+    .select('*')
+    .eq('id', id)
+    .eq('ims_org_id', imsOrgId)
+    .eq('product', product)
+    .is('revoked_at', null)
+    .limit(1);
+  if (error) {
+    throw new Error(`getFacsAccessMappingById failed: ${error.message}`);
+  }
+  return Array.isArray(data) ? (data[0] ?? null) : (data ?? null);
+}
+
+/**
  * Lists access bindings including tombstones (active + revoked) within the
  * caller's org + product. Powers `GET /state/access-mappings/history` for
  * audit forensics. Filters are optional; ordering is by `created_at DESC`.

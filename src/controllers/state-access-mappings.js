@@ -25,6 +25,7 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 import routeFacsCapabilities, { PRODUCTS_CAPABILITIES } from '../routes/facs-capabilities.js';
 import {
   createFacsAccessMappings,
+  getFacsAccessMappingById,
   insertFacsAccessMappingAuditEvent,
   listFacsAccessMappings,
   listFacsAccessMappingHistory,
@@ -317,17 +318,27 @@ function StateAccessMappingsController(context) {
   }
 
   /**
-   * True when the caller holds `<product>/can_manage_users` via the **state
-   * layer** — any active binding (user-subject or the caller's org-subject) whose
-   * `granted_capabilities` include the manage capability. Backs hybrid-model §8.3
-   * (Brand Manager whose management authority is state-granted, not FACS).
+   * Resolves the caller's management authority for the product (hybrid-model
+   * §8.3). Two tiers:
+   *
+   *   - **org-wide** — admin OR FACS-layer `<product>/can_manage_users`. May act
+   *     on any resource in the org (`{ orgWide: true, managedResourceIds: null }`).
+   *   - **resource-scoped** — a state-layer manager. May act ONLY on resources
+   *     where they hold state `can_manage_users`
+   *     (`{ orgWide: false, managedResourceIds: Set<resourceId> }`). The set is
+   *     built from active bindings (user-subject + the caller's org-subject)
+   *     whose `granted_capabilities` include the manage capability. An empty set
+   *     means the caller is not a manager at all.
    *
    * @param {object} ctx
-   * @param {string} imsOrgId Canonical caller org id.
    * @param {string} product  Uppercase product code.
-   * @returns {Promise<boolean>}
+   * @param {string} imsOrgId Canonical caller org id.
+   * @returns {Promise<{ orgWide: boolean, managedResourceIds: Set<string>|null }>}
    */
-  async function callerHasStateManageUsers(ctx, imsOrgId, product) {
+  async function resolveManageAuthority(ctx, product, imsOrgId) {
+    if (callerHasFacsManageUsers(ctx, product)) {
+      return { orgWide: true, managedResourceIds: null };
+    }
     const manageCap = `${product.toLowerCase()}/can_manage_users`;
     const userIdent = resolveCallerUserIdent(ctx);
     const { postgrestClient } = ctx.dataAccess.services;
@@ -342,40 +353,70 @@ function StateAccessMappingsController(context) {
       }));
     }
     const results = await Promise.all(queries);
-    return results.some((rows) => rows.some(
-      (row) => (row.granted_capabilities ?? []).includes(manageCap),
-    ));
+    const managedResourceIds = new Set();
+    for (const rows of results) {
+      for (const row of rows) {
+        if ((row.granted_capabilities ?? []).includes(manageCap)) {
+          managedResourceIds.add(row.resource_id);
+        }
+      }
+    }
+    return { orgWide: false, managedResourceIds };
+  }
+
+  /** True when the caller holds no management authority at all. */
+  function notAManager(authority) {
+    return !authority.orgWide && authority.managedResourceIds.size === 0;
   }
 
   /**
-   * Controller-level capability gate for the state-layer management endpoints.
-   *
-   * Why this lives in the controller and not solely in `facsWrapper`:
-   * `/state/access-mappings/*` carry no ReBAC-scoped resource in the path, so
-   * when the JWT lacks `<product>/can_manage_users` the wrapper finds no
-   * resource to evaluate the state layer against and **defers to the
-   * controller** ("FACS defer-to-controller: no ReBAC-scoped resource for this
-   * request"). Without this check a caller missing the capability would reach
-   * the handler unguarded.
-   *
-   * The gate is: admin OR FACS `<product>/can_manage_users` OR state-layer
-   * `<product>/can_manage_users` (hybrid-model §8.3). FACS and state managers
-   * both reach the management endpoints; the *grant* of `can_manage_users` is
-   * additionally restricted to FACS managers (see `requireFacsManageToGrant`).
-   *
-   * @param {object} ctx
-   * @param {string} product  Uppercase product code.
-   * @param {string} imsOrgId Canonical caller org id.
-   * @returns {Promise<Response|null>} A `forbidden` Response when denied, else null.
+   * True when the caller may act on `resourceId`: org-wide managers always may;
+   * a state-layer manager only on resources where they hold `can_manage_users`.
    */
-  async function requireManageUsers(ctx, product, imsOrgId) {
-    if (callerHasFacsManageUsers(ctx, product)) {
+  function canActOnResource(authority, resourceId) {
+    return authority.orgWide || authority.managedResourceIds.has(resourceId);
+  }
+
+  /**
+   * Resolves authority and returns a `forbidden` Response when the caller is not
+   * a manager at all; otherwise returns `{ authority }`. Centralizes the
+   * "must be a manager to reach this surface" gate (hybrid-model §8.3).
+   *
+   * @returns {Promise<{ error: Response } | { authority: object }>}
+   */
+  async function gateManager(ctx, product, imsOrgId) {
+    const authority = await resolveManageAuthority(ctx, product, imsOrgId);
+    if (notAManager(authority)) {
+      return { error: forbidden(`Requires ${product.toLowerCase()}/can_manage_users`) };
+    }
+    return { authority };
+  }
+
+  /**
+   * Read-scope rule for list / history (hybrid-model §3, mac-state-layer):
+   * **org-wide reads admit FACS-layer `can_manage_users` only**. An org-wide
+   * manager reads anything in the org; a state-layer manager must scope the read
+   * to a resource they manage (`resourceType` + `resourceId`, and that resource
+   * must be in their managed set). Returns a `forbidden` Response when denied.
+   *
+   * @param {object} authority
+   * @param {object} filters   - { resourceType, resourceId, ... }
+   * @param {string} product
+   * @returns {Response|null}
+   */
+  function requireReadScope(authority, filters, product) {
+    if (authority.orgWide) {
       return null;
     }
-    if (await callerHasStateManageUsers(ctx, imsOrgId, product)) {
-      return null;
+    const manageCap = `${product.toLowerCase()}/can_manage_users`;
+    const hasResource = hasText(filters.resourceType) && hasText(filters.resourceId);
+    if (!hasResource) {
+      return forbidden(`Org-wide reads require FACS-layer ${manageCap}`);
     }
-    return forbidden(`Requires ${product.toLowerCase()}/can_manage_users`);
+    if (!canActOnResource(authority, filters.resourceId)) {
+      return forbidden(`Caller may only read resources where they hold ${manageCap}`);
+    }
+    return null;
   }
 
   /**
@@ -437,9 +478,9 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = await requireManageUsers(ctx, product, imsOrgId);
-    if (gate) {
-      return gate;
+    const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
+    if (gateErr) {
+      return gateErr;
     }
 
     const filters = buildListFilters(ctx, imsOrgId, product);
@@ -452,6 +493,12 @@ function StateAccessMappingsController(context) {
       return badRequest(
         'must supply at least one of (subjectType + subjectId) or (resourceType + resourceId)',
       );
+    }
+    // Org-wide reads are FACS-only; a state-layer manager must scope to a
+    // resource they manage (hybrid-model §8.3).
+    const scopeErr = requireReadScope(authority, filters, product);
+    if (scopeErr) {
+      return scopeErr;
     }
 
     const queryParams = getQueryParams(ctx);
@@ -486,9 +533,9 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = await requireManageUsers(ctx, product, imsOrgId);
-    if (gate) {
-      return gate;
+    const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
+    if (gateErr) {
+      return gateErr;
     }
 
     const filters = buildListFilters(ctx, imsOrgId, product);
@@ -501,6 +548,10 @@ function StateAccessMappingsController(context) {
       return badRequest(
         'must supply at least one of (subjectType + subjectId) or (resourceType + resourceId)',
       );
+    }
+    const scopeErr = requireReadScope(authority, filters, product);
+    if (scopeErr) {
+      return scopeErr;
     }
 
     const queryParams = getQueryParams(ctx);
@@ -538,9 +589,9 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = await requireManageUsers(ctx, product, imsOrgId);
-    if (gate) {
-      return gate;
+    const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
+    if (gateErr) {
+      return gateErr;
     }
     const createdBy = resolveCallerUserIdent(ctx);
 
@@ -573,6 +624,13 @@ function StateAccessMappingsController(context) {
     }
     if (!hasText(resourceId)) {
       return badRequest('resourceId is required');
+    }
+    // A state-layer manager may only create bindings on resources they manage
+    // (hybrid-model §8.3); org-wide managers may create on any resource.
+    if (!canActOnResource(authority, resourceId)) {
+      return forbidden(
+        `Caller may only manage resources where they hold ${product.toLowerCase()}/can_manage_users`,
+      );
     }
 
     const capErr = validateGrantedCapabilities(grantedCapabilities, product);
@@ -653,9 +711,9 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = await requireManageUsers(ctx, product, imsOrgId);
-    if (gate) {
-      return gate;
+    const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
+    if (gateErr) {
+      return gateErr;
     }
 
     const { id } = ctx.params || {};
@@ -678,6 +736,20 @@ function StateAccessMappingsController(context) {
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
+      // A state-layer manager may only edit bindings on resources they manage
+      // (hybrid-model §8.3). Authorize against the target row's resource before
+      // mutating; org-wide managers skip this fetch.
+      if (!authority.orgWide) {
+        const existing = await getFacsAccessMappingById(postgrestClient, { id, imsOrgId, product });
+        if (!existing) {
+          return notFound('Mapping not found');
+        }
+        if (!canActOnResource(authority, existing.resource_id)) {
+          return forbidden(
+            `Caller may only manage resources where they hold ${product.toLowerCase()}/can_manage_users`,
+          );
+        }
+      }
       // The table grants no UPDATE to any REST role (mutation is RPC-only by
       // design); capability edits go through the SECURITY DEFINER RPC, which
       // also enforces the active-row + org + product scope.
@@ -723,9 +795,9 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = await requireManageUsers(ctx, product, imsOrgId);
-    if (gate) {
-      return gate;
+    const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
+    if (gateErr) {
+      return gateErr;
     }
 
     const { id } = ctx.params || {};
@@ -738,6 +810,19 @@ function StateAccessMappingsController(context) {
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
+      // A state-layer manager may only revoke bindings on resources they manage
+      // (hybrid-model §8.3); org-wide managers skip this fetch.
+      if (!authority.orgWide) {
+        const existing = await getFacsAccessMappingById(postgrestClient, { id, imsOrgId, product });
+        if (!existing) {
+          return notFound('Mapping not found');
+        }
+        if (!canActOnResource(authority, existing.resource_id)) {
+          return forbidden(
+            `Caller may only manage resources where they hold ${product.toLowerCase()}/can_manage_users`,
+          );
+        }
+      }
       const tombstone = await revokeFacsAccessMappingById(postgrestClient, {
         id,
         imsOrgId,
@@ -929,9 +1014,12 @@ function StateAccessMappingsController(context) {
    * resolved server-side and used as the tenant-isolation key.
    *
    * Gating:
-   *   - The route carries no ReBAC resource, so facsWrapper defers when the
-   *     JWT lacks the capability — the controller therefore enforces the gate
-   *     itself: admin OR FACS-layer `<product>/can_manage_users`.
+   *   - This is an **org-wide** read, which the model restricts to FACS-layer
+   *     managers (hybrid-model §3 — "org-wide reads admit FACS-layer
+   *     `can_manage_users` only"). A resource-scoped state-layer manager has no
+   *     org-wide audit view and is denied. The route carries no ReBAC resource,
+   *     so facsWrapper defers and the controller enforces: admin OR FACS-layer
+   *     `<product>/can_manage_users`.
    *   - Tenant isolation: a non-admin caller may only read their OWN org's
    *     audit (the resolved org's IMS id must equal the caller's).
    */
@@ -941,9 +1029,9 @@ function StateAccessMappingsController(context) {
       return pre.error;
     }
     const { product, imsOrgId } = pre;
-    const gate = await requireManageUsers(ctx, product, imsOrgId);
-    if (gate) {
-      return gate;
+    // Org-wide read: FACS-layer managers (and admins) only.
+    if (!callerHasFacsManageUsers(ctx, product)) {
+      return forbidden(`Requires FACS-layer ${product.toLowerCase()}/can_manage_users`);
     }
     const isAdmin = !!ctx.attributes?.authInfo?.isAdmin?.();
 

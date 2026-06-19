@@ -18,6 +18,7 @@ import {
   listFacsAccessMappingHistory,
   listFacsAccessMappingAuditEvents,
   insertFacsAccessMappingAuditEvent,
+  getFacsAccessMappingById,
   createFacsAccessMappings,
   revokeFacsAccessMappingById,
   updateFacsAccessMappingCapabilities,
@@ -473,6 +474,50 @@ describe('state-access-mapping-utils helpers', () => {
         subjects: [{ type: 'user', id: 'A@AdobeID' }],
       });
       expect(client.insertArgs[0].created_by).to.equal(null);
+    });
+  });
+
+  describe('getFacsAccessMappingById', () => {
+    for (const field of ['id', 'imsOrgId', 'product']) {
+      it(`throws when ${field} is missing`, async () => {
+        const client = fakePostgrestClient();
+        const args = { id: 'm1', imsOrgId: 'org-1', product: 'LLMO' };
+        delete args[field];
+        try {
+          await getFacsAccessMappingById(client, args);
+          throw new Error('expected to throw');
+        } catch (e) {
+          expect(e.message).to.equal(`getFacsAccessMappingById: ${field} is required`);
+        }
+      });
+    }
+
+    it('filters by id, ims_org_id, product, and active rows; returns the row', async () => {
+      const client = fakePostgrestClient({ readResult: { data: [{ id: 'm1' }], error: null } });
+      const row = await getFacsAccessMappingById(client, { id: 'm1', imsOrgId: 'org-1', product: 'LLMO' });
+      expect(row).to.deep.equal({ id: 'm1' });
+      expect(client.fromCalls).to.include('facs_access_mappings');
+      const eqCalls = client.readBuilder.eq.getCalls().map((c) => c.args);
+      expect(eqCalls).to.deep.include(['id', 'm1']);
+      expect(eqCalls).to.deep.include(['ims_org_id', 'org-1']);
+      expect(eqCalls).to.deep.include(['product', 'LLMO']);
+      expect(client.readBuilder.is.calledOnceWithExactly('revoked_at', null)).to.be.true;
+    });
+
+    it('returns null when no active row matches', async () => {
+      const client = fakePostgrestClient({ readResult: { data: [], error: null } });
+      const row = await getFacsAccessMappingById(client, { id: 'm1', imsOrgId: 'org-1', product: 'LLMO' });
+      expect(row).to.equal(null);
+    });
+
+    it('throws when PostgREST returns an error', async () => {
+      const client = fakePostgrestClient({ readResult: { data: null, error: { message: 'boom' } } });
+      try {
+        await getFacsAccessMappingById(client, { id: 'm1', imsOrgId: 'org-1', product: 'LLMO' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.equal('getFacsAccessMappingById failed: boom');
+      }
     });
   });
 

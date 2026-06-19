@@ -21,6 +21,12 @@ state-access-mappings:
       At least one of (`subjectType` + `subjectId`) or (`resourceType` +
       `resourceId`) must be supplied. Pagination is cursor-based; page size
       defaults to 50 and is hard-capped at 200.
+
+      Authority (hybrid-model §8.3): a FACS-layer `can_manage_users` holder (or
+      admin) may read org-wide. A state-layer manager may read **only**
+      resource-scoped (`resourceType` + `resourceId`) and only on resources
+      where they hold state `can_manage_users` — org-wide reads (no resource
+      filter) are FACS-only and return `403` for a state-layer manager.
     operationId: listStateAccessMappings
     parameters:
       - *xProductHeader
@@ -70,6 +76,13 @@ state-access-mappings:
       Inserts one `facs_access_mappings` binding row. Capability is
       validated against the product's capability catalog. For `subjectType:
       org`, `subjectId` must equal the caller's canonical org id.
+
+      Authority (hybrid-model §8.3): a FACS-layer `can_manage_users` holder (or
+      admin) may write on any resource. A state-layer manager may write **only**
+      on resources where they hold state `can_manage_users` (`403` otherwise),
+      and may never grant `can_manage_users` itself (FACS-only). Same rules
+      apply to `PATCH` and `DELETE` (evaluated against the target row's
+      resource).
     operationId: createStateAccessMapping
     parameters:
       - *xProductHeader
