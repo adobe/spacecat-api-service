@@ -5085,6 +5085,36 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(409);
     });
 
+    it('emits the BrandDemotionBlocked metric on a rejected demotion (LLMO-5587)', async () => {
+      // The EMF emitter writes the envelope to stdout via console.log; spy that
+      // sink and assert the emitted metric rather than mocking the emitter.
+      const logSpy = sinon.stub(console, 'log');
+      try {
+        const response = await brandsController.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { status: 'pending' },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        const emfLine = logSpy.getCalls()
+          .map((c) => c.args[0])
+          .find((l) => typeof l === 'string' && l.includes('BrandDemotionBlocked'));
+        expect(emfLine, 'expected a BrandDemotionBlocked EMF line').to.be.a('string');
+        const envelope = JSON.parse(emfLine);
+        expect(envelope.BrandDemotionBlocked).to.equal(1);
+        expect(envelope.Operation).to.equal('updateBrand');
+        expect(envelope.Product).to.equal('llmo');
+        // eslint-disable-next-line no-underscore-dangle
+        expect(envelope._aws.CloudWatchMetrics[0].Namespace).to.equal('Mysticat/Brands');
+      } finally {
+        logSpy.restore();
+      }
+    });
+
     it('returns 400 when brandId is missing', async () => {
       const response = await brandsController.updateBrandForOrg({
         ...context,

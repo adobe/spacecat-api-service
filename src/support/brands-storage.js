@@ -623,7 +623,7 @@ export async function upsertBrand({
   // re-upserts by name without passing baseSiteId.
   const { data: existing, error: existingError } = await postgrestClient
     .from('brands')
-    .select('site_id, status')
+    .select('id, site_id, status')
     .eq('organization_id', organizationId)
     .eq('name', brand.name)
     .maybeSingle();
@@ -655,8 +655,8 @@ export async function upsertBrand({
   // demotions go through setBrandStatus / PATCH /v2/orgs/{org}/brands/{id}/status.
   if (status === 'pending' && existing?.status === 'active') {
     const err = new Error(
-      'Demoting an active brand to pending must go through '
-      + 'PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status.',
+      `Brand "${brand.name}" already exists and is active; demoting it to pending `
+      + `must go through PATCH /v2/orgs/${organizationId}/brands/${existing.id}/status.`,
     );
     err.status = 409;
     err.code = 'brand_status_demotion_not_allowed';
@@ -842,7 +842,7 @@ export async function updateBrand({
   if (patch.status === 'pending' && existing?.status === 'active') {
     const err = new Error(
       'Demoting an active brand to pending must go through '
-      + 'PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status.',
+      + `PATCH /v2/orgs/${organizationId}/brands/${brandId}/status.`,
     );
     err.status = 409;
     err.code = 'brand_status_demotion_not_allowed';

@@ -2330,7 +2330,7 @@ describe('brands-storage', () => {
 
     it('upsertBrand rejects a by-name demotion of an active brand with a typed 409', async () => {
       const postgrestClient = createTableMockClient({
-        brands: [{ data: { site_id: 'site-1', status: 'active' }, error: null }],
+        brands: [{ data: { id: BRAND_ID, site_id: 'site-1', status: 'active' }, error: null }],
       });
 
       const err = await upsertBrand({
@@ -2341,6 +2341,7 @@ describe('brands-storage', () => {
 
       expect(err.status).to.equal(409);
       expect(err.code).to.equal('brand_status_demotion_not_allowed');
+      expect(err.message).to.contain(BRAND_ID);
     });
 
     it('upsertBrand maps a 23514 chk_active_brand_has_site_id violation to a 400 (re-land of #2504)', async () => {
