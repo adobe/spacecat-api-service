@@ -1480,8 +1480,10 @@ function BrandsController(ctx, log, env) {
       // When a Semrush sub-workspace + initial market were provisioned, mirror that
       // initial market as a SpaceCat Site (+ brand_sites link) keyed on the
       // market's domain, so the Semrush project has a resolvable site entity.
-      // Best-effort: never throws (a throw here would trip the workspace-release
-      // compensation below for a live brand).
+      // INVARIANT: ensureMarketSite MUST NOT throw — it sits inside the try/catch
+      // whose catch releases the just-provisioned workspace; a throw here would
+      // tear down a live brand's workspace. ensureMarketSite is best-effort by
+      // contract (its own catch-all swallows + logs), so this holds.
       if (hasText(provisionedWorkspaceId)) {
         await ensureMarketSite(context, {
           organizationId: spaceCatId,

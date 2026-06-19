@@ -106,23 +106,25 @@ describe('serenity site-linkage: ensureMarketSite', () => {
     expect(log.warn).to.have.been.calledOnce;
   });
 
-  it('treats a brand_sites upsert error as non-fatal and still returns the site id', async () => {
+  it('treats a brand_sites upsert error as non-fatal but returns null (link not established)', async () => {
     Site.findByBaseURL.resolves(siteModel('site-9'));
     upsertStub.resolves({ error: { message: 'conflict' } });
     const result = await ensureMarketSite(ctx, {
       organizationId: ORG, brandId: BRAND, domain: 'acme.com', log,
     });
-    expect(result).to.equal('site-9');
+    // Non-null means "linked"; a failed link write returns null.
+    expect(result).to.equal(null);
     expect(log.warn).to.have.been.calledOnce;
   });
 
-  it('returns the site id without linking when no postgrest client is available', async () => {
+  it('returns null (site ensured, not linked) when no postgrest client is available', async () => {
     ctx.dataAccess.services = {}; // no postgrestClient
     Site.findByBaseURL.resolves(siteModel('site-9'));
     const result = await ensureMarketSite(ctx, {
       organizationId: ORG, brandId: BRAND, domain: 'acme.com', log,
     });
-    expect(result).to.equal('site-9');
+    expect(result).to.equal(null);
+    expect(log.warn).to.have.been.calledOnce;
   });
 
   it('swallows a Site.create failure (returns null, logs error)', async () => {

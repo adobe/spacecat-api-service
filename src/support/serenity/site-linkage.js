@@ -59,8 +59,10 @@ export const SERENITY_BRAND_SITE_TYPE = 'serenity';
  *   same base URL as the brand-create path.
  * @param {string} [opts.updatedBy] - audit actor for the brand_sites row.
  * @param {object} [opts.log] - logger.
- * @returns {Promise<string|null>} the linked site id, or null when skipped/failed
- *   (including the cross-org case, where the site exists but is NOT linked).
+ * @returns {Promise<string|null>} the site id ONLY when the brand_sites link was
+ *   established; null otherwise — bad input, data-access unavailable, cross-org,
+ *   no postgrest client, or a failed link write (the site may exist in those
+ *   cases, but a non-null return always means "linked").
  */
 export async function ensureMarketSite(ctx, {
   organizationId,
@@ -118,24 +120,32 @@ export async function ensureMarketSite(ctx, {
       return null;
     }
 
-    if (postgrestClient?.from) {
-      const { error } = await postgrestClient
-        .from('brand_sites')
-        .upsert({
-          organization_id: organizationId,
-          brand_id: brandId,
-          site_id: siteId,
-          paths: ['/'],
-          type: SERENITY_BRAND_SITE_TYPE,
-          updated_by: updatedBy,
-        }, { onConflict: 'brand_id,site_id' });
-      if (error) {
-        // Non-fatal: the Site exists; the link can be re-ensured on a later
-        // market write. The marker keeps it safe from syncBrandSites once set.
-        log?.warn?.('ensureMarketSite: brand_sites link upsert failed (non-fatal)', {
-          brandId, siteId, error: error.message,
-        });
-      }
+    if (!postgrestClient?.from) {
+      // Site ensured, but no client to write the brand_sites link → not linked.
+      log?.warn?.('ensureMarketSite: postgrest client unavailable; site ensured but not linked', {
+        brandId, siteId, domain,
+      });
+      return null;
+    }
+
+    const { error } = await postgrestClient
+      .from('brand_sites')
+      .upsert({
+        organization_id: organizationId,
+        brand_id: brandId,
+        site_id: siteId,
+        paths: ['/'],
+        type: SERENITY_BRAND_SITE_TYPE,
+        updated_by: updatedBy,
+      }, { onConflict: 'brand_id,site_id' });
+    if (error) {
+      // Non-fatal: the Site exists and the link can be re-ensured on a later
+      // market write. Return null (not siteId) — the link was NOT established, so
+      // a caller must not read a non-null return as a successful mirror.
+      log?.warn?.('ensureMarketSite: brand_sites link upsert failed (non-fatal)', {
+        brandId, siteId, error: error.message,
+      });
+      return null;
     }
     return siteId;
   } catch (e) {
