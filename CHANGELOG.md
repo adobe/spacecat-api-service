@@ -1,3 +1,24 @@
+## [1.583.1](https://github.com/adobe/spacecat-api-service/compare/v1.583.0...v1.583.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **plg:** enroll config handlers in pre-onboarding fast path ([#2636](https://github.com/adobe/spacecat-api-service/issues/2636)) ([b5e2d90](https://github.com/adobe/spacecat-api-service/commit/b5e2d90ce0a1ce4687d72792d0b6193da93ef1ab))
+
+# [1.583.0](https://github.com/adobe/spacecat-api-service/compare/v1.582.1...v1.583.0) (2026-06-18)
+
+
+### Features
+
+* **preflight:** mint IMS token via dedicated client (SITES-46699) ([#2641](https://github.com/adobe/spacecat-api-service/issues/2641)) ([7cdd51e](https://github.com/adobe/spacecat-api-service/commit/7cdd51e25a670d27cb3a584d4f5fc46ea30131c9)), closes [#2611](https://github.com/adobe/spacecat-api-service/issues/2611) [#2611](https://github.com/adobe/spacecat-api-service/issues/2611) [#2627](https://github.com/adobe/spacecat-api-service/issues/2627)
+
+## [1.582.1](https://github.com/adobe/spacecat-api-service/compare/v1.582.0...v1.582.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **slack/run-audit:** set onDemand bypass and align entitlement to siteEnrollment ([#2555](https://github.com/adobe/spacecat-api-service/issues/2555)) ([0cdc067](https://github.com/adobe/spacecat-api-service/commit/0cdc067f2e5ee45bd1ea689ddebc81dbb9aa14d5))
+
 # [1.582.0](https://github.com/adobe/spacecat-api-service/compare/v1.581.0...v1.582.0) (2026-06-18)
 
 
