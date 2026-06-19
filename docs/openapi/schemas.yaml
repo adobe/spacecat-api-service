@@ -11377,3 +11377,64 @@ ReferralTrafficWeeks:
         $ref: '#/ReferralTrafficWeekEntry'
   required:
     - weeks
+
+SuggestionReview:
+  type: object
+  description: |
+    A human-review feedback event for a suggestion (Learning Agent feedback loop,
+    SITES-43974). Composed at read time from the feedback_event store. Raw patch
+    fields are omitted unless explicitly requested via ?include=reviews,patches.
+  properties:
+    eventId:
+      type: string
+      format: uuid
+      description: Client-supplied idempotency key for the review.
+    eventTime:
+      type: string
+      format: date-time
+      description: When the review action happened (server-stamped).
+    source:
+      type: string
+      enum: [backoffice, aso_ui, aemy_pr]
+      description: Capture surface (derived server-side from the route).
+    verdict:
+      type: string
+      enum: [up, down]
+      description: The reviewer's verdict.
+    signal:
+      type: string
+      enum: [positive, negative]
+      description: Persisted training label, derived from the verdict.
+    reviewerId:
+      type: string
+      nullable: true
+      description: Server-derived reviewer identity (IMS email for backoffice).
+    detailMarkdown:
+      type: string
+      nullable: true
+      description: Sanitised ESE rationale.
+    rejectionCategory:
+      type: string
+      enum: [product_bug, bad_recommendation, other]
+      nullable: true
+    stateTransition:
+      type: string
+      nullable: true
+    tier:
+      type: string
+      enum: [paid, free]
+    previousFix:
+      type: object
+      nullable: true
+      description: Patch snapshot at review time (only when ?include=...,patches).
+    editedFix:
+      type: object
+      nullable: true
+      description: ESE-edited patch (only when ?include=...,patches).
+  required:
+    - eventId
+    - eventTime
+    - source
+    - verdict
+    - signal
+    - tier
