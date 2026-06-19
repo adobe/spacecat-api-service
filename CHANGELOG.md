@@ -1,3 +1,10 @@
+## [1.585.1](https://github.com/adobe/spacecat-api-service/compare/v1.585.0...v1.585.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **prompts:** deterministic 500 on POST /prompts — dedup + error classification + collation fix ([#2646](https://github.com/adobe/spacecat-api-service/issues/2646)) ([177d778](https://github.com/adobe/spacecat-api-service/commit/177d77866c50e416ded892d736b18ccd609cde74))
+
 # [1.585.0](https://github.com/adobe/spacecat-api-service/compare/v1.584.2...v1.585.0) (2026-06-19)
 
 
