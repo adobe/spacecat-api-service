@@ -11,7 +11,12 @@
  */
 
 import { expect } from 'chai';
-import { ORG_1_ID } from '../seed-ids.js';
+import {
+  ORG_1_ID,
+  MANAGED_BRAND_ID,
+  UNMANAGED_BRAND_ID,
+  UNMANAGED_MAPPING_ID,
+} from '../seed-ids.js';
 
 /**
  * Asserts a value is a parseable ISO 8601 timestamp. Unlike the shared
@@ -430,6 +435,115 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.body.items).to.be.an('array').with.lengthOf(1);
         expect(res.body.items[0].operation).to.equal('revoke');
         expect(res.body.items[0].outcome).to.equal('allow');
+      });
+    });
+
+    describe('flow 8.3: resource-scoped state-layer manager (brandManager persona)', () => {
+      // brandManager holds state-layer llmo/can_manage_users on MANAGED_BRAND_ID
+      // only (seeded), with an empty JWT facs_permissions set. It must be able to
+      // manage users on MANAGED_BRAND_ID but nowhere else, and may never grant
+      // can_manage_users (FACS-only).
+      before(() => resetData());
+
+      const AUDIT_BASE = `/organizations/${ORG_1_ID}/permission/audit-logs`;
+      let managedMappingId;
+
+      it('POST creates a binding on the resource it manages (201)', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.post(BASE, {
+          subjectType: 'user',
+          subjectId: 'workspace-user@AdobeID',
+          resourceType: 'brand',
+          resourceId: MANAGED_BRAND_ID,
+          grantedCapabilities: ['llmo/can_view', 'llmo/can_configure'],
+        });
+        expect(res.status).to.equal(201);
+        expect(res.body.resourceId).to.equal(MANAGED_BRAND_ID);
+        managedMappingId = res.body.id;
+      });
+
+      it('POST 403s on a resource it does NOT manage', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.post(BASE, {
+          subjectType: 'user',
+          subjectId: 'workspace-user@AdobeID',
+          resourceType: 'brand',
+          resourceId: UNMANAGED_BRAND_ID,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('POST 403s when granting can_manage_users (FACS-only)', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.post(BASE, {
+          subjectType: 'user',
+          subjectId: 'workspace-user@AdobeID',
+          resourceType: 'brand',
+          resourceId: MANAGED_BRAND_ID,
+          grantedCapabilities: ['llmo/can_manage_users'],
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('GET lists bindings scoped to the managed resource (200)', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.get(
+          `${BASE}?resourceType=brand&resourceId=${MANAGED_BRAND_ID}`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.items).to.be.an('array');
+        expect(res.body.items.length).to.be.greaterThan(0);
+      });
+
+      it('GET 403s on an org-wide (subject-only) read', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.get(
+          `${BASE}?subjectType=user&subjectId=${encodeURIComponent('workspace-user@AdobeID')}`,
+        );
+        expect(res.status).to.equal(403);
+      });
+
+      it('GET 403s reading a resource it does not manage', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.get(
+          `${BASE}?resourceType=brand&resourceId=${UNMANAGED_BRAND_ID}`,
+        );
+        expect(res.status).to.equal(403);
+      });
+
+      it('PATCH edits a binding on the managed resource (200)', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.patch(`${BASE}/${managedMappingId}`, {
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(200);
+      });
+
+      it('PATCH 403s on a binding belonging to an unmanaged resource', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.patch(`${BASE}/${UNMANAGED_MAPPING_ID}`, {
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('DELETE 403s on a binding belonging to an unmanaged resource', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.delete(`${BASE}/${UNMANAGED_MAPPING_ID}`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('DELETE revokes a binding on the managed resource (204)', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.delete(`${BASE}/${managedMappingId}`);
+        expect(res.status).to.equal(204);
+      });
+
+      it('GET audit-logs 403s (org-wide read is FACS-only)', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.get(AUDIT_BASE);
+        expect(res.status).to.equal(403);
       });
     });
 

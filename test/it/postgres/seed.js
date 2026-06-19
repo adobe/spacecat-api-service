@@ -16,6 +16,7 @@ import { execSync } from 'child_process';
 import { POSTGREST_WRITER_JWT } from '../shared/postgrest-jwt.js';
 import { organizations } from './seed-data/organizations.js';
 import { facsAccessMappingAuditEvents } from './seed-data/facs-access-mapping-audit-events.js';
+import { facsAccessMappings } from './seed-data/facs-access-mappings.js';
 import { sites } from './seed-data/sites.js';
 import { audits } from './seed-data/audits.js';
 import { opportunities } from './seed-data/opportunities.js';
@@ -121,6 +122,7 @@ async function seed() {
     insertRows('consumers', consumers),
     insertRows('projection_audit', projectionAudits),
     insertRows('facs_access_mapping_audit_events', facsAccessMappingAuditEvents, { asWriter: true }),
+    insertRows('facs_access_mappings', facsAccessMappings),
   ]);
 
   // Level 1a: depend on organizations
