@@ -38,6 +38,7 @@ export async function handleSourceDomainsResearchExport(sp, clients) {
     defaultSortKey: 'MENTIONS',
     callExport: (clients_, req) => clients_.sourceClient.sourceDomainsByTopicFTSExport(req),
     label: 'source domains research',
+    textFilterColumn: 'domain',
   });
 }
 /* c8 ignore stop */

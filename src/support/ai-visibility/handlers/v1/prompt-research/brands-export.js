@@ -37,6 +37,7 @@ export async function handleBrandsResearchExport(sp, clients) {
     defaultSortKey: 'MENTIONS',
     callExport: (clients_, req) => clients_.brandClient.brandsByTopicFTSExport(req),
     label: 'brands research',
+    textFilterColumn: 'name',
   });
 }
 /* c8 ignore stop */

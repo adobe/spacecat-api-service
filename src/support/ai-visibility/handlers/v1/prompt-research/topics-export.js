@@ -36,6 +36,7 @@ export async function handleTopicsResearchExport(sp, clients) {
     defaultSortKey: 'RELEVANCE_SCORE',
     callExport: (clients_, req) => clients_.topicClient.topicsByFTSExport(req),
     label: 'topics research',
+    textFilterColumn: 'topic',
   });
 }
 /* c8 ignore stop */

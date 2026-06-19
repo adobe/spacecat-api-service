@@ -21,6 +21,7 @@ import {
   resolveCountryForFts,
   requiredLlmFromQuery,
   responseFromGrpcError,
+  buildTextFilterQl,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
@@ -49,11 +50,12 @@ import {
  * @param {string} config.defaultSortKey default sortBy key
  * @param {(clients: object, exportRequest: object) => Promise<object>} config.callExport gRPC call
  * @param {string} config.label human-readable dataset label for error messages
+ * @param {string} config.textFilterColumn dimension column for the optional `textFilter` search
  */
 /* c8 ignore start */
 export async function runFtsResearchExport(sp, clients, config) {
   const {
-    requestSchema, exportSchema, sortMap, defaultSortKey, callExport, label,
+    requestSchema, exportSchema, sortMap, defaultSortKey, callExport, label, textFilterColumn,
   } = config;
 
   const searchQuery = sp.get('searchQuery')?.trim();
@@ -84,6 +86,7 @@ export async function runFtsResearchExport(sp, clients, config) {
   const country = resolveCountryForFts(sp);
   const llm = requiredLlmFromQuery(sp);
   const { limit, offset } = parseLimitOffset(sp);
+  const dimensionFilterQl = buildTextFilterQl(sp.get('textFilter'), textFilterColumn);
 
   let exportRequest;
   try {
@@ -95,6 +98,7 @@ export async function runFtsResearchExport(sp, clients, config) {
         query: searchQuery,
         order: { by: sortBy, direction: sortDirection },
         range: { limit, offset },
+        ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
       },
       PROTO_FROM_JSON,
     );
