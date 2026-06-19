@@ -60,6 +60,7 @@ import {
   getBrandAliasNames, getBrandUrlSources, getBrandCompetitors,
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
+import { hostnameFromUrlString } from '../support/url-utils.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -74,6 +75,15 @@ const MAX_MARKETS = 50;
  */
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
+}
+
+/**
+ * Stable identity for a market (market + languageCode), used to match a
+ * provisioned market against the deferred-provisioning stash. Case/space
+ * insensitive so 'US'/'us' and ' en'/'en' compare equal.
+ */
+function marketKey(market, languageCode) {
+  return `${String(market ?? '').trim().toLowerCase()}|${String(languageCode ?? '').trim().toLowerCase()}`;
 }
 
 /**
@@ -745,15 +755,43 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const body = ctx.data || {};
-      const markets = Array.isArray(body.markets) ? body.markets : [];
+      const transport = buildTransport(ctx, imsToken);
+      const brand = await loadBrand(ctx, auth.brandUuid);
+      // Markets + primary URL come from the request body, but a pending (draft)
+      // brand activated from the wizard supplies none: fall back to what the
+      // wizard stashed at "Save as pending" (brands.pending_semrush_provisioning =
+      // { primaryUrl, markets }). A reactivation of an already-live brand
+      // re-supplies them in the body, so the body wins when present.
+      const pendingSemrushProvisioning = isNonEmptyObject(brand.getPendingSemrushProvisioning?.())
+        ? brand.getPendingSemrushProvisioning()
+        : null;
+      const hadPendingSemrushProvisioning = pendingSemrushProvisioning != null;
+      const storedMarkets = Array.isArray(pendingSemrushProvisioning?.markets)
+        ? pendingSemrushProvisioning.markets
+        : [];
+      const markets = Array.isArray(body.markets) && body.markets.length > 0
+        ? body.markets
+        : storedMarkets;
       if (markets.length === 0) {
         throw new ErrorWithStatusCode('markets must be a non-empty array', 400);
       }
       if (markets.length > MAX_MARKETS) {
         throw new ErrorWithStatusCode(`markets must not exceed ${MAX_MARKETS} entries`, 400);
       }
-      const transport = buildTransport(ctx, imsToken);
-      const brand = await loadBrand(ctx, auth.brandUuid);
+      // The Semrush project domain: the request's brandDomain, else derived from
+      // the stashed draft primary URL (the wizard's "Save as pending" URL).
+      const brandDomain = hasText(body.brandDomain)
+        ? body.brandDomain
+        : hostnameFromUrlString(pendingSemrushProvisioning?.primaryUrl);
+      // Fail fast with the same discipline as the direct create path
+      // (brands.js guards `if (!hasText(brandDomain)) return badRequest(...)`).
+      // A draft saved without a primary URL, activated without a body
+      // brandDomain, has no domain to provision against — a null would
+      // propagate into handleCreateMarketSubworkspace and surface as an opaque
+      // upstream error or an orphaned sub-workspace rather than a clear 400.
+      if (!hasText(brandDomain)) {
+        throw new ErrorWithStatusCode('brandDomain is required to provision a Semrush market', 400);
+      }
       // Brand aliases are brand-level: read once and apply to every market's
       // project (Semrush brand_names) in this batch.
       const brandAliases = await getBrandAliasNames(
@@ -792,7 +830,7 @@ function SerenityController(context, log, env) {
         const createBody = {
           market: m.market,
           languageCode: m.languageCode,
-          brandDomain: body.brandDomain,
+          brandDomain,
           brandNames: body.brandNames,
           brandDisplayName: body.brandDisplayName,
           name: m.name,
@@ -845,8 +883,40 @@ function SerenityController(context, log, env) {
         });
       }
 
+      // Per-market cleanup of the deferred-provisioning stash: drop every market
+      // that was just provisioned (201 = created now, 409 = already live), so a
+      // retry re-provisions ONLY the markets that still failed. When nothing
+      // remains, clear the whole blob (the draft is fully provisioned). Markets
+      // that failed this round stay stashed (with the primary URL) for retry.
+      const provisionedKeys = new Set(
+        results
+          .filter((r) => r.status === 201 || r.status === 409)
+          .map((r) => marketKey(r.market, r.languageCode)),
+      );
+      const remainingMarkets = storedMarkets.filter(
+        (m) => !provisionedKeys.has(marketKey(m.market, m.languageCode)),
+      );
+
       if (anyLive && typeof brand.setStatus === 'function') {
         brand.setStatus('active');
+        // Stash cleanup is intentionally coupled to this anyLive + setStatus
+        // guard so the flip-to-active and the stash trim happen in one
+        // brand.save() (atomic). If NOTHING went live (anyLive false) we skip
+        // both: the brand stays 'pending' with its stash intact, and a retry
+        // re-provisions — Semrush create is idempotent (a re-provisioned market
+        // returns 409, treated as success), so the coupling cannot strand a
+        // market or lose the stash.
+        // Update the stash to just the not-yet-provisioned markets (or null when
+        // all are done). Saved atomically with the status flip below.
+        const canSetStash = hadPendingSemrushProvisioning
+          && typeof brand.setPendingSemrushProvisioning === 'function';
+        if (canSetStash) {
+          const stashPrimaryUrl = pendingSemrushProvisioning.primaryUrl ?? null;
+          const remainingStash = remainingMarkets.length > 0
+            ? { primaryUrl: stashPrimaryUrl, markets: remainingMarkets }
+            : null;
+          brand.setPendingSemrushProvisioning(remainingStash);
+        }
         try {
           await brand.save();
         } catch (saveError) {
