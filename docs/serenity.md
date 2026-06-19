@@ -152,7 +152,9 @@ A brand runs in one of two modes, decided entirely by `brands.semrush_workspace_
 3. set brands.status = 'active' once >= 1 market is live
 ```
 
-- Body: `{ brandDomain, brandNames, brandDisplayName?, markets: [{ market, languageCode, name? }] }`. `markets` is **capped at 50** (400 above that) — each market is a sequential upstream create+publish.
+- Body: `{ brandDomain?, brandNames, brandDisplayName?, markets?: [{ market, languageCode, name? }] }`. `markets` is **capped at 50** (400 above that) — each market is a sequential upstream create+publish.
+- **Deferred-provisioning fallback (pending/draft brands).** `markets` and `brandDomain` are optional in the body: a brand saved via the wizard's "Save as pending" path carries its intended market(s) and primary URL in `brands.pending_semrush_provisioning`. When the body omits them, activate falls back to the stash — `markets` come from `pendingSemrushProvisioning.markets`, and `brandDomain` is derived from `pendingSemrushProvisioning.primaryUrl` (hostname only, via the shared `hostnameFromUrlString`). The body always wins when both are present. After resolution `markets` must be non-empty (else 400) and `brandDomain` must resolve (else 400) — a draft saved without a primary URL must supply `brandDomain` in the body.
+- **Stash lifecycle.** Each market that provisions (201, or 409 `sliceExists`) is removed from the stash; the column is set back to `null` once none remain. Markets that fail stay in the stash (with the primaryUrl) for a later retry, and the brand still flips to `active` if at least one market went live. The stash trim is saved atomically with the status flip.
 - Response: 200 when every market is live; **207 Multi-Status** when at least one market failed (per-market outcomes in `markets[]`); status `active`/`pending`.
 - Idempotent: a market already live upstream returns 409 `sliceExists` and still counts as live, so a full re-activate of an already-live brand is a 200.
 

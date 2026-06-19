@@ -60,6 +60,7 @@ import {
   getBrandAliasNames, getBrandUrlSources, getBrandCompetitors,
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
+import { hostnameFromUrlString } from '../support/url-utils.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -74,24 +75,6 @@ const MAX_MARKETS = 50;
  */
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
-}
-
-/**
- * Derives the bare hostname (Semrush project domain) from a URL or host string.
- * Mirrors brandDomainFromPayload in the brands controller so a draft's stashed
- * primary URL resolves to the same domain at activation as it would at create.
- * Returns null for empty/unparseable input.
- */
-function domainFromUrl(value) {
-  if (!hasText(value)) {
-    return null;
-  }
-  try {
-    const u = new URL(value.includes('://') ? value : `https://${value}`);
-    return u.hostname || null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -799,7 +782,16 @@ function SerenityController(context, log, env) {
       // the stashed draft primary URL (the wizard's "Save as pending" URL).
       const brandDomain = hasText(body.brandDomain)
         ? body.brandDomain
-        : domainFromUrl(pendingSemrushProvisioning?.primaryUrl);
+        : hostnameFromUrlString(pendingSemrushProvisioning?.primaryUrl);
+      // Fail fast with the same discipline as the direct create path
+      // (brands.js guards `if (!hasText(brandDomain)) return badRequest(...)`).
+      // A draft saved without a primary URL, activated without a body
+      // brandDomain, has no domain to provision against — a null would
+      // propagate into handleCreateMarketSubworkspace and surface as an opaque
+      // upstream error or an orphaned sub-workspace rather than a clear 400.
+      if (!hasText(brandDomain)) {
+        throw new ErrorWithStatusCode('brandDomain is required to provision a Semrush market', 400);
+      }
       // Brand aliases are brand-level: read once and apply to every market's
       // project (Semrush brand_names) in this batch.
       const brandAliases = await getBrandAliasNames(
@@ -907,6 +899,13 @@ function SerenityController(context, log, env) {
 
       if (anyLive && typeof brand.setStatus === 'function') {
         brand.setStatus('active');
+        // Stash cleanup is intentionally coupled to this anyLive + setStatus
+        // guard so the flip-to-active and the stash trim happen in one
+        // brand.save() (atomic). If NOTHING went live (anyLive false) we skip
+        // both: the brand stays 'pending' with its stash intact, and a retry
+        // re-provisions — Semrush create is idempotent (a re-provisioned market
+        // returns 409, treated as success), so the coupling cannot strand a
+        // market or lose the stash.
         // Update the stash to just the not-yet-provisioned markets (or null when
         // all are done). Saved atomically with the status flip below.
         const canSetStash = hadPendingSemrushProvisioning

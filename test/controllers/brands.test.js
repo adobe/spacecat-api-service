@@ -4899,6 +4899,36 @@ describe('Brands Controller', () => {
       expect(syncStub).to.not.have.been.called;
     });
 
+    it('strips system-controlled pendingSemrushProvisioning from a PATCH (no runtime injection)', async () => {
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: null });
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: sinon.stub().resolves({}),
+        createSerenityTransport: sinon.stub(),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          description: 'legit edit',
+          // An attacker-supplied stash that activation would otherwise trust.
+          pendingSemrushProvisioning: {
+            primaryUrl: 'https://evil.example',
+            markets: [{ market: 'us', languageCode: 'en' }],
+          },
+        },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(updateBrandStub).to.have.been.calledOnce;
+      const { updates } = updateBrandStub.firstCall.args[0];
+      expect(updates).to.not.have.property('pendingSemrushProvisioning');
+    });
+
     it('does NOT re-sync a flat-mode brand (no sub-workspace) even when URLs change', async () => {
       const updateBrandStub = sinon.stub().resolves({
         id: BRAND_UUID, semrushWorkspaceId: null, urls: [], socialAccounts: [], earnedContent: [],

@@ -3841,6 +3841,9 @@ Brand:
           type: array
           items:
             type: object
+            required:
+              - market
+              - languageCode
             properties:
               market:
                 type: string

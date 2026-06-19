@@ -27,6 +27,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, getImsUserToken, getImsUserTokenStrict } from '../support/utils.js';
+import { hostnameFromUrlString } from '../support/url-utils.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -92,15 +93,7 @@ function brandDomainFromPayload(brandData) {
   const first = urls
     .map((u) => (typeof u === 'string' ? u : u?.value))
     .find(hasText);
-  if (!hasText(first)) {
-    return null;
-  }
-  try {
-    const url = new URL(first.includes('://') ? first : `https://${first}`);
-    return url.hostname || null;
-  } catch {
-    return null;
-  }
+  return hostnameFromUrlString(first);
 }
 
 /**
@@ -1413,6 +1406,10 @@ function BrandsController(ctx, log, env) {
           const primaryUrl = (Array.isArray(brandData.urls) ? brandData.urls : [])
             .map((u) => (typeof u === 'string' ? u : u?.value))
             .find(hasText) || null;
+          // TODO: the wizard creates a draft with a single market today, so we
+          // stash exactly one (market, languageCode). The activate flow already
+          // handles N stashed markets — if multi-market draft creation is ever
+          // added, build this `markets` array from all selected markets here.
           brandData.pendingSemrushProvisioning = {
             primaryUrl,
             markets: [{ market, languageCode }],
@@ -1534,6 +1531,14 @@ function BrandsController(ctx, log, env) {
 
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
+
+      // pendingSemrushProvisioning is system-controlled: written only when a
+      // brand is saved as 'pending' (createBrandForOrg) and consumed/cleared by
+      // the activate flow. It is marked readOnly in the OpenAPI schema, but that
+      // is a doc hint with no runtime teeth — strip it here so a PATCH caller
+      // cannot inject a primaryUrl/markets that activation would later trust for
+      // Semrush provisioning.
+      delete updates.pendingSemrushProvisioning;
 
       // Capture the competitor list BEFORE the update so the Semrush re-sync can
       // compute which competitors were removed (old − new) — the only ones it

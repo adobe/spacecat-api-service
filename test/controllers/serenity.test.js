@@ -1093,11 +1093,12 @@ describe('SerenityController', () => {
       expect(brand.save).to.have.been.called;
     });
 
-    it('activate derives a null brandDomain when the stash has markets but no primary URL (saved as pending before a URL was entered)', async () => {
+    it('activate 400s when the stash has markets but no primary URL and the body omits brandDomain (no domain to provision)', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const brand = makeBrandModel({
         // A draft saved before a primary URL was entered: markets present, no
-        // primaryUrl. domainFromUrl(undefined) → null, so brandDomain is null.
+        // primaryUrl. hostnameFromUrlString(undefined) → null, so there is no
+        // domain to provision against → fail fast (mirrors the create path).
         getPendingSemrushProvisioning: () => ({
           markets: [{ market: 'us', languageCode: 'en' }],
         }),
@@ -1108,17 +1109,15 @@ describe('SerenityController', () => {
         brand,
         data: { brandNames: ['X'] },
       }));
-      expect(response.status).to.equal(200);
-      const createBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
-      expect(createBody.market).to.equal('us');
-      expect(createBody.brandDomain).to.equal(null);
+      expect(response.status).to.equal(400);
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
     });
 
-    it('activate derives a null brandDomain when the stashed primary URL is unparseable', async () => {
+    it('activate 400s when the stashed primary URL is unparseable and the body omits brandDomain', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const brand = makeBrandModel({
-        // An unparseable primaryUrl makes new URL() throw → domainFromUrl
-        // returns null rather than propagating; activation still proceeds.
+        // An unparseable primaryUrl makes new URL() throw → hostnameFromUrlString
+        // returns null → no domain → 400 rather than a null propagating upstream.
         getPendingSemrushProvisioning: () => ({
           primaryUrl: 'https://[',
           markets: [{ market: 'us', languageCode: 'en' }],
@@ -1130,10 +1129,8 @@ describe('SerenityController', () => {
         brand,
         data: { brandNames: ['X'] },
       }));
-      expect(response.status).to.equal(200);
-      const createBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
-      expect(createBody.market).to.equal('us');
-      expect(createBody.brandDomain).to.equal(null);
+      expect(response.status).to.equal(400);
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
     });
 
     it('activate prefers body markets + brandDomain over the stash, and clears the stash when its market is provisioned', async () => {
