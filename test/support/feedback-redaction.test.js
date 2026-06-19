@@ -39,6 +39,7 @@ describe('feedback-redaction', () => {
     });
 
     it('neutralises javascript: URIs', () => {
+      // eslint-disable-next-line no-script-url -- testing the scheme is stripped
       expect(sanitizeMarkdown('[x](javascript:evil())')).to.not.contain('javascript:');
     });
 

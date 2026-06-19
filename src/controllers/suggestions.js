@@ -327,7 +327,11 @@ function SuggestionsController(ctx, sqs, env) {
    * @param {boolean} [opts.includePatches=false]
    * @returns {Promise<Array<Object>>}
    */
-  const fetchReviewsForSuggestion = async (context, suggestionId, { includePatches = false } = {}) => {
+  const fetchReviewsForSuggestion = async (
+    context,
+    suggestionId,
+    { includePatches = false } = {},
+  ) => {
     const postgrestClient = context.dataAccess?.services?.postgrestClient;
     if (!postgrestClient?.from) {
       context.log?.warn?.('feedback store (postgrestClient) unavailable; returning no reviews');

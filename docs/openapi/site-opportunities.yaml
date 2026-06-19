@@ -1219,19 +1219,15 @@ site-opportunity-suggestion-backoffice-reviews:
               rejectionCategory:
                 type: string
                 enum: [product_bug, bad_recommendation, other]
-                nullable: true
                 description: Optional category on a reject.
               stateTransition:
                 type: string
-                nullable: true
                 description: The accompanying suggestion state transition, e.g. PENDING_VALIDATION->REJECTED or EDIT.
               previousFix:
                 type: object
-                nullable: true
                 description: Patch snapshot at review time (secret-scrubbed server-side).
               editedFix:
                 type: object
-                nullable: true
                 description: ESE-edited patch when supplied (optional; secret-scrubbed server-side).
     responses:
       '201':

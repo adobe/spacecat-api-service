@@ -77,6 +77,7 @@ function scrubString(value, hits) {
   let out = value;
   for (const { label, re } of SECRET_PATTERNS) {
     out = out.replace(re, () => {
+      // eslint-disable-next-line no-param-reassign -- hits is an intentional accumulator
       hits[label] = (hits[label] || 0) + 1;
       return `[[REDACTED:${label}]]`;
     });

@@ -11407,29 +11407,25 @@ SuggestionReview:
       description: Persisted training label, derived from the verdict.
     reviewerId:
       type: string
-      nullable: true
-      description: Server-derived reviewer identity (IMS email for backoffice).
+      description: Server-derived reviewer identity (IMS email for backoffice). Null when not set.
     detailMarkdown:
       type: string
-      nullable: true
-      description: Sanitised ESE rationale.
+      description: Sanitised ESE rationale. Null when not provided.
     rejectionCategory:
       type: string
       enum: [product_bug, bad_recommendation, other]
-      nullable: true
+      description: Optional reject category. Null when not set.
     stateTransition:
       type: string
-      nullable: true
+      description: The accompanying suggestion state transition. Null when not set.
     tier:
       type: string
       enum: [paid, free]
     previousFix:
       type: object
-      nullable: true
       description: Patch snapshot at review time (only when ?include=...,patches).
     editedFix:
       type: object
-      nullable: true
       description: ESE-edited patch (only when ?include=...,patches).
   required:
     - eventId

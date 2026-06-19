@@ -39,7 +39,10 @@ function makePostgrestClient({ onInsert, onSelectSingle, onOrder } = {}) {
     from() {
       let inserted = false;
       const chain = {
-        insert() { inserted = true; return chain; },
+        insert() {
+          inserted = true;
+          return chain;
+        },
         select() { return chain; },
         eq() { return chain; },
         order() {
@@ -144,7 +147,9 @@ describe('Suggestions Controller - backoffice reviews', () => {
       tier: 'free',
       previous_fix: { patch: 'before' },
     };
-    const context = makeContext({ postgrest: { onInsert: () => ({ data: insertedRow, error: null }) } });
+    const context = makeContext({
+      postgrest: { onInsert: () => ({ data: insertedRow, error: null }) },
+    });
 
     const response = await controller.createBackofficeReview(context);
     expect(response.status).to.equal(201);
