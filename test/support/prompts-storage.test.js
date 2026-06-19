@@ -1923,6 +1923,106 @@ describe('prompts-storage', () => {
       // p-topic-alpha wins: both topic_id=null, 'p-topic-alpha' < 'p-topic-beta' alphabetically
       expect(insertedRows[0].prompt_id).to.equal('p-topic-alpha');
     });
+
+    it('picks winner by (topic_id, promptId) asc regardless of input order', async () => {
+      // Two UUIDs with an unambiguous lexicographic ordering: T_ALPHA < T_BETA.
+      // The dedup sort key is (topic_id, promptId) asc, so T_ALPHA must always win.
+      const T_ALPHA = '00000000-0000-4000-b000-000000000001';
+      const T_BETA = 'ffffffff-ffff-4fff-bfff-fffffffffffe';
+
+      const warnSpy = sandbox.spy(console, 'warn');
+
+      // topics table returns both rows pre-populated so topicMap resolves UUIDs
+      // immediately and ensureLookupEntries makes no upsert calls.
+      // INSERT always succeeds — dedup fires before the row reaches the DB.
+      const makeClient = (insertStub) => ({
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            return makeChain({
+              data: [{ id: T_ALPHA, name: 'Alpha' }, { id: T_BETA, name: 'Beta' }],
+              error: null,
+            });
+          }
+          return makeChain({ data: [], error: null });
+        },
+      });
+
+      const makeInsertStub = () => sinon.stub().callsFake((rows) => ({
+        select: () => thenable({
+          data: rows.map((r) => ({ prompt_id: r.prompt_id })),
+          error: null,
+        }),
+      }));
+
+      const findDropLog = () => warnSpy.args
+        .find(([msg]) => msg === '[upsertPrompts] dedup-drop')?.[1];
+
+      // Pass 1: feed [alpha, beta]
+      const stub1 = makeInsertStub();
+      const result1 = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-alpha', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Alpha',
+          },
+          {
+            id: 'p-beta', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Beta',
+          },
+        ],
+        postgrestClient: makeClient(stub1),
+      });
+
+      // (a) exactly one row reaches INSERT
+      expect(stub1.firstCall.args[0]).to.have.lengthOf(1);
+      // (b) surviving row carries T_ALPHA
+      expect(stub1.firstCall.args[0][0].topic_id).to.equal(T_ALPHA);
+      expect(result1.created).to.equal(1);
+      // (c) log entry correctly identifies winner and dropped topic_id
+      expect(findDropLog()).to.deep.include({
+        winning_topic_id: T_ALPHA,
+        dropped_topic_id: T_BETA,
+      });
+
+      // Pass 2: feed [beta, alpha] — (d) input-order invariance
+      warnSpy.resetHistory();
+      const stub2 = makeInsertStub();
+      const result2 = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-beta', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Beta',
+          },
+          {
+            id: 'p-alpha', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Alpha',
+          },
+        ],
+        postgrestClient: makeClient(stub2),
+      });
+
+      expect(stub2.firstCall.args[0]).to.have.lengthOf(1);
+      expect(stub2.firstCall.args[0][0].topic_id).to.equal(T_ALPHA);
+      expect(result2.created).to.equal(1);
+      expect(findDropLog()).to.deep.include({
+        winning_topic_id: T_ALPHA,
+        dropped_topic_id: T_BETA,
+      });
+    });
   });
 
   describe('updatePromptById', () => {
