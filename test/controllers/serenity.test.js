@@ -1093,6 +1093,49 @@ describe('SerenityController', () => {
       expect(brand.save).to.have.been.called;
     });
 
+    it('activate derives a null brandDomain when the stash has markets but no primary URL (saved as pending before a URL was entered)', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({
+        // A draft saved before a primary URL was entered: markets present, no
+        // primaryUrl. domainFromUrl(undefined) → null, so brandDomain is null.
+        getPendingSemrushProvisioning: () => ({
+          markets: [{ market: 'us', languageCode: 'en' }],
+        }),
+        setPendingSemrushProvisioning: sinon.stub(),
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandNames: ['X'] },
+      }));
+      expect(response.status).to.equal(200);
+      const createBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
+      expect(createBody.market).to.equal('us');
+      expect(createBody.brandDomain).to.equal(null);
+    });
+
+    it('activate derives a null brandDomain when the stashed primary URL is unparseable', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({
+        // An unparseable primaryUrl makes new URL() throw → domainFromUrl
+        // returns null rather than propagating; activation still proceeds.
+        getPendingSemrushProvisioning: () => ({
+          primaryUrl: 'https://[',
+          markets: [{ market: 'us', languageCode: 'en' }],
+        }),
+        setPendingSemrushProvisioning: sinon.stub(),
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandNames: ['X'] },
+      }));
+      expect(response.status).to.equal(200);
+      const createBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
+      expect(createBody.market).to.equal('us');
+      expect(createBody.brandDomain).to.equal(null);
+    });
+
     it('activate prefers body markets + brandDomain over the stash, and clears the stash when its market is provisioned', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const setPendingSemrushProvisioning = sinon.stub();
