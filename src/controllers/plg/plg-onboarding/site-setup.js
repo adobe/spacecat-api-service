@@ -17,6 +17,7 @@ import { deriveProjectName } from '../../../support/utils.js';
 // continues even if the configuration table is briefly unwritable.
 export const PLG_CONFIG_HANDLERS = [
   'summit-plg',
+  'top-pages',
   'broken-backlinks',
   'broken-backlinks-auto-suggest',
   'broken-backlinks-auto-fix',
@@ -26,7 +27,6 @@ export const PLG_CONFIG_HANDLERS = [
   'cwv-auto-fix',
   'cwv-auto-suggest',
   'cwv',
-  'top-pages',
 ];
 
 export async function createOrFindProject(baseURL, organizationId, context) {
