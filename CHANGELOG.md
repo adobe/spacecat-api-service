@@ -1,3 +1,10 @@
+## [1.583.1](https://github.com/adobe/spacecat-api-service/compare/v1.583.0...v1.583.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **plg:** enroll config handlers in pre-onboarding fast path ([#2636](https://github.com/adobe/spacecat-api-service/issues/2636)) ([b5e2d90](https://github.com/adobe/spacecat-api-service/commit/b5e2d90ce0a1ce4687d72792d0b6193da93ef1ab))
+
 # [1.583.0](https://github.com/adobe/spacecat-api-service/compare/v1.582.1...v1.583.0) (2026-06-18)
 
 
