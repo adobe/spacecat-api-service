@@ -58,6 +58,9 @@ describe('edge-optimize support', () => {
         ListDistributionsCommand: cfCommand('ListDistributions'),
         GetDistributionConfigCommand: cfCommand('GetDistributionConfig'),
         GetCachePolicyConfigCommand: cfCommand('GetCachePolicyConfig'),
+        GetCachePolicyCommand: cfCommand('GetCachePolicy'),
+        ListCachePoliciesCommand: cfCommand('ListCachePolicies'),
+        CreateCachePolicyCommand: cfCommand('CreateCachePolicy'),
         UpdateCachePolicyCommand: cfCommand('UpdateCachePolicy'),
         CreateFunctionCommand: cfCommand('CreateFunction'),
         UpdateFunctionCommand: cfCommand('UpdateFunction'),
@@ -402,109 +405,181 @@ describe('edge-optimize support', () => {
   });
 
   describe('applyEdgeOptimizeCacheHeaders', () => {
-    it('adds the EO headers to the behavior cache policy whitelist', async () => {
-      cfSendStub.onFirstCall().resolves({
-        DistributionConfig: { DefaultCacheBehavior: { CachePolicyId: 'cp-1' } },
+    // Dispatch cfSendStub by command name so tests are robust to call order.
+    const wireCloudFront = (responders) => {
+      cfSendStub.callsFake((cmd) => {
+        const fn = responders[cmd.commandName];
+        if (!fn) {
+          throw new Error(`unexpected command in test: ${cmd.commandName}`);
+        }
+        return Promise.resolve(typeof fn === 'function' ? fn(cmd) : fn);
       });
-      cfSendStub.onSecondCall().resolves({
-        CachePolicyConfig: {
-          Name: 'my-policy',
-          MinTTL: 60,
-          ParametersInCacheKeyAndForwardedToOrigin: {
-            HeadersConfig: { HeaderBehavior: 'whitelist', Headers: { Quantity: 1, Items: ['accept'] } },
+    };
+
+    const lastCommand = (name) => cfSendStub.getCalls()
+      .filter((c) => c.args[0].commandName === name).pop()?.args[0];
+
+    it('updates a CUSTOM policy to add the EO headers + MinTTL 0', async () => {
+      wireCloudFront({
+        GetDistributionConfig: { DistributionConfig: { DefaultCacheBehavior: { CachePolicyId: 'cp-1' } } },
+        ListCachePolicies: { CachePolicyList: { Items: [{ CachePolicy: { Id: 'managed-x' } }] } },
+        GetCachePolicyConfig: {
+          CachePolicyConfig: {
+            Name: 'my-policy',
+            MinTTL: 60,
+            ParametersInCacheKeyAndForwardedToOrigin: {
+              HeadersConfig: { HeaderBehavior: 'whitelist', Headers: { Quantity: 1, Items: ['accept'] } },
+            },
           },
+          ETag: 'cp-etag',
         },
-        ETag: 'cp-etag',
+        UpdateCachePolicy: {},
       });
-      cfSendStub.onThirdCall().resolves({});
 
       const result = await edgeOptimize.applyEdgeOptimizeCacheHeaders({}, 'E2EXAMPLE', 'default');
 
+      expect(result.scenario).to.equal('custom');
       expect(result.policyId).to.equal('cp-1');
       expect(result.updated).to.equal(true);
-      expect(cfSendStub.thirdCall.args[0].commandName).to.equal('UpdateCachePolicy');
-      const updated = cfSendStub.thirdCall.args[0].input.CachePolicyConfig;
+      const updated = lastCommand('UpdateCachePolicy').input.CachePolicyConfig;
       expect(updated.MinTTL).to.equal(0);
       const items = updated.ParametersInCacheKeyAndForwardedToOrigin.HeadersConfig.Headers.Items;
       expect(items).to.include('x-edgeoptimize-config');
       expect(items).to.include('x-edgeoptimize-url');
     });
 
-    it('is a no-op when headers are already forwarded and MinTTL is 0', async () => {
-      cfSendStub.onFirstCall().resolves({
-        DistributionConfig: { DefaultCacheBehavior: { CachePolicyId: 'cp-1' } },
+    it('is a no-op when a custom policy already forwards the headers and MinTTL is 0', async () => {
+      wireCloudFront({
+        GetDistributionConfig: { DistributionConfig: { DefaultCacheBehavior: { CachePolicyId: 'cp-1' } } },
+        ListCachePolicies: { CachePolicyList: { Items: [] } },
+        GetCachePolicyConfig: {
+          CachePolicyConfig: {
+            Name: 'my-policy',
+            MinTTL: 0,
+            ParametersInCacheKeyAndForwardedToOrigin: {
+              HeadersConfig: {
+                HeaderBehavior: 'whitelist',
+                Headers: { Quantity: 2, Items: ['x-edgeoptimize-config', 'x-edgeoptimize-url'] },
+              },
+            },
+          },
+          ETag: 'cp-etag',
+        },
       });
-      cfSendStub.onSecondCall().resolves({
-        CachePolicyConfig: {
-          Name: 'my-policy',
-          MinTTL: 0,
-          ParametersInCacheKeyAndForwardedToOrigin: {
-            HeadersConfig: {
-              HeaderBehavior: 'whitelist',
-              Headers: { Quantity: 2, Items: ['x-edgeoptimize-config', 'x-edgeoptimize-url'] },
+
+      const result = await edgeOptimize.applyEdgeOptimizeCacheHeaders({}, 'E2EXAMPLE', 'default');
+
+      expect(result).to.deep.equal({
+        scenario: 'custom', policyId: 'cp-1', updated: false, alreadyForwarded: true,
+      });
+      expect(lastCommand('UpdateCachePolicy')).to.equal(undefined); // never updated
+    });
+
+    it('CLONES an AWS-managed policy into edgeoptimize-cache and repoints the behavior', async () => {
+      wireCloudFront({
+        GetDistributionConfig: {
+          DistributionConfig: { DefaultCacheBehavior: { CachePolicyId: 'managed-1', ForwardedValues: { x: 1 } } },
+          ETag: 'dist-etag',
+        },
+        ListCachePolicies: (cmd) => (cmd.input.Type === 'managed'
+          ? { CachePolicyList: { Items: [{ CachePolicy: { Id: 'managed-1' } }] } }
+          : { CachePolicyList: { Items: [] } }), // no existing custom edgeoptimize-cache
+        GetCachePolicy: {
+          CachePolicy: {
+            CachePolicyConfig: {
+              Name: 'Managed-CachingOptimized',
+              MinTTL: 1,
+              ParametersInCacheKeyAndForwardedToOrigin: { HeadersConfig: { HeaderBehavior: 'none' } },
             },
           },
         },
-        ETag: 'cp-etag',
+        CreateCachePolicy: { CachePolicy: { Id: 'new-eo-policy' } },
+        UpdateDistribution: {},
       });
 
       const result = await edgeOptimize.applyEdgeOptimizeCacheHeaders({}, 'E2EXAMPLE', 'default');
 
-      expect(result).to.deep.equal({ policyId: 'cp-1', updated: false, alreadyForwarded: true });
-      expect(cfSendStub.calledTwice).to.equal(true); // never updated
+      expect(result.scenario).to.equal('managed');
+      expect(result.policyId).to.equal('new-eo-policy');
+      expect(result.reused).to.equal(false);
+      const created = lastCommand('CreateCachePolicy').input.CachePolicyConfig;
+      expect(created.Name).to.equal('edgeoptimize-cache');
+      expect(created.MinTTL).to.equal(0);
+      const items = created.ParametersInCacheKeyAndForwardedToOrigin.HeadersConfig.Headers.Items;
+      expect(items).to.include('x-edgeoptimize-config');
+      // behavior repointed to the new policy + ForwardedValues removed
+      const cfg = lastCommand('UpdateDistribution').input.DistributionConfig;
+      expect(cfg.DefaultCacheBehavior.CachePolicyId).to.equal('new-eo-policy');
+      expect(cfg.DefaultCacheBehavior.ForwardedValues).to.equal(undefined);
     });
 
-    it('treats an allViewer header policy as already forwarded', async () => {
-      cfSendStub.onFirstCall().resolves({
-        DistributionConfig: { DefaultCacheBehavior: { CachePolicyId: 'cp-1' } },
-      });
-      cfSendStub.onSecondCall().resolves({
-        CachePolicyConfig: {
-          Name: 'p',
-          MinTTL: 0,
-          ParametersInCacheKeyAndForwardedToOrigin: { HeadersConfig: { HeaderBehavior: 'allViewer' } },
+    it('reuses an existing edgeoptimize-cache custom policy (idempotent managed path)', async () => {
+      wireCloudFront({
+        GetDistributionConfig: {
+          DistributionConfig: { DefaultCacheBehavior: { CachePolicyId: 'managed-1' } },
+          ETag: 'dist-etag',
         },
-        ETag: 'cp-etag',
+        ListCachePolicies: (cmd) => (cmd.input.Type === 'managed'
+          ? { CachePolicyList: { Items: [{ CachePolicy: { Id: 'managed-1' } }] } }
+          : { CachePolicyList: { Items: [{ CachePolicy: { Id: 'existing-eo', CachePolicyConfig: { Name: 'edgeoptimize-cache' } } }] } }),
+        GetCachePolicy: {
+          CachePolicy: { CachePolicyConfig: { Name: 'Managed-X', ParametersInCacheKeyAndForwardedToOrigin: {} } },
+        },
+        UpdateDistribution: {},
       });
 
       const result = await edgeOptimize.applyEdgeOptimizeCacheHeaders({}, 'E2EXAMPLE', 'default');
-      expect(result.updated).to.equal(false);
-      expect(result.alreadyForwarded).to.equal(true);
+
+      expect(result.scenario).to.equal('managed');
+      expect(result.policyId).to.equal('existing-eo');
+      expect(result.reused).to.equal(true);
+      expect(lastCommand('CreateCachePolicy')).to.equal(undefined); // reused, not created
     });
 
-    it('throws when the behavior has no cache policy (legacy/managed)', async () => {
-      cfSendStub.onFirstCall().resolves({
-        DistributionConfig: { DefaultCacheBehavior: { ForwardedValues: {} } },
+    it('handles a LEGACY behavior (ForwardedValues, no CachePolicyId)', async () => {
+      wireCloudFront({
+        GetDistributionConfig: {
+          DistributionConfig: {
+            DefaultCacheBehavior: { ForwardedValues: { Headers: { Quantity: 1, Items: ['accept'] } }, MinTTL: 60 },
+          },
+          ETag: 'dist-etag',
+        },
+        UpdateDistribution: {},
       });
-      let error;
-      try {
-        await edgeOptimize.applyEdgeOptimizeCacheHeaders({}, 'E2EXAMPLE', 'default');
-      } catch (e) {
-        error = e;
-      }
-      expect(error.message).to.include('custom cache policy');
+
+      const result = await edgeOptimize.applyEdgeOptimizeCacheHeaders({}, 'E2EXAMPLE', 'default');
+
+      expect(result.scenario).to.equal('legacy');
+      expect(result.updated).to.equal(true);
+      const cfg = lastCommand('UpdateDistribution').input.DistributionConfig;
+      const items = cfg.DefaultCacheBehavior.ForwardedValues.Headers.Items;
+      expect(items).to.include('x-edgeoptimize-config');
+      expect(cfg.DefaultCacheBehavior.MinTTL).to.equal(0);
     });
 
-    it('targets a named (non-default) behavior', async () => {
-      cfSendStub.onFirstCall().resolves({
-        DistributionConfig: {
-          DefaultCacheBehavior: { CachePolicyId: 'cp-default' },
-          CacheBehaviors: { Items: [{ PathPattern: '/api/*', CachePolicyId: 'cp-api' }] },
+    it('targets a named (non-default) custom-policy behavior', async () => {
+      wireCloudFront({
+        GetDistributionConfig: {
+          DistributionConfig: {
+            DefaultCacheBehavior: { CachePolicyId: 'cp-default' },
+            CacheBehaviors: { Items: [{ PathPattern: '/api/*', CachePolicyId: 'cp-api' }] },
+          },
         },
-      });
-      cfSendStub.onSecondCall().resolves({
-        CachePolicyConfig: {
-          Name: 'api',
-          MinTTL: 0,
-          ParametersInCacheKeyAndForwardedToOrigin: { HeadersConfig: { HeaderBehavior: 'none' } },
+        ListCachePolicies: { CachePolicyList: { Items: [] } },
+        GetCachePolicyConfig: {
+          CachePolicyConfig: {
+            Name: 'api',
+            MinTTL: 0,
+            ParametersInCacheKeyAndForwardedToOrigin: { HeadersConfig: { HeaderBehavior: 'none' } },
+          },
+          ETag: 'cp-etag',
         },
-        ETag: 'cp-etag',
+        UpdateCachePolicy: {},
       });
-      cfSendStub.onThirdCall().resolves({});
 
       const result = await edgeOptimize.applyEdgeOptimizeCacheHeaders({}, 'E2EXAMPLE', '/api/*');
       expect(result.policyId).to.equal('cp-api');
-      expect(cfSendStub.secondCall.args[0].input.Id).to.equal('cp-api');
+      expect(lastCommand('GetCachePolicyConfig').input.Id).to.equal('cp-api');
     });
 
     it('throws when pathPattern is missing', async () => {

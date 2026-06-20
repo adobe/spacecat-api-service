@@ -17,6 +17,9 @@ import {
   ListDistributionsCommand,
   GetDistributionConfigCommand,
   GetCachePolicyConfigCommand,
+  GetCachePolicyCommand,
+  ListCachePoliciesCommand,
+  CreateCachePolicyCommand,
   UpdateCachePolicyCommand,
   CreateFunctionCommand,
   UpdateFunctionCommand,
@@ -56,6 +59,8 @@ export const EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME = 'edgeoptimize-origin';
 export const EDGE_OPTIMIZE_LAMBDA_ROLE_NAME = 'edgeoptimize-origin-role';
 // Headers the routing CloudFront Function sets and that must reach the EO origin uncached.
 export const EDGE_OPTIMIZE_CACHE_HEADERS = ['x-edgeoptimize-config', 'x-edgeoptimize-url'];
+// Name of the custom cache policy we create when cloning an AWS-managed policy.
+export const EDGE_OPTIMIZE_CACHE_POLICY_NAME = 'edgeoptimize-cache';
 
 const delay = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
@@ -397,12 +402,16 @@ export async function createEdgeOptimizeRoutingFunction(
 }
 
 /**
- * Ensure the Edge Optimize routing headers are forwarded by the target behavior's cache policy.
+ * Add the Edge Optimize routing headers to the cache key/forwarded set for the target behavior.
  *
- * Mirrors the common path of the standalone wizard's apply-cache (the "custom policy" scenario):
- * reads the cache policy attached to the selected behavior and, if the EO headers are not already
- * forwarded, adds them to the policy's whitelist via UpdateCachePolicy. Setting `setMinTTLZero`
- * (default true) forces MinTTL to 0 so agentic responses are not over-cached.
+ * Ported from the standalone wizard's detect-cache + apply-cache (server.mjs). Handles all three
+ * scenarios the wizard supports, because real distributions commonly use an AWS-managed policy:
+ *   - `legacy`  — behavior has no CachePolicyId (uses ForwardedValues): add EO headers there.
+ *   - `custom`  — behavior uses a customer-owned cache policy: UpdateCachePolicy to add EO headers.
+ *   - `managed` — behavior uses an AWS-managed policy (cannot be updated → "update is not allowed
+ *     for this policy"): CLONE it into a custom `edgeoptimize-cache` policy with EO headers and
+ *     repoint the behavior to it. Idempotent by policy name.
+ * `setMinTTLZero` (default true) forces MinTTL to 0 so agentic responses are not over-cached.
  *
  * @param {object} credentials - temporary credentials from {@link assumeConnectorRole}.
  * @param {string} distributionId - the CloudFront distribution ID.
@@ -410,7 +419,8 @@ export async function createEdgeOptimizeRoutingFunction(
  * @param {object} [opts]
  * @param {boolean} [opts.setMinTTLZero=true] - force the policy MinTTL to 0.
  * @param {string} [opts.region] - CloudFront control-plane region.
- * @returns {Promise<{policyId: string, updated: boolean, alreadyForwarded: boolean}>}
+ * @returns {Promise<{scenario: string, policyId: string|null, updated: boolean,
+ *   alreadyForwarded: boolean, reused?: boolean}>}
  */
 export async function applyEdgeOptimizeCacheHeaders(
   credentials,
@@ -427,64 +437,135 @@ export async function applyEdgeOptimizeCacheHeaders(
   const client = new CloudFrontClient({ region, credentials });
 
   const distResult = await client.send(new GetDistributionConfigCommand({ Id: distributionId }));
-  const behavior = getBehaviorFromConfig(distResult.DistributionConfig, pathPattern);
+  const config = distResult.DistributionConfig;
+  const behavior = getBehaviorFromConfig(config, pathPattern);
   const policyId = behavior.CachePolicyId;
 
-  // TODO: edge scenarios from the standalone wizard not yet ported here:
-  //  - legacy behaviors using ForwardedValues (no CachePolicyId)
-  //  - AWS-managed cache policies, which must be cloned into a custom `edgeoptimize-cache` policy
-  //    (the connector role can create custom policies but cannot mutate managed ones).
-  // The common path — a custom cache policy already attached to the behavior — is implemented.
+  // ── Scenario A: legacy (ForwardedValues, no CachePolicyId) ──────────────
   if (!policyId) {
-    throw new Error(
-      `Behavior '${pathPattern}' uses legacy ForwardedValues or a managed cache policy; `
-      + 'attach a custom cache policy before applying Edge Optimize cache headers.',
-    );
-  }
-
-  const pcResult = await client.send(new GetCachePolicyConfigCommand({ Id: policyId }));
-  const pc = pcResult.CachePolicyConfig;
-  const pcEtag = pcResult.ETag;
-
-  const params = pc.ParametersInCacheKeyAndForwardedToOrigin || {};
-  const hc = params.HeadersConfig || { HeaderBehavior: 'none' };
-
-  let alreadyForwarded = false;
-  if (hc.HeaderBehavior === 'allViewer' || hc.HeaderBehavior === 'all') {
-    alreadyForwarded = true;
-  } else {
-    const items = hc.Headers?.Items || [];
+    const fv = behavior.ForwardedValues || {};
+    const items = fv.Headers?.Items || [];
     const lower = items.map((x) => x.toLowerCase());
-    alreadyForwarded = EDGE_OPTIMIZE_CACHE_HEADERS.every((h) => lower.includes(h));
-    if (!alreadyForwarded) {
+    let changed = false;
+    if (!lower.includes('*')) {
       EDGE_OPTIMIZE_CACHE_HEADERS.forEach((h) => {
         if (!lower.includes(h)) {
           items.push(h);
+          changed = true;
         }
       });
-      hc.HeaderBehavior = 'whitelist';
-      hc.Headers = { Quantity: items.length, Items: items };
-      params.HeadersConfig = hc;
-      pc.ParametersInCacheKeyAndForwardedToOrigin = params;
+      fv.Headers = { Quantity: items.length, Items: items };
+      behavior.ForwardedValues = fv;
     }
+    if (setMinTTLZero && behavior.MinTTL !== 0) {
+      behavior.MinTTL = 0;
+      changed = true;
+    }
+    if (!changed) {
+      return {
+        scenario: 'legacy', policyId: null, updated: false, alreadyForwarded: true,
+      };
+    }
+    await client.send(new UpdateDistributionCommand({
+      Id: distributionId, IfMatch: distResult.ETag, DistributionConfig: config,
+    }));
+    return {
+      scenario: 'legacy', policyId: null, updated: true, alreadyForwarded: false,
+    };
   }
 
-  const needsMinTtl = setMinTTLZero && pc.MinTTL !== 0;
-  if (alreadyForwarded && !needsMinTtl) {
-    return { policyId, updated: false, alreadyForwarded: true };
+  // Determine whether the attached policy is AWS-managed (managed policies cannot be updated).
+  const managedList = await client.send(new ListCachePoliciesCommand({ Type: 'managed' }));
+  const managedIds = new Set(
+    (managedList.CachePolicyList?.Items || []).map((i) => i.CachePolicy.Id),
+  );
+  const isManaged = managedIds.has(policyId);
+
+  // Helper: add the EO headers to a HeadersConfig in place; returns true if anything changed.
+  const addEoHeaders = (params) => {
+    const hc = params.HeadersConfig || { HeaderBehavior: 'none' };
+    if (hc.HeaderBehavior === 'allViewer' || hc.HeaderBehavior === 'all') {
+      return false;
+    }
+    const items = hc.Headers?.Items || [];
+    const lower = items.map((x) => x.toLowerCase());
+    const missing = EDGE_OPTIMIZE_CACHE_HEADERS.filter((h) => !lower.includes(h));
+    if (missing.length === 0) {
+      return false;
+    }
+    missing.forEach((h) => items.push(h));
+    hc.HeaderBehavior = 'whitelist';
+    hc.Headers = { Quantity: items.length, Items: items };
+    // eslint-disable-next-line no-param-reassign
+    params.HeadersConfig = hc;
+    return true;
+  };
+
+  // ── Scenario B: custom policy → update it in place ──────────────────────
+  if (!isManaged) {
+    const pcResult = await client.send(new GetCachePolicyConfigCommand({ Id: policyId }));
+    const pc = pcResult.CachePolicyConfig;
+    const params = pc.ParametersInCacheKeyAndForwardedToOrigin || {};
+    const headersChanged = addEoHeaders(params);
+    pc.ParametersInCacheKeyAndForwardedToOrigin = params;
+    const needsMinTtl = setMinTTLZero && pc.MinTTL !== 0;
+    if (!headersChanged && !needsMinTtl) {
+      return {
+        scenario: 'custom', policyId, updated: false, alreadyForwarded: true,
+      };
+    }
+    if (needsMinTtl) {
+      pc.MinTTL = 0;
+    }
+    await client.send(new UpdateCachePolicyCommand({
+      Id: policyId, IfMatch: pcResult.ETag, CachePolicyConfig: pc,
+    }));
+    return {
+      scenario: 'custom', policyId, updated: true, alreadyForwarded: false,
+    };
   }
 
-  if (needsMinTtl) {
-    pc.MinTTL = 0;
+  // ── Scenario C: managed policy → clone into edgeoptimize-cache + repoint ──
+  const srcResult = await client.send(new GetCachePolicyCommand({ Id: policyId }));
+  const cloned = JSON.parse(JSON.stringify(srcResult.CachePolicy.CachePolicyConfig));
+  const sourceName = cloned.Name;
+  cloned.Name = EDGE_OPTIMIZE_CACHE_POLICY_NAME;
+  cloned.Comment = `Cloned from ${sourceName} with Edge Optimize headers — managed by LLM Optimizer`;
+  if (setMinTTLZero) {
+    cloned.MinTTL = 0;
+  }
+  const clonedParams = cloned.ParametersInCacheKeyAndForwardedToOrigin || {};
+  addEoHeaders(clonedParams);
+  cloned.ParametersInCacheKeyAndForwardedToOrigin = clonedParams;
+
+  // Idempotent: reuse an existing edgeoptimize-cache custom policy if a prior run created it.
+  const customList = await client.send(new ListCachePoliciesCommand({ Type: 'custom' }));
+  const existing = (customList.CachePolicyList?.Items || []).find(
+    (i) => i.CachePolicy.CachePolicyConfig.Name === EDGE_OPTIMIZE_CACHE_POLICY_NAME,
+  );
+  let newPolicyId;
+  let reused = false;
+  if (existing) {
+    newPolicyId = existing.CachePolicy.Id;
+    reused = true;
+  } else {
+    const created = await client.send(new CreateCachePolicyCommand({ CachePolicyConfig: cloned }));
+    newPolicyId = created.CachePolicy.Id;
   }
 
-  await client.send(new UpdateCachePolicyCommand({
-    Id: policyId,
-    IfMatch: pcEtag,
-    CachePolicyConfig: pc,
+  // Re-read the distribution for a fresh ETag, repoint the behavior to the new custom policy.
+  const freshDist = await client.send(new GetDistributionConfigCommand({ Id: distributionId }));
+  const freshConfig = freshDist.DistributionConfig;
+  const freshBehavior = getBehaviorFromConfig(freshConfig, pathPattern);
+  freshBehavior.CachePolicyId = newPolicyId;
+  delete freshBehavior.ForwardedValues; // cannot coexist with CachePolicyId
+  await client.send(new UpdateDistributionCommand({
+    Id: distributionId, IfMatch: freshDist.ETag, DistributionConfig: freshConfig,
   }));
 
-  return { policyId, updated: true, alreadyForwarded };
+  return {
+    scenario: 'managed', policyId: newPolicyId, updated: true, alreadyForwarded: false, reused,
+  };
 }
 
 // The Lambda@Edge origin-request/response handler, ported verbatim from the standalone wizard's
