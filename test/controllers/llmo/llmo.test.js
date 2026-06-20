@@ -86,6 +86,8 @@ describe('LlmoController', () => {
   let llmoConfigSchemaStub;
   let triggerBrandProfileAgentStub;
   let updateModifiedByDetailsStub;
+  let assumeConnectorRoleStub;
+  let listCloudFrontDistributionsStub;
   let mockTokowakaClient;
   let readStrategyStub;
   let writeStrategyStub;
@@ -194,6 +196,8 @@ describe('LlmoController', () => {
     this.timeout(120000);
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
     updateModifiedByDetailsStub = sinon.stub();
+    assumeConnectorRoleStub = sinon.stub();
+    listCloudFrontDistributionsStub = sinon.stub();
 
     // Initialize mock TokowakaClient
     mockTokowakaClient = {
@@ -261,6 +265,10 @@ describe('LlmoController', () => {
       '../../../src/support/edge-routing-auth.js': {
         getImsTokenFromPromiseToken: (...args) => getImsTokenFromPromiseTokenStub(...args),
         authorizeEdgeCdnRouting: (...args) => authorizeEdgeCdnRoutingStub(...args),
+      },
+      '../../../src/support/edge-optimize.js': {
+        assumeConnectorRole: (...args) => assumeConnectorRoleStub(...args),
+        listCloudFrontDistributions: (...args) => listCloudFrontDistributionsStub(...args),
       },
       '@adobe/spacecat-shared-ims-client': {
         ImsClient: function MockImsClient() {
@@ -7617,6 +7625,178 @@ describe('LlmoController', () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
       const result = await deniedController.getEdgeOptimizeBootstrapUrl(bootstrapContext);
+
+      expect(result.status).to.equal(403);
+    });
+  });
+
+  describe('connectEdgeOptimize', () => {
+    let connectContext;
+
+    beforeEach(() => {
+      assumeConnectorRoleStub = sinon.stub().resolves({
+        roleArn: 'arn:aws:iam::120569600543:role/AdobeLLMOptimizerCloudFrontConnectorRole',
+        accountId: '120569600543',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+      });
+      connectContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+        env: {},
+      };
+    });
+
+    it('returns connected true when the connector role is assumable', async () => {
+      const result = await controller.connectEdgeOptimize(connectContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.connected).to.equal(true);
+      expect(body.accountId).to.equal('120569600543');
+      expect(body.roleArn).to.include('AdobeLLMOptimizerCloudFrontConnectorRole');
+      expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+    });
+
+    it('returns connected false (not erroring) when the role is not yet assumable', async () => {
+      assumeConnectorRoleStub = sinon.stub().rejects(new Error('AccessDenied: not authorized to assume'));
+
+      const result = await controller.connectEdgeOptimize(connectContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.connected).to.equal(false);
+      expect(body.reason).to.include('AccessDenied');
+    });
+
+    it('returns 400 for an invalid account id', async () => {
+      const result = await controller.connectEdgeOptimize({ ...connectContext, data: { accountId: '123', externalId: 'ext' } });
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('12-digit');
+    });
+
+    it('returns 400 when the external id is missing', async () => {
+      const result = await controller.connectEdgeOptimize({ ...connectContext, data: { accountId: '120569600543' } });
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('externalId');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.connectEdgeOptimize(connectContext);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      const result = await deniedController.connectEdgeOptimize(connectContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 403 when the user is not an LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
+        ...getCommonMocks(),
+      });
+
+      const result = await LlmoControllerNoAdmin(mockContext).connectEdgeOptimize(connectContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 400 when an unexpected error occurs', async () => {
+      mockDataAccess.Site.findById.rejects(new Error('db boom'));
+
+      const result = await controller.connectEdgeOptimize(connectContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('db boom');
+    });
+  });
+
+  describe('getEdgeOptimizeDistributions', () => {
+    let distributionsContext;
+
+    beforeEach(() => {
+      assumeConnectorRoleStub = sinon.stub().resolves({
+        roleArn: 'arn:aws:iam::120569600543:role/AdobeLLMOptimizerCloudFrontConnectorRole',
+        accountId: '120569600543',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+      });
+      listCloudFrontDistributionsStub = sinon.stub().resolves([
+        {
+          id: 'E2EXAMPLE123',
+          domainName: 'd111111abcdef8.cloudfront.net',
+          aliases: ['www.example.com'],
+          status: 'Deployed',
+          enabled: true,
+          comment: '',
+        },
+      ]);
+      distributionsContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+        env: {},
+      };
+    });
+
+    it('returns the list of CloudFront distributions', async () => {
+      const result = await controller.getEdgeOptimizeDistributions(distributionsContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.distributions).to.have.length(1);
+      expect(body.distributions[0].id).to.equal('E2EXAMPLE123');
+      expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+      expect(listCloudFrontDistributionsStub.calledOnce).to.equal(true);
+    });
+
+    it('returns 400 for an invalid account id', async () => {
+      const result = await controller.getEdgeOptimizeDistributions({ ...distributionsContext, data: { accountId: '123', externalId: 'ext' } });
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns 400 when the external id is missing', async () => {
+      const result = await controller.getEdgeOptimizeDistributions({ ...distributionsContext, data: { accountId: '120569600543' } });
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns 400 when the AWS call fails', async () => {
+      listCloudFrontDistributionsStub = sinon.stub().rejects(new Error('ListDistributions failed'));
+
+      const result = await controller.getEdgeOptimizeDistributions(distributionsContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('ListDistributions failed');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.getEdgeOptimizeDistributions(distributionsContext);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      const result = await deniedController.getEdgeOptimizeDistributions(distributionsContext);
 
       expect(result.status).to.equal(403);
     });

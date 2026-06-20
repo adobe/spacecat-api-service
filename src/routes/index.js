@@ -481,6 +481,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
     'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
     'POST /sites/:siteId/llmo/edge-optimize-bootstrap-url': llmoController.getEdgeOptimizeBootstrapUrl,
+    'POST /sites/:siteId/llmo/edge-optimize/connect': llmoController.connectEdgeOptimize,
+    'POST /sites/:siteId/llmo/edge-optimize/distributions': llmoController.getEdgeOptimizeDistributions,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,

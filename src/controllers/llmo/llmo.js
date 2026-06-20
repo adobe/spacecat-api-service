@@ -33,6 +33,7 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { assumeConnectorRole, listCloudFrontDistributions } from '../../support/edge-optimize.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
 import { cachedOk } from '../../support/cached-response.js';
 import {
@@ -2160,8 +2161,98 @@ function LlmoController(ctx) {
     }
   };
 
+  // Shared access gate for the CloudFront "Deploy routing" wizard endpoints: the caller
+  // must have access to the site and be an LLMO administrator. Returns { error } (a Response)
+  // when denied, or {} when allowed.
+  const gateEdgeOptimizeWizard = async (siteId, Site, action) => {
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return { error: notFound('Site not found') };
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return { error: forbidden('User does not have access to this site') };
+    }
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return { error: forbidden(`Only LLMO administrators can ${action}`) };
+    }
+    return {};
+  };
+
+  // Verify the customer's cross-account connector role is assumable. Used by the wizard's
+  // "Allow access" step, which polls this after the customer creates the role via CloudFormation.
+  const connectEdgeOptimize = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'connect the edge optimize role');
+      if (error) {
+        return error;
+      }
+
+      try {
+        const { roleArn } = await assumeConnectorRole({ accountId, externalId, roleName });
+        log.info(`[edge-optimize-connect] Connected site ${siteId} to account ${accountId}`);
+        return ok({ connected: true, accountId, roleArn });
+      } catch (assumeError) {
+        // The role may not exist yet (customer still creating it) or the external ID may not
+        // match — surface as not-connected so the wizard can keep polling rather than erroring.
+        log.info(`[edge-optimize-connect] Role not yet assumable for site ${siteId}: ${assumeError.message}`);
+        return ok({ connected: false, reason: cleanupHeaderValue(assumeError.message) });
+      }
+    } catch (error) {
+      log.error(`Failed to connect edge optimize role for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // List the customer's CloudFront distributions (read-only) via the connector role, so the
+  // wizard's "Choose distribution" step can let the customer pick one to configure.
+  const getEdgeOptimizeDistributions = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'list CloudFront distributions');
+      if (error) {
+        return error;
+      }
+
+      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      const distributions = await listCloudFrontDistributions(credentials);
+      return ok({ distributions });
+    } catch (error) {
+      log.error(`Failed to list CloudFront distributions for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
   return {
     getEdgeOptimizeBootstrapUrl,
+    connectEdgeOptimize,
+    getEdgeOptimizeDistributions,
     getLlmoSheetData,
     queryLlmoSheetData,
     getLlmoGlobalSheetData,
