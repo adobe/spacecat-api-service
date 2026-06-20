@@ -625,6 +625,16 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config-stage'
   /sites/{siteId}/llmo/edge-optimize-bootstrap-url:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-bootstrap-url'
+  /sites/{siteId}/llmo/edge-optimize/connect:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-connect'
+  /sites/{siteId}/llmo/edge-optimize/distributions:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-distributions'
+  /sites/{siteId}/llmo/edge-optimize/prerequisites:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-prerequisites'
+  /sites/{siteId}/llmo/edge-optimize/origins:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-origins'
+  /sites/{siteId}/llmo/edge-optimize/behaviors:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-behaviors'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:
