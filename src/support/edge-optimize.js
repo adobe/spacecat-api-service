@@ -11,7 +11,11 @@
  */
 
 import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
-import { CloudFrontClient, ListDistributionsCommand } from '@aws-sdk/client-cloudfront';
+import {
+  CloudFrontClient,
+  ListDistributionsCommand,
+  GetDistributionConfigCommand,
+} from '@aws-sdk/client-cloudfront';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 // CloudFront is a global service; its control plane lives in us-east-1.
@@ -93,4 +97,48 @@ export async function listCloudFrontDistributions(credentials, region = EDGE_OPT
     enabled: dist.Enabled === true,
     comment: dist.Comment || '',
   }));
+}
+
+/**
+ * Fetch a single CloudFront distribution's configuration using assumed-role credentials.
+ *
+ * Returns the parsed origins, default cache behavior, and ordered cache behaviors projected to
+ * the fields the wizard needs to inspect routing. Read-only — uses GetDistributionConfig.
+ *
+ * @param {object} credentials - temporary credentials from {@link assumeConnectorRole}.
+ * @param {string} distributionId - the CloudFront distribution ID.
+ * @param {string} [region] - CloudFront control-plane region.
+ * @returns {Promise<{origins: Array<object>, defaultCacheBehavior: object|null,
+ *   cacheBehaviors: Array<object>}>}
+ */
+export async function getDistributionConfig(
+  credentials,
+  distributionId,
+  region = EDGE_OPTIMIZE_REGION,
+) {
+  if (!hasText(distributionId)) {
+    throw new Error('distributionId is required');
+  }
+  const client = new CloudFrontClient({ region, credentials });
+  const response = await client.send(new GetDistributionConfigCommand({ Id: distributionId }));
+  const config = response?.DistributionConfig || {};
+
+  const origins = (config.Origins?.Items || []).map((origin) => ({
+    id: origin.Id,
+    domainName: origin.DomainName,
+    originPath: origin.OriginPath || '',
+  }));
+
+  const mapBehavior = (behavior) => ({
+    pathPattern: behavior.PathPattern,
+    targetOriginId: behavior.TargetOriginId,
+  });
+
+  const defaultCacheBehavior = config.DefaultCacheBehavior
+    ? mapBehavior({ ...config.DefaultCacheBehavior, PathPattern: 'Default (*)' })
+    : null;
+
+  const cacheBehaviors = (config.CacheBehaviors?.Items || []).map(mapBehavior);
+
+  return { origins, defaultCacheBehavior, cacheBehaviors };
 }

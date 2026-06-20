@@ -40,6 +40,9 @@ describe('edge-optimize support', () => {
         ListDistributionsCommand: function ListDistributionsCommand(input) {
           this.input = input;
         },
+        GetDistributionConfigCommand: function GetDistributionConfigCommand(input) {
+          this.input = input;
+        },
       },
     });
   });
@@ -176,6 +179,65 @@ describe('edge-optimize support', () => {
       expect(result[0].aliases).to.deep.equal([]);
       expect(result[0].comment).to.equal('');
       expect(result[0].enabled).to.equal(false);
+    });
+  });
+
+  describe('getDistributionConfig', () => {
+    it('maps origins, default cache behavior, and ordered cache behaviors', async () => {
+      cfSendStub.resolves({
+        DistributionConfig: {
+          Origins: {
+            Items: [
+              { Id: 'origin-aem', DomainName: 'origin.example.com', OriginPath: '/content' },
+              { Id: 'EdgeOptimizeOrigin', DomainName: 'live.edgeoptimize.net' },
+            ],
+          },
+          DefaultCacheBehavior: { TargetOriginId: 'origin-aem' },
+          CacheBehaviors: {
+            Items: [
+              { PathPattern: '/api/*', TargetOriginId: 'origin-aem' },
+            ],
+          },
+        },
+      });
+
+      const result = await edgeOptimize.getDistributionConfig({}, 'E2EXAMPLE');
+
+      expect(cfSendStub.calledOnce).to.equal(true);
+      expect(cfSendStub.firstCall.args[0].input).to.deep.equal({ Id: 'E2EXAMPLE' });
+      expect(result.origins).to.deep.equal([
+        { id: 'origin-aem', domainName: 'origin.example.com', originPath: '/content' },
+        { id: 'EdgeOptimizeOrigin', domainName: 'live.edgeoptimize.net', originPath: '' },
+      ]);
+      expect(result.defaultCacheBehavior).to.deep.equal({
+        pathPattern: 'Default (*)',
+        targetOriginId: 'origin-aem',
+      });
+      expect(result.cacheBehaviors).to.deep.equal([
+        { pathPattern: '/api/*', targetOriginId: 'origin-aem' },
+      ]);
+    });
+
+    it('defaults to empty collections when the config is sparse', async () => {
+      cfSendStub.resolves({ DistributionConfig: {} });
+
+      const result = await edgeOptimize.getDistributionConfig({}, 'E2EXAMPLE');
+
+      expect(result.origins).to.deep.equal([]);
+      expect(result.defaultCacheBehavior).to.equal(null);
+      expect(result.cacheBehaviors).to.deep.equal([]);
+    });
+
+    it('throws when the distribution id is missing', async () => {
+      let error;
+      try {
+        await edgeOptimize.getDistributionConfig({}, '');
+      } catch (e) {
+        error = e;
+      }
+      expect(error).to.be.an('error');
+      expect(error.message).to.include('distributionId');
+      expect(cfSendStub.called).to.equal(false);
     });
   });
 });

@@ -33,7 +33,11 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { assumeConnectorRole, listCloudFrontDistributions } from '../../support/edge-optimize.js';
+import {
+  assumeConnectorRole,
+  listCloudFrontDistributions,
+  getDistributionConfig,
+} from '../../support/edge-optimize.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
 import { cachedOk } from '../../support/cached-response.js';
 import {
@@ -2249,10 +2253,146 @@ function LlmoController(ctx) {
     }
   };
 
+  // Run the wizard's pre-flight checks: confirm the connector role is assumable and that it grants
+  // CloudFront read access. Each check reports ok/false individually so the wizard can show a
+  // per-check status rather than failing the whole step on a single problem.
+  const checkEdgeOptimizePrerequisites = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'check edge optimize prerequisites');
+      if (error) {
+        return error;
+      }
+
+      const connectorRoleCheck = { name: 'connectorRole', ok: true };
+      const cloudFrontReadCheck = { name: 'cloudFrontRead', ok: true };
+
+      try {
+        const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+        try {
+          await listCloudFrontDistributions(credentials);
+        } catch (listError) {
+          cloudFrontReadCheck.ok = false;
+          cloudFrontReadCheck.detail = cleanupHeaderValue(listError.message);
+        }
+      } catch (assumeError) {
+        connectorRoleCheck.ok = false;
+        connectorRoleCheck.detail = cleanupHeaderValue(assumeError.message);
+        // Can't read CloudFront without the role, so mark it failed too.
+        cloudFrontReadCheck.ok = false;
+        cloudFrontReadCheck.detail = 'connector role not assumable';
+      }
+
+      // TODO: also validate the Edge Optimize API key here (was part of the standalone wizard).
+      return ok({ checks: [connectorRoleCheck, cloudFrontReadCheck] });
+    } catch (error) {
+      log.error(`Failed to check edge optimize prerequisites for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Read the origins configured on a customer's CloudFront distribution so the wizard's
+  // "Review origins" step can show them and flag whether an Edge Optimize origin already exists.
+  const getEdgeOptimizeOrigins = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read CloudFront origins');
+      if (error) {
+        return error;
+      }
+
+      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      const { origins } = await getDistributionConfig(credentials, distributionId);
+      const hasEdgeOptimizeOrigin = origins.some((origin) => /edgeoptimize/i.test(origin.id)
+        || /edgeoptimize/i.test(origin.domainName || ''));
+      return ok({ origins, hasEdgeOptimizeOrigin });
+    } catch (error) {
+      log.error(`Failed to read CloudFront origins for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Read the cache behaviors (default + ordered) configured on a customer's CloudFront
+  // distribution so the wizard's "Review routing" step can show how traffic is currently routed.
+  const getEdgeOptimizeBehaviors = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read CloudFront behaviors');
+      if (error) {
+        return error;
+      }
+
+      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      const { defaultCacheBehavior, cacheBehaviors } = await getDistributionConfig(
+        credentials,
+        distributionId,
+      );
+      const behaviors = [];
+      if (defaultCacheBehavior) {
+        behaviors.push({ ...defaultCacheBehavior, isDefault: true });
+      }
+      cacheBehaviors.forEach((behavior) => behaviors.push({ ...behavior, isDefault: false }));
+      return ok({ behaviors });
+    } catch (error) {
+      log.error(`Failed to read CloudFront behaviors for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
   return {
     getEdgeOptimizeBootstrapUrl,
     connectEdgeOptimize,
     getEdgeOptimizeDistributions,
+    checkEdgeOptimizePrerequisites,
+    getEdgeOptimizeOrigins,
+    getEdgeOptimizeBehaviors,
     getLlmoSheetData,
     queryLlmoSheetData,
     getLlmoGlobalSheetData,

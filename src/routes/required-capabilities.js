@@ -130,6 +130,9 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/edge-optimize-bootstrap-url',
   'POST /sites/:siteId/llmo/edge-optimize/connect',
   'POST /sites/:siteId/llmo/edge-optimize/distributions',
+  'POST /sites/:siteId/llmo/edge-optimize/prerequisites',
+  'POST /sites/:siteId/llmo/edge-optimize/origins',
+  'POST /sites/:siteId/llmo/edge-optimize/behaviors',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
