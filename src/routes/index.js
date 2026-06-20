@@ -723,6 +723,10 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/brand/stats-by-country': aiVisibilityController.getV1BrandStatsByCountry,
     'GET /llmo/ai-visibility/v1/brand/stats-by-llm': aiVisibilityController.getV1BrandStatsByLlm,
     'GET /llmo/ai-visibility/v1/meta/meta': aiVisibilityController.getV1MetaMeta,
+    'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': aiVisibilityController.getV1PromptResearchPromptsExport,
+    'GET /llmo/ai-visibility/v1/prompt-research/brands-export': aiVisibilityController.getV1PromptResearchBrandsExport,
+    'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': aiVisibilityController.getV1PromptResearchSourceDomainsExport,
+    'GET /llmo/ai-visibility/v1/prompt-research/topics-export': aiVisibilityController.getV1PromptResearchTopicsExport,
   };
 
   // Initialization of static and dynamic routes

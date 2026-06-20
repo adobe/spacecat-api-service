@@ -648,40 +648,37 @@ function mergeMultiLlmPromptRows(listResults, totalsResults, sort, mapRow, limit
 
 /**
  * Fetches one page of prompts for the given topic ids via `promptsByTopicIDs`
- * (+ `promptsByTopicIDsTotal`). When an `engine`/`llm` is given, a single LLM is
- * queried; otherwise results are fanned across FTS_LLMS and merged like the FTS path.
+ * (+ `promptsByTopicIDsTotal`) in a SINGLE call. For the all-engines view this uses
+ * `LLM_ENUM.ALL` so the backend aggregates and paginates server-side. A per-LLM fan-out
+ * + client merge cannot paginate correctly here: each LLM receives the same `offset`, and
+ * the summed total over-counts the merged set, so page 2+ comes back empty. Pass a specific
+ * `llm` to scope to a single engine.
  * @returns {Promise<{ data: object[], total: number }>}
  */
 async function promptsByTopicIdsPage({
-  clients, topicIds, country, llm, order, sort, limit, offset,
+  clients, topicIds, country, llm, order, limit, offset,
 }) {
-  if (llm) {
-    const engineSlug = llmToEngine(llm);
-    const pr = await Promise.allSettled([
-      clients.promptClient.promptsByTopicIDsTotal({ country, llm, topicIds }),
-      clients.promptClient.promptsByTopicIDs({
-        country, llm, topicIds, order, range: { limit, offset },
-      }),
-    ]);
-    if (pr[1].status !== 'fulfilled') {
-      throw pr[1].reason;
-    }
-    const raw = pr[1].value;
-    const totalsRaw = settledValueOrElse(pr[0], { total: 0 });
-    const data = (raw.prompts || []).map((p) => {
-      const row = mapTopicIdsPromptRow(p);
-      row.engine = engineSlug || row.engine;
-      return row;
-    });
-    return { data, total: num(totalsRaw.total) };
-  }
-  const prPair = await Promise.all([
-    Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicIDsTotal({ country, llm: l, topicIds }).catch(() => ({ total: 0 })))),
-    Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicIDs({
-      country, llm: l, topicIds, order, range: { limit, offset },
-    }).catch(() => ({ prompts: [] })))),
+  const llmEnum = llm ?? LLM_ENUM.ALL;
+  // For a single-engine request, force the requested engine on every row; for ALL, each row
+  // carries its own engine (mapped from `p.llm` in mapTopicIdsPromptRow).
+  const singleEngineSlug = llm ? llmToEngine(llm) : '';
+  const pr = await Promise.allSettled([
+    clients.promptClient.promptsByTopicIDsTotal({ country, llm: llmEnum, topicIds }),
+    clients.promptClient.promptsByTopicIDs({
+      country, llm: llmEnum, topicIds, order, range: { limit, offset },
+    }),
   ]);
-  return mergeMultiLlmPromptRows(prPair[1], prPair[0], sort, mapTopicIdsPromptRow, limit);
+  if (pr[1].status !== 'fulfilled') {
+    throw pr[1].reason;
+  }
+  const raw = pr[1].value;
+  const totalsRaw = settledValueOrElse(pr[0], { total: 0 });
+  const data = (raw.prompts || []).map((p) => {
+    const row = mapTopicIdsPromptRow(p);
+    if (singleEngineSlug) { row.engine = singleEngineSlug; }
+    return row;
+  });
+  return { data, total: num(totalsRaw.total) };
 }
 
 export async function handleTopicsResearchPrompts(sp, clients) {
@@ -704,7 +701,7 @@ export async function handleTopicsResearchPrompts(sp, clients) {
     if (sort.error) { return sort.error; }
     const order = { by: sort.by, direction: sort.direction };
     const { data, total } = await promptsByTopicIdsPage({
-      clients, topicIds: topicFilter.topicIds, country, llm, order, sort, limit, offset,
+      clients, topicIds: topicFilter.topicIds, country, llm, order, limit, offset,
     });
     return {
       status: 200,
