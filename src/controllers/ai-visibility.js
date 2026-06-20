@@ -63,6 +63,10 @@ import { handlePromptResponse as handlePromptResponseV1 } from '../support/ai-vi
 import { handleStatsByCountry as handleBrandStatsByCountryV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-country.js';
 import { handleStatsByLLM as handleBrandStatsByLLMV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-llm.js';
 import { handleMeta as handleMetaV1 } from '../support/ai-visibility/handlers/v1/meta/meta.js';
+import { handlePromptsResearchExport as handlePromptsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/prompts-export.js';
+import { handleBrandsResearchExport as handleBrandsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/brands-export.js';
+import { handleSourceDomainsResearchExport as handleSourceDomainsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/source-domains-export.js';
+import { handleTopicsResearchExport as handleTopicsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/topics-export.js';
 import { handleMeta } from '../support/ai-visibility/handlers/meta.js';
 
 const ROUTE_MAP = [
@@ -102,6 +106,10 @@ const ROUTE_MAP = [
   ['/v1/brand/stats-by-country', handleBrandStatsByCountryV1],
   ['/v1/brand/stats-by-llm', handleBrandStatsByLLMV1],
   ['/v1/meta/meta', handleMetaV1],
+  ['/v1/prompt-research/prompts-export', handlePromptsResearchExportV1],
+  ['/v1/prompt-research/brands-export', handleBrandsResearchExportV1],
+  ['/v1/prompt-research/source-domains-export', handleSourceDomainsResearchExportV1],
+  ['/v1/prompt-research/topics-export', handleTopicsResearchExportV1],
 ];
 
 function extractSearchParams(context) {
