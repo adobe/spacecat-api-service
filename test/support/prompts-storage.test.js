@@ -1829,6 +1829,304 @@ describe('prompts-storage', () => {
       expect(result.prompts[0].categoryId).to.be.undefined;
       expect(result.prompts[0].topicId).to.be.undefined;
     });
+
+    it('throws a typed 409 when INSERT returns a 23505 unique-constraint error', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: () => ({
+                select: () => thenable({
+                  data: null,
+                  error: {
+                    code: '23505',
+                    message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+                  },
+                }),
+              }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const err = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'p-1', prompt: 'Synthetic prompt text', regions: ['us'] }],
+        postgrestClient: client,
+      }).catch((e) => e);
+      expect(err).to.be.instanceOf(Error);
+      expect(err.status).to.equal(409);
+    });
+
+    it('deduplicates duplicate text+regions in toInsert and does not throw', async () => {
+      // Mock: >1 row in INSERT → 23505 (simulates uq_prompt_text_region_per_brand);
+      // exactly 1 row → success. RED before the intra-batch dedup fix; GREEN after.
+      const insertStub = sinon.stub().callsFake((rows) => ({
+        select: () => thenable(
+          Array.isArray(rows) && rows.length > 1
+            ? {
+              data: null,
+              error: {
+                code: '23505',
+                message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+              },
+            }
+            : { data: rows.map((r) => ({ prompt_id: r.prompt_id })), error: null },
+        ),
+      }));
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-topic-alpha', prompt: 'Synthetic test prompt text', regions: ['us'], topic: 'Alpha',
+          },
+          {
+            id: 'p-topic-beta', prompt: 'Synthetic test prompt text', regions: ['us'], topic: 'Beta',
+          },
+        ],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+      expect(result.prompts).to.have.lengthOf(1);
+      const insertedRows = insertStub.firstCall.args[0];
+      expect(insertedRows).to.have.lengthOf(1);
+      // p-topic-alpha wins: both topic_id=null, 'p-topic-alpha' < 'p-topic-beta' alphabetically
+      expect(insertedRows[0].prompt_id).to.equal('p-topic-alpha');
+    });
+
+    it('dedup-drop fires once per duplicate and splice reduces toInsert to exactly one row', async () => {
+      // Three prompts with the same synthetic text+regions. Only the winner
+      // (lexicographically first prompt_id when all topic_ids are null) reaches
+      // INSERT. The drop path (lines 740-749) fires twice and the splice mutations
+      // (lines 755-757) reduce toInsert to 1, covering the uncovered block.
+      const warnSpy = sandbox.spy(console, 'warn');
+      const toRow = (r) => ({ prompt_id: r.prompt_id });
+      const insertStub = sinon.stub().callsFake((rows) => ({
+        select: () => thenable({ data: rows.map(toRow), error: null }),
+      }));
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      // Input order is [p-c, p-a, p-b] — winner is always p-a (lex-first prompt_id)
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          { id: 'p-c', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+          { id: 'p-a', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+          { id: 'p-b', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+        ],
+        postgrestClient: client,
+      });
+
+      // one row inserted, two dropped
+      expect(result.created).to.equal(1);
+      expect(insertStub.firstCall.args[0]).to.have.lengthOf(1);
+      expect(insertStub.firstCall.args[0][0].prompt_id).to.equal('p-a');
+
+      // drop-log fired twice — once for each duplicate
+      const dropLogs = warnSpy.args.filter(([msg]) => msg === '[upsertPrompts] dedup-drop');
+      expect(dropLogs).to.have.lengthOf(2);
+      dropLogs.forEach(([, payload]) => {
+        expect(payload.winning_prompt_id).to.equal('p-a');
+      });
+    });
+
+    it('picks winner by (topic_id, promptId) asc regardless of input order', async () => {
+      // Two UUIDs with an unambiguous lexicographic ordering: T_ALPHA < T_BETA.
+      // The dedup sort key is (topic_id, promptId) asc, so T_ALPHA must always win.
+      const T_ALPHA = '00000000-0000-4000-b000-000000000001';
+      const T_BETA = 'ffffffff-ffff-4fff-bfff-fffffffffffe';
+
+      const warnSpy = sandbox.spy(console, 'warn');
+
+      // topics table returns both rows pre-populated so topicMap resolves UUIDs
+      // immediately and ensureLookupEntries makes no upsert calls.
+      // INSERT always succeeds — dedup fires before the row reaches the DB.
+      const makeClient = (insertStub) => ({
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            return makeChain({
+              data: [{ id: T_ALPHA, name: 'Alpha' }, { id: T_BETA, name: 'Beta' }],
+              error: null,
+            });
+          }
+          return makeChain({ data: [], error: null });
+        },
+      });
+
+      const makeInsertStub = () => sinon.stub().callsFake((rows) => ({
+        select: () => thenable({
+          data: rows.map((r) => ({ prompt_id: r.prompt_id })),
+          error: null,
+        }),
+      }));
+
+      const findDropLog = () => warnSpy.args
+        .find(([msg]) => msg === '[upsertPrompts] dedup-drop')?.[1];
+
+      // Pass 1: feed [alpha, beta]
+      const stub1 = makeInsertStub();
+      const result1 = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-alpha', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Alpha',
+          },
+          {
+            id: 'p-beta', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Beta',
+          },
+        ],
+        postgrestClient: makeClient(stub1),
+      });
+
+      // (a) exactly one row reaches INSERT
+      expect(stub1.firstCall.args[0]).to.have.lengthOf(1);
+      // (b) surviving row carries T_ALPHA
+      expect(stub1.firstCall.args[0][0].topic_id).to.equal(T_ALPHA);
+      expect(result1.created).to.equal(1);
+      // (c) log entry correctly identifies winner and dropped topic_id
+      expect(findDropLog()).to.deep.include({
+        winning_topic_id: T_ALPHA,
+        dropped_topic_id: T_BETA,
+      });
+
+      // Pass 2: feed [beta, alpha] — (d) input-order invariance
+      warnSpy.resetHistory();
+      const stub2 = makeInsertStub();
+      const result2 = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-beta', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Beta',
+          },
+          {
+            id: 'p-alpha', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Alpha',
+          },
+        ],
+        postgrestClient: makeClient(stub2),
+      });
+
+      expect(stub2.firstCall.args[0]).to.have.lengthOf(1);
+      expect(stub2.firstCall.args[0][0].topic_id).to.equal(T_ALPHA);
+      expect(result2.created).to.equal(1);
+      expect(findDropLog()).to.deep.include({
+        winning_topic_id: T_ALPHA,
+        dropped_topic_id: T_BETA,
+      });
+    });
+
+    it('routes case-variant text to update not insert when an active row already exists', async () => {
+      // Scenario: DB has "hello world" (lowercase); incoming prompt uses "Hello World" (mixed).
+      // The DB constraint uses lower(text), so they collide. getKey must lowercase the text
+      // component to match existingByKey correctly and route to toUpdate, not toInsert.
+      // RED on current (case-sensitive) getKey: misses existingByKey → INSERT stub is called.
+      // GREEN after fix: matches existingByKey → UPDATE path, INSERT stub never reached.
+      const existingRow = {
+        id: 'row-uuid-existing',
+        prompt_id: 'p-existing',
+        text: 'hello world',
+        regions: ['us'],
+        status: 'active',
+      };
+      const toInsertResult = (rows) => ({
+        select: () => thenable({
+          data: rows.map((r) => ({ prompt_id: r.prompt_id })),
+          error: null,
+        }),
+      });
+      const insertStub = sinon.stub().callsFake(toInsertResult);
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [existingRow], error: null }),
+                    in: () => thenable({ data: [existingRow], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Hello World', regions: ['us'] }],
+        postgrestClient: client,
+      });
+      expect(insertStub.notCalled).to.be.true;
+      expect(result.created).to.equal(0);
+      expect(result.updated).to.equal(1);
+    });
   });
 
   describe('updatePromptById', () => {

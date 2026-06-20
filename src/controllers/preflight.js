@@ -483,35 +483,27 @@ function PreflightController(ctx, log, env) {
       }
     }
 
-    // Mint a spacecat-api-service IMS v3 service token for the Mystique CGW
-    // edge gate (SITES-43236 / mystique-deploy PR #463). Sent on the dedicated
-    // x-ims-authorization header — separate from `Authorization` above, which
-    // carries the customer site's page-auth token for DRS upstream.
+    // Mint a spacecat-api-service IMS service token for the Mystique CGW
+    // edge gate (SITES-43236 / SITES-46699 / mystique-deploy PR #463). Sent
+    // on the dedicated x-ims-authorization header — separate from
+    // `Authorization` above, which carries the customer site's page-auth
+    // token for DRS upstream.
     //
-    // Constructs a custom-env ImsClient with IMS_SCOPE='system' hardcoded
-    // because the default spacecat IMS client (`aem-project-collab-service`
-    // per Vault `dx_mysticat`) has no `IMS_SCOPE` provisioned for the v3
-    // client_credentials grant — empirically confirmed in dev where the
-    // wrapper-wired `context.imsClient` produced an IMS 400 (invalid_scope).
-    // 'system' is the Adobe IMS mandated scope for v3 service-client tokens
-    // (per ASO team Slack thread, 2026-06-17). This mirrors the existing
-    // pattern in `email-service.js` and `trial-users.js` of overriding IMS
-    // env at construction, but differs in intent: those callers have their
-    // own dedicated IMS clients (LLMO email, etc.) and MUST swap credentials
-    // entirely; we keep the default client and only override scope. That
-    // makes this hardcode a transitional bypass for missing Vault config,
-    // NOT the desired permanent shape.
+    // Constructs a custom-env ImsClient with the dedicated PREFLIGHT_IMS_*
+    // credentials provisioned in Vault for this S2S use case (SITES-46699).
+    // ASO team manages a dedicated IMS client (`aem_site_optimizer_preflight`)
+    // for this purpose, following the established spacecat
+    // one-IMS-client-per-purpose convention (see `email-service.js` /
+    // `trial-users.js` / cloud-manager-client / brand-client — each swaps
+    // IMS env at construction for their own dedicated identity).
     //
-    // Reversibility: if `IMS_SCOPE=system` is provisioned in Vault for
-    // `aem-project-collab-service`, this hardcode can be reverted to the
-    // wrapper-wired `await context.imsClient.getServiceAccessTokenV3()` and
-    // the `imsClient` destructure + `isNonEmptyObject(imsClient)` constructor
-    // guard on `PreflightController` restored alongside (both removed in the
-    // same PR as this hardcode — see git history under `SITES-43236`). The
-    // revert also restores singleton token caching across warm-Lambda
-    // invocations, which this construction loses — accepted cost during the
-    // transition, since per-invocation mint sidesteps the not-expiry-aware
-    // cache concern from the prior review thread on PR #2611.
+    // Uses getServiceAccessToken (v2 authorization_code) against the
+    // IMSS-provisioned permanent authorization code (Service Token row on
+    // the client) — the synthetic service-account identity is encoded in
+    // the code itself, so no org_id is needed at mint time and no Service
+    // Principal Binding is required. The CGW-Flex edge gate validates the
+    // `client_id` claim, which is identical across v2 and v3 tokens for
+    // this client, so v2 satisfies the gate.
     //
     // Mint before the AsyncJob / Preflight DB writes so a transient IMS
     // failure doesn't leave orphaned IN_PROGRESS records to clean up.
@@ -524,11 +516,21 @@ function PreflightController(ctx, log, env) {
     // this a narrow availability cost in practice.
     let imsServiceToken;
     try {
-      const scopedImsClient = ImsClient.createFrom({
+      const preflightImsEnv = {
+        ...env,
+        IMS_CLIENT_ID: env.PREFLIGHT_IMS_CLIENT_ID,
+        IMS_CLIENT_SECRET: env.PREFLIGHT_IMS_CLIENT_SECRET,
+        IMS_CLIENT_CODE: env.PREFLIGHT_IMS_CLIENT_CODE,
+        // IMS_SCOPE is unused by v2 getServiceAccessToken (scope is bound
+        // to the permanent code at IMSS registration time), but kept here
+        // for forward-compat if/when this client moves to v3.
+        IMS_SCOPE: env.PREFLIGHT_IMS_SCOPE,
+      };
+      const preflightImsClient = ImsClient.createFrom({
         ...context,
-        env: { ...context.env, IMS_SCOPE: 'system' },
+        env: preflightImsEnv,
       });
-      const tokenPayload = await scopedImsClient.getServiceAccessTokenV3();
+      const tokenPayload = await preflightImsClient.getServiceAccessToken();
       imsServiceToken = tokenPayload?.access_token;
       // Post-condition: a successful mint must yield a non-empty access_token.
       // Guards against an SDK shape change (e.g. `{ accessToken }` or `{}`)
