@@ -37,6 +37,12 @@ import {
   assumeConnectorRole,
   listCloudFrontDistributions,
   getDistributionConfig,
+  createEdgeOptimizeOrigin,
+  createEdgeOptimizeRoutingFunction,
+  applyEdgeOptimizeCacheHeaders,
+  createEdgeOptimizeLambda,
+  applyEdgeOptimizeAssociations,
+  verifyEdgeOptimizeRouting,
 } from '../../support/edge-optimize.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
 import { cachedOk } from '../../support/cached-response.js';
@@ -2386,6 +2392,265 @@ function LlmoController(ctx) {
     }
   };
 
+  // Add the Edge Optimize origin to the selected distribution (mutation). Idempotent: returns
+  // { created: false, alreadyExisted: true } when the origin is already present. Used by the
+  // wizard's "Create Edge Optimize origin" step.
+  const createEdgeOptimizeOriginHandler = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+    const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'dev.edgeoptimize.net';
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize origin');
+      if (error) {
+        return error;
+      }
+
+      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      const result = await createEdgeOptimizeOrigin(credentials, distributionId, originDomain);
+      log.info(`[edge-optimize-origin] ${result.created ? 'Created' : 'Origin already existed for'} site ${siteId}, distribution ${distributionId}`);
+      return ok(result);
+    } catch (error) {
+      log.error(`Failed to create CloudFront Edge Optimize origin for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Create/update + publish the `edgeoptimize-routing` CloudFront Function (mutation, idempotent).
+  // Needs the default-behavior target origin id so the function's failover origin group is correct.
+  const createEdgeOptimizeRoutingFunctionHandler = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+    const targetedPaths = Array.isArray(context.data?.targetedPaths)
+      ? context.data.targetedPaths
+      : null;
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize routing function');
+      if (error) {
+        return error;
+      }
+
+      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      // Derive the default-behavior target origin id from the live distribution config.
+      const { defaultCacheBehavior } = await getDistributionConfig(credentials, distributionId);
+      const defaultOriginId = defaultCacheBehavior?.targetOriginId;
+      if (!hasText(defaultOriginId)) {
+        return badRequest('Could not determine the default cache behavior target origin');
+      }
+
+      const result = await createEdgeOptimizeRoutingFunction(
+        credentials,
+        defaultOriginId,
+        targetedPaths,
+      );
+      log.info(`[edge-optimize-function] ${result.created ? 'Created' : 'Updated'} routing function for site ${siteId}`);
+      return ok(result);
+    } catch (error) {
+      log.error(`Failed to create CloudFront routing function for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Ensure the Edge Optimize headers are forwarded by the selected behavior's cache policy
+  // (mutation, idempotent). Used by the wizard's "Apply cache headers" step.
+  const applyEdgeOptimizeCacheHandler = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+    const pathPattern = String(context.data?.pathPattern || '').trim() || 'default';
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'apply edge optimize cache headers');
+      if (error) {
+        return error;
+      }
+
+      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      const result = await applyEdgeOptimizeCacheHeaders(credentials, distributionId, pathPattern);
+      log.info(`[edge-optimize-cache] Applied cache headers for site ${siteId}, behavior ${pathPattern}`);
+      return ok(result);
+    } catch (error) {
+      log.error(`Failed to apply CloudFront cache headers for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Create/update + publish the `edgeoptimize-origin` Lambda@Edge function and its exec role
+  // (mutation, idempotent). Returns the versioned ARN the associate step needs.
+  const createEdgeOptimizeLambdaHandler = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize Lambda@Edge function');
+      if (error) {
+        return error;
+      }
+
+      const { credentials, accountId: resolvedAccountId } = await assumeConnectorRole({
+        accountId, externalId, roleName,
+      });
+      const result = await createEdgeOptimizeLambda(credentials, resolvedAccountId);
+      log.info(`[edge-optimize-lambda] ${result.created ? 'Created' : 'Updated'} Lambda@Edge for site ${siteId}, published version ${result.version}`);
+      return ok(result);
+    } catch (error) {
+      log.error(`Failed to create Lambda@Edge function for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Associate the routing CloudFront Function (viewer-request) and Lambda@Edge (origin-request/
+  // response, versioned ARN) onto the user-selected behavior (mutation). Used by "Associate".
+  const applyEdgeOptimizeAssociationsHandler = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+    const pathPattern = String(context.data?.pathPattern || '').trim() || 'default';
+    const lambdaVersionArn = String(context.data?.lambdaVersionArn || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+    if (!hasText(lambdaVersionArn)) {
+      return badRequest('lambdaVersionArn is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'associate edge optimize routing');
+      if (error) {
+        return error;
+      }
+
+      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      const result = await applyEdgeOptimizeAssociations(
+        credentials,
+        distributionId,
+        pathPattern,
+        lambdaVersionArn,
+      );
+      log.info(`[edge-optimize-associate] Associated routing for site ${siteId}, behavior ${pathPattern}`);
+      return ok(result);
+    } catch (error) {
+      log.error(`Failed to associate CloudFront routing for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Verify end-to-end routing by probing the distribution as a bot vs a human and inspecting the
+  // x-edgeoptimize-* headers. Always returns 200 with { passed }; success requires a request-id.
+  const verifyEdgeOptimizeRoutingHandler = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'verify edge optimize routing');
+      if (error) {
+        return error;
+      }
+
+      // Determine the URL to probe: prefer an explicit domain, else resolve from the distribution.
+      let domain = String(context.data?.domain || '').trim();
+      if (!hasText(domain)) {
+        const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+        const distributions = await listCloudFrontDistributions(credentials);
+        const match = distributions.find((d) => d.id === distributionId);
+        domain = match?.domainName || '';
+      }
+      if (!hasText(domain)) {
+        return badRequest('Could not determine the distribution domain to verify');
+      }
+
+      const url = /^https?:\/\//.test(domain) ? domain : `https://${domain}/`;
+      const result = await verifyEdgeOptimizeRouting(url);
+      log.info(`[edge-optimize-verify] Verified routing for site ${siteId}: passed=${result.passed}`);
+      return ok(result);
+    } catch (error) {
+      log.error(`Failed to verify CloudFront routing for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
   return {
     getEdgeOptimizeBootstrapUrl,
     connectEdgeOptimize,
@@ -2393,6 +2658,12 @@ function LlmoController(ctx) {
     checkEdgeOptimizePrerequisites,
     getEdgeOptimizeOrigins,
     getEdgeOptimizeBehaviors,
+    createEdgeOptimizeOrigin: createEdgeOptimizeOriginHandler,
+    createEdgeOptimizeRoutingFunction: createEdgeOptimizeRoutingFunctionHandler,
+    applyEdgeOptimizeCache: applyEdgeOptimizeCacheHandler,
+    createEdgeOptimizeLambda: createEdgeOptimizeLambdaHandler,
+    applyEdgeOptimizeAssociations: applyEdgeOptimizeAssociationsHandler,
+    verifyEdgeOptimizeRouting: verifyEdgeOptimizeRoutingHandler,
     getLlmoSheetData,
     queryLlmoSheetData,
     getLlmoGlobalSheetData,
