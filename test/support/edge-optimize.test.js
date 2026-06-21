@@ -21,12 +21,12 @@ describe('edge-optimize support', () => {
   let lambdaSendStub;
   let edgeOptimize;
 
-  beforeEach(async function setup() {
+  // esmock ONCE for the whole file (not per-test) — esmock re-instantiates the mocked module
+  // graph on every call and accumulates memory, which contributes to the suite's heap pressure.
+  // The mocked clients call the `*SendStub` closures, which read the `let` bindings reassigned
+  // fresh in beforeEach, so a single esmock works for all tests.
+  before(async function setupEsmock() {
     this.timeout(30000);
-    stsSendStub = sinon.stub();
-    cfSendStub = sinon.stub();
-    iamSendStub = sinon.stub();
-    lambdaSendStub = sinon.stub();
     // Each command in a mocked module is a constructor FUNCTION (not a class) — eslint forbids
     // multiple class declarations in one file, so we capture the command name + input on `this`.
     const cfCommand = (Name) => function CloudFrontCommand(input) {
@@ -90,6 +90,14 @@ describe('edge-optimize support', () => {
         PublishVersionCommand: lambdaCommand('PublishVersion'),
       },
     });
+  });
+
+  beforeEach(() => {
+    // Fresh stubs per test; the esmocked clients read these `let` bindings at call time.
+    stsSendStub = sinon.stub();
+    cfSendStub = sinon.stub();
+    iamSendStub = sinon.stub();
+    lambdaSendStub = sinon.stub();
   });
 
   afterEach(() => {
