@@ -624,97 +624,87 @@ describe('edge-optimize support', () => {
       .filter((c) => c.args[0].commandName === name).pop()?.args[0];
     const notFound = () => Promise.reject(Object.assign(new Error('nf'), { name: 'ResourceNotFoundException' }));
 
-    it('creates the role, function and publishes a version', async () => {
+    it('creates the role + function (non-blocking) and returns provisioning', async () => {
       wireIam({
         GetRole: () => Promise.reject(Object.assign(new Error('no role'), { name: 'NoSuchEntityException' })),
         CreateRole: { Role: { Arn: 'arn:aws:iam::120569600543:role/edgeoptimize-origin-role' } },
         PutRolePolicy: {},
       });
-      let fnCreated = false;
       wireLambda({
-        GetFunctionConfiguration: () => (fnCreated
-          ? {
-            FunctionArn: 'arn:fn', State: 'Active', LastUpdateStatus: 'Successful', CodeSha256: 'sha-new',
-          }
-          : notFound()),
-        CreateFunction: () => {
-          fnCreated = true;
-          return { FunctionArn: 'arn:fn' };
+        GetFunctionConfiguration: () => notFound(),
+        CreateFunction: { FunctionArn: 'arn:fn' },
+      });
+
+      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543', { roleWaitMs: 0 });
+
+      // Does NOT block on the new function becoming Active — returns provisioning immediately.
+      expect(result.status).to.equal('provisioning');
+      expect(result.created).to.equal(true);
+      expect(result.versionArn).to.equal(null);
+      expect(result.roleArn).to.include('edgeoptimize-origin-role');
+      expect(lastLambda('CreateFunction').input.Role).to.include('edgeoptimize-origin-role');
+      expect(lastLambda('PublishVersion')).to.equal(undefined); // never publishes while Pending
+    });
+
+    it('returns provisioning (no mutation) while the function is still finalizing', async () => {
+      wireIam({ GetRole: { Role: { Arn: 'arn:role' } }, UpdateAssumeRolePolicy: {}, PutRolePolicy: {} });
+      wireLambda({
+        GetFunctionConfiguration: {
+          FunctionArn: 'arn:fn', State: 'Active', LastUpdateStatus: 'InProgress',
+        },
+      });
+
+      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543');
+
+      expect(result.status).to.equal('provisioning');
+      expect(result.versionArn).to.equal(null);
+      expect(lastLambda('PublishVersion')).to.equal(undefined); // never touched while InProgress
+    });
+
+    it('is idempotent: reuses the existing version when the function is idle', async () => {
+      wireIam({ GetRole: { Role: { Arn: 'arn:role' } }, UpdateAssumeRolePolicy: {}, PutRolePolicy: {} });
+      wireLambda({
+        GetFunctionConfiguration: {
+          FunctionArn: 'arn:fn', State: 'Active', LastUpdateStatus: 'Successful',
+        },
+        ListVersionsByFunction: { Versions: [{ Version: '$LATEST' }, { Version: '3', FunctionArn: 'arn:fn:3' }] },
+      });
+
+      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543');
+
+      expect(result.status).to.equal('ready');
+      expect(result.alreadyExisted).to.equal(true);
+      expect(result.versionArn).to.equal('arn:fn:3');
+      expect(lastLambda('PublishVersion')).to.equal(undefined); // reused, not re-published
+    });
+
+    it('publishes a version when the function is idle but unpublished', async () => {
+      wireIam({ GetRole: { Role: { Arn: 'arn:role' } }, UpdateAssumeRolePolicy: {}, PutRolePolicy: {} });
+      wireLambda({
+        GetFunctionConfiguration: {
+          FunctionArn: 'arn:fn', State: 'Active', LastUpdateStatus: 'Successful',
         },
         ListVersionsByFunction: { Versions: [{ Version: '$LATEST' }] },
         PublishVersion: { FunctionArn: 'arn:fn:1', Version: '1' },
       });
 
-      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543', { roleWaitMs: 0 });
+      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543');
 
-      expect(result).to.include({
-        functionArn: 'arn:fn', versionArn: 'arn:fn:1', version: '1', created: true,
-      });
-      expect(result.roleArn).to.include('edgeoptimize-origin-role');
-      expect(lastLambda('CreateFunction').input.Role).to.include('edgeoptimize-origin-role');
+      expect(result.status).to.equal('ready');
+      expect(result.versionArn).to.equal('arn:fn:1');
       expect(lastLambda('PublishVersion')).to.not.equal(undefined);
     });
 
-    it('is idempotent: reuses the existing version when code is unchanged (no update/publish)', async () => {
+    it('treats a concurrent-create conflict as provisioning', async () => {
       wireIam({ GetRole: { Role: { Arn: 'arn:role' } }, UpdateAssumeRolePolicy: {}, PutRolePolicy: {} });
       wireLambda({
-        GetFunctionConfiguration: {
-          FunctionArn: 'arn:fn', State: 'Active', LastUpdateStatus: 'Successful', CodeSha256: 'sha-1',
-        },
-        ListVersionsByFunction: { Versions: [{ Version: '$LATEST' }, { Version: '3', FunctionArn: 'arn:fn:3', CodeSha256: 'sha-1' }] },
+        GetFunctionConfiguration: () => notFound(),
+        CreateFunction: () => Promise.reject(Object.assign(new Error('exists'), { name: 'ResourceConflictException' })),
       });
 
-      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543');
+      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543', { roleWaitMs: 0 });
 
-      expect(result.created).to.equal(false);
-      expect(result.alreadyExisted).to.equal(true);
-      expect(result.versionArn).to.equal('arn:fn:3');
-      expect(result.version).to.equal('3');
-      expect(lastLambda('UpdateFunctionCode')).to.equal(undefined); // not re-updated
-      expect(lastLambda('PublishVersion')).to.equal(undefined); // not re-published
-    });
-
-    it('updates the code + publishes when the existing version is stale', async () => {
-      wireIam({ GetRole: { Role: { Arn: 'arn:role' } }, UpdateAssumeRolePolicy: {}, PutRolePolicy: {} });
-      wireLambda({
-        GetFunctionConfiguration: {
-          FunctionArn: 'arn:fn', State: 'Active', LastUpdateStatus: 'Successful', CodeSha256: 'sha-current',
-        },
-        ListVersionsByFunction: { Versions: [{ Version: '1', FunctionArn: 'arn:fn:1', CodeSha256: 'sha-OLD' }] },
-        UpdateFunctionCode: { FunctionArn: 'arn:fn' },
-        PublishVersion: { FunctionArn: 'arn:fn:2', Version: '2' },
-      });
-
-      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543');
-
-      expect(result.created).to.equal(false);
-      expect(result.version).to.equal('2');
-      expect(lastLambda('UpdateFunctionCode')).to.not.equal(undefined);
-    });
-
-    it('waits for an in-progress update to finish before publishing (no conflict)', async () => {
-      wireIam({ GetRole: { Role: { Arn: 'arn:role' } }, UpdateAssumeRolePolicy: {}, PutRolePolicy: {} });
-      let polls = 0;
-      wireLambda({
-        // existence check, then waitForLambdaIdle polls: InProgress first, then idle
-        GetFunctionConfiguration: () => {
-          polls += 1;
-          if (polls <= 1) {
-            return {
-              FunctionArn: 'arn:fn', State: 'Active', LastUpdateStatus: 'InProgress', CodeSha256: 'sha-1',
-            };
-          }
-          return {
-            FunctionArn: 'arn:fn', State: 'Active', LastUpdateStatus: 'Successful', CodeSha256: 'sha-1',
-          };
-        },
-        ListVersionsByFunction: { Versions: [{ Version: '5', FunctionArn: 'arn:fn:5', CodeSha256: 'sha-1' }] },
-      });
-
-      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543');
-
-      expect(result.versionArn).to.equal('arn:fn:5');
-      expect(polls).to.be.greaterThan(1); // it polled past the InProgress state
+      expect(result.status).to.equal('provisioning');
     });
 
     it('throws for an invalid account id', async () => {
@@ -730,7 +720,8 @@ describe('edge-optimize support', () => {
   });
 
   describe('getEdgeOptimizeLambdaStatus', () => {
-    it('reports exists:false when the function is absent', async () => {
+    it('reports roleExists:false + exists:false when nothing is provisioned', async () => {
+      iamSendStub.callsFake(() => Promise.reject(Object.assign(new Error('no role'), { name: 'NoSuchEntityException' })));
       lambdaSendStub.callsFake((cmd) => {
         if (cmd.commandName === 'GetFunctionConfiguration') {
           return Promise.reject(Object.assign(new Error('nf'), { name: 'ResourceNotFoundException' }));
@@ -740,10 +731,13 @@ describe('edge-optimize support', () => {
 
       const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({});
 
-      expect(result).to.deep.equal({ exists: false, versionArn: null });
+      expect(result).to.deep.equal({
+        roleExists: false, exists: false, versionArn: null, ready: false,
+      });
     });
 
-    it('reports the latest published version when the function exists', async () => {
+    it('reports the role + published version and ready:true when fully provisioned', async () => {
+      iamSendStub.callsFake(() => Promise.resolve({ Role: { Arn: 'arn:role' } }));
       lambdaSendStub.callsFake((cmd) => {
         if (cmd.commandName === 'GetFunctionConfiguration') {
           return Promise.resolve({ FunctionArn: 'arn:fn', State: 'Active', LastUpdateStatus: 'Successful' });
@@ -756,13 +750,16 @@ describe('edge-optimize support', () => {
 
       const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({});
 
+      expect(result.roleExists).to.equal(true);
       expect(result.exists).to.equal(true);
       expect(result.state).to.equal('Active');
       expect(result.versionArn).to.equal('arn:fn:2');
       expect(result.version).to.equal('2');
+      expect(result.ready).to.equal(true);
     });
 
-    it('reports versionArn null when only $LATEST exists (not yet published)', async () => {
+    it('reports ready:false (role created, still provisioning) when not yet published', async () => {
+      iamSendStub.callsFake(() => Promise.resolve({ Role: { Arn: 'arn:role' } }));
       lambdaSendStub.callsFake((cmd) => {
         if (cmd.commandName === 'GetFunctionConfiguration') {
           return Promise.resolve({ FunctionArn: 'arn:fn', State: 'Pending', LastUpdateStatus: 'InProgress' });
@@ -775,8 +772,10 @@ describe('edge-optimize support', () => {
 
       const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({});
 
+      expect(result.roleExists).to.equal(true);
       expect(result.exists).to.equal(true);
       expect(result.versionArn).to.equal(null);
+      expect(result.ready).to.equal(false);
     });
   });
 

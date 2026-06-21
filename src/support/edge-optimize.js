@@ -37,7 +37,6 @@ import {
 import {
   LambdaClient,
   CreateFunctionCommand as LambdaCreateFunctionCommand,
-  UpdateFunctionCodeCommand,
   GetFunctionConfigurationCommand,
   ListVersionsByFunctionCommand,
   PublishVersionCommand,
@@ -682,9 +681,11 @@ export function buildLambdaZip(filename, content) {
   const compressed = deflateRawSync(data, { level: 9 });
   const crcVal = crc32(data);
   const fn = Buffer.from(filename, 'utf-8');
-  const now = new Date();
-  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
-  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  // Fixed DOS date/time (1980-01-01 00:00:00) so the zip — and thus the Lambda CodeSha256 — is
+  // deterministic for identical source. A timestamp here would change the hash on every call,
+  // causing needless code updates and version churn.
+  const dosDate = (0 << 9) | (1 << 5) | 1;
+  const dosTime = 0;
 
   const lh = Buffer.alloc(30 + fn.length);
   lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0, 6);
@@ -711,28 +712,6 @@ export function buildLambdaZip(filename, content) {
   return Buffer.concat([lh, compressed, cd, eocd]);
 }
 /* eslint-enable no-bitwise, max-statements-per-line, max-len */
-
-// Wait until the function is fully idle: State Active AND no update in progress. Lambda rejects
-// UpdateFunctionCode / PublishVersion with ResourceConflictException ("update is in progress")
-// while LastUpdateStatus is InProgress, so we must gate on both signals (not just State).
-async function waitForLambdaIdle(lambda, functionName, maxWaitMs = 25000) {
-  const deadline = Date.now() + maxWaitMs;
-  /* eslint-disable no-await-in-loop */
-  while (Date.now() < deadline) {
-    const cfg = await lambda.send(
-      new GetFunctionConfigurationCommand({ FunctionName: functionName }),
-    );
-    if (cfg.State === 'Failed') {
-      throw new Error(`Lambda function entered Failed state: ${cfg.StateReason}`);
-    }
-    if (cfg.State === 'Active' && cfg.LastUpdateStatus !== 'InProgress') {
-      return cfg;
-    }
-    await delay(2000);
-  }
-  /* eslint-enable no-await-in-loop */
-  throw new Error('Lambda function did not become idle in time');
-}
 
 // Latest published numbered version (skips $LATEST). Returns { versionArn, version, codeSha256 }
 // or null when no numbered version has been published yet.
@@ -810,58 +789,30 @@ export async function createEdgeOptimizeLambda(
     PolicyDocument: buildCwLogsPolicy(String(accountId), EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME),
   }));
 
-  // ── 3. Ensure the function exists with the current code (idempotent + idle-aware). ──
-  let functionArn;
-  let fnExists = false;
-  let currentCodeSha;
+  // ── 3. Advance the function state machine WITHOUT blocking on provisioning. ──
+  // This runs behind a CDN/gateway with a ~60s first-byte timeout, so we must never wait for a
+  // fresh function to become Active (30–60s) inside the request. Each call does at most one fast
+  // step and returns `status: 'provisioning' | 'ready'`; the UI polls until ready.
+  let cfg = null;
   try {
-    const cfg = await lambda.send(
+    cfg = await lambda.send(
       new GetFunctionConfigurationCommand({ FunctionName: EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME }),
     );
-    fnExists = true;
-    functionArn = cfg.FunctionArn;
-    currentCodeSha = cfg.CodeSha256;
   } catch (err) {
     if (err.name !== 'ResourceNotFoundException') {
       throw err;
     }
   }
 
-  if (fnExists) {
-    // The function may still be finalizing a prior (possibly timed-out) call — wait for idle
-    // before touching it so we don't hit "update is in progress" (ResourceConflictException).
-    const idleCfg = await waitForLambdaIdle(lambda, EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME);
-    currentCodeSha = idleCfg.CodeSha256;
-
-    // If a numbered version already exists for the CURRENT code, reuse it — fully idempotent,
-    // avoids version churn and lets a retry after a CDN timeout return immediately.
-    const existingVersion = await getLatestLambdaVersion(
-      lambda,
-      EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME,
-    );
-    if (existingVersion && existingVersion.codeSha256 === currentCodeSha) {
-      return {
-        functionArn,
-        versionArn: existingVersion.versionArn,
-        version: existingVersion.version,
-        roleArn,
-        created: false,
-        alreadyExisted: true,
-      };
-    }
-
-    // Code differs (or no version yet) — update the code, wait for idle, then publish.
-    await lambda.send(new UpdateFunctionCodeCommand({
-      FunctionName: EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME,
-      ZipFile: zipBuffer,
-    }));
-  } else {
+  // Function does not exist yet → create it (returns fast in Pending) and report provisioning.
+  if (!cfg) {
     if (roleIsNew && roleWaitMs > 0) {
       await delay(roleWaitMs);
     }
     let lastErr;
+    let createdArn;
     /* eslint-disable no-await-in-loop */
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const created = await lambda.send(new LambdaCreateFunctionCommand({
           FunctionName: EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME,
@@ -873,14 +824,21 @@ export async function createEdgeOptimizeLambda(
           Timeout: 5,
           MemorySize: 128,
         }));
-        functionArn = created.FunctionArn;
+        createdArn = created.FunctionArn;
         lastErr = null;
         break;
       } catch (createErr) {
         lastErr = createErr;
+        // A just-created role may not have propagated yet — short bounded retry, then give up
+        // (the next poll will succeed once it propagates) so we never block long.
         const isRolePropagation = createErr.name === 'InvalidParameterValueException'
           && (createErr.message || '').toLowerCase().includes('role');
-        if (!isRolePropagation || attempt >= 4) {
+        if (createErr.name === 'ResourceConflictException') {
+          // Created concurrently by a prior (timed-out) call — treat as provisioning.
+          lastErr = null;
+          break;
+        }
+        if (!isRolePropagation || attempt >= 2) {
           throw createErr;
         }
         await delay(retryDelayMs);
@@ -890,21 +848,44 @@ export async function createEdgeOptimizeLambda(
     if (lastErr) {
       throw lastErr;
     }
+    return {
+      status: 'provisioning', functionArn: createdArn, roleArn, created: true, versionArn: null,
+    };
   }
 
-  // ── 4. Wait for idle, then publish a version (Lambda@Edge requires a numbered version). ──
-  await waitForLambdaIdle(lambda, EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME);
+  // Still finalizing a create/update → report provisioning, don't touch it (avoids conflicts).
+  if (cfg.State === 'Pending' || cfg.LastUpdateStatus === 'InProgress') {
+    return {
+      status: 'provisioning', functionArn: cfg.FunctionArn, roleArn, created: false, versionArn: null,
+    };
+  }
+
+  // Active and idle. If a numbered version already exists, reuse it (idempotent).
+  const existingVersion = await getLatestLambdaVersion(lambda, EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME);
+  if (existingVersion) {
+    return {
+      status: 'ready',
+      functionArn: cfg.FunctionArn,
+      versionArn: existingVersion.versionArn,
+      version: existingVersion.version,
+      roleArn,
+      created: false,
+      alreadyExisted: true,
+    };
+  }
+
+  // Active, idle, no version yet → publish one (fast on an idle function).
   const published = await lambda.send(new PublishVersionCommand({
     FunctionName: EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME,
     Description: 'Published by LLM Optimizer CloudFront wizard',
   }));
-
   return {
-    functionArn,
+    status: 'ready',
+    functionArn: cfg.FunctionArn,
     versionArn: published.FunctionArn, // includes the :N version suffix
     version: published.Version,
     roleArn,
-    created: !fnExists,
+    created: false,
     alreadyExisted: false,
   };
 }
@@ -920,6 +901,20 @@ export async function createEdgeOptimizeLambda(
  */
 export async function getEdgeOptimizeLambdaStatus(credentials, region = EDGE_OPTIMIZE_REGION) {
   const lambda = new LambdaClient({ region, credentials });
+  const iam = new IAMClient({ region, credentials });
+
+  // Execution role status (created synchronously by create-lambda's ack call).
+  let roleExists = false;
+  try {
+    await iam.send(new GetRoleCommand({ RoleName: EDGE_OPTIMIZE_LAMBDA_ROLE_NAME }));
+    roleExists = true;
+  } catch (err) {
+    if (err.name !== 'NoSuchEntityException') {
+      throw err;
+    }
+  }
+
+  // Function status.
   let cfg;
   try {
     cfg = await lambda.send(
@@ -927,18 +922,23 @@ export async function getEdgeOptimizeLambdaStatus(credentials, region = EDGE_OPT
     );
   } catch (err) {
     if (err.name === 'ResourceNotFoundException') {
-      return { exists: false, versionArn: null };
+      return {
+        roleExists, exists: false, versionArn: null, ready: false,
+      };
     }
     throw err;
   }
   const latest = await getLatestLambdaVersion(lambda, EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME);
+  const ready = cfg.State === 'Active' && cfg.LastUpdateStatus !== 'InProgress' && !!latest;
   return {
+    roleExists,
     exists: true,
     state: cfg.State,
     lastUpdateStatus: cfg.LastUpdateStatus,
     functionArn: cfg.FunctionArn,
     versionArn: latest?.versionArn || null,
     version: latest?.version,
+    ready,
   };
 }
 
