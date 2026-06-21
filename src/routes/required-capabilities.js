@@ -137,6 +137,7 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/edge-optimize/create-function',
   'POST /sites/:siteId/llmo/edge-optimize/apply-cache',
   'POST /sites/:siteId/llmo/edge-optimize/create-lambda',
+  'POST /sites/:siteId/llmo/edge-optimize/lambda-status',
   'POST /sites/:siteId/llmo/edge-optimize/apply-associations',
   'POST /sites/:siteId/llmo/edge-optimize/verify',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',

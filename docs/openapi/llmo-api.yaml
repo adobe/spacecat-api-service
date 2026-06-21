@@ -2949,6 +2949,69 @@ site-llmo-edge-optimize-create-lambda:
     security:
       - api_key: [ ]
 
+site-llmo-edge-optimize-lambda-status:
+  post:
+    tags:
+      - llmo
+    summary: Read the Edge Optimize Lambda@Edge function status
+    description: |
+      Used by the CloudFront "Deploy routing" wizard to check on entry (and poll after a slow or
+      timed-out create) whether the `edgeoptimize-origin` Lambda@Edge function already exists and
+      has a published numbered version. Read-only — assumes the connector role and inspects the
+      function configuration + versions.
+    operationId: getEdgeOptimizeLambdaStatus
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-connector-request'
+    responses:
+      '200':
+        description: The Lambda@Edge function status.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - exists
+                - versionArn
+              properties:
+                exists:
+                  type: boolean
+                state:
+                  type: string
+                lastUpdateStatus:
+                  type: string
+                functionArn:
+                  type: string
+                versionArn:
+                  type: string
+                  description: Latest published numbered version ARN, or null if not yet published.
+                version:
+                  type: string
+              example:
+                exists: true
+                state: Active
+                lastUpdateStatus: Successful
+                functionArn: arn:aws:lambda:us-east-1:682033462621:function:edgeoptimize-origin
+                versionArn: arn:aws:lambda:us-east-1:682033462621:function:edgeoptimize-origin:1
+                version: '1'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 site-llmo-edge-optimize-apply-associations:
   post:
     tags:

@@ -490,6 +490,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/edge-optimize/create-function': llmoController.createEdgeOptimizeRoutingFunction,
     'POST /sites/:siteId/llmo/edge-optimize/apply-cache': llmoController.applyEdgeOptimizeCache,
     'POST /sites/:siteId/llmo/edge-optimize/create-lambda': llmoController.createEdgeOptimizeLambda,
+    'POST /sites/:siteId/llmo/edge-optimize/lambda-status': llmoController.getEdgeOptimizeLambdaStatus,
     'POST /sites/:siteId/llmo/edge-optimize/apply-associations': llmoController.applyEdgeOptimizeAssociations,
     'POST /sites/:siteId/llmo/edge-optimize/verify': llmoController.verifyEdgeOptimizeRouting,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,

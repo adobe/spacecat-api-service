@@ -643,6 +643,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-apply-cache'
   /sites/{siteId}/llmo/edge-optimize/create-lambda:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-create-lambda'
+  /sites/{siteId}/llmo/edge-optimize/lambda-status:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-lambda-status'
   /sites/{siteId}/llmo/edge-optimize/apply-associations:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-apply-associations'
   /sites/{siteId}/llmo/edge-optimize/verify:

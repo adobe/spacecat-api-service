@@ -93,6 +93,7 @@ describe('LlmoController', () => {
   let createEdgeOptimizeRoutingFunctionStub;
   let applyEdgeOptimizeCacheHeadersStub;
   let createEdgeOptimizeLambdaStub;
+  let getEdgeOptimizeLambdaStatusStub;
   let applyEdgeOptimizeAssociationsStub;
   let verifyEdgeOptimizeRoutingStub;
   let mockTokowakaClient;
@@ -210,6 +211,7 @@ describe('LlmoController', () => {
     createEdgeOptimizeRoutingFunctionStub = sinon.stub();
     applyEdgeOptimizeCacheHeadersStub = sinon.stub();
     createEdgeOptimizeLambdaStub = sinon.stub();
+    getEdgeOptimizeLambdaStatusStub = sinon.stub();
     applyEdgeOptimizeAssociationsStub = sinon.stub();
     verifyEdgeOptimizeRoutingStub = sinon.stub();
 
@@ -290,6 +292,7 @@ describe('LlmoController', () => {
         ),
         applyEdgeOptimizeCacheHeaders: (...args) => applyEdgeOptimizeCacheHeadersStub(...args),
         createEdgeOptimizeLambda: (...args) => createEdgeOptimizeLambdaStub(...args),
+        getEdgeOptimizeLambdaStatus: (...args) => getEdgeOptimizeLambdaStatusStub(...args),
         applyEdgeOptimizeAssociations: (...args) => applyEdgeOptimizeAssociationsStub(...args),
         verifyEdgeOptimizeRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
       },
@@ -8541,6 +8544,74 @@ describe('LlmoController', () => {
       });
       const result = await LlmoControllerNoAdmin(mockContext)
         .createEdgeOptimizeLambda(lambdaContext);
+      expect(result.status).to.equal(403);
+    });
+  });
+
+  describe('getEdgeOptimizeLambdaStatus', () => {
+    let statusContext;
+
+    beforeEach(() => {
+      assumeConnectorRoleStub = sinon.stub().resolves({
+        roleArn: 'arn:aws:iam::120569600543:role/AdobeLLMOptimizerCloudFrontConnectorRole',
+        accountId: '120569600543',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+      });
+      getEdgeOptimizeLambdaStatusStub = sinon.stub().resolves({
+        exists: true, state: 'Active', lastUpdateStatus: 'Successful', versionArn: 'arn:fn:2', version: '2',
+      });
+      statusContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+        env: {},
+      };
+    });
+
+    it('returns the Lambda@Edge status with the versioned ARN', async () => {
+      const result = await controller.getEdgeOptimizeLambdaStatus(statusContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.exists).to.equal(true);
+      expect(body.versionArn).to.equal('arn:fn:2');
+      expect(getEdgeOptimizeLambdaStatusStub.calledOnce).to.equal(true);
+    });
+
+    it('returns exists:false when the function is absent', async () => {
+      getEdgeOptimizeLambdaStatusStub = sinon.stub().resolves({ exists: false, versionArn: null });
+      const result = await controller.getEdgeOptimizeLambdaStatus(statusContext);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.exists).to.equal(false);
+      expect(body.versionArn).to.equal(null);
+    });
+
+    it('returns 400 for an invalid account id', async () => {
+      const result = await controller.getEdgeOptimizeLambdaStatus({ ...statusContext, data: { accountId: '123', externalId: 'ext' } });
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns 400 when the external id is missing', async () => {
+      const result = await controller.getEdgeOptimizeLambdaStatus({ ...statusContext, data: { accountId: '120569600543' } });
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns 400 when the AWS call fails', async () => {
+      getEdgeOptimizeLambdaStatusStub = sinon.stub().rejects(new Error('ListVersions failed'));
+      const result = await controller.getEdgeOptimizeLambdaStatus(statusContext);
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getEdgeOptimizeLambdaStatus(statusContext);
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+      const result = await deniedController.getEdgeOptimizeLambdaStatus(statusContext);
       expect(result.status).to.equal(403);
     });
   });

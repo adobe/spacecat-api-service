@@ -41,6 +41,7 @@ import {
   createEdgeOptimizeRoutingFunction,
   applyEdgeOptimizeCacheHeaders,
   createEdgeOptimizeLambda,
+  getEdgeOptimizeLambdaStatus,
   applyEdgeOptimizeAssociations,
   verifyEdgeOptimizeRouting,
 } from '../../support/edge-optimize.js';
@@ -2555,6 +2556,38 @@ function LlmoController(ctx) {
     }
   };
 
+  // Read-only status for the Lambda@Edge function so the wizard can detect on entry (and poll
+  // after a slow/timed-out create) whether it already exists with a published version.
+  const getEdgeOptimizeLambdaStatusHandler = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read the edge optimize Lambda@Edge status');
+      if (error) {
+        return error;
+      }
+
+      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      const status = await getEdgeOptimizeLambdaStatus(credentials);
+      return ok(status);
+    } catch (error) {
+      log.error(`Failed to read Lambda@Edge status for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
   // Associate the routing CloudFront Function (viewer-request) and Lambda@Edge (origin-request/
   // response, versioned ARN) onto the user-selected behavior (mutation). Used by "Associate".
   const applyEdgeOptimizeAssociationsHandler = async (context) => {
@@ -2662,6 +2695,7 @@ function LlmoController(ctx) {
     createEdgeOptimizeRoutingFunction: createEdgeOptimizeRoutingFunctionHandler,
     applyEdgeOptimizeCache: applyEdgeOptimizeCacheHandler,
     createEdgeOptimizeLambda: createEdgeOptimizeLambdaHandler,
+    getEdgeOptimizeLambdaStatus: getEdgeOptimizeLambdaStatusHandler,
     applyEdgeOptimizeAssociations: applyEdgeOptimizeAssociationsHandler,
     verifyEdgeOptimizeRouting: verifyEdgeOptimizeRoutingHandler,
     getLlmoSheetData,
