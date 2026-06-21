@@ -197,6 +197,25 @@ export const INTERNAL_ROUTES = [
   // bucket like `monitoring:read` that would re-create the same problem for the next
   // monitoring endpoint.
   'GET /monitoring/drs-bp-pg-audit',
+
+  // Hybrid permission model — state-layer management + capability
+  // introspection. Customer-org admins manage their own ReBAC bindings
+  // here, gated by `<product>/can_manage_users` (CRUD) and
+  // `<product>/can_view` (catalog/effective-capabilities) in
+  // facs-capabilities.js. Never S2S — automated consumers must never be
+  // able to grant themselves access to customer resources.
+  //
+  // No bulk DELETE: revoke is by-id only and performs a non-revertable
+  // soft-revoke via the wrpc_revoke_facs_access_mapping RPC. The history
+  // endpoint surfaces tombstoned bindings alongside active ones for audit.
+  'GET /state/access-mappings',
+  'GET /state/access-mappings/history',
+  'POST /state/access-mappings',
+  'PATCH /state/access-mappings/:id',
+  'DELETE /state/access-mappings/:id',
+  'GET /organizations/:organizationId/permission/audit-logs',
+  'GET /product/capabilities',
+  'GET /user/capabilities/:resourceId',
 ];
 
 /**

@@ -100,6 +100,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
+ * @param {Object} stateAccessMappingsController - State-layer access mappings + caps.
+ * @param {Object} serenityController - Semrush AIO proxy controller (prompts + projects).
  * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
  * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
@@ -161,6 +163,7 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
+  stateAccessMappingsController,
   agenticCategoriesController,
   agenticPageTypesController,
   serenityController,
@@ -704,6 +707,24 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/topic/gap-topics-export': aiVisibilityController.getV1TopicGapTopicsExport,
     'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': aiVisibilityController.getV1TopicGapTopicsTotals,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
+
+    // Hybrid permission model — state-layer management + capability
+    // introspection endpoints. Gated by `facsWrapper` against
+    // `PRODUCTS_ROUTES.<product>` (state-layer CRUD requires
+    // `<product>/can_manage_users`; capability introspection requires
+    // `<product>/can_view`). See:
+    //   - platform/decisions/mac-state-layer.md §"State Layer Management Endpoints"
+    //   - platform/decisions/rebac-hybrid-permission-model.md
+    'GET /state/access-mappings': stateAccessMappingsController.listMappings,
+    'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
+    'POST /state/access-mappings': stateAccessMappingsController.createMapping,
+    'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
+    'DELETE /state/access-mappings/:id': stateAccessMappingsController.revokeMapping,
+    'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
+    'GET /user/capabilities/:resourceId': stateAccessMappingsController.getUserCapabilities,
+    'GET /organizations/:organizationId/permission/audit-logs': stateAccessMappingsController.getAuditLogs,
+
+    // AI Visibility (Semrush gRPC)
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': aiVisibilityController.getV1PromptBrandPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': aiVisibilityController.getV1PromptGapPromptsExport,

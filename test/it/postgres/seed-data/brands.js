@@ -13,7 +13,11 @@
 /**
  * Baseline brands for IT tests.
  *
- * BRAND_1 belongs to ORG_1 (accessible org).
+ * BRAND_1 belongs to ORG_1 (accessible org) and is bound to SITE_1, its base
+ * site. `site_id` is required because `status` is 'active': the
+ * `chk_active_brand_has_site_id` constraint (mysticat-data-service #638)
+ * rejects an active brand with a null `site_id`. SITE_1 (33333333-…) is in the
+ * same org and is the site the brand-for-org-site tests bind BRAND_1 to.
  *
  * Format: snake_case (PostgreSQL / PostgREST)
  */
@@ -21,8 +25,8 @@ export const brands = [
   {
     id: 'ab111111-1111-4111-b111-111111111111',
     organization_id: '11111111-1111-4111-b111-111111111111',
-    name: 'Test Brand',
     site_id: '33333333-3333-4333-b333-333333333333',
+    name: 'Test Brand',
     status: 'active',
     origin: 'human',
     regions: ['us'],

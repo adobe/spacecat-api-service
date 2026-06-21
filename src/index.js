@@ -27,6 +27,7 @@ import {
   JwtHandler,
   s2sAuthWrapper,
   readOnlyAdminWrapper,
+  facsWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
@@ -98,6 +99,7 @@ import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
+import routeFacsCapabilities from './routes/facs-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
@@ -108,6 +110,7 @@ import AgenticPageTypesController from './controllers/agentic-page-types.js';
 import SerenityController from './controllers/serenity.js';
 import ProxyController from './controllers/proxy.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
+import StateAccessMappingsController from './controllers/state-access-mappings.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
 
@@ -276,6 +279,7 @@ async function run(request, context) {
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
     const aiVisibilityController = AiVisibilityController(context, log, context.env);
+    const stateAccessMappingsController = StateAccessMappingsController(context);
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
     const serenityController = SerenityController(context, log, context.env);
@@ -336,6 +340,7 @@ async function run(request, context) {
       webhooksController,
       aiVisibilityController,
       fanoutReportController,
+      stateAccessMappingsController,
       agenticCategoriesController,
       agenticPageTypesController,
       serenityController,
@@ -398,6 +403,10 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // 3. readOnlyAdminWrapper — enforces read-only access for read-only admin tokens (see
 //    adobe/spacecat-shared#1469); routes not present in routeCapabilities default to deny
 //    (fail-closed), so unmapped routes are blocked for read-only admins
+// 4. facsWrapper — enforces FACS (MAC) permissions for external customer users on
+//    FACS-gated routes. Bypasses internal identities and non-enrolled product/orgs (per
+//    per-product LaunchDarkly flags); deny-by-default for enrolled products on unmapped
+//    routes. See mysticat-architecture/platform/decisions/mac-state-layer.md.
 //
 // authHandlers order contract:
 //  - SkipAuthHandler first: local-dev escape hatch (no-op in Lambda).
@@ -436,6 +445,7 @@ const AUTH_HANDLERS = [
 ];
 
 const wrappedMain = wrap(run)
+  .with(facsWrapper, { routeFacsCapabilities })
   .with(readOnlyAdminWrapper, {
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,

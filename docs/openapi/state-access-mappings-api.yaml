@@ -1,0 +1,318 @@
+x-product-header: &xProductHeader
+  name: x-product
+  in: header
+  required: true
+  description: |
+    Uppercase product code that scopes the request (e.g. `LLMO`, `ASO`).
+    Must match a product declared in `routeFacsCapabilities.PRODUCTS_ROUTES`.
+  schema:
+    type: string
+    example: LLMO
+
+state-access-mappings:
+  get:
+    tags:
+      - state-access-mappings
+    summary: List active state-layer access mappings
+    description: |
+      Returns active (non-revoked) `facs_access_mappings` rows scoped to the
+      caller's IMS org and the product carried by the `x-product` header.
+
+      At least one of (`subjectType` + `subjectId`) or (`resourceType` +
+      `resourceId`) must be supplied. Pagination is cursor-based; page size
+      defaults to 50 and is hard-capped at 200.
+
+      Authority (hybrid-model §8.3): a FACS-layer `can_manage_users` holder (or
+      admin) may read org-wide. A state-layer manager may read **only**
+      resource-scoped (`resourceType` + `resourceId`) and only on resources
+      where they hold state `can_manage_users` — org-wide reads (no resource
+      filter) are FACS-only and return `403` for a state-layer manager.
+    operationId: listStateAccessMappings
+    parameters:
+      - *xProductHeader
+      - in: query
+        name: subjectType
+        schema: { type: string, enum: [user, org] }
+      - in: query
+        name: subjectId
+        schema: { type: string }
+      - in: query
+        name: resourceType
+        schema: { type: string }
+      - in: query
+        name: resourceId
+        schema: { type: string }
+      - in: query
+        name: limit
+        schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      - in: query
+        name: cursor
+        schema: { type: string }
+    responses:
+      '200':
+        description: Page of access mappings.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/StateAccessMappingsListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: []
+
+  post:
+    tags:
+      - state-access-mappings
+    summary: Create a state-layer access mapping
+    description: |
+      Inserts one `facs_access_mappings` binding row. Capability is
+      validated against the product's capability catalog. For `subjectType:
+      org`, `subjectId` must equal the caller's canonical org id.
+
+      Authority (hybrid-model §8.3): a FACS-layer `can_manage_users` holder (or
+      admin) may write on any resource. A state-layer manager may write **only**
+      on resources where they hold state `can_manage_users` (`403` otherwise),
+      and may never grant `can_manage_users` itself (FACS-only). Same rules
+      apply to `PATCH` and `DELETE` (evaluated against the target row's
+      resource).
+    operationId: createStateAccessMapping
+    parameters:
+      - *xProductHeader
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/StateAccessMappingCreateRequest'
+    responses:
+      '201':
+        description: Mapping created.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/StateAccessMapping'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '409':
+        description: Active mapping already exists for this subject and resource.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/StateAccessMappingConflictResponse'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: []
+
+state-access-mappings-history:
+  get:
+    tags:
+      - state-access-mappings
+    summary: List state-layer access mappings (active + revoked)
+    description: |
+      Audit-trail view. Same filters and pagination as
+      `GET /state/access-mappings` but includes tombstoned (revoked) rows.
+    operationId: listStateAccessMappingHistory
+    parameters:
+      - *xProductHeader
+      - in: query
+        name: subjectType
+        schema: { type: string, enum: [user, org] }
+      - in: query
+        name: subjectId
+        schema: { type: string }
+      - in: query
+        name: resourceType
+        schema: { type: string }
+      - in: query
+        name: resourceId
+        schema: { type: string }
+      - in: query
+        name: limit
+        schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      - in: query
+        name: cursor
+        schema: { type: string }
+    responses:
+      '200':
+        description: Page of access mappings (active + revoked).
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/StateAccessMappingsListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: []
+
+state-access-mapping-by-id:
+  parameters:
+    - *xProductHeader
+    - in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+  patch:
+    tags:
+      - state-access-mappings
+    summary: Replace the granted capabilities on a mapping
+    description: |
+      Single-field mutation: replaces the row's `grantedCapabilities` array.
+      404 when the row does not exist, has been revoked, or belongs to a
+      different org / product.
+    operationId: patchStateAccessMapping
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/StateAccessMappingPatchRequest'
+    responses:
+      '200':
+        description: Updated mapping.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/StateAccessMapping'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: []
+  delete:
+    tags:
+      - state-access-mappings
+    summary: Soft-revoke a mapping
+    description: |
+      Performs a soft-revoke via the `wrpc_revoke_facs_access_mapping`
+      Postgres RPC. Returns 204 on success, 404 when no active row matched
+      (idempotent re-revoke or unknown id).
+    operationId: revokeStateAccessMapping
+    responses:
+      '204':
+        description: Mapping revoked.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: []
+
+product-capabilities:
+  get:
+    tags:
+      - state-access-mappings
+    summary: List the capabilities the caller may assign
+    description: |
+      Returns the de-duplicated, sorted catalog of capability strings the
+      caller may **assign** to others under the product, shaped by the
+      caller's management authority (hybrid-model §8.3):
+
+        - FACS-layer manager (or admin) → the full catalog, including
+          `<product>/can_manage_users`.
+        - Otherwise (state-layer manager / any other caller) → the full
+          catalog **minus** `<product>/can_manage_users` — a state-layer
+          manager can assign every other capability but cannot mint new
+          managers.
+    operationId: getProductCapabilities
+    parameters:
+      - *xProductHeader
+    responses:
+      '200':
+        description: Product capability catalog.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ProductCapabilitiesResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: []
+
+user-capabilities-by-resource:
+  get:
+    tags:
+      - state-access-mappings
+    summary: Caller's effective capability set for one resource
+    description: |
+      Computes the union of:
+        - JWT `facs_permissions` (filtered to the product), and
+        - state-layer `granted_capabilities` for `(user, resource)` and
+          `(org, resource)`.
+
+      Reports per-capability provenance with tags from `jwt`, `state:user`,
+      `state:org`. When the product has multiple FACS resource types, the
+      caller must supply `?resourceType=<type>`.
+    operationId: getUserCapabilities
+    parameters:
+      - *xProductHeader
+      - in: path
+        name: resourceId
+        required: true
+        schema: { type: string }
+      - in: query
+        name: resourceType
+        required: false
+        schema: { type: string }
+    responses:
+      '200':
+        description: Effective capability set with provenance.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UserCapabilitiesResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: []
