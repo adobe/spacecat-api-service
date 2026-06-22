@@ -123,6 +123,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations',
   'POST /llmo/onboard',
+  'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
   'POST /llmo/onboard/update-query-index',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
