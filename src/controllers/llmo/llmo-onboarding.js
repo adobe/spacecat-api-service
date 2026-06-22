@@ -1245,6 +1245,178 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 }
 
 /**
+ * Activates the brand and kicks off prompt generation for an onboarded site.
+ *
+ * This is the brand/prompt-generation half of onboarding, owned by Piece 2
+ * (LLMO-5605). For v2 it writes the initial brand to the normalized brands table
+ * and triggers the Brandalf DRS job; for v1 it submits the legacy DRS
+ * prompt-generation job directly. Site-only onboarding (LLMO-5606) does NOT call
+ * this — it stands up the site with no brand entity, no Brandalf job, and no
+ * prompt-generation job.
+ *
+ * @param {object} params
+ * @param {string} params.onboardingMode - Resolved LLMO onboarding mode (v1/v2).
+ * @param {object} params.organization - The organization model.
+ * @param {object} params.site - The site model.
+ * @param {object} params.siteConfig - The (already-saved) site config object.
+ * @param {string} params.brandName - Brand name (label).
+ * @param {string} params.imsOrgId - IMS org ID.
+ * @param {string} params.baseURL - Site base URL.
+ * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region.
+ * @param {object} params.context - The request context.
+ * @param {Function} [params.say] - Optional Slack say callback.
+ * @returns {Promise<void>}
+ */
+export async function activateBrandAndGeneratePrompts({
+  onboardingMode,
+  organization,
+  site,
+  siteConfig,
+  brandName,
+  imsOrgId,
+  baseURL,
+  region,
+  context,
+  say = () => {},
+}) {
+  const { log } = context;
+
+  if (onboardingMode === LLMO_ONBOARDING_MODE_V2) {
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+
+    // Write initial brand to normalized brands table so DRS prompt sync can
+    // find it via GET /v2/orgs/{orgId}/brands before the Brandalf job finishes.
+    // Brandalf will upsert over this with LLM-identified sub-brands later.
+    // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
+    // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
+    // and would fail the exact-match lookup against the sites table.
+    // LLMO-5556: a second site onboarded under an existing brand name must not
+    // re-point that brand's primary site, nor clobber its URLs/aliases via the
+    // full-replace syncs inside upsertBrand. Detect the collision and skip the
+    // initial-brand write — the brand already exists so DRS sync still resolves
+    // it; a human then decides whether the new site is a sub-brand or a URL.
+    try {
+      const { data: existingBrand, error: lookupError } = await postgrestClient
+        .from('brands')
+        .select('id, site_id')
+        .eq('organization_id', organization.getId())
+        .eq('name', brandName.trim())
+        .maybeSingle();
+
+      if (lookupError) {
+        // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a
+        // query failure rather than throwing, so without this check a transient
+        // failure would fall through to upsertBrand and could re-point an
+        // existing brand's primary site. Skip the write as a precaution.
+        log.warn(`Skipping initial brand write: failed to look up existing brand "${brandName.trim()}" `
+          + `(org ${organization.getId()}): ${lookupError.message}`);
+      } else if (existingBrand?.site_id && existingBrand.site_id !== site.getId()) {
+        log.warn(`Skipping initial brand write: brand "${brandName.trim()}" `
+          + `(org ${organization.getId()}) already exists with a different primary site `
+          + `(existing=${existingBrand.site_id}, onboarding=${site.getId()}). `
+          + `Add ${baseURL} as a brand URL or onboard under a distinct brand name.`);
+      } else {
+        // No collision: proceed with upsert (new brand, existing brand with a
+        // null primary site, or a re-onboard of the same site). upsertBrand's
+        // own guard keeps an already-set site_id immutable on the last case.
+        // LLMO-5645: seed operator market when supplied; else the 'gl'
+        // placeholder (consistent with the V2 config + brandAliases, both
+        // overwritten by Brandalf's async result).
+        const stubRegions = onboardingStubRegions(region);
+        await upsertBrand({
+          organizationId: organization.getId(),
+          brand: {
+            name: brandName.trim(),
+            status: 'active',
+            baseSiteId: site.getId(),
+            region: stubRegions,
+            urls: [{ value: baseURL, type: 'base' }],
+            brandAliases: [{ name: brandName.trim(), regions: stubRegions }],
+          },
+          postgrestClient,
+          updatedBy: 'llmo-onboarding',
+          log,
+        });
+        log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
+      }
+    } catch (brandError) {
+      log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
+    }
+
+    // Trigger Brandalf immediately after the v2 config exists so downstream
+    // brand sync can attach results to the newly created organization.
+    try {
+      const drsClient = DrsClient.createFrom(context);
+      if (drsClient.isConfigured()) {
+        const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
+        await triggerBrandalfOnboardingJob({
+          drsClient,
+          organizationId: organization.getId(),
+          siteId: site.getId(),
+          imsOrgId,
+          brandName: brandName.trim(),
+          companyWebsite,
+          onboardingMode,
+          region,
+          log,
+          say,
+        });
+      } else {
+        log.debug('DRS client not configured, skipping Brandalf flow');
+      }
+    } catch (drsError) {
+      log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
+      say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+    }
+  } else {
+    // V1 has no Brandalf trigger, so DRS will not submit prompt generation
+    // automatically. Submit it directly here so v1 onboardings still get
+    // prompts written to the legacy LLMO config (LLMO-4534).
+    try {
+      const drsClient = DrsClient.createFrom(context);
+      if (drsClient.isConfigured()) {
+        const trimmedBrand = brandName.trim();
+        const brandProfile = siteConfig.getBrandProfile?.();
+        // LLMO-4534: v1 fallback audience is English-only. v2 onboardings get a
+        // locale-aware audience from brand_profile.main_profile.target_audience.
+        const audience = brandProfile?.main_profile?.target_audience
+          || `General consumers interested in ${trimmedBrand} products and services`;
+
+        // The audit-worker `drs-prompt-generation` handler takes the legacy LLMO
+        // config write path when `onboarding_mode` is absent from the DRS job
+        // metadata. Do NOT pass `onboarding_mode` here — adding it would route v1
+        // prompts to the v2 customer-config storage and break v1 onboardings.
+        //
+        // LLMO-4683: forward operator-supplied `region` so the GPT prompt-generation
+        // job conditions on the brand's market. Omitted → DRS client default ('US')
+        // applies, preserving prior behavior.
+        if (region) {
+          log.info(`Using operator-supplied region "${region}" for v1 DRS prompt generation`);
+        }
+        const drsJob = await drsClient.submitPromptGenerationJob({
+          baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
+          brandName: trimmedBrand,
+          audience,
+          siteId: site.getId(),
+          imsOrgId,
+          ...(region ? { region } : {}),
+        });
+        if (!drsJob?.job_id) {
+          throw new Error('DRS submitPromptGenerationJob returned no job_id');
+        }
+        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
+        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+      } else {
+        log.debug('DRS client not configured, skipping prompt generation');
+      }
+    } catch (drsError) {
+      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
+      say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
+    }
+  }
+}
+
+/**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
  * @param {string} [params.domain] - The domain name (alternative to baseURL)
@@ -1256,6 +1428,10 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  *   HTTP clients set this via the `temp-onboarding` body field.
  * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region code forwarded to V1 DRS
  *   prompt generation. Omitted → DRS client default ('US') applies.
+ * @param {boolean} [params.siteOnly=false] - Site-only onboarding (LLMO-5606). When true, stands
+ *   up the site, entitlement/enrollment, config, and site-analysis audits, but skips the entire
+ *   brand activation + prompt-generation block (no brand entity, no Brandalf job, no v1
+ *   prompt-generation job) and never enables/triggers llmo-customer-analysis.
  * @param {object} context - The request context
  * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result
@@ -1263,7 +1439,7 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
-    tempOnboarding, region,
+    tempOnboarding, region, siteOnly = false,
   } = params;
   const { env, log } = context;
 
@@ -1311,11 +1487,19 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       await updateIndexConfig(dataFolder, context, say);
     }
 
+    // Site-only onboarding (LLMO-5606) omits llmo-customer-analysis entirely — it
+    // belongs to the prompt-gen/brand path (Piece 2) which site-only skips, and it
+    // would otherwise never run (no DRS job to fire it via SNS). The full flow
+    // enables it so the DRS → SNS path can trigger it later.
+    const auditsToEnable = siteOnly
+      ? [...BASIC_AUDITS, 'llm-error-pages', 'wikipedia-analysis']
+      : [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis'];
+
     // Enable audits (continues on partial failure, logs warnings)
     await enableAudits(
       site,
       context,
-      [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis'],
+      auditsToEnable,
       say,
     );
 
@@ -1388,143 +1572,40 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         postgrestClient,
       });
       log.info(`Enabled brandalf feature flag for organization ${organization.getId()}`);
-
-      // Write initial brand to normalized brands table so DRS prompt sync can
-      // find it via GET /v2/orgs/{orgId}/brands before the Brandalf job finishes.
-      // Brandalf will upsert over this with LLM-identified sub-brands later.
-      // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
-      // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
-      // and would fail the exact-match lookup against the sites table.
-      // LLMO-5556: a second site onboarded under an existing brand name must not
-      // re-point that brand's primary site, nor clobber its URLs/aliases via the
-      // full-replace syncs inside upsertBrand. Detect the collision and skip the
-      // initial-brand write — the brand already exists so DRS sync still resolves
-      // it; a human then decides whether the new site is a sub-brand or a URL.
-      try {
-        const { data: existingBrand, error: lookupError } = await postgrestClient
-          .from('brands')
-          .select('id, site_id')
-          .eq('organization_id', organization.getId())
-          .eq('name', brandName.trim())
-          .maybeSingle();
-
-        if (lookupError) {
-          // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a
-          // query failure rather than throwing, so without this check a transient
-          // failure would fall through to upsertBrand and could re-point an
-          // existing brand's primary site. Skip the write as a precaution.
-          log.warn(`Skipping initial brand write: failed to look up existing brand "${brandName.trim()}" `
-            + `(org ${organization.getId()}): ${lookupError.message}`);
-        } else if (existingBrand?.site_id && existingBrand.site_id !== site.getId()) {
-          log.warn(`Skipping initial brand write: brand "${brandName.trim()}" `
-            + `(org ${organization.getId()}) already exists with a different primary site `
-            + `(existing=${existingBrand.site_id}, onboarding=${site.getId()}). `
-            + `Add ${baseURL} as a brand URL or onboard under a distinct brand name.`);
-        } else {
-          // No collision: proceed with upsert (new brand, existing brand with a
-          // null primary site, or a re-onboard of the same site). upsertBrand's
-          // own guard keeps an already-set site_id immutable on the last case.
-          // LLMO-5645: seed operator market when supplied; else the 'gl'
-          // placeholder (consistent with the V2 config + brandAliases, both
-          // overwritten by Brandalf's async result).
-          const stubRegions = onboardingStubRegions(region);
-          await upsertBrand({
-            organizationId: organization.getId(),
-            brand: {
-              name: brandName.trim(),
-              status: 'active',
-              baseSiteId: site.getId(),
-              region: stubRegions,
-              urls: [{ value: baseURL, type: 'base' }],
-              brandAliases: [{ name: brandName.trim(), regions: stubRegions }],
-            },
-            postgrestClient,
-            updatedBy: 'llmo-onboarding',
-            log,
-          });
-          log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
-        }
-      } catch (brandError) {
-        log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
-      }
-
-      // Trigger Brandalf immediately after the v2 config exists so downstream
-      // brand sync can attach results to the newly created organization.
-      try {
-        const drsClient = DrsClient.createFrom(context);
-        if (drsClient.isConfigured()) {
-          const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
-          await triggerBrandalfOnboardingJob({
-            drsClient,
-            organizationId: organization.getId(),
-            siteId: site.getId(),
-            imsOrgId,
-            brandName: brandName.trim(),
-            companyWebsite,
-            onboardingMode,
-            region,
-            log,
-            say,
-          });
-        } else {
-          log.debug('DRS client not configured, skipping Brandalf flow');
-        }
-      } catch (drsError) {
-        log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
-        say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
-      }
     } else {
-      log.info(`Skipping v2 customer config initialization and Brandalf flow for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
-
-      // V1 has no Brandalf trigger, so DRS will not submit prompt generation
-      // automatically. Submit it directly here so v1 onboardings still get
-      // prompts written to the legacy LLMO config (LLMO-4534).
-      try {
-        const drsClient = DrsClient.createFrom(context);
-        if (drsClient.isConfigured()) {
-          const trimmedBrand = brandName.trim();
-          const brandProfile = siteConfig.getBrandProfile?.();
-          // LLMO-4534: v1 fallback audience is English-only. v2 onboardings get a
-          // locale-aware audience from brand_profile.main_profile.target_audience.
-          const audience = brandProfile?.main_profile?.target_audience
-            || `General consumers interested in ${trimmedBrand} products and services`;
-
-          // The audit-worker `drs-prompt-generation` handler takes the legacy LLMO
-          // config write path when `onboarding_mode` is absent from the DRS job
-          // metadata. Do NOT pass `onboarding_mode` here — adding it would route v1
-          // prompts to the v2 customer-config storage and break v1 onboardings.
-          //
-          // LLMO-4683: forward operator-supplied `region` so the GPT prompt-generation
-          // job conditions on the brand's market. Omitted → DRS client default ('US')
-          // applies, preserving prior behavior.
-          if (region) {
-            log.info(`Using operator-supplied region "${region}" for v1 DRS prompt generation`);
-          }
-          const drsJob = await drsClient.submitPromptGenerationJob({
-            baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
-            brandName: trimmedBrand,
-            audience,
-            siteId: site.getId(),
-            imsOrgId,
-            ...(region ? { region } : {}),
-          });
-          if (!drsJob?.job_id) {
-            throw new Error('DRS submitPromptGenerationJob returned no job_id');
-          }
-          log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
-          say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
-        } else {
-          log.debug('DRS client not configured, skipping prompt generation');
-        }
-      } catch (drsError) {
-        log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
-        say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
-      }
+      log.info(`Skipping v2 customer config initialization for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
     }
 
-    // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
-    // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
-    await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
+    // Brand activation + prompt generation. This block is owned by Piece 2
+    // (LLMO-5605). Site-only onboarding (LLMO-5606) skips it entirely — no brand
+    // entity (upsertBrand), no Brandalf job, and no v1 prompt-generation job.
+    // ensureInitialCustomerConfigV2 + the brandalf feature flag deliberately stay
+    // in the always-run path above.
+    if (!siteOnly) {
+      await activateBrandAndGeneratePrompts({
+        onboardingMode,
+        organization,
+        site,
+        siteConfig,
+        brandName,
+        imsOrgId,
+        baseURL,
+        region,
+        context,
+        say,
+      });
+    } else {
+      log.info(`Site-only onboarding: skipping brand activation and prompt generation for site ${site.getId()}`);
+    }
+
+    // Trigger audits. The full flow does NOT trigger llm-error-pages or
+    // llmo-customer-analysis here — they fire after DRS prompt generation via
+    // SNS → audit-worker (LLMO-1819). Site-only (LLMO-5606) skips that DRS path,
+    // so it triggers llm-error-pages directly; llmo-customer-analysis is never run.
+    const auditsToTrigger = siteOnly
+      ? [...BASIC_AUDITS, 'llm-error-pages', 'wikipedia-analysis']
+      : [...BASIC_AUDITS, 'wikipedia-analysis'];
+    await triggerAudits(auditsToTrigger, context, site);
 
     return {
       site,
