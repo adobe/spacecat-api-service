@@ -491,7 +491,7 @@ function PreflightController(ctx, log, env) {
     //
     // Constructs a custom-env ImsClient with the dedicated PREFLIGHT_IMS_*
     // credentials provisioned in Vault for this S2S use case (SITES-46699).
-    // ASO team manages a dedicated IMS client (`aem_site_optimizer_preflight`)
+    // ASO team manages a dedicated IMS client (`aem_sites_optimizer_preflight`)
     // for this purpose, following the established spacecat
     // one-IMS-client-per-purpose convention (see `email-service.js` /
     // `trial-users.js` / cloud-manager-client / brand-client — each swaps
