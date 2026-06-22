@@ -47,6 +47,9 @@ export const INTERNAL_ROUTES = [
   // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
   'POST /webhooks/github',
 
+  // ASO redirect overlay - authenticated by X-ASO-API-Key (AsoOverlayKeyHandler), not S2S JWT
+  'GET /config/:service/redirects.txt',
+
   // Suggestion edge ops (edge-deploy, etc.): not yet required by S2S
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
@@ -607,9 +610,6 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/brands/source-opportunities': 'report:read',
   'GET /llmo/ai-visibility/brands/competitors': 'report:read',
   'GET /llmo/ai-visibility/competitors/metrics': 'report:read',
-  'GET /llmo/ai-visibility/competitors/gap-topics': 'report:read',
-  'GET /llmo/ai-visibility/competitors/gap-source-domains': 'report:read',
-  'GET /llmo/ai-visibility/competitors/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/meta': 'report:read',
   'GET /llmo/ai-visibility/prompts/responses/latest': 'report:read',
   'GET /llmo/ai-visibility/prompts/responses': 'report:read',
@@ -629,7 +629,11 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/gap-source-domains': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt-research/brands-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': 'report:read',
