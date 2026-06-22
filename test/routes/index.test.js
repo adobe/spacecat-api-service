@@ -547,6 +547,10 @@ describe('getRouteHandlers', () => {
     getPreview: sinon.stub(),
   };
 
+  const mockRedirectsController = {
+    getRedirects: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -607,6 +611,7 @@ describe('getRouteHandlers', () => {
       mockAgenticPageTypesController,
       mockSerenityController,
       mockProxyController,
+      mockRedirectsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -1023,6 +1028,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs/:jobId/result',
       'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
       'GET /consent-banner/:jobId',
+      'GET /config/:service/redirects.txt',
       'GET /sites/:siteId/scraped-content/:type',
       'GET /sites/:siteId/metadata',
       'GET /sites/:siteId/files',

@@ -104,6 +104,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
+ * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -165,11 +166,13 @@ export default function getRouteHandlers(
   agenticPageTypesController,
   serenityController,
   proxyController,
+  redirectsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
 
   const routeDefinitions = {
+    'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
     'PATCH /configurations/latest': configurationController.updateConfiguration,

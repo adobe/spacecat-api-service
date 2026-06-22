@@ -306,6 +306,8 @@ paths:
     $ref: './scrape-api.yaml#/get-scraped-content-list'
   /sites/{siteId}/files:
     $ref: './scrape-api.yaml#/get-files'
+  /config/{service}/redirects.txt:
+    $ref: './aso-overlay-api.yaml#/get-aso-redirects'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:
@@ -770,6 +772,11 @@ components:
       in: header
       name: X-Hub-Signature-256
       description: 'HMAC-SHA256 signature of the request body, provided by GitHub on webhook delivery'
+    aso_overlay_api_key:
+      type: apiKey
+      in: header
+      name: X-ASO-API-Key
+      description: 'Static key the AEM dispatcher presents to fetch ASO redirect overlays from /config/*'
   schemas:
     $ref: './schemas.yaml'
   examples:
