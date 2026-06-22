@@ -891,9 +891,10 @@ export async function upsertPrompts({
 
   // TEMP timing instrumentation (LLMO prompts-upload 503 diagnosis) — remove after.
   // Logged via the structured logger (context.log) so it lands in Coralogix;
-  // bare console.* only reaches CloudWatch.
+  // bare console.* only reaches CloudWatch. Uses warn level so it is never
+  // dropped by an info-filtering LOG_LEVEL in dev (it's a temporary diagnostic).
   const tEnd = Date.now();
-  log.info(`[upsertPrompts] timing ${JSON.stringify({
+  log.warn(`[upsertPrompts] timing ${JSON.stringify({
     brand_id: brandUuid,
     incoming: prompts.length,
     existing: existing?.length ?? 0,
