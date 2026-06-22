@@ -247,7 +247,10 @@ const routeRequiredCapabilities = {
   'GET /organizations': CAP_ORG_READ_ALL,
   'POST /organizations': 'organization:write',
   'GET /organizations/:organizationId': 'organization:read',
-  'GET /organizations/by-ims-org-id/:imsOrgId': 'organization:read',
+  // Reachable by tenant-scoped `organization:read` (own org) and cross-tenant
+  // `organization:readAll` (platform enumeration). The controller bypasses org-scoping
+  // only for admin or readAll callers. See READALL_CAPABILITY_DESIGN.md.
+  'GET /organizations/by-ims-org-id/:imsOrgId': ['organization:read', CAP_ORG_READ_ALL],
   'GET /organizations/by-ims-org-id/:imsOrgId/slack-config': 'organization:read',
   'PATCH /organizations/:organizationId': 'organization:write',
   'DELETE /organizations/:organizationId': 'organization:write',
@@ -401,7 +404,10 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
-  'GET /sites/by-base-url/:baseURL': 'site:read',
+  // Reachable by tenant-scoped `site:read` (own site) and cross-tenant `site:readAll`
+  // (platform enumeration). The controller bypasses org-scoping only for admin or
+  // readAll callers. See READALL_CAPABILITY_DESIGN.md.
+  'GET /sites/by-base-url/:baseURL': ['site:read', CAP_SITE_READ_ALL],
   'GET /sites/by-delivery-type/:deliveryType': 'site:read',
   'GET /sites/with-latest-audit/:auditType': 'site:read',
 
@@ -627,6 +633,10 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt-research/brands-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt-research/topics-export': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'report:read',
   'GET /llmo/ai-visibility/v1/meta/meta': 'report:read',

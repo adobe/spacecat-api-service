@@ -45,6 +45,50 @@ function normalizeNullableText(value, fieldName) {
 }
 
 /**
+ * Normalizes the deferred Semrush provisioning data of a pending (draft) brand
+ * into the shape persisted in `brands.pending_semrush_provisioning` (a JSONB object
+ * `{ primaryUrl?, markets: [{ market, languageCode }] }`). These are the primary
+ * URL + initial market the add-brand wizard collected before a
+ * sub-workspace/project exist; activation reads them back to provision the real
+ * Semrush projects, then clears the column.
+ *
+ * Returns `undefined` when the caller did not supply the field (leave the column
+ * untouched), `null` when explicitly cleared or nothing useful remains, or the
+ * cleaned object otherwise.
+ *
+ * @param {unknown} value - `{ primaryUrl?, markets }`, null, or undefined.
+ * @returns {{primaryUrl: (string|null), markets: Array<{market: string,
+ *   languageCode: string}>}|null|undefined}
+ */
+function normalizePendingSemrushProvisioning(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    const error = new Error('pendingSemrushProvisioning must be an object or null');
+    error.status = 400;
+    throw error;
+  }
+  const markets = (Array.isArray(value.markets) ? value.markets : [])
+    .map((m) => ({
+      market: typeof m?.market === 'string' ? m.market.trim() : '',
+      languageCode: typeof m?.languageCode === 'string' ? m.languageCode.trim() : '',
+    }))
+    .filter((m) => hasText(m.market) && hasText(m.languageCode));
+  const primaryUrl = typeof value.primaryUrl === 'string' && hasText(value.primaryUrl)
+    ? value.primaryUrl.trim()
+    : null;
+  // Nothing worth persisting → treat as cleared.
+  if (markets.length === 0 && !hasText(primaryUrl)) {
+    return null;
+  }
+  return { primaryUrl, markets };
+}
+
+/**
  * Splits a full URL string into its base URL and path.
  * e.g. "https://example.com/products" -> { base: "https://example.com", path: "/products" }
  * A root path "/" is treated as no path (empty string).
@@ -139,6 +183,12 @@ function mapDbBrandToV2(row) {
     // brands still in flat mode (no sub-workspace minted yet). Consumers use it
     // to scope per-brand Semrush views to the sub-workspace.
     semrushWorkspaceId: row.semrush_workspace_id || null,
+    // Read-only: deferred Semrush provisioning data for a pending (draft) brand
+    // (serenity dual-mode). Object { primaryUrl, markets: [{ market,
+    // languageCode }] } the wizard collected before provisioning; null once
+    // activation has provisioned it (or for a non-pending brand). Lets the UI
+    // re-hydrate the draft's primary URL + market on the activation form.
+    pendingSemrushProvisioning: row.pending_semrush_provisioning || null,
     status: row.status || 'active',
     origin: row.origin || 'human',
     description: row.description || null,
@@ -686,6 +736,17 @@ export async function upsertBrand({
     row.mention_sentiment_guidance = mentionSentimentGuidance;
   }
 
+  // Deferred Semrush provisioning data for a pending (draft) brand: the primary
+  // URL + desired (market, languageCode) the wizard collected before a
+  // sub-workspace / project exist. Persisted as JSONB so activation can
+  // provision it later, then cleared. Undefined leaves the column untouched.
+  const pendingSemrushProvisioning = normalizePendingSemrushProvisioning(
+    brand.pendingSemrushProvisioning,
+  );
+  if (pendingSemrushProvisioning !== undefined) {
+    row.pending_semrush_provisioning = pendingSemrushProvisioning;
+  }
+
   // A Semrush-anchored create (serenity-first, semrushWorkspaceId set) is NEVER
   // anchored by a SpaceCat site: its primary URL is the Semrush project domain,
   // which may coincidentally match an onboarded site. Setting site_id from that
@@ -811,6 +872,15 @@ export async function updateBrand({
   if (updates.region !== undefined) {
     patch.regions = (updates.region || [])
       .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
+  }
+
+  // Deferred Semrush provisioning data (pending/draft brands). Activation passes
+  // `pendingSemrushProvisioning: null` to clear it once the real projects are
+  // provisioned.
+  if (updates.pendingSemrushProvisioning !== undefined) {
+    patch.pending_semrush_provisioning = normalizePendingSemrushProvisioning(
+      updates.pendingSemrushProvisioning,
+    );
   }
 
   // Clear legacy columns on any brand update so old data doesn't linger.

@@ -3823,6 +3823,32 @@ Brand:
         scope per-brand Semrush views to the sub-workspace.
       type: [string, 'null']
       readOnly: true
+    pendingSemrushProvisioning:
+      description: >-
+        Read-only. Deferred Semrush provisioning data for a pending (draft)
+        brand: the primary URL + initial market chosen at "Save as pending"
+        before the brand's sub-workspace + project exist. Fed into activation;
+        each market that provisions is removed and the field is nulled once none
+        remain (failed markets stay for retry). Null for a non-pending brand (or
+        a draft with no provisioning data yet). primaryUrl may be null (saved as
+        pending before a URL was entered).
+      type: [object, 'null']
+      readOnly: true
+      properties:
+        primaryUrl:
+          type: [string, 'null']
+        markets:
+          type: array
+          items:
+            type: object
+            required:
+              - market
+              - languageCode
+            properties:
+              market:
+                type: string
+              languageCode:
+                type: string
     imsOrgId:
       description: The IMS Organization ID of the brand
       $ref: '#/ImsOrganizationId'
@@ -10235,6 +10261,30 @@ AiVisibilityV1PromptGapPromptsExportResponse:
       type: string
       description: Suggested CSV file name from `ExportResponse.file_name`.
       example: gap-prompts.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityPromptResearchExportResponse:
+  type: object
+  description: |
+    Prompt Research CSV export from the `GET /llmo/ai-visibility/v1/prompt-research/*-export`
+    endpoints (prompts, brands, source-domains, topics). Native Semrush v2 `ExportResponse`
+    protobuf JSON plus `srFilters` from the API layer. The CSV columns are produced by Semrush
+    and passed through unchanged. Omitting `engine` exports all engines in a single call.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: prompts_by_topic_fts_coffee_us.csv
     contentType:
       type: string
       description: MIME type from `ExportResponse.content_type`.
