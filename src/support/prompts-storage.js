@@ -641,6 +641,13 @@ export async function upsertPrompts({
     throw new Error('PostgREST client is required for prompts');
   }
 
+  // TEMP timing instrumentation (LLMO prompts-upload 503 diagnosis) — remove after.
+  const tStart = Date.now();
+  let tRead = tStart;
+  let tEnsure = tStart;
+  let tClassify = tStart;
+  let tInsert = tStart;
+
   const incomingIds = prompts
     .map((p) => p.id || p.prompt_id)
     .filter(hasText);
@@ -661,9 +668,11 @@ export async function upsertPrompts({
   ]);
 
   const { categoryMap, topicMap } = lookups;
+  tRead = Date.now();
 
   // eslint-disable-next-line no-await-in-loop,max-len
   await ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy);
+  tEnsure = Date.now();
 
   const getKey = (p) => {
     const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();
@@ -798,6 +807,8 @@ export async function upsertPrompts({
     }
   }
 
+  tClassify = Date.now();
+
   let created = 0;
   let updated = 0;
   const skipped = prompts.length - toInsert.length - toUpdate.length;
@@ -820,6 +831,7 @@ export async function upsertPrompts({
     }
     created = inserted?.length ?? toInsert.length;
   }
+  tInsert = Date.now();
 
   // Updates run with bounded concurrency rather than strictly serially: each row
   // targets a distinct primary key, so they never contend, and a serial loop of
@@ -874,6 +886,23 @@ export async function upsertPrompts({
     createdBy: r.created_by,
     updatedBy: r.updated_by,
     updatedAt: r.updated_at,
+  }));
+
+  // TEMP timing instrumentation (LLMO prompts-upload 503 diagnosis) — remove after.
+  const tEnd = Date.now();
+  // eslint-disable-next-line no-console
+  console.info('[upsertPrompts] timing', JSON.stringify({
+    brand_id: brandUuid,
+    incoming: prompts.length,
+    existing: existing?.length ?? 0,
+    toInsert: toInsert.length,
+    toUpdate: toUpdate.length,
+    ms_read: tRead - tStart,
+    ms_ensure_lookups: tEnsure - tRead,
+    ms_match_classify: tClassify - tEnsure,
+    ms_insert: tInsert - tClassify,
+    ms_update: tEnd - tInsert,
+    ms_total: tEnd - tStart,
   }));
 
   return {
