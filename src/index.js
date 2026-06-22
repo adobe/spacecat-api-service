@@ -44,6 +44,7 @@ import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
 
 import AuditsController from './controllers/audits.js';
+import TaskManagementController from './controllers/task-management.js';
 import OrganizationsController from './controllers/organizations.js';
 import ProjectsController from './controllers/project.js';
 import SitesController from './controllers/sites.js';
@@ -289,6 +290,7 @@ async function run(request, context) {
     const agenticPageTypesController = AgenticPageTypesController();
     const serenityController = SerenityController(context, log, context.env);
     const proxyController = ProxyController();
+    const taskManagementController = TaskManagementController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -352,6 +354,7 @@ async function run(request, context) {
       agenticPageTypesController,
       serenityController,
       proxyController,
+      taskManagementController,
       redirectsController,
     );
 
