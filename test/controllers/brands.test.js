@@ -919,6 +919,57 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(500);
     });
 
+    it('createPromptsByBrand returns 409 and logs at warn (not error) when INSERT fails with 23505', async () => {
+      const th = (v) => ({ then: (resolve) => resolve(v), catch: () => th(v) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  ...th({ data: [], error: null }),
+                  in: () => th({ data: [], error: null }),
+                }),
+              }),
+            }),
+            insert: () => ({
+              select: () => th({
+                data: null,
+                error: {
+                  code: '23505',
+                  message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+                },
+              }),
+            }),
+            update: () => ({ eq: () => th({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ id: 'p-1', prompt: 'Synthetic test prompt', regions: ['us'] }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(409);
+      expect(loggerStub.warn).to.have.been.called;
+      expect(loggerStub.error).to.not.have.been.called;
+    });
+
     it('updatePromptByBrandAndId returns 200 when prompt updated', async () => {
       const response = await brandsController.updatePromptByBrandAndId({
         ...context,

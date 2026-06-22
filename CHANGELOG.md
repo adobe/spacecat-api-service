@@ -1,3 +1,17 @@
+# [1.586.0](https://github.com/adobe/spacecat-api-service/compare/v1.585.1...v1.586.0) (2026-06-21)
+
+
+### Features
+
+* server-side text search for prompt research | LLMO-5216 ([#2650](https://github.com/adobe/spacecat-api-service/issues/2650)) ([b23243d](https://github.com/adobe/spacecat-api-service/commit/b23243dc93f14bfa7db6a7aea575b848af993d4c))
+
+## [1.585.1](https://github.com/adobe/spacecat-api-service/compare/v1.585.0...v1.585.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **prompts:** deterministic 500 on POST /prompts — dedup + error classification + collation fix ([#2646](https://github.com/adobe/spacecat-api-service/issues/2646)) ([177d778](https://github.com/adobe/spacecat-api-service/commit/177d77866c50e416ded892d736b18ccd609cde74))
+
 # [1.585.0](https://github.com/adobe/spacecat-api-service/compare/v1.584.2...v1.585.0) (2026-06-19)
 
 
