@@ -1,3 +1,10 @@
+## [1.589.1](https://github.com/adobe/spacecat-api-service/compare/v1.589.0...v1.589.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* **prerender:** remove URL batching, pass mode to audit-worker ([#2659](https://github.com/adobe/spacecat-api-service/issues/2659)) ([6967ee8](https://github.com/adobe/spacecat-api-service/commit/6967ee8c75e9726f5ff33d34b96bfd644569182f)), closes [adobe/spacecat-audit-worker#2713](https://github.com/adobe/spacecat-audit-worker/issues/2713) [adobe/spacecat-audit-worker#2713](https://github.com/adobe/spacecat-audit-worker/issues/2713) [adobe/spacecat-audit-worker#2713](https://github.com/adobe/spacecat-audit-worker/issues/2713)
+
 # [1.589.0](https://github.com/adobe/spacecat-api-service/compare/v1.588.0...v1.589.0) (2026-06-22)
 
 
