@@ -4625,20 +4625,75 @@ describe('Brands Controller', () => {
         expect(provisionStub.called).to.equal(false);
       });
 
-      it('returns 400 when semrushModelIds is missing or empty', async () => {
+      it('returns 400 when semrushModelIds is missing or empty and generatePrompts is true', async () => {
         const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
         const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
 
+        // generatePrompts:true → a prompt-generating project, which needs a model.
         const response = await controller.createBrandForOrg({
           ...context,
           params: { spaceCatId: ORGANIZATION_ID },
-          data: { name: 'New Brand', urls: [{ value: 'https://acme.com' }], semrushMarket: { market: 'us', languageCode: 'en' } },
+          data: {
+            name: 'New Brand',
+            urls: [{ value: 'https://acme.com' }],
+            semrushMarket: { market: 'us', languageCode: 'en' },
+            generatePrompts: true,
+          },
           dataAccess: mockDataAccess,
           attributes: { authInfo: { profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(400);
         expect(provisionStub.called).to.equal(false);
+      });
+
+      it('returns 400 when generatePrompts is true but no market/language was supplied', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        // generatePrompts true signals Semrush mode even with no semrushMarket, but
+        // generating prompts needs a project → market+language are required.
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'New Brand',
+            urls: [{ value: 'https://acme.com' }],
+            generatePrompts: true,
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(provisionStub.called).to.equal(false);
+      });
+
+      it('provisions WITHOUT models when generatePrompts is false (model-less project allowed)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'New Brand',
+            urls: [{ value: 'https://acme.com' }],
+            semrushMarket: { market: 'us', languageCode: 'en' },
+            generatePrompts: false,
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(true);
+        // generateTopics is threaded through as false.
+        expect(provisionStub.firstCall.args[1].generateTopics).to.equal(false);
+        expect(provisionStub.firstCall.args[1].modelIds).to.deep.equal([]);
       });
 
       it('returns 400 when no primary URL is present to derive a domain', async () => {
@@ -4703,6 +4758,7 @@ describe('Brands Controller', () => {
         expect(upsertArgs.brand.pendingSemrushProvisioning).to.deep.equal({
           primaryUrl: null,
           markets: [{ market: 'us', languageCode: 'en' }],
+          generatePrompts: false,
         });
         // A draft is never bound to a workspace at create time.
         expect(upsertArgs.semrushWorkspaceId).to.equal(null);
@@ -4734,6 +4790,39 @@ describe('Brands Controller', () => {
         expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
           primaryUrl: 'https://acme.com/path',
           markets: [{ market: 'us', languageCode: 'en' }],
+          generatePrompts: false,
+        });
+      });
+
+      it('seeds the initial market modelIds from semrushModelIds on a pending draft (no provisioning)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'New Brand',
+            status: 'pending',
+            urls: [{ value: 'https://acme.com' }],
+            semrushMarket: { market: 'us', languageCode: 'en' },
+            // The wizard's model picks: unlike the direct path they are optional
+            // for a draft, but when present they seed the initial market.
+            semrushModelIds: ['chatgpt', 'perplexity'],
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(false);
+        expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
+          primaryUrl: 'https://acme.com',
+          markets: [{ market: 'us', languageCode: 'en', modelIds: ['chatgpt', 'perplexity'] }],
+          generatePrompts: false,
         });
       });
 
@@ -5008,7 +5097,9 @@ describe('Brands Controller', () => {
       expect(syncStub).to.not.have.been.called;
     });
 
-    it('strips system-controlled pendingSemrushProvisioning from a PATCH (no runtime injection)', async () => {
+    it('strips pendingSemrushProvisioning from a PATCH when the brand is NOT pending (no runtime injection)', async () => {
+      // The describe-level postgrest mock resolves the brand with status:'active',
+      // so the pending-only guard strips the stash an attacker tried to inject.
       const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: null });
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
@@ -5034,6 +5125,75 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       expect(updateBrandStub).to.have.been.calledOnce;
+      const { updates } = updateBrandStub.firstCall.args[0];
+      expect(updates).to.not.have.property('pendingSemrushProvisioning');
+    });
+
+    it('keeps pendingSemrushProvisioning on a PATCH when the brand IS pending (draft Markets-tab edit)', async () => {
+      // The draft Markets tab appends a market (with its LLMs) by PATCHing the
+      // stash; the pending-only guard must let it through for a pending brand.
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
+        select: sandbox.stub().returnsThis(),
+        eq: sandbox.stub().returnsThis(),
+        maybeSingle: sandbox.stub().resolves({ data: { status: 'pending' }, error: null }),
+      }));
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: null });
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: sinon.stub().resolves({}),
+        createSerenityTransport: sinon.stub(),
+      });
+
+      const stash = {
+        primaryUrl: 'https://acme.com',
+        markets: [{ market: 'us', languageCode: 'en', modelIds: ['chatgpt'] }],
+      };
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { pendingSemrushProvisioning: stash },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(updateBrandStub).to.have.been.calledOnce;
+      const { updates } = updateBrandStub.firstCall.args[0];
+      expect(updates.pendingSemrushProvisioning).to.deep.equal(stash);
+    });
+
+    it('strips pendingSemrushProvisioning when a PATCH would flip a pending brand to active', async () => {
+      // Going active is the serenity activate endpoint's job, not PATCH's: a
+      // PATCH that sets status:'active' must not also carry a staging stash.
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
+        select: sandbox.stub().returnsThis(),
+        eq: sandbox.stub().returnsThis(),
+        maybeSingle: sandbox.stub().resolves({ data: { status: 'pending' }, error: null }),
+      }));
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: null });
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: sinon.stub().resolves({}),
+        createSerenityTransport: sinon.stub(),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          status: 'active',
+          pendingSemrushProvisioning: {
+            primaryUrl: 'https://acme.com',
+            markets: [{ market: 'us', languageCode: 'en' }],
+          },
+        },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
       const { updates } = updateBrandStub.firstCall.args[0];
       expect(updates).to.not.have.property('pendingSemrushProvisioning');
     });

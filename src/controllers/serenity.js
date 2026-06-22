@@ -54,6 +54,8 @@ import {
   handleBulkDeletePromptsSubworkspace,
 } from '../support/serenity/handlers/prompts-subworkspace.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
+import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
+import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
@@ -76,15 +78,6 @@ const MAX_MARKETS = 50;
  */
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
-}
-
-/**
- * Stable identity for a market (market + languageCode), used to match a
- * provisioned market against the deferred-provisioning stash. Case/space
- * insensitive so 'US'/'us' and ' en'/'en' compare equal.
- */
-function marketKey(market, languageCode) {
-  return `${String(market ?? '').trim().toLowerCase()}|${String(languageCode ?? '').trim().toLowerCase()}`;
 }
 
 /**
@@ -532,6 +525,9 @@ function SerenityController(context, log, env) {
           auth.brandUuid,
           ctx.dataAccess.services.postgrestClient,
         );
+        // Optional prompt/topic generation for this market, defaulting to off so
+        // the endpoint's behavior is unchanged unless the caller opts in.
+        const genMarketTopics = (ctx.data || {}).generatePrompts === true;
         result = await handleCreateMarketSubworkspace(
           transport,
           brand,
@@ -540,7 +536,15 @@ function SerenityController(context, log, env) {
           log,
           null,
           brandPointerReloader(ctx, auth.brandUuid),
-          { brandAliases, brandUrlSources, competitors },
+          {
+            generateTopics: genMarketTopics,
+            topicCap: genMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
+            standardTags: genMarketTopics ? STANDARD_PROMPT_TAGS : [],
+            projectTags: genMarketTopics ? PROJECT_STANDARD_TAGS : [],
+            brandAliases,
+            brandUrlSources,
+            competitors,
+          },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
         // market's own domain, once its Semrush project is created. Best-effort:
@@ -784,28 +788,108 @@ function SerenityController(context, log, env) {
       const storedMarkets = Array.isArray(pendingSemrushProvisioning?.markets)
         ? pendingSemrushProvisioning.markets
         : [];
-      const markets = Array.isArray(body.markets) && body.markets.length > 0
-        ? body.markets
-        : storedMarkets;
-      if (markets.length === 0) {
-        throw new ErrorWithStatusCode('markets must be a non-empty array', 400);
-      }
-      if (markets.length > MAX_MARKETS) {
-        throw new ErrorWithStatusCode(`markets must not exceed ${MAX_MARKETS} entries`, 400);
-      }
+      // Whether to generate topics/prompts for the provisioned project(s). Body
+      // overrides the stash; default false preserves the historical activate
+      // behavior (projects published without generated prompts).
+      const generatePrompts = typeof body.generatePrompts === 'boolean'
+        ? body.generatePrompts
+        : pendingSemrushProvisioning?.generatePrompts === true;
+      const wasPending = brand.getStatus?.() === 'pending';
       // The Semrush project domain: the request's brandDomain, else derived from
       // the stashed draft primary URL (the wizard's "Save as pending" URL).
+      const suppliedUrlOrDomain = hasText(body.brandDomain)
+        || hasText(pendingSemrushProvisioning?.primaryUrl);
       const brandDomain = hasText(body.brandDomain)
         ? body.brandDomain
         : hostnameFromUrlString(pendingSemrushProvisioning?.primaryUrl);
-      // Fail fast with the same discipline as the direct create path
-      // (brands.js guards `if (!hasText(brandDomain)) return badRequest(...)`).
-      // A draft saved without a primary URL, activated without a body
-      // brandDomain, has no domain to provision against — a null would
-      // propagate into handleCreateMarketSubworkspace and surface as an opaque
-      // upstream error or an orphaned sub-workspace rather than a clear 400.
+
+      // ----- Sub-workspace-only activation (no primary URL → no project) -----
+      // A brand with no domain has nothing to provision a project against: just
+      // ensure its sub-workspace (which IS the active-brand anchor, persisted by
+      // ensureSubworkspace) and flip it active. This is the bare "save & continue
+      // later" draft; the user adds markets (projects) afterwards from the Markets
+      // tab. generatePrompts can't apply with no project, so reject the combo.
       if (!hasText(brandDomain)) {
-        throw new ErrorWithStatusCode('brandDomain is required to provision a Semrush market', 400);
+        // A URL/domain WAS supplied but did not resolve to a hostname → bad input,
+        // not a bare brand. Fail fast (a silent fallback would mask the typo and
+        // strand the user with a project-less brand they did not ask for).
+        if (suppliedUrlOrDomain) {
+          throw new ErrorWithStatusCode('brandDomain is required to provision a Semrush market', 400);
+        }
+        if (generatePrompts) {
+          throw new ErrorWithStatusCode('A primary URL is required to generate prompts', 400);
+        }
+        const bareWorkspaceId = await ensureSubworkspace(
+          transport,
+          brand,
+          auth.parentWorkspaceId,
+          1,
+          log,
+          {},
+          brandPointerReloader(ctx, auth.brandUuid),
+        );
+        let bareSucceeded = true;
+        if (typeof brand.setStatus === 'function') {
+          brand.setStatus('active');
+        }
+        if (hadPendingSemrushProvisioning
+          && typeof brand.setPendingSemrushProvisioning === 'function') {
+          brand.setPendingSemrushProvisioning(null);
+        }
+        try {
+          await brand.save();
+        } catch (saveError) {
+          bareSucceeded = false;
+          log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — sub-workspace ensured upstream but failed to persist active status', {
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: bareWorkspaceId,
+            error: saveError?.message,
+          });
+        }
+        log.info('serenity activate: completed (sub-workspace only)', {
+          brandId: auth.brandUuid,
+          semrushWorkspaceId: bareWorkspaceId,
+          fullySucceeded: bareSucceeded,
+        });
+        if (bareSucceeded) {
+          return createResponse(
+            { brandId: auth.brandUuid, status: 'active', markets: [] },
+            200,
+          );
+        }
+        // Save failed: a pending draft stays pending (retryable, idempotent — the
+        // sub-workspace 409s on retry); an already-active brand is left active
+        // (the flip was a no-op anyway).
+        if (wasPending) {
+          return createResponse(
+            {
+              brandId: auth.brandUuid,
+              status: 'pending',
+              error: 'serenityActivationIncomplete',
+              message: 'Sub-workspace provisioned but the active status could not be persisted.',
+              markets: [],
+            },
+            502,
+          );
+        }
+        return createResponse(
+          { brandId: auth.brandUuid, status: 'active', markets: [] },
+          207,
+        );
+      }
+
+      // ----- Project activation (primary URL present) -----
+      // Markets come from the body (reactivation), else the stash. A draft with a
+      // URL but no stashed market provisions a single US/EN fallback project — the
+      // same default brand-provisioning.js applies on the direct-create path.
+      const requestedMarkets = Array.isArray(body.markets) && body.markets.length > 0
+        ? body.markets
+        : storedMarkets;
+      const markets = requestedMarkets.length > 0
+        ? requestedMarkets
+        : [{ market: 'US', languageCode: 'en' }];
+      if (markets.length > MAX_MARKETS) {
+        throw new ErrorWithStatusCode(`markets must not exceed ${MAX_MARKETS} entries`, 400);
       }
       // Brand aliases are brand-level: read once and apply to every market's
       // project (Semrush brand_names) in this batch.
@@ -839,8 +923,6 @@ function SerenityController(context, log, env) {
         brandPointerReloader(ctx, auth.brandUuid),
       );
       const results = [];
-      let anyLive = false; // ≥1 market is live (created now OR already live)
-      let anyFailed = false; // ≥1 market neither created nor already-live
       for (const m of markets) {
         const createBody = {
           market: m.market,
@@ -850,6 +932,11 @@ function SerenityController(context, log, env) {
           brandDisplayName: body.brandDisplayName,
           name: m.name,
         };
+        // AI models (LLMs) the draft staged for this market (or that the activate
+        // request supplied). handleCreateMarketSubworkspace reads them from its
+        // OPTIONS arg (NOT the body) and attaches them to the project before
+        // publish; omitted/empty → none attached.
+        const marketModelIds = Array.isArray(m.modelIds) ? m.modelIds : [];
         let r;
         try {
           // eslint-disable-next-line no-await-in-loop
@@ -861,7 +948,25 @@ function SerenityController(context, log, env) {
             log,
             workspaceId,
             null,
-            { brandAliases, brandUrlSources, competitors },
+            {
+              modelIds: marketModelIds,
+              // Generate topics/prompts only when the brand opted in. When false
+              // the project is published empty (no prompts) — today's default.
+              generateTopics: generatePrompts,
+              topicCap: generatePrompts ? MAX_TOPICS_ON_CREATE : 0,
+              standardTags: generatePrompts ? STANDARD_PROMPT_TAGS : [],
+              projectTags: generatePrompts ? PROJECT_STANDARD_TAGS : [],
+              // A project with neither models nor generated prompts publishes
+              // "empty units" → Semrush's disguised quota 405. Tolerate it
+              // (best-effort, leaves a draft) rather than failing activation; a
+              // project with models OR prompts has real units and must publish.
+              publishMode: marketModelIds.length > 0 || generatePrompts
+                ? 'require'
+                : 'best-effort',
+              brandAliases,
+              brandUrlSources,
+              competitors,
+            },
           );
         } catch (e) {
           // A single market failing must NOT abort the batch: markets already
@@ -880,16 +985,10 @@ function SerenityController(context, log, env) {
             body: { error: 'serenityUpstreamError', message: 'Market activation failed' },
           };
         }
-        // 201 = created+published now; 409 = sliceExists (the market is already
-        // live upstream). Both mean the slice IS live, so both count toward
-        // brand-active and neither trips the partial-failure path — a full
-        // idempotent re-activate (every market already live → all 409s) is a
-        // complete success, not a 207/pending.
-        if (r.status === 201 || r.status === 409) {
-          anyLive = true;
-        } else {
-          anyFailed = true;
-        }
+        // 201 = created+published now; 409 = sliceExists (already live upstream).
+        // Both mean the slice IS live (a full idempotent re-activate where every
+        // market 409s is a complete success). The live/failed tally is derived
+        // from `results` after the loop (see allMarketsLive below).
         results.push({
           market: m.market,
           languageCode: m.languageCode,
@@ -898,58 +997,64 @@ function SerenityController(context, log, env) {
         });
       }
 
-      // Per-market cleanup of the deferred-provisioning stash: drop every market
-      // that was just provisioned (201 = created now, 409 = already live), so a
-      // retry re-provisions ONLY the markets that still failed. When nothing
-      // remains, clear the whole blob (the draft is fully provisioned). Markets
-      // that failed this round stay stashed (with the primary URL) for retry.
-      const provisionedKeys = new Set(
-        results
-          .filter((r) => r.status === 201 || r.status === 409)
-          .map((r) => marketKey(r.market, r.languageCode)),
-      );
-      const remainingMarkets = storedMarkets.filter(
-        (m) => !provisionedKeys.has(marketKey(m.market, m.languageCode)),
-      );
+      // ALL-OR-NOTHING activation. The brand flips to 'active' ONLY when the
+      // full provisioning chain succeeded:
+      //   1. sub-workspace ensured (above; throws → caught → error response),
+      //   2. EVERY market's project published (status 201/409 — all live),
+      //   3. the brand is linked to its sub-workspace (semrushWorkspaceId,
+      //      persisted by ensureSubworkspace above), AND
+      //   4. every provisioned market is mirrored as a Site + brand_sites row
+      //      (type='serenity').
+      // If ANY step fails, a brand that was pending STAYS pending — its stash and
+      // workspace pointer are left intact so a retry converges idempotently (live
+      // markets return 409; the site-link + stash-clear re-run) — and the
+      // response is an error. (An already-active brand re-supplying markets is
+      // never downgraded.)
+      const allMarketsLive = results.length > 0
+        && results.every((r) => r.status === 201 || r.status === 409);
 
-      if (anyLive && typeof brand.setStatus === 'function') {
-        brand.setStatus('active');
-        // Stash cleanup is intentionally coupled to this anyLive + setStatus
-        // guard so the flip-to-active and the stash trim happen in one
-        // brand.save() (atomic). If NOTHING went live (anyLive false) we skip
-        // both: the brand stays 'pending' with its stash intact, and a retry
-        // re-provisions — Semrush create is idempotent (a re-provisioned market
-        // returns 409, treated as success), so the coupling cannot strand a
-        // market or lose the stash.
-        // Update the stash to just the not-yet-provisioned markets (or null when
-        // all are done). Saved atomically with the status flip below.
-        const canSetStash = hadPendingSemrushProvisioning
-          && typeof brand.setPendingSemrushProvisioning === 'function';
-        if (canSetStash) {
-          const stashPrimaryUrl = pendingSemrushProvisioning.primaryUrl ?? null;
-          const remainingStash = remainingMarkets.length > 0
-            ? { primaryUrl: stashPrimaryUrl, markets: remainingMarkets }
-            : null;
-          brand.setPendingSemrushProvisioning(remainingStash);
+      // The brand_sites mirror is now a REQUIRED activation step (NOT
+      // best-effort): run it only once every market is live. Every market in
+      // this batch was provisioned against the single resolved `brandDomain`
+      // (body/stash primary URL), so one idempotent ensure on that domain links
+      // them all. A null return (any failure: bad input, cross-org, write error)
+      // keeps the brand pending below.
+      let siteLinked = false;
+      if (allMarketsLive) {
+        const linkedSiteId = await ensureMarketSite(ctx, {
+          // Optional-chained so a missing/throwing accessor can't 500 the call.
+          organizationId: brand.getOrganizationId?.(),
+          brandId: auth.brandUuid,
+          domain: brandDomain,
+          updatedBy: 'serenity-activate',
+          log,
+        });
+        siteLinked = hasText(linkedSiteId);
+      }
+
+      let fullySucceeded = allMarketsLive && siteLinked;
+
+      if (fullySucceeded) {
+        if (typeof brand.setStatus === 'function') {
+          brand.setStatus('active');
+        }
+        // Fully provisioned → clear the whole deferred-provisioning stash,
+        // saved atomically with the status flip.
+        if (hadPendingSemrushProvisioning
+          && typeof brand.setPendingSemrushProvisioning === 'function') {
+          brand.setPendingSemrushProvisioning(null);
         }
         try {
           await brand.save();
         } catch (saveError) {
-          // Non-atomic seam — the mirror of deactivate's
-          // SERENITY_DEACTIVATE_SAVE_DIVERGENCE guard. The markets are already
-          // LIVE upstream (published in the loop above; the workspace pointer was
-          // persisted by ensureSubworkspace), but persisting the 'active' status
-          // flip failed: brands.status stays 'pending' while markets are live —
-          // divergent. A re-activate converges (idempotent: every live market
-          // returns 409), so this self-heals. Crucially, do NOT collapse to a 5xx
-          // via mapError — that would discard the per-market results telling the
-          // caller which markets went live. Emit a DISTINCT, greppable token so
-          // the orphaned status is alertable (not indistinguishable from an
-          // ordinary upstream error), force the partial-failure path so the caller
-          // sees a 207 instead of a bare 200 that hides the divergence, then fall
-          // through to return the multi-status body.
-          anyFailed = true;
-          log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — markets live upstream but failed to persist active status', {
+          // Divergence seam: markets live + site linked upstream, but persisting
+          // the 'active' flip failed → the brand stays 'pending'. A re-activate
+          // converges (idempotent). Emit a DISTINCT, greppable token so the
+          // orphaned status is alertable, then fall through to the error response
+          // (do NOT collapse to a bare mapError 5xx — that discards the
+          // per-market results telling the caller what went live).
+          fullySucceeded = false;
+          log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — markets live + site linked upstream but failed to persist active status', {
             brandId: auth.brandUuid,
             semrushWorkspaceId: workspaceId,
             marketsLive: results.filter((r) => r.status === 201 || r.status === 409).length,
@@ -957,43 +1062,51 @@ function SerenityController(context, log, env) {
           });
         }
       }
-      // Mirror the activated markets as a SpaceCat Site (+ brand_sites link) once
-      // at least one is live. Every market provisioned by this activation was
-      // created against the single resolved `brandDomain` (the body/stash primary
-      // URL), so one idempotent ensure on that domain covers them. Markets added
-      // later via createMarket carry their own domain and are mirrored there.
-      // Best-effort: never fails the activation.
-      if (anyLive) {
-        await ensureMarketSite(ctx, {
-          // Optional-chained so a missing/throwing accessor can't 500 an
-          // activation whose markets are already live upstream — best-effort.
-          organizationId: brand.getOrganizationId?.(),
-          brandId: auth.brandUuid,
-          domain: brandDomain,
-          updatedBy: 'serenity-activate',
-          log,
-        });
-      }
-      // Success-level summary so a completed activation can be correlated with
-      // upstream state during incident investigation (counts + workspace).
+
+      const marketsLiveCount = results.filter((r) => r.status === 201 || r.status === 409).length;
       log.info('serenity activate: completed', {
         brandId: auth.brandUuid,
         semrushWorkspaceId: workspaceId,
-        status: anyLive ? 'active' : 'pending',
+        fullySucceeded,
+        siteLinked,
         marketsTotal: results.length,
-        marketsLive: results.filter((r) => r.status === 201 || r.status === 409).length,
-        marketsFailed: results.filter((r) => !(r.status === 201 || r.status === 409)).length,
+        marketsLive: marketsLiveCount,
+        marketsFailed: results.length - marketsLiveCount,
       });
-      // 207 Multi-Status whenever ANY market failed (even if others went live),
-      // so a caller keying off the HTTP status sees the partial failure instead
-      // of a bare 200. 200 only when every market is live.
+
+      if (fullySucceeded) {
+        return createResponse(
+          { brandId: auth.brandUuid, status: 'active', markets: results },
+          200,
+        );
+      }
+
+      // Not fully succeeded. A pending-draft activation that did not complete
+      // every step STAYS pending and returns an ERROR (HTTP 502: the upstream
+      // provisioning chain is incomplete) naming the failed step, with the
+      // per-market results so the caller can show specifics and retry.
+      if (wasPending) {
+        const failureReason = !allMarketsLive
+          ? 'One or more markets failed to provision.'
+          : 'Markets were provisioned but could not be linked as sites (brand_sites).';
+        return createResponse(
+          {
+            brandId: auth.brandUuid,
+            status: 'pending',
+            error: 'serenityActivationIncomplete',
+            message: failureReason,
+            markets: results,
+          },
+          502,
+        );
+      }
+
+      // An already-active brand re-supplying markets (reactivation) is never
+      // downgraded: a single failed market is reported as 207 Multi-Status while
+      // the brand remains active.
       return createResponse(
-        {
-          brandId: auth.brandUuid,
-          status: anyLive ? 'active' : 'pending',
-          markets: results,
-        },
-        anyFailed ? 207 : 200,
+        { brandId: auth.brandUuid, status: 'active', markets: results },
+        207,
       );
     } catch (e) {
       return mapError(e, log);

@@ -1028,6 +1028,73 @@ describe('brands-storage', () => {
       });
     });
 
+    it('preserves per-market modelIds (trimmed, non-empty) and omits the key when empty', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          status: 'pending',
+          pendingSemrushProvisioning: {
+            primaryUrl: 'https://acme.com',
+            markets: [
+              { market: 'US', languageCode: 'en', modelIds: [' chatgpt ', '', 'perplexity'] },
+              { market: 'DE', languageCode: 'de', modelIds: ['  '] },
+              { market: 'FR', languageCode: 'fr' },
+            ],
+          },
+        },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
+        primaryUrl: 'https://acme.com',
+        markets: [
+          { market: 'US', languageCode: 'en', modelIds: ['chatgpt', 'perplexity'] },
+          { market: 'DE', languageCode: 'de' },
+          { market: 'FR', languageCode: 'fr' },
+        ],
+      });
+    });
+
+    it('preserves an explicit generatePrompts flag, keeping a bare stash (no URL, no market) alive', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          status: 'pending',
+          // A bare no-prompt draft: no primary URL, no market — yet the explicit
+          // generatePrompts flag must keep the stash from collapsing to null so
+          // activation knows to provision a sub-workspace-only brand.
+          pendingSemrushProvisioning: { generatePrompts: false, markets: [] },
+        },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
+        primaryUrl: null,
+        markets: [],
+        generatePrompts: false,
+      });
+    });
+
     it('drops invalid markets and a blank primaryUrl from pending_semrush_provisioning, nulling it when empty', async () => {
       const client = createCapturingClient({
         brands: [

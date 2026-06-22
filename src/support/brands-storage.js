@@ -49,10 +49,13 @@ function normalizeNullableText(value, fieldName) {
 /**
  * Normalizes the deferred Semrush provisioning data of a pending (draft) brand
  * into the shape persisted in `brands.pending_semrush_provisioning` (a JSONB object
- * `{ primaryUrl?, markets: [{ market, languageCode }] }`). These are the primary
- * URL + initial market the add-brand wizard collected before a
- * sub-workspace/project exist; activation reads them back to provision the real
- * Semrush projects, then clears the column.
+ * `{ primaryUrl?, markets: [{ market, languageCode, modelIds? }], generatePrompts? }`).
+ * These are the primary URL + initial markets (each with its chosen AI models/LLMs)
+ * plus whether activation should generate topics/prompts — all collected by the
+ * add-brand wizard before a sub-workspace/project exist; activation reads them
+ * back to provision the real Semrush projects, then clears the column.
+ * The canonical shape is the `PendingSemrushProvisioning` type exported by
+ * `@adobe/spacecat-shared-data-access` (shared with project-elmo-ui).
  *
  * Returns `undefined` when the caller did not supply the field (leave the column
  * untouched), `null` when explicitly cleared or nothing useful remains, or the
@@ -60,7 +63,7 @@ function normalizeNullableText(value, fieldName) {
  *
  * @param {unknown} value - `{ primaryUrl?, markets }`, null, or undefined.
  * @returns {{primaryUrl: (string|null), markets: Array<{market: string,
- *   languageCode: string}>}|null|undefined}
+ *   languageCode: string, modelIds?: string[]}>}|null|undefined}
  */
 function normalizePendingSemrushProvisioning(value) {
   if (value === undefined) {
@@ -75,19 +78,42 @@ function normalizePendingSemrushProvisioning(value) {
     throw error;
   }
   const markets = (Array.isArray(value.markets) ? value.markets : [])
-    .map((m) => ({
-      market: typeof m?.market === 'string' ? m.market.trim() : '',
-      languageCode: typeof m?.languageCode === 'string' ? m.languageCode.trim() : '',
-    }))
+    .map((m) => {
+      const market = {
+        market: typeof m?.market === 'string' ? m.market.trim() : '',
+        languageCode: typeof m?.languageCode === 'string' ? m.languageCode.trim() : '',
+      };
+      // Per-market AI models (LLMs) chosen for this market; applied to the
+      // project at activation. Keep only non-empty strings; omit the key
+      // entirely when none remain so a cleared selection doesn't persist `[]`.
+      const modelIds = (Array.isArray(m?.modelIds) ? m.modelIds : [])
+        .map((id) => (typeof id === 'string' ? id.trim() : ''))
+        .filter(hasText);
+      if (modelIds.length > 0) {
+        market.modelIds = modelIds;
+      }
+      return market;
+    })
     .filter((m) => hasText(m.market) && hasText(m.languageCode));
   const primaryUrl = typeof value.primaryUrl === 'string' && hasText(value.primaryUrl)
     ? value.primaryUrl.trim()
     : null;
-  // Nothing worth persisting → treat as cleared.
-  if (markets.length === 0 && !hasText(primaryUrl)) {
+  // Whether activation should generate topics/prompts for the provisioned
+  // project(s). Only meaningful as an explicit boolean; absent means "legacy
+  // stash, leave generation off" and is omitted so the column stays minimal.
+  const hasGeneratePrompts = typeof value.generatePrompts === 'boolean';
+  // Nothing worth persisting → treat as cleared. An explicit generatePrompts
+  // flag IS worth persisting on its own: a bare no-prompt draft (no URL, no
+  // market) still needs the stash so activation knows to provision a
+  // sub-workspace-only brand rather than treating it as a non-Semrush brand.
+  if (markets.length === 0 && !hasText(primaryUrl) && !hasGeneratePrompts) {
     return null;
   }
-  return { primaryUrl, markets };
+  const result = { primaryUrl, markets };
+  if (hasGeneratePrompts) {
+    result.generatePrompts = value.generatePrompts;
+  }
+  return result;
 }
 
 /**

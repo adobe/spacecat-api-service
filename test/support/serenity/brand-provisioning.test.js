@@ -118,6 +118,29 @@ describe('provisionBrandSubworkspace', () => {
     expect(brandStub.getSemrushWorkspaceId()).to.equal(undefined);
   });
 
+  it('falls back to US/EN and publishes best-effort when generateTopics is false with no market or models', async () => {
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    await provisionBrandSubworkspace(buildContext(), {
+      ...baseParams,
+      market: '',
+      languageCode: '',
+      modelIds: [],
+      generateTopics: false,
+    });
+    const { args } = handleCreateMarketSubworkspace.firstCall;
+    const [, , , body, , , , options] = args;
+    // No market/language supplied → US/EN default slice.
+    expect(body.market).to.equal('US');
+    expect(body.languageCode).to.equal('en');
+    expect(body.name).to.equal('US - EN');
+    // No prompts + no models → empty units → best-effort publish (leaves a draft).
+    expect(options.generateTopics).to.equal(false);
+    expect(options.topicCap).to.equal(0);
+    expect(options.publishMode).to.equal('best-effort');
+  });
+
   it('forwards brandAliases to the handler for branded prompt classification', async () => {
     const { provisionBrandSubworkspace } = await loadModule({
       resolveWorkspaceId, handleCreateMarketSubworkspace,
@@ -214,11 +237,11 @@ describe('provisionBrandSubworkspace', () => {
     const { provisionBrandSubworkspace } = await loadModule({
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
+    // market/languageCode are NOT in this list: they are optional (a no-prompt
+    // brand may omit them, falling back to US/EN) — see the fallback test below.
     for (const bad of [
       { ...baseParams, brandName: '' },
       { ...baseParams, brandId: '' },
-      { ...baseParams, market: '' },
-      { ...baseParams, languageCode: '' },
       { ...baseParams, brandDomain: '' },
     ]) {
       // eslint-disable-next-line no-await-in-loop

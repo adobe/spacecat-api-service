@@ -389,6 +389,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             }),
             getBrandCompetitors: () => Promise.resolve([]),
           },
+          // activate's all-or-nothing flip REQUIRES the brand_sites mirror to
+          // succeed; stub it to a site id so the documented 200 (full success)
+          // shape is exercised rather than the 207/502 partial-failure paths.
+          '../../src/support/serenity/site-linkage.js': {
+            ensureMarketSite: () => Promise.resolve('site-x'),
+          },
         },
       )).default;
 

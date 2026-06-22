@@ -1397,10 +1397,24 @@ function BrandsController(ctx, log, env) {
       // before picking its primary URL.
       const isPendingBrand = brandData.status === 'pending';
       const { semrushMarket } = brandData;
-      if (isNonEmptyObject(semrushMarket)) {
-        const { market, languageCode } = semrushMarket;
-        if (!hasText(market) || !hasText(languageCode)) {
-          return badRequest('semrushMarket requires market and languageCode');
+      const hasSemrushMarket = isNonEmptyObject(semrushMarket);
+      // generatePrompts (default false) gates topic/prompt generation ONLY. The
+      // wizard sends it as an explicit boolean for every Semrush-mode create, so
+      // its presence ALSO signals Semrush mode even when no market was picked —
+      // a bare "save and continue later" draft (location/language optional).
+      const generatePrompts = brandData.generatePrompts === true;
+      const isSemrushMode = hasSemrushMarket || typeof brandData.generatePrompts === 'boolean';
+      if (isSemrushMode) {
+        let market;
+        let languageCode;
+        if (hasSemrushMarket) {
+          ({ market, languageCode } = semrushMarket);
+          if (!hasText(market) || !hasText(languageCode)) {
+            return badRequest('semrushMarket requires market and languageCode');
+          }
+        } else if (generatePrompts) {
+          // Generating prompts needs a project, which needs a (market, language).
+          return badRequest('market and languageCode are required when generatePrompts is true');
         }
         if (isPendingBrand) {
           // Defer provisioning: persist the chosen (market, languageCode) AND
@@ -1410,17 +1424,38 @@ function BrandsController(ctx, log, env) {
           // URL otherwise lives only on the Semrush side, so a site-less draft
           // would have nowhere to keep it. The row lands as 'pending' because it
           // has no anchor (no site_id, no semrush_workspace_id) — see
-          // upsertBrand's anchor check. Models are collected at activation.
+          // upsertBrand's anchor check.
           const primaryUrl = (Array.isArray(brandData.urls) ? brandData.urls : [])
             .map((u) => (typeof u === 'string' ? u : u?.value))
             .find(hasText) || null;
-          // TODO: the wizard creates a draft with a single market today, so we
-          // stash exactly one (market, languageCode). The activate flow already
-          // handles N stashed markets — if multi-market draft creation is ever
-          // added, build this `markets` array from all selected markets here.
+          // AI models (LLMs) the wizard collected. Unlike the direct-provision
+          // path they are NOT required here — a draft can be saved before the
+          // user picks any, and they can be edited per-market later from the
+          // Markets tab. Seed the initial market's modelIds with them when
+          // present so activation applies them; omit the key entirely when none
+          // were chosen (mirrors normalizePendingSemrushProvisioning).
+          const seedModelIds = Array.isArray(brandData.semrushModelIds)
+            ? brandData.semrushModelIds.filter(hasText)
+            : [];
+          // A no-prompt draft may carry NO market at all (location/language are
+          // optional then) — stash only the market actually picked. The activate
+          // flow already handles 0..N stashed markets: an empty list + a primary
+          // URL provisions a single US/EN fallback project, and an empty list +
+          // no URL provisions a sub-workspace-only brand.
+          // TODO: the wizard creates at most one market today; if multi-market
+          // draft creation is added, build this array from all selected markets.
+          const markets = [];
+          if (hasSemrushMarket) {
+            const initialMarket = { market, languageCode };
+            if (seedModelIds.length > 0) {
+              initialMarket.modelIds = seedModelIds;
+            }
+            markets.push(initialMarket);
+          }
           brandData.pendingSemrushProvisioning = {
             primaryUrl,
-            markets: [{ market, languageCode }],
+            markets,
+            generatePrompts,
           };
         } else {
           const brandDomain = brandDomainFromPayload(brandData);
@@ -1428,12 +1463,15 @@ function BrandsController(ctx, log, env) {
             return badRequest('A primary URL is required to provision a Semrush brand');
           }
           provisionedBrandDomain = brandDomain;
-          // The project needs at least one AI model (LLM) to track. The wizard
-          // collects them; reject a Semrush create that omits them.
+          // A prompt-generating project needs at least one AI model (LLM) to
+          // track. The wizard collects them; reject a prompt-generating Semrush
+          // create that omits them. With generatePrompts=false the project is
+          // created empty, so models are optional (it tracks nothing until the
+          // user adds them later).
           const modelIds = Array.isArray(brandData.semrushModelIds)
             ? brandData.semrushModelIds.filter(hasText)
             : [];
-          if (modelIds.length === 0) {
+          if (generatePrompts && modelIds.length === 0) {
             return badRequest('semrushModelIds must list at least one AI model to track');
           }
           // Brand aliases drive branded/non-branded prompt classification. Accept
@@ -1456,10 +1494,13 @@ function BrandsController(ctx, log, env) {
             spaceCatId,
             brandId: provisionedBrandId,
             brandName: brandData.name,
+            // market/languageCode may be undefined when generatePrompts=false and
+            // no market was picked — provisionBrandSubworkspace falls back to US/EN.
             market,
             languageCode,
             brandDomain,
             modelIds,
+            generateTopics: generatePrompts,
             brandAliases,
             brandUrlSources,
             // Competitors ("other brands to track") are merged into the initial
@@ -1559,13 +1600,28 @@ function BrandsController(ctx, log, env) {
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
 
-      // pendingSemrushProvisioning is system-controlled: written only when a
-      // brand is saved as 'pending' (createBrandForOrg) and consumed/cleared by
-      // the activate flow. It is marked readOnly in the OpenAPI schema, but that
-      // is a doc hint with no runtime teeth — strip it here so a PATCH caller
-      // cannot inject a primaryUrl/markets that activation would later trust for
-      // Semrush provisioning.
-      delete updates.pendingSemrushProvisioning;
+      // pendingSemrushProvisioning is the deferred-provisioning staging blob for
+      // a *pending* (draft) brand. The draft UI mutates it via PATCH — the
+      // Markets tab appends a market / edits a market's LLMs before activation.
+      // Permit that ONLY while the brand is (and stays) pending: an active brand
+      // keeps its markets on the Semrush side, so a PATCH must never inject a
+      // primaryUrl/markets onto a live brand that activation would later trust.
+      // When the target isn't pending (or the same PATCH is flipping it to
+      // active — activation is the serenity endpoint's job, not PATCH's), strip
+      // it. Only pay for the status read when the field is actually present.
+      if (updates.pendingSemrushProvisioning !== undefined) {
+        const { data: currentBrand } = await postgrestClient
+          .from('brands')
+          .select('status')
+          .eq('organization_id', spaceCatId)
+          .eq('id', brandUuid)
+          .maybeSingle();
+        const isPending = currentBrand?.status === 'pending'
+          && (updates.status === undefined || updates.status === 'pending');
+        if (!isPending) {
+          delete updates.pendingSemrushProvisioning;
+        }
+      }
 
       // Capture the competitor list BEFORE the update so the Semrush re-sync can
       // compute which competitors were removed (old − new) — the only ones it
