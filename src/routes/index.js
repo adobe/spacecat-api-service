@@ -104,6 +104,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
+ * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -165,11 +166,13 @@ export default function getRouteHandlers(
   agenticPageTypesController,
   serenityController,
   proxyController,
+  redirectsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
 
   const routeDefinitions = {
+    'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
@@ -699,9 +702,6 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/brands/source-opportunities': aiVisibilityController.getBrandsSourceOpportunities,
     'GET /llmo/ai-visibility/brands/competitors': aiVisibilityController.getBrandsCompetitors,
     'GET /llmo/ai-visibility/competitors/metrics': aiVisibilityController.getCompetitorsMetrics,
-    'GET /llmo/ai-visibility/competitors/gap-topics': aiVisibilityController.getCompetitorsGapTopics,
-    'GET /llmo/ai-visibility/competitors/gap-source-domains': aiVisibilityController.getCompetitorsGapSourceDomains,
-    'GET /llmo/ai-visibility/competitors/gap-prompts': aiVisibilityController.getCompetitorsGapPrompts,
     'GET /llmo/ai-visibility/meta': aiVisibilityController.getMeta,
     'GET /llmo/ai-visibility/prompts/responses/latest': aiVisibilityController.getPromptsResponsesLatest,
     'GET /llmo/ai-visibility/prompts/responses': aiVisibilityController.getPromptsResponses,
@@ -721,7 +721,11 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': aiVisibilityController.getV1PromptBrandPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': aiVisibilityController.getV1PromptGapPromptsExport,
+    'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': aiVisibilityController.getV1PromptGapPromptsTotals,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
+    'GET /llmo/ai-visibility/v1/source/gap-source-domains': aiVisibilityController.getV1SourceGapSourceDomains,
+    'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': aiVisibilityController.getV1SourceGapSourceDomainsExport,
+    'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': aiVisibilityController.getV1SourceGapSourceDomainsTotals,
     'GET /llmo/ai-visibility/v1/brand/stats-by-country': aiVisibilityController.getV1BrandStatsByCountry,
     'GET /llmo/ai-visibility/v1/brand/stats-by-llm': aiVisibilityController.getV1BrandStatsByLlm,
     'GET /llmo/ai-visibility/v1/meta/meta': aiVisibilityController.getV1MetaMeta,
