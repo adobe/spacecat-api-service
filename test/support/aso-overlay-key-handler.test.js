@@ -130,27 +130,39 @@ describe('AsoOverlayKeyHandler', () => {
     const PREVIOUS_KEY = 'old-aso-key-being-rotated';
 
     it('accepts the previous key during rotation overlap', async () => {
+      const env = {
+        ASO_OVERLAY_API_KEY: API_KEY,
+        ASO_OVERLAY_API_KEY_PREVIOUS: PREVIOUS_KEY,
+      };
       const authInfo = await handler.checkAuth(
         makeRequest({ 'x-aso-api-key': PREVIOUS_KEY }),
-        makeContext({ env: { ASO_OVERLAY_API_KEY: API_KEY, ASO_OVERLAY_API_KEY_PREVIOUS: PREVIOUS_KEY } }),
+        makeContext({ env }),
       );
       expect(authInfo).to.not.be.null;
       expect(authInfo.isAuthenticated()).to.be.true;
     });
 
     it('still accepts the current key when previous is also set', async () => {
+      const env = {
+        ASO_OVERLAY_API_KEY: API_KEY,
+        ASO_OVERLAY_API_KEY_PREVIOUS: PREVIOUS_KEY,
+      };
       const authInfo = await handler.checkAuth(
         makeRequest({ 'x-aso-api-key': API_KEY }),
-        makeContext({ env: { ASO_OVERLAY_API_KEY: API_KEY, ASO_OVERLAY_API_KEY_PREVIOUS: PREVIOUS_KEY } }),
+        makeContext({ env }),
       );
       expect(authInfo).to.not.be.null;
       expect(authInfo.isAuthenticated()).to.be.true;
     });
 
     it('rejects a wrong key even when previous key is set', async () => {
+      const env = {
+        ASO_OVERLAY_API_KEY: API_KEY,
+        ASO_OVERLAY_API_KEY_PREVIOUS: PREVIOUS_KEY,
+      };
       const authInfo = await handler.checkAuth(
         makeRequest({ 'x-aso-api-key': 'totally-wrong' }),
-        makeContext({ env: { ASO_OVERLAY_API_KEY: API_KEY, ASO_OVERLAY_API_KEY_PREVIOUS: PREVIOUS_KEY } }),
+        makeContext({ env }),
       );
       expect(authInfo).to.be.null;
     });
