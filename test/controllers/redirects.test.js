@@ -15,13 +15,23 @@ import sinon from 'sinon';
 
 import RedirectsController from '../../src/controllers/redirects.js';
 
-const API_KEY = 'super-secret-aso-key';
 const BUCKET = 'spacecat-dev-aso-overlays';
 const SERVICE = 'cm-p154709-e1629980';
+const ORG_ID = 'org-1';
+const ENTITLEMENT_ID = 'ent-aso-1';
 
+/**
+ * Authentication for this route is performed upstream by AsoOverlayKeyHandler
+ * (see test/support/aso-overlay-key-handler.test.js); by the time the controller
+ * runs the request is already authenticated. These tests therefore exercise the
+ * per-request AUTHORIZATION (resolve service -> entitled site) and S3 read.
+ */
 describe('RedirectsController', () => {
   let sandbox;
   let mockS3;
+  let mockSite;
+  let mockEntitlement;
+  let mockDataAccess;
   let mockContext;
   let controller;
   let requestContext;
@@ -34,17 +44,28 @@ describe('RedirectsController', () => {
       GetObjectCommand: sandbox.stub().callsFake((params) => ({ input: params })),
     };
 
+    mockSite = { getId: () => 'site-1', getOrganizationId: () => ORG_ID };
+    mockEntitlement = { getId: () => ENTITLEMENT_ID };
+
+    mockDataAccess = {
+      Site: { findByExternalOwnerIdAndExternalSiteId: sandbox.stub().resolves(mockSite) },
+      Entitlement: { findByOrganizationIdAndProductCode: sandbox.stub().resolves(mockEntitlement) },
+      SiteEnrollment: {
+        allBySiteId: sandbox.stub().resolves([
+          { getEntitlementId: () => ENTITLEMENT_ID },
+        ]),
+      },
+    };
+
     mockContext = {
       s3: mockS3,
+      dataAccess: mockDataAccess,
       log: { info: sandbox.stub(), error: sandbox.stub() },
-      env: { S3_ASO_OVERLAYS_BUCKET: BUCKET, ASO_OVERLAY_API_KEY: API_KEY },
+      env: { S3_ASO_OVERLAYS_BUCKET: BUCKET },
     };
 
     controller = RedirectsController(mockContext);
-    requestContext = {
-      params: { env: 'dev', service: SERVICE },
-      pathInfo: { headers: { 'x-aso-api-key': API_KEY } },
-    };
+    requestContext = { params: { service: SERVICE } };
   });
 
   afterEach(() => {
@@ -55,7 +76,7 @@ describe('RedirectsController', () => {
     expect(() => RedirectsController()).to.throw('Context required');
   });
 
-  it('returns 200 text/plain with the overlay body for a valid request', async () => {
+  it('returns 200 text/plain with the overlay body for an entitled, enrolled site', async () => {
     const overlay = 'example.com/old https://www.example.com/new\n';
     mockS3.s3Client.send.resolves({
       Body: { transformToString: sandbox.stub().resolves(overlay) },
@@ -66,39 +87,47 @@ describe('RedirectsController', () => {
     expect(response.status).to.equal(200);
     expect(response.headers.get('content-type')).to.equal('text/plain; charset=utf-8');
     expect(await response.text()).to.equal(overlay);
-    // Reads the env-stripped key from the configured overlays bucket.
+    // Resolves the site by the p<program>/e<env> external ids parsed from the service.
+    expect(mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId
+      .calledWith('p154709', 'e1629980')).to.be.true;
+    // Reads the service-scoped key from the configured overlays bucket.
     expect(mockS3.GetObjectCommand.calledWithMatch({
       Bucket: BUCKET,
       Key: `config/${SERVICE}/redirects.txt`,
     })).to.be.true;
   });
 
-  it('returns 401 when the X-ASO-API-Key header is missing', async () => {
-    requestContext.pathInfo.headers = {};
-    const response = await controller.getRedirects(requestContext);
-    expect(response.status).to.equal(401);
-    expect(mockS3.s3Client.send.called).to.be.false;
-  });
-
-  it('returns 401 when the X-ASO-API-Key is wrong', async () => {
-    requestContext.pathInfo.headers['x-aso-api-key'] = 'wrong-key';
-    const response = await controller.getRedirects(requestContext);
-    expect(response.status).to.equal(401);
-  });
-
-  it('returns 400 for an invalid environment segment', async () => {
-    requestContext.params.env = 'qa';
-    const response = await controller.getRedirects(requestContext);
-    expect(response.status).to.equal(400);
-  });
-
   it('returns 400 for a malformed service identifier', async () => {
     requestContext.params.service = 'not-a-cm-service';
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(400);
+    expect(mockS3.s3Client.send.called).to.be.false;
   });
 
-  it('returns 404 when the overlay object does not exist', async () => {
+  it('returns 404 (not 403) when no site resolves — no enumeration signal', async () => {
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(404);
+    expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  it('returns 404 when the site org holds no ASO entitlement', async () => {
+    mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(404);
+    expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  it('returns 404 when the site is not enrolled in the ASO entitlement', async () => {
+    mockDataAccess.SiteEnrollment.allBySiteId.resolves([
+      { getEntitlementId: () => 'some-other-entitlement' },
+    ]);
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(404);
+    expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  it('returns 404 when the overlay object does not exist (NoSuchKey)', async () => {
     const err = new Error('not found');
     err.name = 'NoSuchKey';
     mockS3.s3Client.send.rejects(err);
@@ -116,12 +145,16 @@ describe('RedirectsController', () => {
     expect(response.status).to.equal(404);
   });
 
-  it('returns 404 when the requested env does not match the deployment bucket', async () => {
-    // Bucket is spacecat-dev-aso-overlays; a request for prod must not be served.
-    requestContext.params.env = 'prod';
+  it('maps AccessDenied (no ListBucket → 403 on missing key) to 404 and logs error', async () => {
+    const err = new Error('access denied');
+    err.name = 'AccessDenied';
+    err.$metadata = { httpStatusCode: 403 };
+    mockS3.s3Client.send.rejects(err);
+
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
-    expect(mockS3.s3Client.send.called).to.be.false;
+    // Logged at error so a missing IAM grant (every request 403) stays alertable.
+    expect(mockContext.log.error.called).to.be.true;
   });
 
   it('returns 500 on an unexpected S3 error', async () => {
@@ -131,18 +164,10 @@ describe('RedirectsController', () => {
     expect(mockContext.log.error.called).to.be.true;
   });
 
-  it('returns 500 when the API key is not configured', async () => {
-    const ctl = RedirectsController({
-      ...mockContext,
-      env: { S3_ASO_OVERLAYS_BUCKET: BUCKET },
-    });
-    const response = await ctl.getRedirects(requestContext);
-    expect(response.status).to.equal(500);
-  });
-
   it('returns 500 when the overlays bucket is not configured', async () => {
-    const ctl = RedirectsController({ ...mockContext, env: { ASO_OVERLAY_API_KEY: API_KEY } });
+    const ctl = RedirectsController({ ...mockContext, env: {} });
     const response = await ctl.getRedirects(requestContext);
     expect(response.status).to.equal(500);
+    expect(mockS3.s3Client.send.called).to.be.false;
   });
 });

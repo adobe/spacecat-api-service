@@ -47,8 +47,8 @@ export const INTERNAL_ROUTES = [
   // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
   'POST /webhooks/github',
 
-  // ASO redirect overlay - authenticated by X-ASO-API-Key in the controller, not S2S JWT
-  'GET /config/:env/:service/redirects.txt',
+  // ASO redirect overlay - authenticated by X-ASO-API-Key (AsoOverlayKeyHandler), not S2S JWT
+  'GET /config/:service/redirects.txt',
 
   // Suggestion edge ops (edge-deploy, etc.): not yet required by S2S
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',

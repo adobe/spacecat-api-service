@@ -10,43 +10,21 @@
  * governing permissions and limitations under the License.
  */
 
-import crypto from 'crypto';
 import {
   createResponse,
-  unauthorized,
   badRequest,
   notFound,
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 
-const ENVS = ['dev', 'stage', 'prod'];
 // Cloud Manager service identifier, e.g. cm-p154709-e1629980. Digit runs are
-// capped to a realistic length to avoid arbitrarily long S3 key lookups.
-const SERVICE_RE = /^cm-p\d{1,10}-e\d{1,10}$/;
+// capped to a realistic length to avoid arbitrarily long lookups; the capture
+// groups yield the program id (pXXXX) and environment id (eYYYY).
+const SERVICE_RE = /^cm-p(\d{1,10})-e(\d{1,10})$/;
 // Aligns with the Fastly edge TTL for this path (fetch/100-aso-overlay-ttl.vcl).
 const OVERLAY_TTL_SECONDS = 10;
-
-/**
- * Constant-time string comparison that does not leak input length. Both inputs
- * are HMAC'd to a fixed 32-byte digest before the timing-safe compare, so a
- * length mismatch is not observable via response timing. Never throws on
- * non-string input.
- *
- * @param {string} a
- * @param {string} b
- * @returns {boolean}
- */
-function safeEqual(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string') {
-    return false;
-  }
-  // The HMAC key is not a secret — it only normalises both inputs to a fixed
-  // 32-byte digest regardless of length, removing the length side channel.
-  const ha = crypto.createHmac('sha256', 'aso-key-compare').update(a).digest();
-  const hb = crypto.createHmac('sha256', 'aso-key-compare').update(b).digest();
-  return crypto.timingSafeEqual(ha, hb);
-}
 
 /**
  * Redirects Controller — serves the ASO dispatcher-layer redirect overlay
@@ -54,15 +32,18 @@ function safeEqual(a, b) {
  *
  * This is the "Lite-E" read path from ADR aso-dispatcher-overlay: Fastly proxies
  * `/config/*` to api-service (instead of signing SigV4 to S3 directly), and
- * api-service reads the object with its own Lambda execution role. The inbound
- * `X-ASO-API-Key` (unchanged from the static-key model) is validated here, so
- * the route is registered as anonymous in `access-control-util.js` (the same
- * pattern as the `/hooks/*` endpoints) and gates on the key in this controller.
+ * api-service reads the object with its own Lambda execution role.
  *
- * Server-side per-tenant authorization (resolving `(program, env)` against site
- * config / entitlements) is a tracked follow-up — see the ADR's Lite-E note.
+ * AuthN is handled upstream by `AsoOverlayKeyHandler` (validates the inbound
+ * `X-ASO-API-Key`), so by the time this controller runs the caller is the
+ * dispatcher. This controller performs per-request AUTHZ: it resolves the Cloud
+ * Manager `(program, environment)` to a provisioned, ASO-entitled site and only
+ * then serves the overlay. Every authz failure returns an indistinguishable 404
+ * so the endpoint cannot be used to enumerate which programs exist or are
+ * entitled (this is the property that makes Lite-E safer than a bare shared key
+ * — see the ADR's OQ-1 / Lite-E note).
  *
- * @param {object} ctx - Context with `s3`, `log`, and `env`.
+ * @param {object} ctx - Context with `s3`, `dataAccess`, `log`, and `env`.
  * @returns {object} controller with `getRedirects`.
  */
 function RedirectsController(ctx) {
@@ -70,41 +51,25 @@ function RedirectsController(ctx) {
     throw new Error('Context required');
   }
 
-  const { s3, log, env } = ctx;
-  const { s3Client, GetObjectCommand } = s3;
   const {
-    S3_ASO_OVERLAYS_BUCKET: bucketName,
-    ASO_OVERLAY_API_KEY: apiKey,
-  } = env;
+    s3, dataAccess, log, env,
+  } = ctx;
+  const { s3Client, GetObjectCommand } = s3;
+  const { Site, Entitlement, SiteEnrollment } = dataAccess;
+  const { S3_ASO_OVERLAYS_BUCKET: bucketName } = env;
 
   /**
-   * GET /config/:env/:service/redirects.txt
+   * GET /config/:service/redirects.txt
    *
    * @param {object} context - Request context.
-   * @param {object} context.params - `{ env, service }` from the path.
-   * @param {object} context.pathInfo.headers - Request headers (`x-aso-api-key`).
-   * @returns {Promise<Response>} 200 text/plain redirects file, or 401/400/404/500.
+   * @param {object} context.params - `{ service }` from the path (cm-pXXX-eYYY).
+   * @returns {Promise<Response>} 200 text/plain redirects file, or 400/404/500.
    */
   async function getRedirects(context) {
-    const { env: reqEnv, service } = context.params;
-    const headers = context.pathInfo?.headers || {};
-    const providedKey = headers['x-aso-api-key'];
+    const { service } = context.params;
 
-    // Auth — constant-time check of the inbound X-ASO-API-Key.
-    if (!apiKey) {
-      log.error('[aso-overlay] ASO_OVERLAY_API_KEY is not configured');
-      return internalServerError('Overlay endpoint not configured');
-    }
-    if (!safeEqual(providedKey, apiKey)) {
-      log.info('[aso-overlay] auth failed', { hasKey: !!providedKey });
-      return unauthorized('Unauthorized: missing or invalid X-ASO-API-Key');
-    }
-
-    // Validate path parameters before touching S3.
-    if (!ENVS.includes(reqEnv)) {
-      return badRequest('Invalid environment');
-    }
-    if (!SERVICE_RE.test(service)) {
+    const match = SERVICE_RE.exec(service);
+    if (!match) {
       return badRequest('Invalid service identifier');
     }
     if (!bucketName) {
@@ -112,11 +77,34 @@ function RedirectsController(ctx) {
       return internalServerError('Overlay endpoint not configured');
     }
 
-    // The env in the URL is for Fastly routing compatibility; this deployment
-    // serves exactly one env's bucket (spacecat-<env>-aso-overlays). Reject a
-    // mismatch so e.g. a dev deployment never appears to answer for prod.
-    const bucketEnv = /(?:^|-)(dev|stage|prod)-aso-overlays$/.exec(bucketName)?.[1];
-    if (bucketEnv && reqEnv !== bucketEnv) {
+    const [, programId, environmentId] = match;
+
+    // Resolve (program, env) -> Site via the indexed external-id accessor. The
+    // p<programId>/e<environmentId> encoding matches Site.computeExternalIds for
+    // AEM CS sites (see spacecat-shared site.model.js / SiteCollection.findByPreviewURL).
+    const site = await Site.findByExternalOwnerIdAndExternalSiteId(
+      `p${programId}`,
+      `e${environmentId}`,
+    );
+    if (!site) {
+      log.info('[aso-overlay] no site resolves for service', { service });
+      return notFound('No redirect overlay found');
+    }
+
+    // Authorize: the site's org must hold an ASO entitlement AND the site must be
+    // enrolled in it. Same gate pattern as edge-routing-auth / tier-client.
+    const entitlement = await Entitlement.findByOrganizationIdAndProductCode(
+      site.getOrganizationId(),
+      EntitlementModel.PRODUCT_CODES.ASO,
+    );
+    if (!entitlement) {
+      log.info('[aso-overlay] site org not ASO-entitled', { siteId: site.getId() });
+      return notFound('No redirect overlay found');
+    }
+    const enrollments = await SiteEnrollment.allBySiteId(site.getId());
+    const enrolled = enrollments.some((se) => se.getEntitlementId() === entitlement.getId());
+    if (!enrolled) {
+      log.info('[aso-overlay] site not enrolled for ASO', { siteId: site.getId() });
       return notFound('No redirect overlay found');
     }
 
@@ -132,7 +120,22 @@ function RedirectsController(ctx) {
         'cache-control': `max-age=${OVERLAY_TTL_SECONDS}`,
       });
     } catch (err) {
-      if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) {
+      const code = err.$metadata?.httpStatusCode;
+      if (err.name === 'NoSuchKey' || code === 404) {
+        return notFound('No redirect overlay found');
+      }
+      // The reader role intentionally lacks s3:ListBucket (least privilege, no key
+      // enumeration), so a *missing* object surfaces as 403 AccessDenied rather
+      // than 404. The authz above already proved the tenant is legitimate, so map
+      // it to 404 for the caller — but log at error level so a genuine permissions
+      // misconfiguration (every request 403, e.g. the IAM grant not applied) stays
+      // alertable. See spacecat-infrastructure#620.
+      if (err.name === 'AccessDenied' || code === 403) {
+        log.error(
+          `[aso-overlay] AccessDenied reading ${key} from ${bucketName} `
+          + '— missing object or missing s3:GetObject grant',
+          err,
+        );
         return notFound('No redirect overlay found');
       }
       log.error(`[aso-overlay] failed to read ${key} from ${bucketName}`, err);

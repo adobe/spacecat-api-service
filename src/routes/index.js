@@ -172,7 +172,7 @@ export default function getRouteHandlers(
   const dynamicRoutes = {};
 
   const routeDefinitions = {
-    'GET /config/:env/:service/redirects.txt': redirectsController.getRedirects,
+    'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
