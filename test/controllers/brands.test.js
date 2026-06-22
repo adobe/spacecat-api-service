@@ -932,14 +932,12 @@ describe('Brands Controller', () => {
                 }),
               }),
             }),
-            insert: () => ({
-              select: () => th({
-                data: null,
-                error: {
-                  code: '23505',
-                  message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
-                },
-              }),
+            insert: () => th({
+              data: null,
+              error: {
+                code: '23505',
+                message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+              },
             }),
             update: () => ({ eq: () => th({ error: null }) }),
           };
