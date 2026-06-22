@@ -24,6 +24,8 @@ import {
   SITE_4_BASE_URL,
   SITE_LEGACY_LLMO_ID,
   SITE_NEW_LLMO_ID,
+  MARKET_SITE_1_ID,
+  MARKET_SITE_1_BASE_URL,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
   PROJECT_2_ID,
@@ -375,9 +377,20 @@ export default function siteTests(getHttpClient, resetData) {
         });
       });
 
-      it('admin: returns empty array for unmatched delivery type', async () => {
+      it('admin: returns the Serenity market-mirror site for delivery type other', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/other');
+        expect(res.status).to.equal(200);
+        // MARKET_SITE_1 (Semrush market mirror) is the only delivery_type=other site.
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(MARKET_SITE_1_ID);
+        expect(res.body[0].baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+        expect(res.body[0].deliveryType).to.equal('other');
+      });
+
+      it('admin: returns empty array for unmatched delivery type', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-delivery-type/aem_ams');
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });

@@ -11,7 +11,12 @@
  */
 
 import { expect } from 'chai';
-import { ORG_1_ID } from '../seed-ids.js';
+import {
+  ORG_1_ID,
+  BRAND_1_ID,
+  MARKET_SITE_1_ID,
+  MARKET_SITE_1_BASE_URL,
+} from '../seed-ids.js';
 
 export default function brandsTests(getHttpClient, resetData) {
   describe('Brands v2 claims guidance', () => {
@@ -82,6 +87,34 @@ export default function brandsTests(getHttpClient, resetData) {
         },
       );
       expect(tooLong.status).to.equal(400);
+    });
+  });
+
+  describe('Brands v2 Serenity market-mirror linkage', () => {
+    before(() => resetData());
+
+    it('excludes the Serenity market-mirror site from the brand urls[] and siteIds', async () => {
+      const http = getHttpClient();
+
+      // BRAND_1 is linked to the market-mirror Site (MARKET_SITE_1) via a
+      // brand_sites row tagged type='serenity'. The market's domain is NOT a
+      // brand URL (the brand is a shell with no domain of its own), so the row
+      // is a pure backend linkage and must not surface in the brand response.
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}`);
+      expect(getRes.status).to.equal(200);
+
+      expect(getRes.body.siteIds || []).to.not.include(MARKET_SITE_1_ID);
+      const urlValues = (getRes.body.urls || []).map((u) => u.value);
+      expect(urlValues).to.not.include(MARKET_SITE_1_BASE_URL);
+
+      // The same exclusion must hold on the list endpoint.
+      const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands`);
+      expect(listRes.status).to.equal(200);
+      const listed = listRes.body.brands.find((brand) => brand.id === BRAND_1_ID);
+      expect(listed).to.be.an('object');
+      expect(listed.siteIds || []).to.not.include(MARKET_SITE_1_ID);
+      const listedUrlValues = (listed.urls || []).map((u) => u.value);
+      expect(listedUrlValues).to.not.include(MARKET_SITE_1_BASE_URL);
     });
   });
 }
