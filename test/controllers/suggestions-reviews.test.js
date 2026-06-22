@@ -104,6 +104,15 @@ describe('Suggestions Controller - backoffice reviews', () => {
       getId: () => SUGGESTION_ID,
       getOpportunityId: () => OPPORTUNITY_ID,
       getOpportunity: async () => opportunity,
+      // getters used by SuggestionDto.toJSON (getByID ?include=reviews path)
+      getType: () => 'CONTENT_UPDATE',
+      getStatus: () => 'PENDING_VALIDATION',
+      getRank: () => 1,
+      getData: () => ({ patchContent: 'alt="image"' }),
+      getKpiDeltas: () => ({}),
+      getCreatedAt: () => '2026-06-19T18:00:00.000Z',
+      getUpdatedAt: () => '2026-06-19T18:00:00.000Z',
+      getUpdatedBy: () => 'system',
     };
     site = {
       getId: () => SITE_ID,
@@ -253,5 +262,150 @@ describe('Suggestions Controller - backoffice reviews', () => {
     context.dataAccess = { services: {} };
     const response = await controller.createBackofficeReview(context);
     expect(response.status).to.equal(503);
+  });
+
+  it('rejects an invalid site id with 400', async () => {
+    const context = makeContext({
+      context: {
+        params: { siteId: 'bad', opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_ID },
+      },
+    });
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(400);
+  });
+
+  it('rejects an invalid opportunity id with 400', async () => {
+    const context = makeContext({
+      context: {
+        params: { siteId: SITE_ID, opportunityId: 'bad', suggestionId: SUGGESTION_ID },
+      },
+    });
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(400);
+  });
+
+  it('rejects an invalid suggestion id with 400', async () => {
+    const context = makeContext({
+      context: {
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: 'bad' },
+      },
+    });
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(400);
+  });
+
+  it('rejects a non-string detail_markdown with 400', async () => {
+    const context = makeContext();
+    context.data.detailMarkdown = 12345;
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(400);
+  });
+
+  it('returns 404 when the suggestion opportunity belongs to a different site', async () => {
+    suggestion.getOpportunity = async () => ({ getSiteId: () => 'other-site', getType: () => 'cwv' });
+    const response = await controller.createBackofficeReview(makeContext());
+    expect(response.status).to.equal(404);
+  });
+
+  it('defaults tier to free (and warns) when entitlement lookup throws', async () => {
+    site.getSiteEnrollments = async () => {
+      throw new Error('enrollment boom');
+    };
+    const context = makeContext({
+      postgrest: { onInsert: () => ({ data: { event_id: EVENT_ID, signal: 'negative', tier: 'free' }, error: null }) },
+    });
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(201);
+    expect(log.warn.called).to.equal(true);
+  });
+
+  it('derives tier=paid from a PAID ASO entitlement', async () => {
+    site.getSiteEnrollments = async () => [
+      { getEntitlement: async () => ({ getProductCode: () => 'ASO', getTier: () => 'PAID' }) },
+    ];
+    const context = makeContext({
+      postgrest: { onInsert: () => ({ data: { event_id: EVENT_ID, signal: 'negative', tier: 'paid' }, error: null }) },
+    });
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(201);
+  });
+
+  it('scrubs secrets from the payload and emits a scrub-hit metric log', async () => {
+    const context = makeContext({
+      postgrest: { onInsert: () => ({ data: { event_id: EVENT_ID, signal: 'negative', tier: 'free' }, error: null }) },
+    });
+    context.data.detailMarkdown = 'leaked key AKIAABCDEFGHIJKLMNOP in here';
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(201);
+    expect(log.info.called).to.equal(true);
+  });
+
+  describe('getByID ?include=reviews', () => {
+    const reviewRow = () => ({
+      event_id: 'r1',
+      event_time: '2026-06-19T18:00:00.000Z',
+      source: 'backoffice',
+      signal: 'positive',
+      tier: 'free',
+      previous_fix: { a: 1 },
+      edited_fix: null,
+    });
+
+    const makeGetContext = (overrides = {}) => ({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_ID },
+      data: { view: 'full', ...(overrides.data || {}) },
+      attributes: { authInfo: { profile: { email: 'ese@adobe.com' } } },
+      log,
+      dataAccess: { services: { postgrestClient: makePostgrestClient(overrides.postgrest) } },
+      ...overrides.context,
+    });
+
+    it('composes reviews into the suggestion response', async () => {
+      const context = makeGetContext({
+        data: { include: 'reviews' },
+        postgrest: { onOrder: () => ({ data: [reviewRow()], error: null }) },
+      });
+      const response = await controller.getByID(context);
+      expect(response.status).to.equal(200);
+      const json = await response.json();
+      expect(json.reviews).to.have.length(1);
+      expect(json.reviews[0].verdict).to.equal('up');
+      expect(json.reviews[0]).to.not.have.property('previousFix');
+    });
+
+    it('includes raw patches when ?include=reviews,patches', async () => {
+      const context = makeGetContext({
+        data: { include: 'reviews,patches' },
+        postgrest: { onOrder: () => ({ data: [reviewRow()], error: null }) },
+      });
+      const response = await controller.getByID(context);
+      const json = await response.json();
+      expect(json.reviews[0].previousFix).to.deep.equal({ a: 1 });
+    });
+
+    it('returns empty reviews when the feedback store is unavailable', async () => {
+      const context = makeGetContext({ data: { include: 'reviews' } });
+      context.dataAccess = { services: {} };
+      const response = await controller.getByID(context);
+      const json = await response.json();
+      expect(json.reviews).to.deep.equal([]);
+    });
+
+    it('returns empty reviews when the reviews query errors', async () => {
+      const context = makeGetContext({
+        data: { include: 'reviews' },
+        postgrest: { onOrder: () => ({ data: null, error: { message: 'read failed' } }) },
+      });
+      const response = await controller.getByID(context);
+      const json = await response.json();
+      expect(json.reviews).to.deep.equal([]);
+    });
+
+    it('does not attach reviews when ?include is absent', async () => {
+      const context = makeGetContext();
+      const response = await controller.getByID(context);
+      const json = await response.json();
+      expect(json).to.not.have.property('reviews');
+    });
   });
 });
