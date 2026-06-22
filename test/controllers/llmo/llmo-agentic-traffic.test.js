@@ -289,6 +289,8 @@ describe('llmo-agentic-traffic', () => {
       ['perplexity', 'Perplexity'],
       ['gemini', 'Gemini'],
       ['google', 'Google'],
+      ['google-ai-mode', 'Google AI Mode'],
+      ['copilot', 'Copilot'],
       ['amazon', 'Amazon'],
       ['all', null],
       [undefined, null],
