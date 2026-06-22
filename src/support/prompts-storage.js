@@ -636,16 +636,17 @@ export async function upsertPrompts({
   updatedBy = 'system',
   classifyIntent,
   classifyIntentBatchTimeoutMs,
-  // No-op default: only the temp timing line uses this. Defaulting to a silent
-  // logger (not console) keeps it out of console.warn spies in unit tests that
-  // call upsertPrompts without a logger; prod passes the real context.log.
-  log = { warn: () => {} },
+  // Logger for the per-phase timing line below. No-op default so unit tests that
+  // call upsertPrompts without a logger emit nothing; prod passes context.log.
+  log = { info: () => {} },
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
   }
 
-  // TEMP timing instrumentation (LLMO prompts-upload 503 diagnosis) — remove after.
+  // Per-phase timing for the bulk upload, surfaced in CloudWatch. A bulk write can
+  // run long enough for Fastly to 503 while the Lambda still completes; this lets
+  // a failed upload be diagnosed by phase (classification vs insert vs update).
   const tStart = Date.now();
   let tRead = tStart;
   let tEnsure = tStart;
@@ -820,12 +821,16 @@ export async function upsertPrompts({
   // Best-effort against environments where `prompts.intent` is absent: the
   // shared helper drops intent and retries when the column is missing.
   if (toInsert.length > 0) {
-    const { data: inserted, error } = await withMissingIntentFallback(
+    // No `.select()`: returning every inserted row (up to 3000) is the dominant,
+    // variable cost of a bulk upload (~5-10s for ~2k rows) and can push the
+    // request past the gateway timeout. The response is built from `processed`,
+    // not from the inserted rows, and `created` is just the count — so we skip
+    // the round-trip of serializing/returning all rows.
+    const { error } = await withMissingIntentFallback(
       postgrestClient,
       (includeIntent) => postgrestClient
         .from('prompts')
-        .insert(includeIntent ? toInsert : toInsert.map(stripIntent))
-        .select(),
+        .insert(includeIntent ? toInsert : toInsert.map(stripIntent)),
     );
     if (error) {
       throwOnPgConstraintViolation(error, {
@@ -833,7 +838,7 @@ export async function upsertPrompts({
       });
       throw new Error(`Failed to insert prompts: ${error.message}`);
     }
-    created = inserted?.length ?? toInsert.length;
+    created = toInsert.length;
   }
   tInsert = Date.now();
 
@@ -892,12 +897,8 @@ export async function upsertPrompts({
     updatedAt: r.updated_at,
   }));
 
-  // TEMP timing instrumentation (LLMO prompts-upload 503 diagnosis) — remove after.
-  // Logged via the structured logger (context.log) so it lands in Coralogix;
-  // bare console.* only reaches CloudWatch. Uses warn level so it is never
-  // dropped by an info-filtering LOG_LEVEL in dev (it's a temporary diagnostic).
   const tEnd = Date.now();
-  log.warn(`[upsertPrompts] timing ${JSON.stringify({
+  log.info(`[upsertPrompts] timing ${JSON.stringify({
     brand_id: brandUuid,
     incoming: prompts.length,
     existing: existing?.length ?? 0,

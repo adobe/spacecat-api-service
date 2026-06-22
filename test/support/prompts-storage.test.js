@@ -1221,7 +1221,7 @@ describe('prompts-storage', () => {
                   eq: () => thenable({ data: [], error: null }),
                 }),
               }),
-              insert: () => ({ select: () => thenable({ data: null, error: { message: 'Insert failed' } }) }),
+              insert: () => thenable({ data: null, error: { message: 'Insert failed' } }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
           }
@@ -1881,14 +1881,12 @@ describe('prompts-storage', () => {
                   }),
                 }),
               }),
-              insert: () => ({
-                select: () => thenable({
-                  data: null,
-                  error: {
-                    code: '23505',
-                    message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
-                  },
-                }),
+              insert: () => thenable({
+                data: null,
+                error: {
+                  code: '23505',
+                  message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+                },
               }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -3146,12 +3144,8 @@ describe('prompts-storage', () => {
     it('upsertPrompts inserts without intent when the column is missing, then retries clean', async () => {
       const insertStub = sinon.stub();
       // First insert (with intent) -> missing-column error; retry -> success.
-      insertStub.onFirstCall().returns({
-        select: () => thenable({ data: null, error: MISSING_INTENT_INSERT }),
-      });
-      insertStub.onSecondCall().returns({
-        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
-      });
+      insertStub.onFirstCall().returns(thenable({ data: null, error: MISSING_INTENT_INSERT }));
+      insertStub.onSecondCall().returns(thenable({ data: [{ prompt_id: 'new-1' }], error: null }));
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -3188,15 +3182,9 @@ describe('prompts-storage', () => {
 
     it('upsertPrompts skips intent up front on a second call with the same client', async () => {
       const insertStub = sinon.stub();
-      insertStub.onCall(0).returns({
-        select: () => thenable({ data: null, error: MISSING_INTENT_INSERT }),
-      });
-      insertStub.onCall(1).returns({
-        select: () => thenable({ data: [{ prompt_id: 'p1' }], error: null }),
-      });
-      insertStub.onCall(2).returns({
-        select: () => thenable({ data: [{ prompt_id: 'p2' }], error: null }),
-      });
+      insertStub.onCall(0).returns(thenable({ data: null, error: MISSING_INTENT_INSERT }));
+      insertStub.onCall(1).returns(thenable({ data: [{ prompt_id: 'p1' }], error: null }));
+      insertStub.onCall(2).returns(thenable({ data: [{ prompt_id: 'p2' }], error: null }));
       const client = {
         from: (table) => {
           if (table === 'prompts') {
