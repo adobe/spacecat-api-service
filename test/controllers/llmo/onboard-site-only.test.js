@@ -277,6 +277,30 @@ describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
       expect(body.message).to.contain('domain and brandName are required');
       expect(performLlmoOnboardingStub).to.not.have.been.called;
     });
+
+    it('returns 400 when domain/brandName are not strings', async () => {
+      const res = await invoke({ data: { domain: ['example.com'], brandName: { x: 1 } } });
+      expect(res.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('returns 400 when domain/brandName are whitespace-only', async () => {
+      const res = await invoke({ data: { domain: '   ', brandName: '  ' } });
+      expect(res.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('returns 400 when domain exceeds the length cap', async () => {
+      const res = await invoke({ data: { domain: `${'a'.repeat(254)}.com`, brandName: 'Test Brand' } });
+      expect(res.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('returns 400 when the domain is not a valid hostname', async () => {
+      const res = await invoke({ data: { domain: 'not a domain!!', brandName: 'Test Brand' } });
+      expect(res.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
   });
 
   describe('validateSiteNotOnboarded rejection', () => {

@@ -51,6 +51,13 @@ export const BASIC_AUDITS = [
   'prerender',
 ];
 
+// Site-only onboarding (LLMO-5606) enables AND triggers exactly this set. The
+// DRS → SNS path that would otherwise fire llm-error-pages / llmo-customer-analysis
+// is skipped, so llm-error-pages is triggered directly and llmo-customer-analysis
+// is intentionally omitted. Shared by both the enable and trigger lists to prevent
+// drift between them.
+export const SITE_ONLY_AUDITS = [...BASIC_AUDITS, 'llm-error-pages', 'wikipedia-analysis'];
+
 export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 
 export const ASO_CRITICAL_SITES = [];
@@ -1492,7 +1499,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // would otherwise never run (no DRS job to fire it via SNS). The full flow
     // enables it so the DRS → SNS path can trigger it later.
     const auditsToEnable = siteOnly
-      ? [...BASIC_AUDITS, 'llm-error-pages', 'wikipedia-analysis']
+      ? SITE_ONLY_AUDITS
       : [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis'];
 
     // Enable audits (continues on partial failure, logs warnings)
@@ -1603,7 +1610,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // SNS → audit-worker (LLMO-1819). Site-only (LLMO-5606) skips that DRS path,
     // so it triggers llm-error-pages directly; llmo-customer-analysis is never run.
     const auditsToTrigger = siteOnly
-      ? [...BASIC_AUDITS, 'llm-error-pages', 'wikipedia-analysis']
+      ? SITE_ONLY_AUDITS
       : [...BASIC_AUDITS, 'wikipedia-analysis'];
     await triggerAudits(auditsToTrigger, context, site);
 

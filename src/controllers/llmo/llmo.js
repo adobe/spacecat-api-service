@@ -1127,11 +1127,22 @@ function LlmoController(ctx) {
         return badRequest('Onboarding data is required');
       }
       const { domain, brandName, deliveryType } = data;
-      if (!domain || !brandName) {
-        return badRequest('domain and brandName are required');
+      if (!hasText(domain) || !hasText(brandName)) {
+        return badRequest('domain and brandName are required and must be non-empty strings');
+      }
+      // Customer-facing endpoint — bound the inputs. RFC 1035 caps a hostname at
+      // 253 chars; brandName is a label, so cap it defensively too.
+      if (domain.trim().length > 253) {
+        return badRequest('domain is too long');
+      }
+      if (brandName.trim().length > 256) {
+        return badRequest('brandName is too long');
       }
 
-      const baseURL = composeBaseURL(domain);
+      const baseURL = composeBaseURL(domain.trim());
+      if (!isValidUrl(baseURL)) {
+        return badRequest('domain is invalid');
+      }
       const dataFolder = generateDataFolder(baseURL, env.ENV);
       const imsOrgId = organization.getImsOrgId();
 
