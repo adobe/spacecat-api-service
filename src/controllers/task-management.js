@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 // eslint-disable-next-line import/no-unresolved
@@ -29,18 +30,24 @@ const STATUS_CONFLICT = 409;
  *
  * Route: POST /organizations/:organizationId/task-management/:provider/tickets
  *
+ * v1 scope (intentional simplifications vs. architecture spec):
+ *   - No Idempotency-Key header enforcement (deferred to v2)
+ *   - Connection resolved by org + provider URL params; spec also supports explicit
+ *     connectionId in the body (deferred to v2 when multiple connections per org needed)
+ *   - suggestionIds not required; v1 links tickets to an opportunityId directly
+ *   - priority field deferred to v2 (JiraCloudClient maps it to a Jira field not yet configured)
+ *
  * Flow:
  *   1. Validate inputs (organizationId, provider, required ticket fields).
  *   2. Load the active TaskManagementConnection for the org + provider.
- *      → 404 when the org has never connected, 409 when the connection is degraded.
- *   3. Call the provider's ticket client (JiraCloudClient) to create the ticket.
+ *      → 404 when no active connection exists (including degraded connections).
+ *   3. Call the provider's ticket client to create the ticket.
  *      The client handles OAuth token refresh and Jira API communication.
  *   4. Persist a Ticket record with the returned provider identifiers.
  *   5. Return 201 with the persisted ticket data to the UI.
  *
  * @param {object} context - Universal serverless function context.
  * @param {object} context.dataAccess - Data access layer (models).
- * @param {object} context.env - Environment variables (Vault secrets are loaded here).
  * @param {import('pino').Logger} context.log - Logger.
  * @returns {object} Controller with a `createTicket` method.
  */
@@ -49,7 +56,7 @@ function TaskManagementController(context) {
     throw new Error('Context required');
   }
 
-  const { dataAccess, env, log } = context;
+  const { dataAccess, log } = context;
 
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
@@ -65,16 +72,25 @@ function TaskManagementController(context) {
     throw new Error('Ticket collection not available');
   }
 
+  // AWS SDK auto-detects region from the Lambda execution environment.
+  // Constructed once per controller instance (not per request) to reuse the connection pool.
+  const smClient = new SecretsManagerClient();
+
+  // Wrap global fetch so TicketClientFactory receives the expected { fetch } interface.
+  // fetch is available globally in Node 18+ (Lambda runtime).
+  const httpClient = { fetch: globalThis.fetch };
+
   /**
    * Creates a Jira ticket for an opportunity and persists the result.
    *
    * Expected request body:
    * ```json
    * {
-   *   "summary":     "string (required)",
-   *   "description": "string (optional, plain text — backend converts to ADF)",
-   *   "labels":      ["string"] (optional),
-   *   "priority":    "string"  (optional, defaults to 'Medium'),
+   *   "projectKey":   "string (required) — Jira project key, e.g. 'ASO'",
+   *   "summary":      "string (required)",
+   *   "description":  "string (optional, plain text — backend converts to ADF)",
+   *   "issueType":    "string (optional, defaults to 'Task')",
+   *   "labels":       ["string"] (optional),
    *   "opportunityId": "uuid"  (optional)
    * }
    * ```
@@ -104,7 +120,14 @@ function TaskManagementController(context) {
       return createResponse({ message: 'Request body with summary is required' }, STATUS_BAD_REQUEST);
     }
 
+    if (!hasText(data.projectKey)) {
+      return createResponse({ message: 'projectKey is required' }, STATUS_BAD_REQUEST);
+    }
+
     // --- Resolve the active connection -------------------------------------
+    // findActiveByOrganizationAndProvider returns null for both "not connected" and
+    // "connection exists but is degraded" — both map to 404 so callers are directed
+    // to the connection management UI without leaking connection state.
 
     let connection;
     try {
@@ -122,24 +145,27 @@ function TaskManagementController(context) {
       );
     }
 
-    if (!connection.isActive()) {
-      return createResponse(
-        { message: `The ${provider} connection requires re-authentication` },
-        STATUS_CONFLICT,
-      );
-    }
-
     // --- Create the ticket via the provider client ------------------------
+    // TicketClientFactory.create expects: (connection, smClient, httpClient, log)
+    // where connection is a plain object: { id, organizationId, provider, metadata }.
+    // We extract those from the entity rather than passing the entity directly
+    // so the ticket-client library stays decoupled from the data-access layer.
 
     let ticketResult;
     try {
-      // eslint-disable-next-line max-len
-      const ticketClient = await TicketClientFactory.create(provider, connection.getMetadata(), env, log);
+      const connectionObj = {
+        id: connection.getId(),
+        organizationId: connection.getOrganizationId(),
+        provider: connection.getProvider(),
+        metadata: connection.getMetadata(),
+      };
+      const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
       ticketResult = await ticketClient.createTicket({
+        projectKey: data.projectKey,
         summary: data.summary,
         description: data.description ?? '',
         labels: data.labels ?? [],
-        priority: data.priority ?? 'Medium',
+        issueType: data.issueType ?? 'Task',
       });
     } catch (err) {
       // If the token could not be refreshed mark the connection degraded so
