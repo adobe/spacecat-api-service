@@ -487,6 +487,7 @@ function BrandsController(ctx, log, env) {
         updatedBy,
         classifyIntent,
         classifyIntentBatchTimeoutMs,
+        log,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);

@@ -636,6 +636,7 @@ export async function upsertPrompts({
   updatedBy = 'system',
   classifyIntent,
   classifyIntentBatchTimeoutMs,
+  log = console,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
@@ -889,9 +890,10 @@ export async function upsertPrompts({
   }));
 
   // TEMP timing instrumentation (LLMO prompts-upload 503 diagnosis) — remove after.
+  // Logged via the structured logger (context.log) so it lands in Coralogix;
+  // bare console.* only reaches CloudWatch.
   const tEnd = Date.now();
-  // eslint-disable-next-line no-console
-  console.info('[upsertPrompts] timing', JSON.stringify({
+  log.info(`[upsertPrompts] timing ${JSON.stringify({
     brand_id: brandUuid,
     incoming: prompts.length,
     existing: existing?.length ?? 0,
@@ -903,7 +905,7 @@ export async function upsertPrompts({
     ms_insert: tInsert - tClassify,
     ms_update: tEnd - tInsert,
     ms_total: tEnd - tStart,
-  }));
+  })}`);
 
   return {
     created, updated, skipped, prompts: promptsOut,
