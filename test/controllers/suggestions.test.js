@@ -159,6 +159,7 @@ describe('Suggestions Controller', () => {
   const suggestionsFunctions = [
     'autofixSuggestions',
     'createSuggestions',
+    'createBackofficeReview',
     'getAllForOpportunity',
     'getAllForOpportunityPaged',
     'deploySuggestionToEdge',
