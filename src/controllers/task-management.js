@@ -62,7 +62,7 @@ function TaskManagementController(context) {
     throw new Error('Data access required');
   }
 
-  const { TaskManagementConnection, Ticket } = dataAccess;
+  const { TaskManagementConnection, Ticket, TicketSuggestion } = dataAccess;
 
   if (!isNonEmptyObject(TaskManagementConnection)) {
     throw new Error('TaskManagementConnection collection not available');
@@ -70,6 +70,10 @@ function TaskManagementController(context) {
 
   if (!isNonEmptyObject(Ticket)) {
     throw new Error('Ticket collection not available');
+  }
+
+  if (!isNonEmptyObject(TicketSuggestion)) {
+    throw new Error('TicketSuggestion collection not available');
   }
 
   // AWS SDK auto-detects region from the Lambda execution environment.
@@ -102,6 +106,19 @@ function TaskManagementController(context) {
    * @param {object} requestContext.data - Parsed request body.
    * @param {object} requestContext.attributes - Request-scoped attributes (authInfo, etc.).
    * @returns {Promise<Response>} 201 with ticket data, or an error response.
+   *
+   * Expected request body:
+   * ```json
+   * {
+   *   "projectKey":    "string (required)",
+   *   "summary":       "string (required)",
+   *   "description":   "string (optional, plain text)",
+   *   "issueType":     "string (optional, defaults to 'Task')",
+   *   "labels":        ["string"] (optional),
+   *   "suggestionId":  "uuid (optional) — when provided a TicketSuggestion bridge row is created",
+   *   "opportunityId": "uuid (optional)"
+   * }
+   * ```
    */
   async function createTicket(requestContext) {
     const { params, data, attributes } = requestContext;
@@ -220,6 +237,34 @@ function TaskManagementController(context) {
       return createResponse({ message: 'Ticket created but could not be saved' }, STATUS_INTERNAL_SERVER_ERROR);
     }
 
+    // --- Create the TicketSuggestion bridge row (when suggestionId is provided) ---
+    // Links the specific Suggestion to this Ticket for 1:1 enforcement.
+    // The DB UNIQUE (suggestion_id) constraint prevents the same suggestion from
+    // being ticketed twice. If the insert fails with a conflict it means the
+    // suggestion was already ticketed — return 409 so the UI can handle it.
+
+    if (data.suggestionId) {
+      try {
+        await TicketSuggestion.create({
+          ticketId: ticket.getId(),
+          suggestionId: data.suggestionId,
+          opportunityId: data.opportunityId ?? undefined,
+          createdBy,
+        });
+      } catch (err) {
+        // Detect unique constraint violation (suggestion already ticketed)
+        const isDuplicate = err?.message?.includes('unique') || err?.code === '23505';
+        if (isDuplicate) {
+          return createResponse(
+            { message: `Suggestion ${data.suggestionId} has already been ticketed` },
+            STATUS_CONFLICT,
+          );
+        }
+        log.error({ ticketId: ticket.getId(), suggestionId: data.suggestionId, err }, 'Failed to create TicketSuggestion bridge record');
+        return createResponse({ message: 'Ticket created but suggestion link could not be saved' }, STATUS_INTERNAL_SERVER_ERROR);
+      }
+    }
+
     return createResponse(
       {
         id: ticket.getId(),
@@ -229,6 +274,7 @@ function TaskManagementController(context) {
         ticketStatus: ticket.getTicketStatus(),
         ticketProvider: ticket.getTicketProvider(),
         opportunityId: ticket.getOpportunityId(),
+        suggestionId: data.suggestionId ?? undefined,
       },
       STATUS_CREATED,
     );
