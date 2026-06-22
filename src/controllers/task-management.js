@@ -100,10 +100,15 @@ function TaskManagementController(context) {
    * @param {string} requestContext.params.organizationId - Organization UUID.
    * @param {string} requestContext.params.provider - Provider key (e.g. 'jira_cloud').
    * @param {object} requestContext.data - Parsed request body.
+   * @param {object} requestContext.attributes - Request-scoped attributes (authInfo, etc.).
    * @returns {Promise<Response>} 201 with ticket data, or an error response.
    */
   async function createTicket(requestContext) {
-    const { params, data } = requestContext;
+    const { params, data, attributes } = requestContext;
+
+    // IMS user ID of the authenticated caller — stored on the Ticket for audit purposes.
+    // Falls back to 'unknown' only when auth middleware is absent (e.g. local dev without JWT).
+    const createdBy = attributes?.authInfo?.getProfile()?.getImsUserId() ?? 'unknown';
     const { organizationId, provider } = params;
 
     // --- Input validation ---------------------------------------------------
@@ -191,6 +196,8 @@ function TaskManagementController(context) {
       ticket = await Ticket.create({
         organizationId,
         taskManagementConnectionId: connection.getId(),
+        ticketProvider: provider,
+        createdBy,
         opportunityId: data.opportunityId ?? undefined,
         ticketId: ticketResult.ticketId,
         ticketKey: ticketResult.ticketKey,
@@ -220,6 +227,7 @@ function TaskManagementController(context) {
         ticketKey: ticket.getTicketKey(),
         ticketUrl: ticket.getTicketUrl(),
         ticketStatus: ticket.getTicketStatus(),
+        ticketProvider: ticket.getTicketProvider(),
         opportunityId: ticket.getOpportunityId(),
       },
       STATUS_CREATED,
