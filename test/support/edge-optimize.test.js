@@ -304,13 +304,40 @@ describe('edge-optimize support', () => {
 
       const result = await edgeOptimize.createEdgeOptimizeOrigin({}, 'E2EXAMPLE', 'dev.edgeoptimize.net');
 
-      expect(result).to.deep.equal({ created: true, alreadyExisted: false, originId: 'EdgeOptimize_Origin' });
+      expect(result).to.deep.equal({
+        created: true, alreadyExisted: false, updated: false, originId: 'EdgeOptimize_Origin',
+      });
       expect(cfSendStub.secondCall.args[0].commandName).to.equal('UpdateDistribution');
       const update = cfSendStub.secondCall.args[0].input;
       expect(update.IfMatch).to.equal('etag-1');
       const added = update.DistributionConfig.Origins.Items.find((o) => o.Id === 'EdgeOptimize_Origin');
       expect(added.DomainName).to.equal('dev.edgeoptimize.net');
       expect(added.CustomOriginConfig.OriginProtocolPolicy).to.equal('https-only');
+    });
+
+    it('sets the EO custom headers on the new origin', async () => {
+      cfSendStub.onFirstCall().resolves({
+        DistributionConfig: { Origins: { Quantity: 1, Items: [{ Id: 'origin-aem', DomainName: 'origin.example.com' }] } },
+        ETag: 'etag-1',
+      });
+      cfSendStub.onSecondCall().resolves({});
+
+      await edgeOptimize.createEdgeOptimizeOrigin({}, 'E2EXAMPLE', 'dev.edgeoptimize.net', {
+        apiKey: 'eo-key-123', forwardedHost: 'www.example.com', fetcherKey: 'fk-9',
+      });
+
+      const update = cfSendStub.secondCall.args[0].input;
+      const added = update.DistributionConfig.Origins.Items.find((o) => o.Id === 'EdgeOptimize_Origin');
+      expect(added.CustomHeaders.Quantity).to.equal(3);
+      const headerMap = added.CustomHeaders.Items.reduce((acc, h) => {
+        acc[h.HeaderName] = h.HeaderValue;
+        return acc;
+      }, {});
+      expect(headerMap).to.deep.equal({
+        'x-edgeoptimize-api-key': 'eo-key-123',
+        'x-forwarded-host': 'www.example.com',
+        'x-edgeoptimize-fetcher-key': 'fk-9',
+      });
     });
 
     it('is idempotent when the origin already exists by id', async () => {
@@ -321,7 +348,9 @@ describe('edge-optimize support', () => {
 
       const result = await edgeOptimize.createEdgeOptimizeOrigin({}, 'E2EXAMPLE');
 
-      expect(result).to.deep.equal({ created: false, alreadyExisted: true, originId: 'EdgeOptimize_Origin' });
+      expect(result).to.deep.equal({
+        created: false, alreadyExisted: true, updated: false, originId: 'EdgeOptimize_Origin',
+      });
       expect(cfSendStub.calledOnce).to.equal(true); // never updated
     });
 
@@ -335,6 +364,60 @@ describe('edge-optimize support', () => {
 
       expect(result.alreadyExisted).to.equal(true);
       expect(cfSendStub.calledOnce).to.equal(true);
+    });
+
+    it('patches the headers when the origin exists without them (self-heal)', async () => {
+      cfSendStub.onFirstCall().resolves({
+        DistributionConfig: {
+          Origins: {
+            Quantity: 1,
+            Items: [{ Id: 'EdgeOptimize_Origin', DomainName: 'dev.edgeoptimize.net', CustomHeaders: { Quantity: 0, Items: [] } }],
+          },
+        },
+        ETag: 'etag-1',
+      });
+      cfSendStub.onSecondCall().resolves({});
+
+      const result = await edgeOptimize.createEdgeOptimizeOrigin({}, 'E2EXAMPLE', 'dev.edgeoptimize.net', {
+        apiKey: 'eo-key-123', forwardedHost: 'www.example.com',
+      });
+
+      expect(result).to.deep.equal({
+        created: false, alreadyExisted: true, updated: true, originId: 'EdgeOptimize_Origin',
+      });
+      expect(cfSendStub.secondCall.args[0].commandName).to.equal('UpdateDistribution');
+      const patched = cfSendStub.secondCall.args[0].input
+        .DistributionConfig.Origins.Items.find((o) => o.Id === 'EdgeOptimize_Origin');
+      expect(patched.CustomHeaders.Quantity).to.equal(2);
+    });
+
+    it('does not patch when the existing headers already match', async () => {
+      cfSendStub.resolves({
+        DistributionConfig: {
+          Origins: {
+            Quantity: 1,
+            Items: [{
+              Id: 'EdgeOptimize_Origin',
+              DomainName: 'dev.edgeoptimize.net',
+              CustomHeaders: {
+                Quantity: 2,
+                Items: [
+                  { HeaderName: 'x-edgeoptimize-api-key', HeaderValue: 'eo-key-123' },
+                  { HeaderName: 'x-forwarded-host', HeaderValue: 'www.example.com' },
+                ],
+              },
+            }],
+          },
+        },
+        ETag: 'etag-1',
+      });
+
+      const result = await edgeOptimize.createEdgeOptimizeOrigin({}, 'E2EXAMPLE', 'dev.edgeoptimize.net', {
+        apiKey: 'eo-key-123', forwardedHost: 'www.example.com',
+      });
+
+      expect(result.updated).to.equal(false);
+      expect(cfSendStub.calledOnce).to.equal(true); // no UpdateDistribution
     });
 
     it('throws when the distribution id is missing', async () => {

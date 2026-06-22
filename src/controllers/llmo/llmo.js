@@ -2186,7 +2186,7 @@ function LlmoController(ctx) {
     if (!accessControlUtil.isLLMOAdministrator()) {
       return { error: forbidden(`Only LLMO administrators can ${action}`) };
     }
-    return {};
+    return { site };
   };
 
   // Verify the customer's cross-account connector role is assumable. Used by the wizard's
@@ -2417,14 +2417,37 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize origin');
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize origin');
       if (error) {
         return error;
       }
 
+      // The EO origin needs custom headers so the routing function's request authenticates to Edge
+      // Optimize (x-edgeoptimize-api-key) and resolves the customer host (x-forwarded-host). Both
+      // are derived server-side from the site — no UI input. Without them Verify never goes green.
+      const baseURL = site.getBaseURL();
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+      const apiKey = metaconfig?.apiKeys?.[0];
+      if (!hasText(apiKey)) {
+        return badRequest('Site has no Edge Optimize API key — enable Edge Optimize for this site first');
+      }
+      const forwardedHost = calculateForwardedHost(baseURL, log);
+
       const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const result = await createEdgeOptimizeOrigin(credentials, distributionId, originDomain);
-      log.info(`[edge-optimize-origin] ${result.created ? 'Created' : 'Origin already existed for'} site ${siteId}, distribution ${distributionId}`);
+      const result = await createEdgeOptimizeOrigin(
+        credentials,
+        distributionId,
+        originDomain,
+        { apiKey, forwardedHost },
+      );
+      let action = 'Origin already existed for';
+      if (result.created) {
+        action = 'Created origin for';
+      } else if (result.updated) {
+        action = 'Patched origin headers for';
+      }
+      log.info(`[edge-optimize-origin] ${action} site ${siteId}, distribution ${distributionId}`);
       return ok(result);
     } catch (error) {
       log.error(`Failed to create CloudFront Edge Optimize origin for site ${siteId}:`, error);
@@ -2663,6 +2686,14 @@ function LlmoController(ctx) {
       }
 
       // Determine the URL to probe: prefer an explicit domain, else resolve from the distribution.
+      //
+      // TODO(prod): probe the customer's REAL onboarded domain, not the *.cloudfront.net domain.
+      // In prod, bot traffic hits the customer's own domain (their CNAME / distribution alias), so
+      // that is the true end-to-end test. We have it server-side via the site
+      // (calculateForwardedHost(site.getBaseURL())) and/or the distribution Aliases. We default to
+      // the distribution cloudfront.net DomainName today only because the dev test distribution has
+      // no custom domain. Switch the default to the site/alias domain before prod (keep the
+      // explicit `domain` override + cloudfront.net fallback for distributions with no alias).
       let domain = String(context.data?.domain || '').trim();
       if (!hasText(domain)) {
         const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });

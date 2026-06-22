@@ -8193,8 +8193,9 @@ describe('LlmoController', () => {
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
       createEdgeOptimizeOriginStub = sinon.stub().resolves({
-        created: true, alreadyExisted: false, originId: 'EdgeOptimize_Origin',
+        created: true, alreadyExisted: false, updated: false, originId: 'EdgeOptimize_Origin',
       });
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['eo-key-123'] });
       originContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
@@ -8212,9 +8213,16 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body).to.deep.equal({ created: true, alreadyExisted: false, originId: 'EdgeOptimize_Origin' });
+      expect(body).to.deep.equal({
+        created: true, alreadyExisted: false, updated: false, originId: 'EdgeOptimize_Origin',
+      });
       expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
-      expect(createEdgeOptimizeOriginStub.calledOnceWith(sinon.match.any, 'E2EXAMPLE123', 'dev.edgeoptimize.net')).to.equal(true);
+      expect(createEdgeOptimizeOriginStub.calledOnceWith(
+        sinon.match.any,
+        'E2EXAMPLE123',
+        'dev.edgeoptimize.net',
+        sinon.match({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' }),
+      )).to.equal(true);
     });
 
     it('passes the env-driven origin domain when set', async () => {
@@ -8226,14 +8234,37 @@ describe('LlmoController', () => {
       expect(createEdgeOptimizeOriginStub.calledOnceWith(sinon.match.any, 'E2EXAMPLE123', 'live.edgeoptimize.net')).to.equal(true);
     });
 
+    it('returns 400 when the site has no Edge Optimize API key', async () => {
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [] });
+
+      const result = await controller.createEdgeOptimizeOrigin(originContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('API key');
+      expect(createEdgeOptimizeOriginStub.called).to.equal(false);
+    });
+
     it('is idempotent when the origin already exists', async () => {
       createEdgeOptimizeOriginStub = sinon.stub().resolves({
-        created: false, alreadyExisted: true, originId: 'EdgeOptimize_Origin',
+        created: false, alreadyExisted: true, updated: false, originId: 'EdgeOptimize_Origin',
       });
 
       const result = await controller.createEdgeOptimizeOrigin(originContext);
       const body = await result.json();
       expect(body.alreadyExisted).to.equal(true);
+    });
+
+    it('reports a header patch on an existing header-less origin', async () => {
+      createEdgeOptimizeOriginStub = sinon.stub().resolves({
+        created: false, alreadyExisted: true, updated: true, originId: 'EdgeOptimize_Origin',
+      });
+
+      const result = await controller.createEdgeOptimizeOrigin(originContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.updated).to.equal(true);
     });
 
     it('returns 400 for an invalid account id', async () => {

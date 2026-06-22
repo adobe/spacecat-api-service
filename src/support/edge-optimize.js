@@ -205,47 +205,104 @@ function getBehaviorFromConfig(config, pathPattern) {
 }
 
 /**
- * Add the Edge Optimize origin to a CloudFront distribution (idempotent).
+ * Build the custom-header items the EO origin must carry. Mirrors the standalone wizard's
+ * apiCreateOrigin (server.mjs) + the CloudFormation installer: `x-edgeoptimize-api-key`
+ * authenticates the prerender request to Edge Optimize, `x-forwarded-host` tells EO which site's
+ * content to serve, and the optional `x-edgeoptimize-fetcher-key` is for WAF-allowlisted customers.
+ * Without these the origin returns no `x-edgeoptimize-request-id` and Verify never goes green.
  *
- * Mirrors the standalone wizard's create-origin: reads the distribution config, and — only if no
- * Edge Optimize origin exists yet — appends a custom HTTPS origin pointing at the EO target domain
- * with the EO request headers, then writes it back via UpdateDistribution (deploy propagates in the
- * background; we do not block on it).
+ * @param {object} headers
+ * @param {string} [headers.apiKey] - the site's Edge Optimize API key.
+ * @param {string} [headers.forwardedHost] - the customer's canonical site host.
+ * @param {string} [headers.fetcherKey] - optional fetcher key (WAF allowlist).
+ * @returns {Array<{HeaderName: string, HeaderValue: string}>}
+ */
+function buildEdgeOptimizeOriginHeaders({ apiKey, forwardedHost, fetcherKey } = {}) {
+  const items = [];
+  if (hasText(apiKey)) {
+    items.push({ HeaderName: 'x-edgeoptimize-api-key', HeaderValue: apiKey });
+  }
+  if (hasText(forwardedHost)) {
+    items.push({ HeaderName: 'x-forwarded-host', HeaderValue: forwardedHost });
+  }
+  if (hasText(fetcherKey)) {
+    items.push({ HeaderName: 'x-edgeoptimize-fetcher-key', HeaderValue: fetcherKey });
+  }
+  return items;
+}
+
+/**
+ * Add the Edge Optimize origin to a CloudFront distribution (idempotent + self-healing).
+ *
+ * Reads the distribution config and, if no Edge Optimize origin exists yet, appends a custom HTTPS
+ * origin pointing at the EO target domain with the EO request headers. If the origin already exists
+ * but its custom headers do not match the desired set (e.g. it was created header-less by an
+ * earlier version), the headers are patched in place. Writes are applied via UpdateDistribution
+ * (deploy propagates in the background; we do not block on it).
  *
  * @param {object} credentials - temporary credentials from {@link assumeConnectorRole}.
  * @param {string} distributionId - the CloudFront distribution ID.
  * @param {string} [originDomain] - EO origin domain (env-driven; defaults to the dev EO domain).
+ * @param {object} [headers] - EO origin headers ({ apiKey, forwardedHost, fetcherKey }).
  * @param {string} [region] - CloudFront control-plane region.
- * @returns {Promise<{created: boolean, alreadyExisted: boolean, originId: string}>}
+ * @returns {Promise<{created, alreadyExisted, updated, originId}>} origin mutation outcome.
  */
 export async function createEdgeOptimizeOrigin(
   credentials,
   distributionId,
   originDomain = EDGE_OPTIMIZE_DEFAULT_ORIGIN_DOMAIN,
+  headers = {},
   region = EDGE_OPTIMIZE_REGION,
 ) {
   if (!hasText(distributionId)) {
     throw new Error('distributionId is required');
   }
+  const desiredHeaderItems = buildEdgeOptimizeOriginHeaders(headers);
+
   const client = new CloudFrontClient({ region, credentials });
   const result = await client.send(new GetDistributionConfigCommand({ Id: distributionId }));
   const config = result.DistributionConfig;
   const etag = result.ETag;
   const origins = config.Origins?.Items || [];
 
-  const alreadyExisted = origins.some(
+  const existing = origins.find(
     (o) => o.Id === EDGE_OPTIMIZE_ORIGIN_ID || o.DomainName === originDomain,
   );
 
-  if (alreadyExisted) {
-    return { created: false, alreadyExisted: true, originId: EDGE_OPTIMIZE_ORIGIN_ID };
+  if (existing) {
+    // Idempotent — but self-heal an origin created without the EO headers (earlier bug): patch its
+    // CustomHeaders to the desired set when they differ. Never wipe headers if none were supplied.
+    const toMap = (arr) => (arr || []).reduce((acc, h) => {
+      acc[h.HeaderName.toLowerCase()] = h.HeaderValue;
+      return acc;
+    }, {});
+    const current = toMap(existing.CustomHeaders?.Items);
+    const desired = toMap(desiredHeaderItems);
+    const headersMatch = Object.keys(desired).length === Object.keys(current).length
+      && Object.entries(desired).every(([k, v]) => current[k] === v);
+
+    if (desiredHeaderItems.length === 0 || headersMatch) {
+      return {
+        created: false, alreadyExisted: true, updated: false, originId: EDGE_OPTIMIZE_ORIGIN_ID,
+      };
+    }
+
+    existing.CustomHeaders = { Quantity: desiredHeaderItems.length, Items: desiredHeaderItems };
+    await client.send(new UpdateDistributionCommand({
+      Id: distributionId,
+      IfMatch: etag,
+      DistributionConfig: config,
+    }));
+    return {
+      created: false, alreadyExisted: true, updated: true, originId: EDGE_OPTIMIZE_ORIGIN_ID,
+    };
   }
 
   origins.push({
     Id: EDGE_OPTIMIZE_ORIGIN_ID,
     DomainName: originDomain,
     OriginPath: '',
-    CustomHeaders: { Quantity: 0, Items: [] },
+    CustomHeaders: { Quantity: desiredHeaderItems.length, Items: desiredHeaderItems },
     CustomOriginConfig: {
       HTTPPort: 80,
       HTTPSPort: 443,
@@ -265,7 +322,9 @@ export async function createEdgeOptimizeOrigin(
     DistributionConfig: config,
   }));
 
-  return { created: true, alreadyExisted: false, originId: EDGE_OPTIMIZE_ORIGIN_ID };
+  return {
+    created: true, alreadyExisted: false, updated: false, originId: EDGE_OPTIMIZE_ORIGIN_ID,
+  };
 }
 
 /**
