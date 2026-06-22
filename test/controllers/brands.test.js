@@ -5600,6 +5600,16 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 400 when organization ID is missing', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 400 when spaceCatId is not a valid UUID', async () => {
       const response = await brandsController.transitionBrandStatusForOrg({
         ...context,
