@@ -42,6 +42,16 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
     attributes: { authInfo: { getType: () => 'ims' } },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves({ getId: () => ORG }) },
+      Brand: {
+        findById: sinon.stub().resolves({
+          getId: () => BRAND,
+          getName: () => 'Test Brand',
+          getSemrushWorkspaceId: () => null,
+          setSemrushWorkspaceId: sinon.stub(),
+          setStatus: sinon.stub(),
+          save: sinon.stub().resolves(),
+        }),
+      },
       services: { postgrestClient: { from: () => ({}) } },
     },
     params: { spaceCatId: ORG, brandId: BRAND, ...params },
@@ -199,6 +209,58 @@ const FIXTURES = {
     },
     query: { geoTargetId: '2840', languageCode: 'en' },
   },
+  updateSerenityModels: {
+    expectedStatus: 200,
+    controllerMethod: 'updateModels',
+    handlerName: 'handleUpdateModels',
+    handlerResult: {
+      items: [{
+        id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: 'icon-url',
+      }],
+    },
+    data: { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
+  },
+  activateSerenityBrand: {
+    expectedStatus: 200,
+    controllerMethod: 'activate',
+    // activate orchestrates per-market subworkspace creates; stubbing the subworkspace
+    // market handler is enough to drive the documented 200 (≥1 live) shape.
+    handlerName: 'handleCreateMarketSubworkspace',
+    handlerResult: {
+      status: 201,
+      body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
+    },
+    data: {
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+      brandDisplayName: 'Adobe',
+      markets: [{ market: 'US', languageCode: 'en' }],
+    },
+  },
+  deactivateSerenityBrand: {
+    expectedStatus: 200,
+    controllerMethod: 'deactivate',
+    handlerName: 'decommissionBrandWorkspace',
+    handlerResult: undefined,
+  },
+  listSerenityOrgModels: {
+    expectedStatus: 200,
+    controllerMethod: 'listOrgModels',
+    handlerName: 'listGlobalModelCatalog',
+    handlerResult: {
+      items: [{
+        id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: 'icon-url',
+      }],
+    },
+  },
+  listSerenityOrgLanguages: {
+    expectedStatus: 200,
+    controllerMethod: 'listOrgLanguages',
+    handlerName: 'listLanguageCatalog',
+    handlerResult: {
+      items: [{ id: 'lang-en', name: 'English' }],
+    },
+  },
 };
 
 function makeAjv() {
@@ -253,6 +315,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
         handleListModels: sinon.stub(),
+        handleUpdateModels: sinon.stub(),
+        handleCreateMarketSubworkspace: sinon.stub(),
+        ensureSubworkspace: sinon.stub().resolves(WORKSPACE),
+        decommissionBrandWorkspace: sinon.stub(),
+        listGlobalModelCatalog: sinon.stub(),
+        listLanguageCatalog: sinon.stub(),
       };
       handlerStubs[fx.handlerName].resolves(fx.handlerResult);
 
@@ -265,6 +333,9 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           },
           '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
+            resolveBrandWorkspace: () => Promise.resolve({
+              mode: 'flat', workspaceId: WORKSPACE, parentWorkspaceId: WORKSPACE,
+            }),
           },
           '../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
@@ -285,6 +356,37 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleDeleteMarket: handlerStubs.handleDeleteMarket,
             handleListTags: handlerStubs.handleListTags,
             handleListModels: handlerStubs.handleListModels,
+            handleUpdateModels: handlerStubs.handleUpdateModels,
+            listGlobalModelCatalog: handlerStubs.listGlobalModelCatalog,
+            listLanguageCatalog: handlerStubs.listLanguageCatalog,
+          },
+          '../../src/support/serenity/handlers/markets-subworkspace.js': {
+            handleListMarketsSubworkspace: sinon.stub(),
+            handleGetMarketSubworkspace: sinon.stub(),
+            handleCreateMarketSubworkspace: handlerStubs.handleCreateMarketSubworkspace,
+            handleDeleteMarketSubworkspace: sinon.stub(),
+            handleListTagsSubworkspace: sinon.stub(),
+            handleListModelsSubworkspace: sinon.stub(),
+            handleUpdateModelsSubworkspace: sinon.stub(),
+          },
+          '../../src/support/serenity/handlers/prompts-subworkspace.js': {
+            handleListPromptsSubworkspace: sinon.stub(),
+            handleCreatePromptsSubworkspace: sinon.stub(),
+            handleUpdatePromptSubworkspace: sinon.stub(),
+            handleBulkDeletePromptsSubworkspace: sinon.stub(),
+          },
+          '../../src/support/serenity/workspace-lifecycle.js': {
+            ensureSubworkspace: handlerStubs.ensureSubworkspace,
+            decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
+          },
+          // activate reads brand-level aliases/URLs/competitors once per batch;
+          // stub them so the contract test doesn't hit the fake postgrest client.
+          '../../src/support/brands-storage.js': {
+            getBrandAliasNames: () => Promise.resolve([]),
+            getBrandUrlSources: () => Promise.resolve({
+              urls: [], socialAccounts: [], earnedContent: [],
+            }),
+            getBrandCompetitors: () => Promise.resolve([]),
           },
         },
       )).default;

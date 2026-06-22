@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { classifyIntents } from './intent-classifier.js';
+import { throwOnPgConstraintViolation } from './errors.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
@@ -659,7 +660,7 @@ export async function upsertPrompts({
 
   const getKey = (p) => {
     const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();
-    return `${String(p.prompt || p.text || '').trim()}:${norm.join(',')}`;
+    return `${String(p.prompt || p.text || '').trim().toLowerCase()}:${norm.join(',')}`;
   };
 
   const existingById = new Map((existing || []).map((p) => [p.prompt_id, p]));
@@ -718,6 +719,49 @@ export async function upsertPrompts({
     }
   }
 
+  // Guard against uq_prompt_text_region_per_brand: deduplicate toInsert by
+  // (lower(text), sorted_regions) before the bulk INSERT. For a new brand
+  // existingByKey is empty, so cross-topic text collisions all land here.
+  // Deterministic tie-break: sort by (topic_id, prompt_id) asc, keep first.
+  // Each drop is logged (warn) with a text hash — auditable without echoing
+  // customer data. Dropped entries are removed from processed so counts stay
+  // honest. Guard is > 1: a single-row batch cannot collide with itself.
+  if (toInsert.length > 1) {
+    const dedupKey = (row) => {
+      const t = String(row.text || '').trim().toLowerCase();
+      const r = [...(row.regions || [])].map((x) => String(x).toLowerCase()).sort().join(',');
+      return `${t}:${r}`;
+    };
+    const sortedForDedup = [...toInsert].sort((a, b) => {
+      const tCmp = String(a.topic_id ?? '').localeCompare(String(b.topic_id ?? ''));
+      return tCmp !== 0 ? tCmp : String(a.prompt_id).localeCompare(String(b.prompt_id));
+    });
+    const winnerByKey = new Map();
+    const droppedIds = new Set();
+    for (const row of sortedForDedup) {
+      const key = dedupKey(row);
+      if (winnerByKey.has(key)) {
+        droppedIds.add(row.prompt_id);
+        // eslint-disable-next-line no-console
+        console.warn('[upsertPrompts] dedup-drop', {
+          brand_id: row.brand_id,
+          text_hash: crypto.createHash('sha256').update(row.text || '').digest('hex').slice(0, 12),
+          dropped_prompt_id: row.prompt_id,
+          dropped_topic_id: row.topic_id ?? null,
+          winning_prompt_id: winnerByKey.get(key).prompt_id,
+          winning_topic_id: winnerByKey.get(key).topic_id ?? null,
+        });
+      } else {
+        winnerByKey.set(key, row);
+      }
+    }
+    if (droppedIds.size > 0) {
+      const keep = (r) => !droppedIds.has(r.prompt_id);
+      toInsert.splice(0, toInsert.length, ...toInsert.filter(keep));
+      processed.splice(0, processed.length, ...processed.filter(keep));
+    }
+  }
+
   // Best-effort intent classification for prompts that arrived WITHOUT an
   // intent (typically human-added). Pipeline prompts already carry a
   // normalized intent and are skipped. Failures leave intent null; they MUST
@@ -762,6 +806,9 @@ export async function upsertPrompts({
         .select(),
     );
     if (error) {
+      throwOnPgConstraintViolation(error, {
+        23505: { status: 409, message: 'A prompt with the same text and region already exists for this brand.' },
+      });
       throw new Error(`Failed to insert prompts: ${error.message}`);
     }
     created = inserted?.length ?? toInsert.length;
@@ -895,6 +942,96 @@ export async function updatePromptById({
     promptId,
     postgrestClient,
   });
+}
+
+/**
+ * Normalizes a regions array for set comparison: lower-cased, trimmed, non-empty
+ * codes, sorted. Used by the brand-region consistency guard so casing/order
+ * differences never defeat the removed-region comparison.
+ *
+ * @param {string[]} regions
+ * @returns {string[]} normalized, sorted region codes
+ */
+function normalizeRegionsForCompare(regions) {
+  if (!Array.isArray(regions)) {
+    return [];
+  }
+  return regions
+    .filter((r) => r != null)
+    .map((r) => (typeof r === 'string' ? r : String(r)).trim().toLowerCase())
+    .filter((r) => r.length > 0)
+    .sort();
+}
+
+/**
+ * Counts, per region, how many of a brand's non-deleted prompts still use each
+ * of the given regions (LLMO-5645). Used to guard a brand-level region change:
+ * DRS schedules off each prompt's `regions`, so a region must not be removed
+ * from a brand while prompts still reference it (that would orphan those
+ * prompts on a market the brand no longer covers). The operator relocates the
+ * prompts first; comparison is case-insensitive. Deleted prompts are skipped.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {string} params.brandUuid - brands.id (uuid)
+ * @param {string[]} params.oldRegions - brand regions BEFORE the update
+ * @param {string[]} params.newRegions - brand regions AFTER the update
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {object} [params.log] - Logger
+ * @returns {Promise<Record<string, number>>} map of removed region (lowercase)
+ *   → count of prompts still using it; empty when nothing blocks the change
+ */
+export async function findPromptsBlockingRegionRemoval({
+  organizationId,
+  brandUuid,
+  oldRegions,
+  newRegions,
+  postgrestClient,
+  log = console,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const newSet = new Set(normalizeRegionsForCompare(newRegions));
+  const removed = normalizeRegionsForCompare(oldRegions).filter((r) => !newSet.has(r));
+  if (removed.length === 0) {
+    return {};
+  }
+
+  // Fetch the brand's non-deleted prompts. A single brand carries tens to a few
+  // hundred prompts in practice; cap the read and warn (never silently truncate)
+  // if a brand somehow exceeds it so the operator knows the check was partial.
+  const READ_CAP = 5000;
+  const { data, error } = await postgrestClient
+    .from('prompts')
+    .select('id, regions')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandUuid)
+    .neq('status', 'deleted')
+    .limit(READ_CAP);
+
+  if (error) {
+    throw new Error(`Failed to read prompts for region consistency check: ${error.message}`);
+  }
+
+  const prompts = data || [];
+  if (prompts.length >= READ_CAP) {
+    log.warn?.(`findPromptsBlockingRegionRemoval: brand ${brandUuid} has >= ${READ_CAP} prompts; `
+      + 'consistency check may be partial');
+  }
+
+  const counts = {};
+  prompts.forEach((p) => {
+    const promptRegions = new Set(normalizeRegionsForCompare(p.regions));
+    removed.forEach((r) => {
+      if (promptRegions.has(r)) {
+        counts[r] = (counts[r] || 0) + 1;
+      }
+    });
+  });
+
+  return counts;
 }
 
 /**

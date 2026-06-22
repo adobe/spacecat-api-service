@@ -23,6 +23,7 @@ import {
   createAgenticTrafficByStatusHandler,
   createAgenticTrafficByUserAgentHandler,
   createAgenticTrafficByUrlHandler,
+  createAgenticTrafficHitsByUrlsHandler,
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
@@ -288,6 +289,8 @@ describe('llmo-agentic-traffic', () => {
       ['perplexity', 'Perplexity'],
       ['gemini', 'Gemini'],
       ['google', 'Google'],
+      ['google-ai-mode', 'Google AI Mode'],
+      ['copilot', 'Copilot'],
       ['amazon', 'Amazon'],
       ['all', null],
       [undefined, null],
@@ -2182,6 +2185,146 @@ describe('llmo-agentic-traffic', () => {
       const chain = client.from.firstCall.returnValue;
       expect(chain.eq).to.have.been.calledWith('site_id', SITE_ID);
       expect(chain.limit).to.have.been.calledWith(1);
+    });
+  });
+
+  describe('hits-by-urls handler', () => {
+    const urlsBody = [
+      { host: 'www.example.com', urlPath: '/a' },
+      { host: 'www.example.com', urlPath: '/b' },
+    ];
+
+    it('maps urls to p_urls and returns mapped rows', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: {
+          data: [{
+            url: 'https://www.example.com/a',
+            host: 'www.example.com',
+            url_path: '/a',
+            total_hits: 42,
+            hits_trend: [{ week_start: '2026-01-05', value: 42 }],
+          }],
+          error: null,
+        },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          urls: urlsBody,
+          agentTypes: ['Chatbots', 'Research'],
+        },
+      });
+
+      const handler = createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_hits_for_urls', {
+        p_site_id: SITE_ID,
+        p_start_date: '2026-01-01',
+        p_end_date: '2026-01-28',
+        p_urls: [
+          { host: 'www.example.com', url_path: '/a' },
+          { host: 'www.example.com', url_path: '/b' },
+        ],
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.rows).to.deep.equal([{
+        host: 'www.example.com',
+        urlPath: '/a',
+        totalHits: 42,
+        hitsTrend: [{ weekStart: '2026-01-05', value: 42 }],
+      }]);
+    });
+
+    it('drops entries missing host or path and accepts snake_case url_path', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          urls: [
+            { host: 'www.example.com', url_path: '/snake' },
+            { urlPath: '/no-host' },
+            { host: 'www.example.com' },
+          ],
+        },
+      });
+
+      await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_hits_for_urls', {
+        p_urls: [{ host: 'www.example.com', url_path: '/snake' }],
+      });
+    });
+
+    it('returns 400 when urls is not an array', async () => {
+      const ctx = makeContext({ data: { urls: 'nope' } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when more than 2000 urls are requested', async () => {
+      const urls = Array.from({ length: 2001 }, (_, i) => ({ host: 'h', urlPath: `/p/${i}` }));
+      const ctx = makeContext({ data: { urls } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('short-circuits to an empty result without calling the RPC', async () => {
+      const client = createMockClient();
+      const ctx = makeContext({ client, data: { urls: [{ urlPath: '/no-host' }] } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      expect(await res.json()).to.deep.equal({ rows: [] });
+      expect(client.rpc).to.not.have.been.called;
+    });
+
+    it('returns 500 when the RPC errors', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: null, error: { message: 'boom' } },
+      });
+      const ctx = makeContext({ client, data: { urls: urlsBody } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(500);
+    });
+
+    it('accepts exactly the 2000-entry cap (inclusive boundary)', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const urls = Array.from({ length: 2000 }, (_, i) => ({ host: 'h', urlPath: `/p/${i}` }));
+      const ctx = makeContext({ client, data: { urls } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      expect(client.rpc).to.have.been.calledWith('rpc_agentic_hits_for_urls');
+    });
+
+    it('coerces null total_hits and a non-array hits_trend to safe defaults', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: {
+          data: [
+            {
+              url: 'u', host: 'h', url_path: '/p', total_hits: null, hits_trend: null,
+            },
+            {
+              url: 'u2', host: 'h', url_path: '/q', total_hits: 5, hits_trend: [{ week_start: '2026-01-05' }],
+            },
+          ],
+          error: null,
+        },
+      });
+      const ctx = makeContext({ client, data: { urls: urlsBody } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.rows[0].totalHits).to.equal(0);
+      expect(body.rows[0].hitsTrend).to.deep.equal([]);
+      // missing point.value coerces to 0
+      expect(body.rows[1].hitsTrend).to.deep.equal([{ weekStart: '2026-01-05', value: 0 }]);
     });
   });
 });

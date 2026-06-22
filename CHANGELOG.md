@@ -1,3 +1,185 @@
+## [1.589.1](https://github.com/adobe/spacecat-api-service/compare/v1.589.0...v1.589.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* **prerender:** remove URL batching, pass mode to audit-worker ([#2659](https://github.com/adobe/spacecat-api-service/issues/2659)) ([6967ee8](https://github.com/adobe/spacecat-api-service/commit/6967ee8c75e9726f5ff33d34b96bfd644569182f)), closes [adobe/spacecat-audit-worker#2713](https://github.com/adobe/spacecat-audit-worker/issues/2713) [adobe/spacecat-audit-worker#2713](https://github.com/adobe/spacecat-audit-worker/issues/2713) [adobe/spacecat-audit-worker#2713](https://github.com/adobe/spacecat-audit-worker/issues/2713)
+
+# [1.589.0](https://github.com/adobe/spacecat-api-service/compare/v1.588.0...v1.589.0) (2026-06-22)
+
+
+### Features
+
+* **redirects:** serve ASO redirect overlay via api-service (Lite-E) ([#2638](https://github.com/adobe/spacecat-api-service/issues/2638)) ([a900c15](https://github.com/adobe/spacecat-api-service/commit/a900c151978df6e29b431296b80e49201090992f)), closes [#617](https://github.com/adobe/spacecat-api-service/issues/617)
+
+# [1.588.0](https://github.com/adobe/spacecat-api-service/compare/v1.587.1...v1.588.0) (2026-06-22)
+
+
+### Features
+
+* v1 gap-prompts-totals + gap-source-domains endpoints | LLMO-5619 ([#2647](https://github.com/adobe/spacecat-api-service/issues/2647)) ([90817b7](https://github.com/adobe/spacecat-api-service/commit/90817b7d003b3b3aeb70c191c17c81d995b1f6b1)), closes [#2609](https://github.com/adobe/spacecat-api-service/issues/2609)
+
+## [1.587.1](https://github.com/adobe/spacecat-api-service/compare/v1.587.0...v1.587.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* **agentic-traffic:** map google-ai-mode and copilot platform codes to DB values ([#2660](https://github.com/adobe/spacecat-api-service/issues/2660)) ([3b37cce](https://github.com/adobe/spacecat-api-service/commit/3b37ccebf966040833fbbe31e7f0af0c0fde4afc))
+
+# [1.587.0](https://github.com/adobe/spacecat-api-service/compare/v1.586.0...v1.587.0) (2026-06-22)
+
+
+### Features
+
+* **s2s:** allow readAll consumers to use by-base-url and by-ims-org-id ([#2640](https://github.com/adobe/spacecat-api-service/issues/2640)) ([abb0775](https://github.com/adobe/spacecat-api-service/commit/abb0775fa3ba5cdd0f98a3b0898a57c0b99fab8e))
+
+# [1.586.0](https://github.com/adobe/spacecat-api-service/compare/v1.585.1...v1.586.0) (2026-06-21)
+
+
+### Features
+
+* server-side text search for prompt research | LLMO-5216 ([#2650](https://github.com/adobe/spacecat-api-service/issues/2650)) ([b23243d](https://github.com/adobe/spacecat-api-service/commit/b23243dc93f14bfa7db6a7aea575b848af993d4c))
+
+## [1.585.1](https://github.com/adobe/spacecat-api-service/compare/v1.585.0...v1.585.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **prompts:** deterministic 500 on POST /prompts — dedup + error classification + collation fix ([#2646](https://github.com/adobe/spacecat-api-service/issues/2646)) ([177d778](https://github.com/adobe/spacecat-api-service/commit/177d77866c50e416ded892d736b18ccd609cde74))
+
+# [1.585.0](https://github.com/adobe/spacecat-api-service/compare/v1.584.2...v1.585.0) (2026-06-19)
+
+
+### Features
+
+* server-side export for prompt research | LLMO-5216 ([#2645](https://github.com/adobe/spacecat-api-service/issues/2645)) ([349e68c](https://github.com/adobe/spacecat-api-service/commit/349e68c031d46c30e4ca90cf5363162e23504dbc))
+
+## [1.584.2](https://github.com/adobe/spacecat-api-service/compare/v1.584.1...v1.584.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* **prerender:** ai-only-missing mode should include FIXED suggestions ([#2644](https://github.com/adobe/spacecat-api-service/issues/2644)) ([cb6db46](https://github.com/adobe/spacecat-api-service/commit/cb6db46b8ff296b8926cc65cc352a7eef173f53d)), closes [adobe/spacecat-audit-worker#2703](https://github.com/adobe/spacecat-audit-worker/issues/2703)
+
+## [1.584.1](https://github.com/adobe/spacecat-api-service/compare/v1.584.0...v1.584.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* paginate topic-research prompts via single ALL-engine call | LLMO-5671 ([#2639](https://github.com/adobe/spacecat-api-service/issues/2639)) ([a66ac4e](https://github.com/adobe/spacecat-api-service/commit/a66ac4e249fe7738dc07746e91577b18731a60c0)), closes [#2629](https://github.com/adobe/spacecat-api-service/issues/2629)
+
+# [1.584.0](https://github.com/adobe/spacecat-api-service/compare/v1.583.1...v1.584.0) (2026-06-19)
+
+
+### Features
+
+* **serenity:** defer Semrush provisioning for pending (draft) brands ([#2635](https://github.com/adobe/spacecat-api-service/issues/2635)) ([74fc1b2](https://github.com/adobe/spacecat-api-service/commit/74fc1b2203df26757ad3fb19c47d43afc5a721d0))
+
+## [1.583.1](https://github.com/adobe/spacecat-api-service/compare/v1.583.0...v1.583.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **plg:** enroll config handlers in pre-onboarding fast path ([#2636](https://github.com/adobe/spacecat-api-service/issues/2636)) ([b5e2d90](https://github.com/adobe/spacecat-api-service/commit/b5e2d90ce0a1ce4687d72792d0b6193da93ef1ab))
+
+# [1.583.0](https://github.com/adobe/spacecat-api-service/compare/v1.582.1...v1.583.0) (2026-06-18)
+
+
+### Features
+
+* **preflight:** mint IMS token via dedicated client (SITES-46699) ([#2641](https://github.com/adobe/spacecat-api-service/issues/2641)) ([7cdd51e](https://github.com/adobe/spacecat-api-service/commit/7cdd51e25a670d27cb3a584d4f5fc46ea30131c9)), closes [#2611](https://github.com/adobe/spacecat-api-service/issues/2611) [#2611](https://github.com/adobe/spacecat-api-service/issues/2611) [#2627](https://github.com/adobe/spacecat-api-service/issues/2627)
+
+## [1.582.1](https://github.com/adobe/spacecat-api-service/compare/v1.582.0...v1.582.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **slack/run-audit:** set onDemand bypass and align entitlement to siteEnrollment ([#2555](https://github.com/adobe/spacecat-api-service/issues/2555)) ([0cdc067](https://github.com/adobe/spacecat-api-service/commit/0cdc067f2e5ee45bd1ea689ddebc81dbb9aa14d5))
+
+# [1.582.0](https://github.com/adobe/spacecat-api-service/compare/v1.581.0...v1.582.0) (2026-06-18)
+
+
+### Features
+
+* fetch prompts by topic in research endpoint | LLMO-5671 ([#2629](https://github.com/adobe/spacecat-api-service/issues/2629)) ([13e88ed](https://github.com/adobe/spacecat-api-service/commit/13e88ed55a9916bd439b1ad8adf0a55b7c52e2b0))
+
+# [1.581.0](https://github.com/adobe/spacecat-api-service/compare/v1.580.0...v1.581.0) (2026-06-18)
+
+
+### Features
+
+* add POST agentic-traffic/hits-by-urls endpoint | LLMO-5586 ([#2615](https://github.com/adobe/spacecat-api-service/issues/2615)) ([6f4dbd8](https://github.com/adobe/spacecat-api-service/commit/6f4dbd88563af5adeed5721ffbafae54ac9755f6))
+
+# [1.580.0](https://github.com/adobe/spacecat-api-service/compare/v1.579.0...v1.580.0) (2026-06-18)
+
+
+### Features
+
+* Add cwv-trends-audit to paid profile ([#2633](https://github.com/adobe/spacecat-api-service/issues/2633)) ([e632f13](https://github.com/adobe/spacecat-api-service/commit/e632f132be10365239fbb2984578effc86050e5e))
+
+# [1.579.0](https://github.com/adobe/spacecat-api-service/compare/v1.578.2...v1.579.0) (2026-06-18)
+
+
+### Features
+
+* **serenity:** sub-workspace dual-mode provisioning (brand-create, activate/deactivate, subworkspace reads/writes) ([#2610](https://github.com/adobe/spacecat-api-service/issues/2610)) ([47b8352](https://github.com/adobe/spacecat-api-service/commit/47b8352c1691492aff259aab0f597840e2cec678)), closes [throu#api](https://github.com/throu/issues/api) [hi#market-count](https://github.com/hi/issues/market-count)
+
+## [1.578.2](https://github.com/adobe/spacecat-api-service/compare/v1.578.1...v1.578.2) (2026-06-18)
+
+
+### Bug Fixes
+
+* **topics:** guard topic_categories link against non-UUID categoryId and log SQLSTATE ([#2631](https://github.com/adobe/spacecat-api-service/issues/2631)) ([741d9d5](https://github.com/adobe/spacecat-api-service/commit/741d9d583d10c9088217d04723f9c3435e4d4950))
+
+## [1.578.1](https://github.com/adobe/spacecat-api-service/compare/v1.578.0...v1.578.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* **preflight:** construct custom-env ImsClient with IMS_SCOPE=system at the call site (SITES-43236 follow-up) ([#2627](https://github.com/adobe/spacecat-api-service/issues/2627)) ([0fbe049](https://github.com/adobe/spacecat-api-service/commit/0fbe0493fcc0e78921564bf6d72798e81f01828d)), closes [#2611](https://github.com/adobe/spacecat-api-service/issues/2611) [#2611](https://github.com/adobe/spacecat-api-service/issues/2611)
+
+# [1.578.0](https://github.com/adobe/spacecat-api-service/compare/v1.577.1...v1.578.0) (2026-06-17)
+
+
+### Features
+
+* add v2 brand claims guidance fields ([#2626](https://github.com/adobe/spacecat-api-service/issues/2626)) ([174b2b7](https://github.com/adobe/spacecat-api-service/commit/174b2b725e30d194064789e844d1fc4ed4d62316))
+
+## [1.577.1](https://github.com/adobe/spacecat-api-service/compare/v1.577.0...v1.577.1) (2026-06-16)
+
+
+### Bug Fixes
+
+* **llmo:** plumb operator market into V2 onboarding + cascade region to prompts (LLMO-5645) ([#2619](https://github.com/adobe/spacecat-api-service/issues/2619)) ([9c61331](https://github.com/adobe/spacecat-api-service/commit/9c613318f3a18ca647a8f36cd378e11d1d81d3a0))
+
+# [1.577.0](https://github.com/adobe/spacecat-api-service/compare/v1.576.0...v1.577.0) (2026-06-16)
+
+
+### Features
+
+* LLMO-5652 bump ai-seo-ts ([#2620](https://github.com/adobe/spacecat-api-service/issues/2620)) ([618fe1d](https://github.com/adobe/spacecat-api-service/commit/618fe1dfd5ff49247fa94fd35b0d216571309400))
+
+# [1.576.0](https://github.com/adobe/spacecat-api-service/compare/v1.575.0...v1.576.0) (2026-06-16)
+
+
+### Bug Fixes
+
+* **it:** bump pinned data-service image to v5.38.0 ([#2618](https://github.com/adobe/spacecat-api-service/issues/2618)) ([5e9b5c6](https://github.com/adobe/spacecat-api-service/commit/5e9b5c60c15fafa95316359c513fbc6a1e6f70c6))
+* remove dormant data-access-v2 fallback (drops electrodb/jsonschema, fixes DEP0169 log noise) ([#2617](https://github.com/adobe/spacecat-api-service/issues/2617)) ([4fca1c5](https://github.com/adobe/spacecat-api-service/commit/4fca1c553cf337f80566999135a6a2837935a618))
+
+
+### Features
+
+* **llmo:** support claims guidance config ([#2600](https://github.com/adobe/spacecat-api-service/issues/2600)) ([7761717](https://github.com/adobe/spacecat-api-service/commit/77617172794b197745462e347ef913906d7c8747))
+* **preflight:** attach IMS service token on x-ims-authorization for Mysticat call (SITES-43236) ([#2611](https://github.com/adobe/spacecat-api-service/issues/2611)) ([1e45798](https://github.com/adobe/spacecat-api-service/commit/1e45798423f7fe583b27bf22f28d6ce4cfa3e36c)), closes [#463](https://github.com/adobe/spacecat-api-service/issues/463) [#463](https://github.com/adobe/spacecat-api-service/issues/463) [#463](https://github.com/adobe/spacecat-api-service/issues/463) [#463](https://github.com/adobe/spacecat-api-service/issues/463)
+
+# [1.575.0](https://github.com/adobe/spacecat-api-service/compare/v1.574.3...v1.575.0) (2026-06-16)
+
+
+### Features
+
+* server-side search and sort for competitor gap endpoints | LLMO-5609 ([#2609](https://github.com/adobe/spacecat-api-service/issues/2609)) ([0c3c0df](https://github.com/adobe/spacecat-api-service/commit/0c3c0dfe01b8d1df8d60421235b5a75758b06787))
+
 ## [1.574.3](https://github.com/adobe/spacecat-api-service/compare/v1.574.2...v1.574.3) (2026-06-15)
 
 
