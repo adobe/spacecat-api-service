@@ -636,7 +636,10 @@ export async function upsertPrompts({
   updatedBy = 'system',
   classifyIntent,
   classifyIntentBatchTimeoutMs,
-  log = console,
+  // No-op default: only the temp timing line uses this. Defaulting to a silent
+  // logger (not console) keeps it out of console.warn spies in unit tests that
+  // call upsertPrompts without a logger; prod passes the real context.log.
+  log = { warn: () => {} },
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
