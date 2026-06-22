@@ -125,4 +125,52 @@ describe('AsoOverlayKeyHandler', () => {
     expect(authInfo).to.not.be.null;
     expect(authInfo.getType()).to.equal('aso_overlay_key');
   });
+
+  describe('dual-key rotation overlap', () => {
+    const PREVIOUS_KEY = 'old-aso-key-being-rotated';
+
+    it('accepts the previous key during rotation overlap', async () => {
+      const authInfo = await handler.checkAuth(
+        makeRequest({ 'x-aso-api-key': PREVIOUS_KEY }),
+        makeContext({ env: { ASO_OVERLAY_API_KEY: API_KEY, ASO_OVERLAY_API_KEY_PREVIOUS: PREVIOUS_KEY } }),
+      );
+      expect(authInfo).to.not.be.null;
+      expect(authInfo.isAuthenticated()).to.be.true;
+    });
+
+    it('still accepts the current key when previous is also set', async () => {
+      const authInfo = await handler.checkAuth(
+        makeRequest({ 'x-aso-api-key': API_KEY }),
+        makeContext({ env: { ASO_OVERLAY_API_KEY: API_KEY, ASO_OVERLAY_API_KEY_PREVIOUS: PREVIOUS_KEY } }),
+      );
+      expect(authInfo).to.not.be.null;
+      expect(authInfo.isAuthenticated()).to.be.true;
+    });
+
+    it('rejects a wrong key even when previous key is set', async () => {
+      const authInfo = await handler.checkAuth(
+        makeRequest({ 'x-aso-api-key': 'totally-wrong' }),
+        makeContext({ env: { ASO_OVERLAY_API_KEY: API_KEY, ASO_OVERLAY_API_KEY_PREVIOUS: PREVIOUS_KEY } }),
+      );
+      expect(authInfo).to.be.null;
+    });
+
+    it('works in steady state when previous key is empty', async () => {
+      const authInfo = await handler.checkAuth(
+        makeRequest({ 'x-aso-api-key': API_KEY }),
+        makeContext({ env: { ASO_OVERLAY_API_KEY: API_KEY, ASO_OVERLAY_API_KEY_PREVIOUS: '' } }),
+      );
+      expect(authInfo).to.not.be.null;
+      expect(authInfo.isAuthenticated()).to.be.true;
+    });
+
+    it('works in steady state when previous key is not set at all', async () => {
+      const authInfo = await handler.checkAuth(
+        makeRequest({ 'x-aso-api-key': API_KEY }),
+        makeContext({ env: { ASO_OVERLAY_API_KEY: API_KEY } }),
+      );
+      expect(authInfo).to.not.be.null;
+      expect(authInfo.isAuthenticated()).to.be.true;
+    });
+  });
 });
