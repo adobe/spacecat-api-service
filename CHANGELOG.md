@@ -1,3 +1,10 @@
+# [1.587.0](https://github.com/adobe/spacecat-api-service/compare/v1.586.0...v1.587.0) (2026-06-22)
+
+
+### Features
+
+* **s2s:** allow readAll consumers to use by-base-url and by-ims-org-id ([#2640](https://github.com/adobe/spacecat-api-service/issues/2640)) ([abb0775](https://github.com/adobe/spacecat-api-service/commit/abb0775fa3ba5cdd0f98a3b0898a57c0b99fab8e))
+
 # [1.586.0](https://github.com/adobe/spacecat-api-service/compare/v1.585.1...v1.586.0) (2026-06-21)
 
 
