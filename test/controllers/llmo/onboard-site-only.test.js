@@ -296,6 +296,12 @@ describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
       expect(performLlmoOnboardingStub).to.not.have.been.called;
     });
 
+    it('returns 400 when brandName exceeds the length cap', async () => {
+      const res = await invoke({ data: { domain: 'example.com', brandName: 'b'.repeat(257) } });
+      expect(res.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
     it('returns 400 when the domain is not a valid hostname', async () => {
       const res = await invoke({ data: { domain: 'not a domain!!', brandName: 'Test Brand' } });
       expect(res.status).to.equal(400);
