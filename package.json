@@ -87,6 +87,7 @@
     "@adobe/spacecat-shared-athena-client": "1.9.12",
     "@adobe/spacecat-shared-brand-client": "1.4.0",
     "@adobe/spacecat-shared-cloudflare-client": "1.2.1",
+    "@adobe/spacecat-shared-ticket-client": "^1.0.0",
     "@adobe/spacecat-shared-content-client": "1.8.24",
     "@adobe/spacecat-shared-data-access": "4.6.0",
     "@adobe/spacecat-shared-drs-client": "1.13.0",
