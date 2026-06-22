@@ -1,3 +1,10 @@
+## [1.589.3](https://github.com/adobe/spacecat-api-service/compare/v1.589.2...v1.589.3) (2026-06-22)
+
+
+### Bug Fixes
+
+* ensure stale suggestion grants are cleaned up on token cycle transitions ([#2368](https://github.com/adobe/spacecat-api-service/issues/2368)) ([8f48778](https://github.com/adobe/spacecat-api-service/commit/8f48778e8a23cae14b16323b1f05e93c9984fb55))
+
 ## [1.589.2](https://github.com/adobe/spacecat-api-service/compare/v1.589.1...v1.589.2) (2026-06-22)
 
 
