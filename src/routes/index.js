@@ -493,6 +493,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/edge-optimize/lambda-status': llmoController.getEdgeOptimizeLambdaStatus,
     'POST /sites/:siteId/llmo/edge-optimize/apply-associations': llmoController.applyEdgeOptimizeAssociations,
     'POST /sites/:siteId/llmo/edge-optimize/verify': llmoController.verifyEdgeOptimizeRouting,
+    'POST /sites/:siteId/llmo/edge-optimize/deploy': llmoController.deployEdgeOptimize,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,

@@ -3124,6 +3124,115 @@ site-llmo-edge-optimize-verify:
     security:
       - api_key: [ ]
 
+site-llmo-edge-optimize-deploy:
+  post:
+    tags:
+      - llmo
+    summary: Orchestrate the full Edge Optimize CloudFront deploy (idempotent, step-on-poll)
+    description: |
+      Single endpoint that drives the CloudFront "Deploy routing" wizard end-to-end. The frontend
+      calls it once and then polls it every ~30s; each call advances the deploy sequence (origin →
+      routing function → cache policy → Lambda@Edge → association → verify) as far as it safely can
+      while staying well under the gateway's ~60s first-byte timeout, and returns the per-step
+      status. It is safe to call repeatedly: completed steps are gated and never re-mutated (no
+      CloudFront re-deploy churn, no routing-function re-publish). When the Lambda@Edge is still
+      provisioning the sequence pauses (associate/verify stay pending) and the next poll re-checks.
+      The caller passes the customer's selected distribution, failover origin, and behavior
+      explicitly; the Edge Optimize API key and forwarded host are derived server-side from the site.
+      Always returns HTTP 200 unless validation or the access gate fails; a step that errors is
+      surfaced on its own row with `status: error` rather than failing the whole response.
+    operationId: deployEdgeOptimize
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-deploy-request'
+    responses:
+      '200':
+        description: The current per-step deploy status.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - routingDeployed
+                - verified
+                - steps
+              properties:
+                routingDeployed:
+                  type: boolean
+                  description: True once the association step has completed.
+                verified:
+                  type: boolean
+                  description: True once end-to-end routing verification passes.
+                steps:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - key
+                      - label
+                      - status
+                    properties:
+                      key:
+                        type: string
+                        enum:
+                          - origin
+                          - function
+                          - cache
+                          - lambda
+                          - associate
+                          - verify
+                      label:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - pending
+                          - in_progress
+                          - done
+                          - error
+                      detail:
+                        type: string
+              example:
+                routingDeployed: false
+                verified: false
+                steps:
+                  - key: origin
+                    label: Edge Optimize origin
+                    status: done
+                  - key: function
+                    label: Routing function
+                    status: done
+                  - key: cache
+                    label: Cache policy
+                    status: done
+                  - key: lambda
+                    label: Lambda@Edge
+                    status: in_progress
+                    detail: Lambda@Edge is still provisioning
+                  - key: associate
+                    label: Association
+                    status: pending
+                  - key: verify
+                    label: Verify routing
+                    status: pending
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 edge-optimize-connector-request:
   type: object
   required:
@@ -3217,6 +3326,39 @@ edge-optimize-associate-request:
       type: string
       description: The published, versioned Lambda@Edge ARN from the create-lambda step.
       example: arn:aws:lambda:us-east-1:682033462621:function:edgeoptimize-origin:1
+
+edge-optimize-deploy-request:
+  type: object
+  required:
+    - accountId
+    - externalId
+    - distributionId
+    - originId
+    - behavior
+  properties:
+    accountId:
+      type: string
+      description: The 12-digit AWS account ID hosting the customer's CloudFront distribution.
+      pattern: '^[0-9]{12}$'
+      example: '682033462621'
+    externalId:
+      type: string
+      description: Per-session external ID baked into the connector role's trust policy.
+      example: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
+    distributionId:
+      type: string
+      description: The CloudFront distribution ID to configure.
+      example: E2EXAMPLE123
+    originId:
+      type: string
+      description: >-
+        The customer's existing failover origin id (the default behavior's target origin),
+        baked into the routing function's failover origin group.
+      example: origin-aem
+    behavior:
+      type: string
+      description: The cache behavior path pattern to target; use `default` for the default behavior.
+      example: default
 
 llmo-probe-edge-optimize:
   get:

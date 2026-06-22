@@ -997,4 +997,352 @@ describe('edge-optimize support', () => {
       expect(error.message).to.include('url');
     });
   });
+
+  describe('runEdgeOptimizeDeployStep', () => {
+    let fetchStub;
+    const deployParams = {
+      distributionId: 'E2EXAMPLE123',
+      originId: 'origin-aem',
+      behavior: 'default',
+      originDomain: 'dev.edgeoptimize.net',
+      originHeaders: { apiKey: 'eo-key', forwardedHost: 'www.example.com' },
+      accountId: '120569600543',
+    };
+
+    // Dispatch each client's send() by command name; per-test overrides via the `r` map.
+    const wire = (cf = {}, lambda = {}, iam = {}) => {
+      cfSendStub.callsFake((cmd) => {
+        const fn = cf[cmd.commandName];
+        if (fn === undefined) {
+          throw new Error(`unexpected cf command: ${cmd.commandName}`);
+        }
+        return Promise.resolve(typeof fn === 'function' ? fn(cmd) : fn);
+      });
+      lambdaSendStub.callsFake((cmd) => {
+        const fn = lambda[cmd.commandName];
+        if (fn === undefined) {
+          throw new Error(`unexpected lambda command: ${cmd.commandName}`);
+        }
+        return Promise.resolve(typeof fn === 'function' ? fn(cmd) : fn);
+      });
+      iamSendStub.callsFake((cmd) => {
+        const fn = iam[cmd.commandName];
+        if (fn === undefined) {
+          throw new Error(`unexpected iam command: ${cmd.commandName}`);
+        }
+        return Promise.resolve(typeof fn === 'function' ? fn(cmd) : fn);
+      });
+    };
+
+    const statusOf = (steps, key) => steps.find((s) => s.key === key).status;
+    const cfCalls = (name) => cfSendStub.getCalls().filter((c) => c.args[0].commandName === name);
+
+    // Returns a responder that throws an AWS-style named error (so the SDK error path triggers).
+    const throwNamed = (name, message) => () => {
+      const e = new Error(message);
+      e.name = name;
+      throw e;
+    };
+
+    const makeFetchResponse = (status, headerMap) => ({
+      status,
+      headers: { forEach: (cb) => Object.entries(headerMap).forEach(([k, v]) => cb(v, k)) },
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+    });
+
+    afterEach(() => {
+      if (fetchStub) {
+        fetchStub.restore();
+      }
+      fetchStub = undefined;
+    });
+
+    it('first call advances origin+function+cache and returns lambda in_progress (others pending)', async () => {
+      wire(
+        {
+          // origin: existing with matching headers → idempotent no-op (no UpdateDistribution).
+          GetDistributionConfig: {
+            DistributionConfig: {
+              Origins: {
+                Items: [{
+                  Id: 'EdgeOptimize_Origin',
+                  DomainName: 'dev.edgeoptimize.net',
+                  CustomHeaders: {
+                    Items: [
+                      { HeaderName: 'x-edgeoptimize-api-key', HeaderValue: 'eo-key' },
+                      { HeaderName: 'x-forwarded-host', HeaderValue: 'www.example.com' },
+                    ],
+                  },
+                }],
+              },
+              DefaultCacheBehavior: { CachePolicyId: 'cp-1' },
+            },
+            ETag: 'etag',
+          },
+          // function gate: already published to LIVE → skip create+publish.
+          DescribeFunction: { FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } } },
+          // cache: custom policy already forwards EO headers + MinTTL 0 → no-op.
+          ListCachePolicies: { CachePolicyList: { Items: [] } },
+          GetCachePolicyConfig: {
+            CachePolicyConfig: {
+              Name: 'p',
+              MinTTL: 0,
+              ParametersInCacheKeyAndForwardedToOrigin: {
+                HeadersConfig: {
+                  HeaderBehavior: 'whitelist',
+                  Headers: { Quantity: 2, Items: ['x-edgeoptimize-config', 'x-edgeoptimize-url'] },
+                },
+              },
+            },
+            ETag: 'cp-etag',
+          },
+        },
+        {
+          // lambda: does not exist yet → kick off create → in_progress.
+          GetFunctionConfiguration: throwNamed('ResourceNotFoundException', 'nope'),
+          ListVersionsByFunction: { Versions: [] },
+          CreateFunction: { FunctionArn: 'arn:lambda', Version: '$LATEST' },
+        },
+        {
+          // Role already exists → no role-propagation wait (the slow create path is avoided).
+          GetRole: { Role: { Arn: 'arn:role' } },
+          UpdateAssumeRolePolicy: {},
+          PutRolePolicy: {},
+        },
+      );
+
+      const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
+
+      expect(statusOf(out.steps, 'origin')).to.equal('done');
+      expect(statusOf(out.steps, 'function')).to.equal('done');
+      expect(statusOf(out.steps, 'cache')).to.equal('done');
+      expect(statusOf(out.steps, 'lambda')).to.equal('in_progress');
+      expect(statusOf(out.steps, 'associate')).to.equal('pending');
+      expect(statusOf(out.steps, 'verify')).to.equal('pending');
+      expect(out.routingDeployed).to.equal(false);
+      expect(out.verified).to.equal(false);
+      // function already LIVE → never created/published.
+      expect(cfCalls('CreateFunction')).to.have.length(0);
+      expect(cfCalls('PublishFunction')).to.have.length(0);
+    });
+
+    it('with lambda ready proceeds to associate then verify (in_progress until propagation)', async () => {
+      const lambdaVersionArn = 'arn:aws:lambda:us-east-1:120569600543:function:edgeoptimize-origin:3';
+      wire(
+        {
+          GetDistributionConfig: () => ({
+            // origin exists (idempotent), default behavior NOT yet associated (associate must run).
+            DistributionConfig: {
+              Origins: {
+                Items: [{
+                  Id: 'EdgeOptimize_Origin',
+                  DomainName: 'dev.edgeoptimize.net',
+                  CustomHeaders: {
+                    Items: [
+                      { HeaderName: 'x-edgeoptimize-api-key', HeaderValue: 'eo-key' },
+                      { HeaderName: 'x-forwarded-host', HeaderValue: 'www.example.com' },
+                    ],
+                  },
+                }],
+              },
+              DefaultCacheBehavior: { CachePolicyId: 'cp-1' },
+            },
+            ETag: 'etag',
+          }),
+          DescribeFunction: { FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } } },
+          ListCachePolicies: { CachePolicyList: { Items: [] } },
+          GetCachePolicyConfig: {
+            CachePolicyConfig: {
+              Name: 'p',
+              MinTTL: 0,
+              ParametersInCacheKeyAndForwardedToOrigin: {
+                HeadersConfig: {
+                  HeaderBehavior: 'whitelist',
+                  Headers: { Quantity: 2, Items: ['x-edgeoptimize-config', 'x-edgeoptimize-url'] },
+                },
+              },
+            },
+            ETag: 'cp-etag',
+          },
+          UpdateDistribution: {},
+          ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net' }] } },
+        },
+        {
+          GetFunctionConfiguration: { State: 'Active', LastUpdateStatus: 'Successful', FunctionArn: 'arn:lambda' },
+          ListVersionsByFunction: { Versions: [{ Version: '3', FunctionArn: lambdaVersionArn, CodeSha256: 'sha' }] },
+        },
+        {
+          GetRole: { Role: { Arn: 'arn:role' } },
+        },
+      );
+      // verify probe: bot lacks request-id → not passed yet (propagation).
+      fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.onFirstCall().resolves(makeFetchResponse(200, {}));
+      fetchStub.onSecondCall().resolves(makeFetchResponse(200, {}));
+
+      const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
+
+      expect(statusOf(out.steps, 'lambda')).to.equal('done');
+      expect(statusOf(out.steps, 'associate')).to.equal('done');
+      expect(statusOf(out.steps, 'verify')).to.equal('in_progress');
+      expect(out.routingDeployed).to.equal(true);
+      expect(out.verified).to.equal(false);
+      // associate ran exactly one UpdateDistribution (behavior was not associated).
+      expect(cfCalls('UpdateDistribution')).to.have.length(1);
+    });
+
+    it('verify passes → verified true and verify done', async () => {
+      const lambdaVersionArn = 'arn:aws:lambda:us-east-1:120569600543:function:edgeoptimize-origin:3';
+      wire(
+        {
+          GetDistributionConfig: () => ({
+            DistributionConfig: {
+              Origins: {
+                Items: [{
+                  Id: 'EdgeOptimize_Origin',
+                  DomainName: 'dev.edgeoptimize.net',
+                  CustomHeaders: {
+                    Items: [
+                      { HeaderName: 'x-edgeoptimize-api-key', HeaderValue: 'eo-key' },
+                      { HeaderName: 'x-forwarded-host', HeaderValue: 'www.example.com' },
+                    ],
+                  },
+                }],
+              },
+              // already associated → associate gate skips UpdateDistribution.
+              DefaultCacheBehavior: {
+                CachePolicyId: 'cp-1',
+                FunctionAssociations: { Items: [{ EventType: 'viewer-request', FunctionARN: 'arn:fn/edgeoptimize-routing' }] },
+                LambdaFunctionAssociations: { Items: [{ EventType: 'origin-request', LambdaFunctionARN: 'arn:edgeoptimize-origin:3' }] },
+              },
+            },
+            ETag: 'etag',
+          }),
+          DescribeFunction: { FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } } },
+          ListCachePolicies: { CachePolicyList: { Items: [] } },
+          GetCachePolicyConfig: {
+            CachePolicyConfig: {
+              Name: 'p',
+              MinTTL: 0,
+              ParametersInCacheKeyAndForwardedToOrigin: {
+                HeadersConfig: {
+                  HeaderBehavior: 'whitelist',
+                  Headers: { Quantity: 2, Items: ['x-edgeoptimize-config', 'x-edgeoptimize-url'] },
+                },
+              },
+            },
+            ETag: 'cp-etag',
+          },
+          ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net' }] } },
+        },
+        {
+          GetFunctionConfiguration: { State: 'Active', LastUpdateStatus: 'Successful', FunctionArn: 'arn:lambda' },
+          ListVersionsByFunction: { Versions: [{ Version: '3', FunctionArn: lambdaVersionArn, CodeSha256: 'sha' }] },
+        },
+        { GetRole: { Role: { Arn: 'arn:role' } } },
+      );
+      fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.onFirstCall().resolves(makeFetchResponse(200, { 'x-edgeoptimize-request-id': 'req-1' }));
+      fetchStub.onSecondCall().resolves(makeFetchResponse(200, {}));
+
+      const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
+
+      expect(statusOf(out.steps, 'associate')).to.equal('done');
+      expect(statusOf(out.steps, 'verify')).to.equal('done');
+      expect(out.routingDeployed).to.equal(true);
+      expect(out.verified).to.equal(true);
+      // idempotent gate: behavior already associated → no UpdateDistribution at all.
+      expect(cfCalls('UpdateDistribution')).to.have.length(0);
+    });
+
+    it('marks the step error (earlier done, later pending) and does not throw when a step fails', async () => {
+      wire(
+        {
+          GetDistributionConfig: {
+            DistributionConfig: {
+              Origins: {
+                Items: [{
+                  Id: 'EdgeOptimize_Origin',
+                  DomainName: 'dev.edgeoptimize.net',
+                  CustomHeaders: {
+                    Items: [
+                      { HeaderName: 'x-edgeoptimize-api-key', HeaderValue: 'eo-key' },
+                      { HeaderName: 'x-forwarded-host', HeaderValue: 'www.example.com' },
+                    ],
+                  },
+                }],
+              },
+              DefaultCacheBehavior: { CachePolicyId: 'cp-1' },
+            },
+            ETag: 'etag',
+          },
+          // function gate DescribeFunction throws a non-NoSuchFunction error → step error.
+          DescribeFunction: () => { throw new Error('AccessDenied on DescribeFunction'); },
+        },
+      );
+
+      const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
+
+      expect(statusOf(out.steps, 'origin')).to.equal('done');
+      expect(statusOf(out.steps, 'function')).to.equal('error');
+      expect(out.steps.find((s) => s.key === 'function').detail).to.include('AccessDenied');
+      // later steps remain pending.
+      expect(statusOf(out.steps, 'cache')).to.equal('pending');
+      expect(statusOf(out.steps, 'lambda')).to.equal('pending');
+      expect(out.routingDeployed).to.equal(false);
+    });
+
+    it('holds the sequence when lambda exists but is not yet ready (no re-create)', async () => {
+      wire(
+        {
+          GetDistributionConfig: {
+            DistributionConfig: {
+              Origins: {
+                Items: [{
+                  Id: 'EdgeOptimize_Origin',
+                  DomainName: 'dev.edgeoptimize.net',
+                  CustomHeaders: {
+                    Items: [
+                      { HeaderName: 'x-edgeoptimize-api-key', HeaderValue: 'eo-key' },
+                      { HeaderName: 'x-forwarded-host', HeaderValue: 'www.example.com' },
+                    ],
+                  },
+                }],
+              },
+              DefaultCacheBehavior: { CachePolicyId: 'cp-1' },
+            },
+            ETag: 'etag',
+          },
+          DescribeFunction: { FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } } },
+          ListCachePolicies: { CachePolicyList: { Items: [] } },
+          GetCachePolicyConfig: {
+            CachePolicyConfig: {
+              Name: 'p',
+              MinTTL: 0,
+              ParametersInCacheKeyAndForwardedToOrigin: {
+                HeadersConfig: {
+                  HeaderBehavior: 'whitelist',
+                  Headers: { Quantity: 2, Items: ['x-edgeoptimize-config', 'x-edgeoptimize-url'] },
+                },
+              },
+            },
+            ETag: 'cp-etag',
+          },
+        },
+        {
+          // exists but still finalizing → not ready, must NOT re-create.
+          GetFunctionConfiguration: { State: 'Pending', LastUpdateStatus: 'InProgress', FunctionArn: 'arn:lambda' },
+          ListVersionsByFunction: { Versions: [] },
+        },
+        { GetRole: { Role: { Arn: 'arn:role' } } },
+      );
+
+      const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
+
+      expect(statusOf(out.steps, 'lambda')).to.equal('in_progress');
+      expect(statusOf(out.steps, 'associate')).to.equal('pending');
+      // never called CreateFunction on the Lambda client (no re-create of an in-flight function).
+      expect(lambdaSendStub.getCalls().filter((c) => c.args[0].commandName === 'CreateFunction')).to.have.length(0);
+    });
+  });
 });

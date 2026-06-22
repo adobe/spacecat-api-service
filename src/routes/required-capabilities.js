@@ -140,6 +140,7 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/edge-optimize/lambda-status',
   'POST /sites/:siteId/llmo/edge-optimize/apply-associations',
   'POST /sites/:siteId/llmo/edge-optimize/verify',
+  'POST /sites/:siteId/llmo/edge-optimize/deploy',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S

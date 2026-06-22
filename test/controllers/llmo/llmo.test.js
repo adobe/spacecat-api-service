@@ -96,6 +96,7 @@ describe('LlmoController', () => {
   let getEdgeOptimizeLambdaStatusStub;
   let applyEdgeOptimizeAssociationsStub;
   let verifyEdgeOptimizeRoutingStub;
+  let runEdgeOptimizeDeployStepStub;
   let mockTokowakaClient;
   let readStrategyStub;
   let writeStrategyStub;
@@ -214,6 +215,7 @@ describe('LlmoController', () => {
     getEdgeOptimizeLambdaStatusStub = sinon.stub();
     applyEdgeOptimizeAssociationsStub = sinon.stub();
     verifyEdgeOptimizeRoutingStub = sinon.stub();
+    runEdgeOptimizeDeployStepStub = sinon.stub();
 
     // Initialize mock TokowakaClient
     mockTokowakaClient = {
@@ -295,6 +297,7 @@ describe('LlmoController', () => {
         getEdgeOptimizeLambdaStatus: (...args) => getEdgeOptimizeLambdaStatusStub(...args),
         applyEdgeOptimizeAssociations: (...args) => applyEdgeOptimizeAssociationsStub(...args),
         verifyEdgeOptimizeRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
+        runEdgeOptimizeDeployStep: (...args) => runEdgeOptimizeDeployStepStub(...args),
       },
       '@adobe/spacecat-shared-ims-client': {
         ImsClient: function MockImsClient() {
@@ -8846,6 +8849,148 @@ describe('LlmoController', () => {
       });
       const result = await LlmoControllerNoAdmin(mockContext)
         .verifyEdgeOptimizeRouting(verifyContext);
+      expect(result.status).to.equal(403);
+    });
+  });
+
+  describe('deployEdgeOptimize', () => {
+    let deployContext;
+
+    const sampleSteps = [
+      { key: 'origin', label: 'Edge Optimize origin', status: 'done' },
+      { key: 'function', label: 'Routing function', status: 'done' },
+      { key: 'cache', label: 'Cache policy', status: 'done' },
+      { key: 'lambda', label: 'Lambda@Edge', status: 'in_progress' },
+      { key: 'associate', label: 'Association', status: 'pending' },
+      { key: 'verify', label: 'Verify routing', status: 'pending' },
+    ];
+
+    beforeEach(() => {
+      assumeConnectorRoleStub = sinon.stub().resolves({
+        roleArn: 'arn:aws:iam::120569600543:role/AdobeLLMOptimizerCloudFrontConnectorRole',
+        accountId: '120569600543',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+      });
+      runEdgeOptimizeDeployStepStub = sinon.stub().resolves({
+        routingDeployed: false,
+        verified: false,
+        steps: sampleSteps,
+      });
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['eo-key-123'] });
+      deployContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {
+          accountId: '120569600543',
+          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
+          distributionId: 'E2EXAMPLE123',
+          originId: 'origin-aem',
+          behavior: 'default',
+        },
+        env: {},
+      };
+    });
+
+    it('runs the orchestrator and returns the per-step status', async () => {
+      const result = await controller.deployEdgeOptimize(deployContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.routingDeployed).to.equal(false);
+      expect(body.verified).to.equal(false);
+      expect(body.steps).to.deep.equal(sampleSteps);
+      // assumeConnectorRole is called exactly once for the whole sequence.
+      expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+      expect(runEdgeOptimizeDeployStepStub.calledOnce).to.equal(true);
+      const [, params] = runEdgeOptimizeDeployStepStub.firstCall.args;
+      expect(params).to.include({
+        distributionId: 'E2EXAMPLE123',
+        originId: 'origin-aem',
+        behavior: 'default',
+        originDomain: 'dev.edgeoptimize.net',
+        accountId: '120569600543',
+      });
+      expect(params.originHeaders).to.deep.equal({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' });
+    });
+
+    it('passes the env-driven origin domain when set', async () => {
+      await controller.deployEdgeOptimize({
+        ...deployContext,
+        env: { EDGE_OPTIMIZE_ORIGIN_DOMAIN: 'live.edgeoptimize.net' },
+      });
+      const [, params] = runEdgeOptimizeDeployStepStub.firstCall.args;
+      expect(params.originDomain).to.equal('live.edgeoptimize.net');
+    });
+
+    it('returns 400 when the site has no Edge Optimize API key', async () => {
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [] });
+      const result = await controller.deployEdgeOptimize(deployContext);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('API key');
+      expect(runEdgeOptimizeDeployStepStub.called).to.equal(false);
+    });
+
+    it('returns 400 for an invalid account id', async () => {
+      const result = await controller.deployEdgeOptimize({ ...deployContext, data: { ...deployContext.data, accountId: '123' } });
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns 400 when the external id is missing', async () => {
+      const result = await controller.deployEdgeOptimize({ ...deployContext, data: { ...deployContext.data, externalId: '' } });
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns 400 when the distributionId is missing', async () => {
+      const result = await controller.deployEdgeOptimize({ ...deployContext, data: { ...deployContext.data, distributionId: '' } });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('distributionId');
+    });
+
+    it('returns 400 when the originId is missing', async () => {
+      const result = await controller.deployEdgeOptimize({ ...deployContext, data: { ...deployContext.data, originId: '' } });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('originId');
+    });
+
+    it('returns 400 when the behavior is missing', async () => {
+      const result = await controller.deployEdgeOptimize({ ...deployContext, data: { ...deployContext.data, behavior: '' } });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('behavior');
+    });
+
+    it('returns 400 when the orchestrator throws', async () => {
+      runEdgeOptimizeDeployStepStub = sinon.stub().rejects(new Error('assume failed'));
+      const result = await controller.deployEdgeOptimize(deployContext);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('assume failed');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.deployEdgeOptimize(deployContext);
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+      const result = await deniedController.deployEdgeOptimize(deployContext);
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 403 when the user is not an LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
+        ...getCommonMocks(),
+      });
+      const result = await LlmoControllerNoAdmin(mockContext)
+        .deployEdgeOptimize(deployContext);
       expect(result.status).to.equal(403);
     });
   });

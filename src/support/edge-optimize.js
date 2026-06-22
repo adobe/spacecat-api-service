@@ -42,6 +42,7 @@ import {
   PublishVersionCommand,
 } from '@aws-sdk/client-lambda';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 // CloudFront is a global service; its control plane lives in us-east-1.
 export const EDGE_OPTIMIZE_REGION = 'us-east-1';
@@ -1118,4 +1119,221 @@ export async function verifyEdgeOptimizeRouting(url) {
     && human.headers['x-edgeoptimize-proxy'] !== '1';
 
   return { passed, requestId, details: { bot, human } };
+}
+
+// The ordered deploy steps + their human labels, in the sequence the orchestrator advances them.
+// Exported so the controller/tests can assert the contract without re-declaring it.
+export const EDGE_OPTIMIZE_DEPLOY_STEPS = [
+  { key: 'origin', label: 'Edge Optimize origin' },
+  { key: 'function', label: 'Routing function' },
+  { key: 'cache', label: 'Cache policy' },
+  { key: 'lambda', label: 'Lambda@Edge' },
+  { key: 'associate', label: 'Association' },
+  { key: 'verify', label: 'Verify routing' },
+];
+
+/**
+ * True when the `edgeoptimize-routing` CloudFront Function is already published to LIVE.
+ * Used to gate the function step so we never re-publish (which causes deploy churn).
+ *
+ * @param {CloudFrontClient} client - a CloudFront client built with the connector credentials.
+ * @returns {Promise<boolean>}
+ */
+async function isRoutingFunctionLive(client) {
+  try {
+    const desc = await client.send(new DescribeFunctionCommand({
+      Name: EDGE_OPTIMIZE_FUNCTION_NAME,
+      Stage: 'LIVE',
+    }));
+    return Boolean(desc?.FunctionSummary?.FunctionMetadata?.FunctionARN);
+  } catch (err) {
+    if (err.name === 'NoSuchFunctionExists') {
+      return false;
+    }
+    throw err;
+  }
+}
+
+/**
+ * True when the target behavior already has BOTH the Edge Optimize routing CloudFront Function
+ * (viewer-request) AND the Edge Optimize Lambda@Edge (origin-request) associated. Used to gate the
+ * associate step so we never re-issue UpdateDistribution (needless re-deploy) once wired.
+ *
+ * @param {CloudFrontClient} client - a CloudFront client built with the connector credentials.
+ * @param {string} distributionId - the CloudFront distribution ID.
+ * @param {string} pathPattern - the behavior to inspect (`default` for the default behavior).
+ * @returns {Promise<boolean>}
+ */
+async function isBehaviorAlreadyAssociated(client, distributionId, pathPattern) {
+  const result = await client.send(new GetDistributionConfigCommand({ Id: distributionId }));
+  const config = result.DistributionConfig || {};
+  let behavior;
+  if (pathPattern === 'default' || pathPattern === 'Default (*)') {
+    behavior = config.DefaultCacheBehavior;
+  } else {
+    behavior = (config.CacheBehaviors?.Items || []).find((b) => b.PathPattern === pathPattern);
+  }
+  if (!behavior) {
+    return false;
+  }
+  const hasCfFunction = (behavior.FunctionAssociations?.Items || []).some(
+    (a) => a.EventType === 'viewer-request' && /edgeoptimize-routing/i.test(a.FunctionARN || ''),
+  );
+  const hasLambda = (behavior.LambdaFunctionAssociations?.Items || []).some(
+    (a) => a.EventType === 'origin-request' && /edgeoptimize-origin/i.test(a.LambdaFunctionARN || ''),
+  );
+  return hasCfFunction && hasLambda;
+}
+
+/**
+ * Run one poll of the idempotent Edge Optimize "Deploy routing" orchestrator.
+ *
+ * Advances the deploy sequence (origin → function → cache → lambda → associate → verify) as far as
+ * it safely can in a single call, staying well under the CDN/gateway ~60s first-byte timeout. Each
+ * step is gated so a re-poll never re-mutates already-completed work (no CloudFront re-deploy
+ * churn, no CF-function re-publish). Designed to be called once and then polled every ~30s by the
+ * wizard UI: each call returns the per-step status and the FE keeps polling until verify is green.
+ *
+ * Stops advancing (returning earlier steps' real status and later steps `pending`) when the
+ * Lambda@Edge is still provisioning — the next poll re-checks. A step that throws is marked
+ * `error` on its own row (with later steps `pending`); the caller still returns HTTP 200 so the FE
+ * shows the failure on that row and a re-poll retries idempotently.
+ *
+ * @param {object} credentials - temporary credentials from {@link assumeConnectorRole}.
+ * @param {object} params
+ * @param {string} params.distributionId - the CloudFront distribution ID.
+ * @param {string} params.originId - the default-behavior target origin id (failover origin).
+ * @param {string} params.behavior - the cache behavior to target (`default` for the default).
+ * @param {string} [params.originDomain] - the Edge Optimize origin domain.
+ * @param {object} [params.originHeaders] - EO origin headers ({ apiKey, forwardedHost }).
+ * @param {string} params.accountId - the 12-digit customer AWS account ID.
+ * @param {string} [region] - CloudFront control-plane region.
+ * @returns {Promise<{routingDeployed: boolean, verified: boolean, steps: Array<object>}>}
+ */
+export async function runEdgeOptimizeDeployStep(
+  credentials,
+  {
+    distributionId, originId, behavior, originDomain, originHeaders, accountId,
+  },
+  region = EDGE_OPTIMIZE_REGION,
+) {
+  // Start every step pending; each handler flips its own row to done/in_progress/error.
+  const steps = EDGE_OPTIMIZE_DEPLOY_STEPS.map((s) => ({ ...s, status: 'pending' }));
+  const byKey = (key) => steps.find((s) => s.key === key);
+  const client = new CloudFrontClient({ region, credentials });
+
+  let routingDeployed = false;
+  let verified = false;
+  let lambdaVersionArn = null;
+
+  // ── 1. origin — already idempotent (no UpdateDistribution when headers match). ──
+  try {
+    await createEdgeOptimizeOrigin(
+      credentials,
+      distributionId,
+      originDomain,
+      originHeaders,
+      region,
+    );
+    byKey('origin').status = 'done';
+  } catch (err) {
+    byKey('origin').status = 'error';
+    byKey('origin').detail = cleanupHeaderValue(err.message);
+    return { routingDeployed, verified, steps };
+  }
+
+  // ── 2. function — GATE: skip the create+publish when already LIVE (avoids re-publish churn). ──
+  try {
+    if (await isRoutingFunctionLive(client)) {
+      byKey('function').status = 'done';
+    } else {
+      await createEdgeOptimizeRoutingFunction(credentials, originId, null, region);
+      byKey('function').status = 'done';
+    }
+  } catch (err) {
+    byKey('function').status = 'error';
+    byKey('function').detail = cleanupHeaderValue(err.message);
+    return { routingDeployed, verified, steps };
+  }
+
+  // ── 3. cache — idempotent (skips UpdateDistribution/UpdateCachePolicy when already applied). ──
+  try {
+    await applyEdgeOptimizeCacheHeaders(credentials, distributionId, behavior, { region });
+    byKey('cache').status = 'done';
+  } catch (err) {
+    byKey('cache').status = 'error';
+    byKey('cache').detail = cleanupHeaderValue(err.message);
+    return { routingDeployed, verified, steps };
+  }
+
+  // ── 4. lambda — kick off / poll WITHOUT re-creating; stop here while still provisioning. ──
+  try {
+    const ls = await getEdgeOptimizeLambdaStatus(credentials, region);
+    if (ls.ready) {
+      lambdaVersionArn = ls.versionArn;
+      byKey('lambda').status = 'done';
+    } else if (ls.exists) {
+      // Provisioning in progress — do NOT re-create. Hold the sequence and re-check next poll.
+      byKey('lambda').status = 'in_progress';
+      byKey('lambda').detail = 'Lambda@Edge is still provisioning';
+      return { routingDeployed, verified, steps };
+    } else {
+      // Not created yet — kick off the create (returns fast) and report in_progress.
+      await createEdgeOptimizeLambda(credentials, accountId, { region });
+      byKey('lambda').status = 'in_progress';
+      byKey('lambda').detail = 'Lambda@Edge create started';
+      return { routingDeployed, verified, steps };
+    }
+  } catch (err) {
+    byKey('lambda').status = 'error';
+    byKey('lambda').detail = cleanupHeaderValue(err.message);
+    return { routingDeployed, verified, steps };
+  }
+
+  // ── 5. associate — GATE: skip UpdateDistribution when the behavior is already wired. ──
+  try {
+    if (await isBehaviorAlreadyAssociated(client, distributionId, behavior)) {
+      byKey('associate').status = 'done';
+    } else {
+      await applyEdgeOptimizeAssociations(
+        credentials,
+        distributionId,
+        behavior,
+        lambdaVersionArn,
+        region,
+      );
+      byKey('associate').status = 'done';
+    }
+    routingDeployed = true;
+  } catch (err) {
+    byKey('associate').status = 'error';
+    byKey('associate').detail = cleanupHeaderValue(err.message);
+    return { routingDeployed, verified, steps };
+  }
+
+  // ── 6. verify — BEST-EFFORT: in_progress (not error) until CloudFront propagation lets pass. ──
+  try {
+    const distributions = await listCloudFrontDistributions(credentials, region);
+    const match = distributions.find((d) => d.id === distributionId);
+    const domain = match?.domainName;
+    if (!hasText(domain)) {
+      byKey('verify').status = 'in_progress';
+      byKey('verify').detail = 'waiting for distribution domain';
+      return { routingDeployed, verified, steps };
+    }
+    const result = await verifyEdgeOptimizeRouting(`https://${domain}/`);
+    if (result.passed) {
+      verified = true;
+      byKey('verify').status = 'done';
+    } else {
+      byKey('verify').status = 'in_progress';
+      byKey('verify').detail = 'waiting for propagation';
+    }
+  } catch (err) {
+    // Never fail the whole deploy because verify could not run yet — surface as in_progress.
+    byKey('verify').status = 'in_progress';
+    byKey('verify').detail = cleanupHeaderValue(err.message);
+  }
+
+  return { routingDeployed, verified, steps };
 }

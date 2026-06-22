@@ -44,6 +44,7 @@ import {
   getEdgeOptimizeLambdaStatus,
   applyEdgeOptimizeAssociations,
   verifyEdgeOptimizeRouting,
+  runEdgeOptimizeDeployStep,
 } from '../../support/edge-optimize.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
 import { cachedOk } from '../../support/cached-response.js';
@@ -2716,6 +2717,81 @@ function LlmoController(ctx) {
     }
   };
 
+  // Idempotent, step-on-poll orchestrator for the CloudFront "Deploy routing" wizard. The FE calls
+  // this once then polls it (~30s); each call advances origin → function → cache → lambda →
+  // associate → verify as far as it safely can (well under the gateway's ~60s timeout) and returns
+  // per-step status. Safe to call repeatedly — gated steps never re-mutate completed work. The FE
+  // passes the customer's selected distribution, failover origin, and behavior explicitly; the EO
+  // API key + forwarded host are derived server-side from the site (no UI input).
+  const deployEdgeOptimizeHandler = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+    const originId = String(context.data?.originId || '').trim();
+    const behavior = String(context.data?.behavior || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+    const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'dev.edgeoptimize.net';
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+    if (!hasText(originId)) {
+      return badRequest('originId is required');
+    }
+    if (!hasText(behavior)) {
+      return badRequest('behavior is required');
+    }
+
+    try {
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'deploy edge optimize routing');
+      if (error) {
+        return error;
+      }
+
+      // The EO origin needs custom headers so the routing function's request authenticates to Edge
+      // Optimize (x-edgeoptimize-api-key) and resolves the customer host (x-forwarded-host). Both
+      // are derived server-side from the site — no UI input. Without them Verify never goes green.
+      const baseURL = site.getBaseURL();
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+      const apiKey = metaconfig?.apiKeys?.[0];
+      if (!hasText(apiKey)) {
+        return badRequest('Site has no Edge Optimize API key — enable Edge Optimize for this site first');
+      }
+      const forwardedHost = calculateForwardedHost(baseURL, log);
+
+      // Assume the connector role ONCE; all steps run with the same short-lived credentials.
+      const { credentials, accountId: resolvedAccountId } = await assumeConnectorRole({
+        accountId, externalId, roleName,
+      });
+
+      const result = await runEdgeOptimizeDeployStep(credentials, {
+        distributionId,
+        originId,
+        behavior,
+        originDomain,
+        originHeaders: { apiKey, forwardedHost },
+        accountId: resolvedAccountId,
+      });
+
+      log.info(`[edge-optimize-deploy] site ${siteId}: routingDeployed=${result.routingDeployed},`
+        + ` verified=${result.verified}, steps=${result.steps.map((s) => `${s.key}:${s.status}`).join(',')}`);
+      return ok(result);
+    } catch (error) {
+      log.error(`[edge-optimize-deploy] Failed for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
   return {
     getEdgeOptimizeBootstrapUrl,
     connectEdgeOptimize,
@@ -2730,6 +2806,7 @@ function LlmoController(ctx) {
     getEdgeOptimizeLambdaStatus: getEdgeOptimizeLambdaStatusHandler,
     applyEdgeOptimizeAssociations: applyEdgeOptimizeAssociationsHandler,
     verifyEdgeOptimizeRouting: verifyEdgeOptimizeRoutingHandler,
+    deployEdgeOptimize: deployEdgeOptimizeHandler,
     getLlmoSheetData,
     queryLlmoSheetData,
     getLlmoGlobalSheetData,
