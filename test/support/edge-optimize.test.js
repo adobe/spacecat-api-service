@@ -1334,19 +1334,88 @@ describe('edge-optimize support', () => {
           },
         },
         {
-          // exists but still finalizing → not ready, must NOT re-create.
+          // exists but still finalizing (Pending) → createEdgeOptimizeLambda is called to drive the
+          // state machine, but it must NOT CreateFunction or PublishVersion while still Pending.
           GetFunctionConfiguration: { State: 'Pending', LastUpdateStatus: 'InProgress', FunctionArn: 'arn:lambda' },
           ListVersionsByFunction: { Versions: [] },
         },
-        { GetRole: { Role: { Arn: 'arn:role' } } },
+        { GetRole: { Role: { Arn: 'arn:role' } }, UpdateAssumeRolePolicy: {}, PutRolePolicy: {} },
       );
 
       const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
 
       expect(statusOf(out.steps, 'lambda')).to.equal('in_progress');
       expect(statusOf(out.steps, 'associate')).to.equal('pending');
-      // never called CreateFunction on the Lambda client (no re-create of an in-flight function).
+      // Pending → neither CreateFunction nor PublishVersion (no re-create, no premature publish).
       expect(lambdaSendStub.getCalls().filter((c) => c.args[0].commandName === 'CreateFunction')).to.have.length(0);
+      expect(lambdaSendStub.getCalls().filter((c) => c.args[0].commandName === 'PublishVersion')).to.have.length(0);
+    });
+
+    it('publishes the version once the Lambda is Active, then proceeds to associate + verify', async () => {
+      const lambdaVersionArn = 'arn:aws:lambda:us-east-1:120569600543:function:edgeoptimize-origin:1';
+      wire(
+        {
+          GetDistributionConfig: () => ({
+            DistributionConfig: {
+              Origins: {
+                Items: [{
+                  Id: 'EdgeOptimize_Origin',
+                  DomainName: 'dev.edgeoptimize.net',
+                  CustomHeaders: {
+                    Items: [
+                      { HeaderName: 'x-edgeoptimize-api-key', HeaderValue: 'eo-key' },
+                      { HeaderName: 'x-forwarded-host', HeaderValue: 'www.example.com' },
+                    ],
+                  },
+                }],
+              },
+              // already associated → associate gate skips; the focus is the lambda publish path.
+              DefaultCacheBehavior: {
+                CachePolicyId: 'cp-1',
+                FunctionAssociations: { Items: [{ EventType: 'viewer-request', FunctionARN: 'arn:fn/edgeoptimize-routing' }] },
+                LambdaFunctionAssociations: { Items: [{ EventType: 'origin-request', LambdaFunctionARN: 'arn:edgeoptimize-origin:1' }] },
+              },
+            },
+            ETag: 'etag',
+          }),
+          DescribeFunction: { FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } } },
+          ListCachePolicies: { CachePolicyList: { Items: [] } },
+          GetCachePolicyConfig: {
+            CachePolicyConfig: {
+              Name: 'p',
+              MinTTL: 0,
+              ParametersInCacheKeyAndForwardedToOrigin: {
+                HeadersConfig: {
+                  HeaderBehavior: 'whitelist',
+                  Headers: { Quantity: 2, Items: ['x-edgeoptimize-config', 'x-edgeoptimize-url'] },
+                },
+              },
+            },
+            ETag: 'cp-etag',
+          },
+          ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net' }] } },
+        },
+        {
+          // Active + idle, NO published version yet → createEdgeOptimizeLambda must publish one.
+          GetFunctionConfiguration: { State: 'Active', LastUpdateStatus: 'Successful', FunctionArn: 'arn:lambda' },
+          ListVersionsByFunction: { Versions: [] },
+          PublishVersion: { Version: '1', FunctionArn: lambdaVersionArn },
+        },
+        { GetRole: { Role: { Arn: 'arn:role' } }, UpdateAssumeRolePolicy: {}, PutRolePolicy: {} },
+      );
+      fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.onFirstCall().resolves(makeFetchResponse(200, { 'x-edgeoptimize-request-id': 'req-1' }));
+      fetchStub.onSecondCall().resolves(makeFetchResponse(200, {}));
+
+      const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
+
+      // the fix: Active-without-version gets published → lambda flips to done (not stuck).
+      expect(statusOf(out.steps, 'lambda')).to.equal('done');
+      expect(lambdaSendStub.getCalls().filter((c) => c.args[0].commandName === 'PublishVersion')).to.have.length(1);
+      expect(statusOf(out.steps, 'associate')).to.equal('done');
+      expect(statusOf(out.steps, 'verify')).to.equal('done');
+      expect(out.routingDeployed).to.equal(true);
+      expect(out.verified).to.equal(true);
     });
   });
 });

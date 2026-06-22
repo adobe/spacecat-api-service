@@ -1266,23 +1266,30 @@ export async function runEdgeOptimizeDeployStep(
     return { routingDeployed, verified, steps };
   }
 
-  // ── 4. lambda — kick off / poll WITHOUT re-creating; stop here while still provisioning. ──
+  // ── 4. lambda — drive the create/publish state machine each poll (idempotent + non-blocking). ──
+  // createEdgeOptimizeLambda creates the function when missing, no-ops while it is Pending, and —
+  // crucially — PUBLISHES a numbered version once the function is Active (which is what flips it to
+  // ready). We must call it on EVERY not-ready poll, not only when the function is missing: the
+  // version is published on a later poll (after the function reaches Active), so if we merely
+  // status-check while it "exists", the version never gets published and the step hangs at
+  // "provisioning" forever.
   try {
     const ls = await getEdgeOptimizeLambdaStatus(credentials, region);
     if (ls.ready) {
       lambdaVersionArn = ls.versionArn;
       byKey('lambda').status = 'done';
-    } else if (ls.exists) {
-      // Provisioning in progress — do NOT re-create. Hold the sequence and re-check next poll.
-      byKey('lambda').status = 'in_progress';
-      byKey('lambda').detail = 'Lambda@Edge is still provisioning';
-      return { routingDeployed, verified, steps };
     } else {
-      // Not created yet — kick off the create (returns fast) and report in_progress.
-      await createEdgeOptimizeLambda(credentials, accountId, { region });
-      byKey('lambda').status = 'in_progress';
-      byKey('lambda').detail = 'Lambda@Edge create started';
-      return { routingDeployed, verified, steps };
+      const created = await createEdgeOptimizeLambda(credentials, accountId, { region });
+      if (created.status === 'ready') {
+        lambdaVersionArn = created.versionArn;
+        byKey('lambda').status = 'done';
+      } else {
+        byKey('lambda').status = 'in_progress';
+        byKey('lambda').detail = ls.exists
+          ? 'Lambda@Edge is still provisioning'
+          : 'Lambda@Edge create started';
+        return { routingDeployed, verified, steps };
+      }
     }
   } catch (err) {
     byKey('lambda').status = 'error';
