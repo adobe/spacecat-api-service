@@ -5225,6 +5225,34 @@ describe('Brands Controller', () => {
       }
     });
 
+    it('swallows a logging failure during emission and still returns 409 (LLMO-5587, best-effort)', async () => {
+      // emitMetric is already best-effort; this proves emitBrandDemotionBlocked's own
+      // catch keeps a logger failure from breaking the request path (covers the catch).
+      const logSpy = sinon.stub(console, 'log');
+      const throwingLogger = {
+        info: sandbox.stub(),
+        error: sandbox.stub(),
+        warn: sandbox.stub().throws(new Error('log boom')),
+        debug: sandbox.stub(),
+      };
+      const controller = BrandsController(context, throwingLogger, mockEnv);
+      try {
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { status: 'pending' },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        expect(throwingLogger.warn).to.have.been.called;
+      } finally {
+        logSpy.restore();
+      }
+    });
+
     it('returns 400 when brandId is missing', async () => {
       const response = await brandsController.updateBrandForOrg({
         ...context,
