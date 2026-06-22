@@ -26,7 +26,11 @@ describe('edge-optimize support', () => {
   // The mocked clients call the `*SendStub` closures, which read the `let` bindings reassigned
   // fresh in beforeEach, so a single esmock works for all tests.
   before(async function setupEsmock() {
-    this.timeout(30000);
+    // One-time esmock of the AWS SDK module graph. This is memory-heavy, so under the full CI
+    // suite (12k+ tests + nyc coverage + heap pressure) it can take well over the default/30s
+    // even though it runs in ~1s locally. Give the hook generous headroom so it can't flake the
+    // whole build on suite growth (it still completes in seconds in practice).
+    this.timeout(120000);
     // Each command in a mocked module is a constructor FUNCTION (not a class) — eslint forbids
     // multiple class declarations in one file, so we capture the command name + input on `this`.
     const cfCommand = (Name) => function CloudFrontCommand(input) {
