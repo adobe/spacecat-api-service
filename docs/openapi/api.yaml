@@ -653,6 +653,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-verify'
   /sites/{siteId}/llmo/edge-optimize/deploy:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-deploy'
+  /sites/{siteId}/llmo/edge-optimize/installer-url:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-installer-url'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:

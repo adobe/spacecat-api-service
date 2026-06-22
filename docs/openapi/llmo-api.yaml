@@ -2409,6 +2409,64 @@ site-llmo-edge-optimize-bootstrap-url:
     security:
       - api_key: [ ]
 
+site-llmo-edge-optimize-installer-url:
+  get:
+    tags:
+      - llmo
+    summary: Generate a one-click CloudFormation "Launch Stack" URL for a customer-managed Edge Optimize install
+    description: |
+      "Option B" onboarding. Returns a one-click AWS CloudFormation quick-create
+      ("Launch Stack") URL (with a server-side presigned template URL) that the
+      customer runs entirely in their own AWS account (us-east-1, a Lambda@Edge
+      requirement). Unlike the assume-role wizard, this endpoint makes no
+      cross-account calls — no AssumeRole, no SDK mutations. It only reads the
+      site's Edge Optimize API key, presigns the installer template, and builds
+      the URL, so Adobe gets no access to the customer's account.
+
+      The URL prefills only `SiteHost` and `EdgeOptimizeApiKey` (plus sensible
+      defaults). `DistributionId` and `DefaultOriginId` are intentionally left
+      unset for the customer to fill in the CloudFormation form, because they are
+      account-specific and cannot be discovered without cross-account access.
+    operationId: getEdgeOptimizeInstallerUrl
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: Installer URL generated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - quickCreateUrl
+                - siteHost
+                - presignTtlSeconds
+              properties:
+                quickCreateUrl:
+                  type: string
+                  description: One-click CloudFormation quick-create URL (presigned template)
+                siteHost:
+                  type: string
+                  description: The customer host forwarded to Edge Optimize (x-forwarded-host)
+                presignTtlSeconds:
+                  type: integer
+              example:
+                quickCreateUrl: 'https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=...&stackName=edgeoptimize&param_SiteHost=www.example.com&param_EdgeOptimizeApiKey=...'
+                siteHost: www.example.com
+                presignTtlSeconds: 3600
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 site-llmo-edge-optimize-connect:
   post:
     tags:
