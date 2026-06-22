@@ -42,6 +42,13 @@ export { INTENT_VALUES, normalizeIntent };
  */
 const intentColumnSupported = new WeakMap();
 
+// Max in-flight prompt UPDATEs during a bulk upsert. Each row targets a distinct
+// primary key, so concurrent updates never touch the same row; bounding the
+// in-flight count keeps the serial-loop latency (one round-trip per row) from
+// stalling the request past the ~15s Fastly gateway timeout on large re-uploads,
+// while still protecting the PostgREST/Postgres connection pool.
+const UPDATE_CONCURRENCY = 20;
+
 /**
  * Detects a PostgREST/Postgres error that indicates the `intent` column is
  * absent. Covers the insert/upsert error (`PGRST204`, "Could not find the
@@ -814,20 +821,45 @@ export async function upsertPrompts({
     created = inserted?.length ?? toInsert.length;
   }
 
-  for (const row of toUpdate) {
-    const { id, ...patch } = row;
-    // eslint-disable-next-line no-await-in-loop
-    const { error } = await withMissingIntentFallback(
-      postgrestClient,
-      (includeIntent) => postgrestClient
-        .from('prompts')
-        .update(includeIntent ? patch : stripIntent(patch))
-        .eq('id', id),
-    );
-    if (error) {
-      throw new Error(`Failed to update prompt: ${error.message}`);
+  // Updates run with bounded concurrency rather than strictly serially: each row
+  // targets a distinct primary key, so they never contend, and a serial loop of
+  // one round-trip per row can outlast the gateway timeout on large re-uploads.
+  // The first error is captured and surfaced after the in-flight batch drains,
+  // preserving the previous fail-on-error contract (the write is non-atomic and
+  // idempotent either way, so a retry re-converges).
+  let updateError = null;
+  let updateCursor = 0;
+  const runUpdates = async () => {
+    for (;;) {
+      const index = updateCursor;
+      updateCursor += 1;
+      if (index >= toUpdate.length || updateError) {
+        return;
+      }
+      const { id, ...patch } = toUpdate[index];
+      // eslint-disable-next-line no-await-in-loop
+      const { error } = await withMissingIntentFallback(
+        postgrestClient,
+        (includeIntent) => postgrestClient
+          .from('prompts')
+          .update(includeIntent ? patch : stripIntent(patch))
+          .eq('id', id),
+      );
+      if (error) {
+        updateError = error;
+        return;
+      }
+      updated += 1;
     }
-    updated += 1;
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(UPDATE_CONCURRENCY, toUpdate.length) },
+      () => runUpdates(),
+    ),
+  );
+  if (updateError) {
+    throw new Error(`Failed to update prompt: ${updateError.message}`);
   }
 
   const promptsOut = processed.map((r) => ({

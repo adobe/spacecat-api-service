@@ -87,8 +87,13 @@ Do not include markdown, code fences, or any text outside the JSON object.`;
 // Cap prompt text fed to the LLM (mirrors DRS prompt_text[:2000]).
 const MAX_PROMPT_CHARS = 2000;
 // Bound concurrent LLM calls so a bulk create (arrays up to 3000) does not fan
-// out an unbounded number of in-flight requests.
-const DEFAULT_MAX_CONCURRENCY = 10;
+// out an unbounded number of in-flight requests. Set high enough to tag as many
+// prompts as possible within the (tightened) batch wall-clock cap: prompts left
+// unclassified persist with intent=null and the DynamoDB-cache backfill does NOT
+// recover user-uploaded prompts (it only covers texts DRS has already seen), so
+// in-request tagging is the primary path for them. Throttled/failed calls return
+// null (same as a miss), so a higher ceiling never hurts correctness.
+const DEFAULT_MAX_CONCURRENCY = 40;
 // Wall-clock cap (ms) on a single `model.invoke()`. A hung Azure call must not
 // stall prompt creation: on timeout the classification is treated as a failure
 // (intent stays null) and the write proceeds. Overridable via env so it can be
@@ -110,11 +115,15 @@ function resolveInvokeTimeoutMs(env = {}) {
 
 // Wall-clock cap (ms) on a whole bulk-classification batch. Per-call timeouts
 // bound a single hung call, but a slow-but-not-dead Azure (e.g. 8-9s per call)
-// across many unique prompts could otherwise stall a bulk write past the Lambda
-// timeout and 5xx a request that would have succeeded without classification.
-// On expiry the batch returns whatever completed so far; the rest stay null and
-// are recovered by the backfill/reconciliation path.
-const DEFAULT_BATCH_TIMEOUT_MS = 30000;
+// across many unique prompts could otherwise stall the request past the ~15s
+// Fastly gateway timeout. When that wall is hit the browser sees a 5xx even
+// though the Lambda (15-min timeout) keeps running and finishes the write — a
+// false "upload failed" error. Keep this comfortably under the gateway wall so
+// classification PLUS the DB write still return in time. On expiry the batch
+// returns whatever completed so far; the rest stay null and are recovered by
+// the backfill/reconciliation path. Raise via env if the gateway timeout is
+// ever raised (see PROMPT_INTENT_CLASSIFICATION_BATCH_TIMEOUT_MS).
+const DEFAULT_BATCH_TIMEOUT_MS = 8000;
 
 /**
  * Resolves the bulk-classification batch timeout (ms) from env, falling back to

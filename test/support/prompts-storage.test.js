@@ -1100,6 +1100,44 @@ describe('prompts-storage', () => {
       expect(result.updated).to.equal(1);
     });
 
+    it('processes every update with bounded concurrency (more rows than the pool)', async () => {
+      // Guards the parallel update loop: with 25 rows and a pool of 20, all rows
+      // must still be updated exactly once (the loop drains via a shared cursor).
+      const rows = Array.from({ length: 25 }, (_, i) => ({
+        id: `row-${i}`, prompt_id: `p${i}`, text: `t${i}`, regions: [], status: 'active',
+      }));
+      const existingData = { data: rows, error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: rows.map((r) => ({ id: r.prompt_id, prompt: `updated ${r.prompt_id}`, regions: [] })),
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(25);
+      expect(result.created).to.equal(0);
+      expect(updateStub.callCount).to.equal(25);
+    });
+
     it('skips a deleted prompt matched by prompt_id without updating or inserting', async () => {
       const deletedRow = {
         id: 'row-uuid', prompt_id: 'del-1', text: 'Deleted text', regions: [], status: 'deleted',

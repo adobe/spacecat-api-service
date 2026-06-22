@@ -21,6 +21,7 @@ import yaml from 'js-yaml';
 import {
   classifyIntents,
   contentToString,
+  resolveBatchTimeoutMs,
 } from '../../src/support/intent-classifier.js';
 import { INTENT_VALUES } from '../../src/support/intent.js';
 
@@ -313,6 +314,27 @@ describe('intent-classifier', () => {
         log,
       });
       expect(await classify('how to X')).to.equal('planning');
+    });
+  });
+
+  describe('resolveBatchTimeoutMs', () => {
+    it('defaults to 8s — comfortably under the ~15s Fastly gateway wall', () => {
+      // Keeping classification + the DB write under the gateway timeout is what
+      // prevents the false "upload failed" error (the Lambda finishes either way).
+      expect(resolveBatchTimeoutMs()).to.equal(8000);
+      expect(resolveBatchTimeoutMs({})).to.equal(8000);
+    });
+
+    it('honours a positive numeric env override', () => {
+      expect(resolveBatchTimeoutMs({
+        PROMPT_INTENT_CLASSIFICATION_BATCH_TIMEOUT_MS: '20000',
+      })).to.equal(20000);
+    });
+
+    it('falls back to the default for non-numeric / non-positive overrides', () => {
+      expect(resolveBatchTimeoutMs({ PROMPT_INTENT_CLASSIFICATION_BATCH_TIMEOUT_MS: 'nope' })).to.equal(8000);
+      expect(resolveBatchTimeoutMs({ PROMPT_INTENT_CLASSIFICATION_BATCH_TIMEOUT_MS: '0' })).to.equal(8000);
+      expect(resolveBatchTimeoutMs({ PROMPT_INTENT_CLASSIFICATION_BATCH_TIMEOUT_MS: '-5' })).to.equal(8000);
     });
   });
 
