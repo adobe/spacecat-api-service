@@ -1115,6 +1115,8 @@ describe('Preflight Controller', () => {
     let fetchStub;
     let CreatePreflightController;
     let hasAccessStub;
+    let mockImsClient;
+    let createFromStub;
 
     beforeEach(async () => {
       if (!global.fetch) {
@@ -1131,11 +1133,35 @@ describe('Preflight Controller', () => {
       mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
       hasAccessStub = sandbox.stub().resolves(true);
 
+      // SITES-43236 / SITES-46699: createPreflight constructs a custom-env
+      // ImsClient with the dedicated PREFLIGHT_IMS_* credentials at the mint
+      // call site (see preflight.js for rationale). Tests esmock
+      // `ImsClient.createFrom` to return the shared mockImsClient stub; tests
+      // control mint behavior by overriding getServiceAccessToken on that
+      // stub per case (v2 authorization_code service-token mint).
+      mockImsClient = {
+        getServiceAccessToken: sandbox.stub().resolves({
+          access_token: 'test-ims-service-token',
+          token_type: 'bearer',
+          expires_in: 3600,
+        }),
+      };
+      // Stub-ify ImsClient.createFrom so tests can assert that the source
+      // passes the dedicated PREFLIGHT_IMS_* credentials through to the
+      // factory (the load-bearing contract of SITES-46699; if a future
+      // refactor accidentally swaps the wrong env keys, this stub's call
+      // args won't match and assertions fail).
+      createFromStub = sandbox.stub().returns(mockImsClient);
+
       // SITES-46202: createPreflight no longer consults Configuration / TierClient
       // for eligibility — Mysticat owns that decision. The controller is mocked
-      // here only against AccessControlUtil (tenancy boundary) and the standard
-      // dataAccess stubs.
+      // here only against AccessControlUtil (tenancy boundary), the IMS client
+      // factory (for the custom-env mint), and the standard dataAccess stubs.
       CreatePreflightController = await esmock('../../src/controllers/preflight.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: createFromStub },
+          retrievePageAuthentication: sandbox.stub().resolves('default-page-token'),
+        },
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
         },
@@ -1152,6 +1178,11 @@ describe('Preflight Controller', () => {
           AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
           MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
           AWS_ENV: 'prod',
+          // SITES-46699: dedicated IMS client credentials used by callMysticatAnalyze.
+          PREFLIGHT_IMS_CLIENT_ID: 'test-preflight-client-id',
+          PREFLIGHT_IMS_CLIENT_SECRET: 'test-preflight-client-secret',
+          PREFLIGHT_IMS_CLIENT_CODE: 'test-preflight-client-code',
+          PREFLIGHT_IMS_SCOPE: 'test-preflight-scope',
         },
       );
     });
@@ -1567,6 +1598,156 @@ describe('Preflight Controller', () => {
       expect(calledOptions.headers.Authorization).to.be.undefined;
     });
 
+    // -- IMS service token on x-ims-authorization (SITES-43236) --
+
+    it('attaches the IMS service token on x-ims-authorization (Bearer prefix)', async () => {
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      // Load-bearing contracts (SITES-46699):
+      //   1. Custom-env ImsClient construction passes the dedicated
+      //      PREFLIGHT_IMS_* credentials through to ImsClient.createFrom.
+      //   2. Mint uses getServiceAccessToken (v2 authorization_code against
+      //      the IMSS-provisioned permanent code — no org_id, no SP binding).
+      // If a future refactor swaps to v3 client_credentials or wires the
+      // wrong env keys, one of these assertions fails.
+      expect(createFromStub).to.have.been.calledWith(
+        sinon.match({
+          env: sinon.match({
+            IMS_CLIENT_ID: 'test-preflight-client-id',
+            IMS_CLIENT_SECRET: 'test-preflight-client-secret',
+            IMS_CLIENT_CODE: 'test-preflight-client-code',
+            IMS_SCOPE: 'test-preflight-scope',
+          }),
+        }),
+      );
+      expect(mockImsClient.getServiceAccessToken).to.have.been.calledOnce;
+      const [, calledOptions] = fetchStub.secondCall.args;
+      // Bearer prefix mirrors the v3-token convention; verified against the
+      // mystique-deploy CGW-Flex validator (Authorization on /v1/apply uses
+      // the same shape).
+      expect(calledOptions.headers['x-ims-authorization']).to.equal(
+        'Bearer test-ims-service-token',
+      );
+      // The customer-site page-auth header lives on a different key and
+      // must not be clobbered or duplicated by the IMS attachment.
+      expect(calledOptions.headers.Authorization).to.be.undefined;
+    });
+
+    it('keeps Authorization (page-auth) and x-ims-authorization (IMS) on separate headers when both are present', async () => {
+      // HEAD returns 401 → enableAuthentication=true → retrievePageAuthentication
+      // resolves a customer-site token onto Authorization. The IMS token still
+      // rides x-ims-authorization independently.
+      fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
+      const aemCsSite = {
+        ...mockSite,
+        getDeliveryType: () => 'aem_cs',
+      };
+      mockDataAccess.Site.findById.resolves(aemCsSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const pageAuthStub = sandbox.stub().resolves('customer-site-token');
+      const controller = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
+        },
+        '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: () => mockImsClient },
+          retrievePageAuthentication: pageAuthStub,
+        },
+      });
+      const preflightCtrl = controller(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: mockAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await preflightCtrl.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(202);
+      const [, calledOptions] = fetchStub.secondCall.args;
+      expect(calledOptions.headers.Authorization).to.equal('token customer-site-token');
+      expect(calledOptions.headers['x-ims-authorization']).to.equal(
+        'Bearer test-ims-service-token',
+      );
+    });
+
+    it('returns 500 PREFLIGHT_INTERNAL_ERROR when IMS service-token mint fails', async () => {
+      mockImsClient.getServiceAccessToken.rejects(new Error('IMS down'));
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.include('IMS service token');
+    });
+
+    it('does not create AsyncJob or Preflight records when IMS mint fails', async () => {
+      // Mint happens before DB writes — a transient IMS failure must not
+      // leave orphaned IN_PROGRESS records that the caller can't reconcile.
+      mockImsClient.getServiceAccessToken.rejects(new Error('IMS down'));
+      await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(mockDataAccess.AsyncJob.create).to.not.have.been.called;
+      expect(mockDataAccess.Preflight.create).to.not.have.been.called;
+    });
+
+    it('does not call Mysticat when IMS mint fails', async () => {
+      mockImsClient.getServiceAccessToken.rejects(new Error('IMS down'));
+      await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      // Filter by Mysticat URL — resilient to future fetch additions (HEAD
+      // probe, IMS-client HTTP fetches, etc.) that could change the raw
+      // call count without changing the load-bearing invariant.
+      const mysticatCalls = fetchStub.getCalls().filter(
+        (c) => typeof c.args[0] === 'string' && c.args[0].includes('/v1/preflight/analyze'),
+      );
+      expect(mysticatCalls).to.have.lengthOf(0);
+    });
+
+    it('returns 500 PREFLIGHT_INTERNAL_ERROR when IMS mint returns a payload missing access_token', async () => {
+      // SDK shape drift guard (e.g. `{ accessToken: ... }` after a version bump
+      // or `{}` on partial responses) — must surface as an explicit 500, not
+      // silently drop the header.
+      mockImsClient.getServiceAccessToken.resolves({});
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.include('IMS service token');
+      // No DB writes when the post-condition rejects the mint result.
+      expect(mockDataAccess.AsyncJob.create).to.not.have.been.called;
+      expect(mockDataAccess.Preflight.create).to.not.have.been.called;
+    });
+
     it('creates preflight with correct createdBy from IMS profile', async () => {
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
@@ -1627,6 +1808,7 @@ describe('Preflight Controller', () => {
       const mockRetrievePageAuth = sandbox.stub().resolves('page-access-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: () => mockImsClient },
           retrievePageAuthentication: mockRetrievePageAuth,
         },
         '../../src/support/access-control-util.js': {
@@ -1759,6 +1941,7 @@ describe('Preflight Controller', () => {
       const mockRetrievePageAuth = sandbox.stub().rejects(new Error('IMS down'));
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: () => mockImsClient },
           retrievePageAuthentication: mockRetrievePageAuth,
         },
         '../../src/support/access-control-util.js': {
@@ -1824,6 +2007,7 @@ describe('Preflight Controller', () => {
       const mockRetrievePageAuth = sandbox.stub().resolves('sp-page-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: () => mockImsClient },
           retrievePageAuthentication: mockRetrievePageAuth,
         },
         '../../src/support/access-control-util.js': {
@@ -1870,6 +2054,7 @@ describe('Preflight Controller', () => {
       const mockRetrievePageAuth = sandbox.stub().resolves('cs-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: () => mockImsClient },
           retrievePageAuthentication: mockRetrievePageAuth,
         },
         '../../src/support/access-control-util.js': {

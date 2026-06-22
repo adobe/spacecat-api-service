@@ -47,6 +47,7 @@ describe('RunAuditCommand', () => {
     });
     return {
       isHandlerEnabledForSite: () => true,
+      isHandlerDisabledForSite: () => false,
       getHandlers: () => handlers,
     };
   };
@@ -72,10 +73,12 @@ describe('RunAuditCommand', () => {
     };
     slackContext = { say: sinon.spy() };
 
-    // Reset and set default behavior for TierClient mock
+    // Reset and set default behavior for TierClient mock.
+    // The Slack run-audit handler checks `siteEnrollment` (matching the audit-worker's
+    // downstream gate); `entitlement` is intentionally not consulted.
     mockTierClient.createForSite.reset();
     mockTierClient.createForSite.resolves({
-      checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-123' } }),
+      checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: { id: 'enr-123' } }),
     });
   });
 
@@ -84,7 +87,7 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
-      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for current-tab suggestions missing an AI summary. CSV uploads are batched at 320 URLs.');
+      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for NEW/FIXED suggestions missing an AI summary.');
     });
   });
 
@@ -231,7 +234,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 2 URLs.');
     });
 
-    it('sends batch-wise Slack messages for large prerender CSV', async () => {
+    it('sends a single SQS message for large prerender CSV', async () => {
       const site = { getId: () => '123' };
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO']));
@@ -241,7 +244,7 @@ describe('RunAuditCommand', () => {
           url_private: 'https://example.com/urls.csv',
         },
       ];
-      // Generate 500 valid URLs → should produce 2 batches (320 + 180)
+      // Generate 500 valid URLs — all sent in a single message (no batching)
       const urls = Array.from({ length: 500 }, (_, i) => `https://valid.site/page-${i + 1}`);
       nock('https://example.com')
         .get('/urls.csv')
@@ -250,14 +253,9 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['site.com', 'prerender'], slackContext);
 
-      expect(sqsStub.sendMessage).to.have.been.calledTwice;
-      // First batch: 320 URLs
-      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.have.length(320);
-      // Second batch: 180 URLs
-      expect(sqsStub.sendMessage.secondCall.args[1].auditContext.urls).to.have.length(180);
-      // Batch-wise Slack messages
-      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 320 URLs (batch 1/2).');
-      expect(slackContext.say.thirdCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 180 URLs (batch 2/2).');
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.have.length(500);
+      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 500 URLs.');
     });
 
     it('warns when a prerender CSV has no valid URLs', async () => {
@@ -333,10 +331,11 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
-    it('blocks prerender CSV audits when the prerender handler is disabled', async () => {
+    it('blocks prerender CSV audits when the prerender handler is explicitly disabled for the site', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
       dataAccessStub.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: sinon.stub().returns(false),
+        isHandlerEnabledForSite: sinon.stub().returns(true),
+        isHandlerDisabledForSite: sinon.stub().returns(true),
         getHandlers: sinon.stub().returns({ prerender: { productCodes: ['LLMO'] } }),
       });
       slackContext.files = [
@@ -352,8 +351,8 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['site.com', 'prerender'], slackContext);
 
-      expect(slackContext.say.secondCall.args[0]).to.equal(':x: Will not audit site \'https://site.com\' because audits of type \'prerender\' are disabled for this site.');
       expect(sqsStub.sendMessage.called).to.be.false;
+      expect(slackContext.say.secondCall.args[0]).to.equal(':x: Audit `prerender` is explicitly disabled for site `https://site.com`. Re-enable it via the audit configuration before running on-demand.');
     });
 
     it('blocks prerender CSV audits when no product codes are configured', async () => {
@@ -383,7 +382,7 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
       dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO', 'AEM']));
       mockTierClient.createForSite.resolves({
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: null }),
       });
       slackContext.files = [
         {
@@ -411,7 +410,7 @@ describe('RunAuditCommand', () => {
         .rejects(new Error('tier down'))
         .onSecondCall()
         .resolves({
-          checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-123' } }),
+          checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: { id: 'enr-123' } }),
         });
       slackContext.files = [
         {
@@ -728,16 +727,6 @@ describe('RunAuditCommand', () => {
   });
 
   describe('Prerender Modes', () => {
-    const makeSuggestion = (url, status, extraData = {}) => ({
-      getStatus: () => status,
-      getData: () => ({ url, ...extraData }),
-    });
-
-    const makeOpportunity = (type, suggestions) => ({
-      getType: () => type,
-      getSuggestions: sinon.stub().resolves(suggestions),
-    });
-
     beforeEach(() => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'siteId' });
       dataAccessStub.Configuration.findLatest.resolves(
@@ -745,106 +734,49 @@ describe('RunAuditCommand', () => {
       );
     });
 
-    it('mode:all fetches NEW/FIXED suggestions and triggers prerender audit', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'NEW'),
-          makeSuggestion('https://site.com/page-2', 'FIXED'),
-          makeSuggestion('https://site.com/page-3', 'OUTDATED'),
-        ]),
-      ]);
-
+    it('mode:all passes mode in data field without fetching suggestions', async () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
-      const { urls, mode } = sqsStub.sendMessage.firstCall.args[1].auditContext;
-      expect(urls).to.deep.equal(['https://site.com/page-1', 'https://site.com/page-2']);
-      expect(mode).to.be.undefined;
-    });
-
-    it('mode:ai-only fetches suggestions and passes mode in data field', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'NEW'),
-          makeSuggestion('https://site.com/page-2', 'FIXED'),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only'], slackContext);
 
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
       expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({ type: 'prerender' });
       const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('all');
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.be.undefined;
+      expect(dataAccessStub.Opportunity.allBySiteId).to.not.have.been.called;
+    });
+
+    it('mode:ai-only passes mode in data field without sending URLs', async () => {
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
       expect(msgData.mode).to.equal('ai-only');
-      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.mode).to.be.undefined;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.be.undefined;
+      expect(dataAccessStub.Opportunity.allBySiteId).to.not.have.been.called;
     });
 
-    it('deduplicates URLs across multiple prerender opportunities', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'NEW'),
-        ]),
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'FIXED'),
-          makeSuggestion('https://site.com/page-2', 'NEW'),
-        ]),
-      ]);
-
+    it('mode:ai-only-current passes mode:ai-only-current in data field without sending URLs', async () => {
       const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-current'], slackContext);
 
-      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
-      expect(urls).to.have.length(2);
-      expect(urls).to.include('https://site.com/page-1');
-      expect(urls).to.include('https://site.com/page-2');
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only-current');
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.be.undefined;
+      expect(dataAccessStub.Opportunity.allBySiteId).to.not.have.been.called;
     });
 
-    it('filters out wildcard and invalid URLs from suggestions', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'NEW'),
-          makeSuggestion('https://site.com/wildcard/*', 'NEW'),
-          makeSuggestion('invalid-url', 'NEW'),
-          makeSuggestion(null, 'NEW'),
-        ]),
-      ]);
-
+    it('mode:ai-only-missing passes mode:ai-only-missing in data field without sending URLs', async () => {
       const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
 
-      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
-      expect(urls).to.deep.equal(['https://site.com/page-1']);
-    });
-
-    it('reports nothing to audit when no NEW/FIXED suggestions exist', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'OUTDATED'),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
-
-      expect(sqsStub.sendMessage).to.not.have.been.called;
-      expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
-    });
-
-    it('reports nothing to audit when no prerender opportunities exist', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('broken-backlinks', [
-          makeSuggestion('https://site.com/page-1', 'NEW'),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
-
-      expect(sqsStub.sendMessage).to.not.have.been.called;
-      expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only-missing');
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.be.undefined;
+      expect(dataAccessStub.Opportunity.allBySiteId).to.not.have.been.called;
     });
 
     it('shows site-not-found for suggestion-based mode when site does not exist', async () => {
@@ -858,17 +790,20 @@ describe('RunAuditCommand', () => {
     });
 
     it('merges mode into data field alongside other keyword args', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'NEW'),
-        ]),
-      ]);
-
       const command = RunAuditCommand(context);
       await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only', 'source:test'], slackContext);
 
       const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
       expect(msgData.mode).to.equal('ai-only');
+      expect(msgData.source).to.equal('test');
+    });
+
+    it('mode:ai-only-missing merges mode into data field alongside other keyword args', async () => {
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing', 'source:test'], slackContext);
+
+      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
+      expect(msgData.mode).to.equal('ai-only-missing');
       expect(msgData.source).to.equal('test');
     });
 
@@ -919,215 +854,6 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
       expect(sqsStub.sendMessage.firstCall.args[1].data).to.be.undefined;
     });
-
-    it('sends batch-wise Slack messages for suggestion-based mode', async () => {
-      const suggestions = Array.from({ length: 500 }, (_, i) => makeSuggestion(`https://site.com/page-${i + 1}`, i % 2 === 0 ? 'NEW' : 'FIXED'));
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', suggestions),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:all'], slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledTwice;
-      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.have.length(320);
-      expect(sqsStub.sendMessage.secondCall.args[1].auditContext.urls).to.have.length(180);
-      expect(slackContext.say).to.have.been.calledWithMatch(/320 URLs \(batch 1\/2\)/);
-      expect(slackContext.say).to.have.been.calledWithMatch(/180 URLs \(batch 2\/2\)/);
-    });
-
-    it('mode:ai-only-current fetches only current-tab suggestions', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/current', 'NEW'),
-          makeSuggestion('https://site.com/covered', 'NEW', { coveredByDomainWide: true }),
-          makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
-          makeSuggestion('https://site.com/pattern', 'NEW', { coveredByPattern: true }),
-          makeSuggestion('https://site.com/fixed', 'FIXED'),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-current'], slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
-      expect(urls).to.deep.equal(['https://site.com/current']);
-      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
-      expect(msgData.mode).to.equal('ai-only');
-    });
-
-    it('mode:ai-only-current filters out wildcard and null URLs', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/valid', 'NEW'),
-          makeSuggestion('https://site.com/wildcard/*', 'NEW'),
-          makeSuggestion(null, 'NEW'),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-current'], slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
-      expect(urls).to.deep.equal(['https://site.com/valid']);
-    });
-
-    it('mode:ai-only-current reports nothing when all suggestions are filtered out', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/covered', 'NEW', { coveredByDomainWide: true }),
-          makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-current'], slackContext);
-
-      expect(sqsStub.sendMessage).to.not.have.been.called;
-      expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
-    });
-
-    it('mode:ai-only-missing fetches current-tab suggestions missing an aiSummary', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/no-summary', 'NEW'),
-          makeSuggestion('https://site.com/has-summary', 'NEW', { aiSummary: 'some AI text' }),
-          makeSuggestion('https://site.com/covered', 'NEW', { coveredByDomainWide: true }),
-          makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
-          makeSuggestion('https://site.com/pattern', 'NEW', { coveredByPattern: true }),
-          makeSuggestion('https://site.com/fixed', 'FIXED'),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
-      expect(urls).to.deep.equal(['https://site.com/no-summary']);
-      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
-      expect(msgData.mode).to.equal('ai-only');
-    });
-
-    it('mode:ai-only-missing filters out wildcard and null URLs', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/valid', 'NEW'),
-          makeSuggestion('https://site.com/wildcard/*', 'NEW'),
-          makeSuggestion(null, 'NEW'),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
-      expect(urls).to.deep.equal(['https://site.com/valid']);
-    });
-
-    it('mode:ai-only-missing treats empty-string aiSummary as missing', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/empty-summary', 'NEW', { aiSummary: '' }),
-          makeSuggestion('https://site.com/has-summary', 'NEW', { aiSummary: 'some AI text' }),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
-      expect(urls).to.deep.equal(['https://site.com/empty-summary']);
-    });
-
-    it('mode:ai-only-missing reports nothing when all current-tab suggestions already have an aiSummary', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'NEW', { aiSummary: 'summary for page 1' }),
-          makeSuggestion('https://site.com/page-2', 'NEW', { aiSummary: 'summary for page 2' }),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
-
-      expect(sqsStub.sendMessage).to.not.have.been.called;
-      expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
-      expect(slackContext.say).to.have.been.calledWithMatch(/missing AI summary/);
-    });
-
-    it('mode:ai-only-missing reports nothing when all suggestions are covered or filtered', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/covered', 'NEW', { coveredByDomainWide: true }),
-          makeSuggestion('https://site.com/deployed', 'NEW', { edgeDeployed: true }),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
-
-      expect(sqsStub.sendMessage).to.not.have.been.called;
-      expect(slackContext.say).to.have.been.calledWithMatch(/nothing to audit/);
-    });
-
-    it('mode:ai-only-missing deduplicates URLs across multiple opportunities', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'NEW'),
-        ]),
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'NEW'),
-          makeSuggestion('https://site.com/page-2', 'NEW'),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
-
-      const { urls } = sqsStub.sendMessage.firstCall.args[1].auditContext;
-      expect(urls).to.have.length(2);
-      expect(urls).to.include('https://site.com/page-1');
-      expect(urls).to.include('https://site.com/page-2');
-    });
-
-    it('mode:ai-only-missing sends batch-wise Slack messages for large result sets', async () => {
-      const suggestions = Array.from(
-        { length: 500 },
-        (_, i) => makeSuggestion(`https://site.com/page-${i + 1}`, 'NEW'),
-      );
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', suggestions),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing'], slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledTwice;
-      expect(sqsStub.sendMessage.firstCall.args[1].auditContext.urls).to.have.length(320);
-      expect(sqsStub.sendMessage.secondCall.args[1].auditContext.urls).to.have.length(180);
-      expect(slackContext.say).to.have.been.calledWithMatch(/320 URLs \(batch 1\/2\)/);
-      expect(slackContext.say).to.have.been.calledWithMatch(/180 URLs \(batch 2\/2\)/);
-    });
-
-    it('mode:ai-only-missing merges mode into data field alongside other keyword args', async () => {
-      dataAccessStub.Opportunity.allBySiteId.resolves([
-        makeOpportunity('prerender', [
-          makeSuggestion('https://site.com/page-1', 'NEW'),
-        ]),
-      ]);
-
-      const command = RunAuditCommand(context);
-      await command.handleExecution(['site.com', 'audit:prerender', 'mode:ai-only-missing', 'source:test'], slackContext);
-
-      const msgData = JSON.parse(sqsStub.sendMessage.firstCall.args[1].data);
-      expect(msgData.mode).to.equal('ai-only');
-      expect(msgData.source).to.equal('test');
-    });
   });
 
   describe('Entitlement Checks', () => {
@@ -1172,13 +898,13 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
-      // Mock TierClient to return valid entitlement
       const mockTierClientInstance = {
         checkValidEntitlement: sinon.stub().resolves({
-          entitlement: { id: 'ent-123' },
+          siteEnrollment: { id: 'enr-123' },
         }),
       };
       mockTierClient.createForSite.resolves(mockTierClientInstance);
@@ -1192,7 +918,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit');
     });
 
-    it('should block audit when site has no entitlement', async () => {
+    it('should block audit when site has no site enrollment', async () => {
       const site = { getId: () => '123' };
       const handler = {
         productCodes: ['LLMO'],
@@ -1201,13 +927,13 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
-      // Mock TierClient to return no entitlement
       const mockTierClientInstance = {
         checkValidEntitlement: sinon.stub().resolves({
-          entitlement: null,
+          siteEnrollment: null,
         }),
       };
       mockTierClient.createForSite.resolves(mockTierClientInstance);
@@ -1221,7 +947,31 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say).to.have.been.calledWith(':x: Will not audit site \'https://validsite.com\' because site is not entitled for this audit.');
     });
 
-    it('should allow audit when site has entitlement for any product code', async () => {
+    it('should block audit when org has entitlement but site has no site enrollment', async () => {
+      // Regression: parity with audit-worker. Org-level `entitlement` is not enough;
+      // the site must have explicit `siteEnrollment`.
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': { productCodes: ['LLMO'] } }),
+      });
+
+      mockTierClient.createForSite.resolves({
+        checkValidEntitlement: sinon.stub().resolves({
+          entitlement: { id: 'ent-123' },
+          siteEnrollment: null,
+        }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(':x: Will not audit site \'https://validsite.com\' because site is not entitled for this audit.');
+    });
+
+    it('should allow audit when site has enrollment for any product code', async () => {
       const site = { getId: () => '123' };
       const handler = {
         productCodes: ['LLMO', 'ASO'],
@@ -1230,15 +980,15 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
-      // Mock TierClient - first product code fails, second succeeds
       const mockTierClientInstance1 = {
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: null }),
       };
       const mockTierClientInstance2 = {
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-456' } }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: { id: 'enr-456' } }),
       };
 
       mockTierClient.createForSite
@@ -1263,12 +1013,12 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
-      // Mock TierClient - first product code throws error, second succeeds
       const mockTierClientInstance2 = {
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-456' } }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: { id: 'enr-456' } }),
       };
 
       mockTierClient.createForSite
@@ -1295,15 +1045,15 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 
-      // Mock TierClient - both product codes return no entitlement
       const mockTierClientInstance1 = {
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: null }),
       };
       const mockTierClientInstance2 = {
-        checkValidEntitlement: sinon.stub().resolves({ entitlement: false }),
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: false }),
       };
 
       mockTierClient.createForSite
@@ -1318,6 +1068,68 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say).to.have.been.calledWith(':x: Will not audit site \'https://validsite.com\' because site is not entitled for this audit.');
     });
 
+    it('does not pass onDemand in the SQS auditContext for single-audit runs', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.called;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.not.have.property('onDemand');
+    });
+
+    it('blocks a single audit when the handler is explicitly disabled for the site', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': { productCodes: ['LLMO'] } }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(':x: Audit `lhs-mobile` is explicitly disabled for site `https://validsite.com`. Re-enable it via the audit configuration before running on-demand.');
+    });
+
+    it('audit:all skips audit types explicitly disabled for the site but queues the rest', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: (auditType) => auditType === 'cwv',
+        getHandlers: () => ({}),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'all'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.called;
+      const queuedTypes = sqsStub.sendMessage.getCalls().map((call) => call.args[1].type);
+      expect(queuedTypes).to.not.include('cwv');
+      expect(queuedTypes.length).to.be.greaterThan(0);
+    });
+
+    it('triggers a single audit even when the site is not in the handler enabled-list (no enabled-list gate)', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => false,
+        isHandlerDisabledForSite: () => false,
+        getHandlers: () => ({ 'lhs-mobile': { productCodes: ['LLMO'] } }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.called;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.not.have.property('onDemand');
+    });
+
     it('should handle checkValidEntitlement errors gracefully', async () => {
       const site = { getId: () => '123' };
       const handler = {
@@ -1327,6 +1139,7 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => false,
         getHandlers: () => ({ 'lhs-mobile': handler }),
       });
 

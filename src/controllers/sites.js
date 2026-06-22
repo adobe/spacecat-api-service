@@ -48,6 +48,7 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
+import { detectedCdnPatchGuard } from '../support/detected-cdn-validation.js';
 import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 import {
@@ -784,8 +785,21 @@ function SitesController(ctx, log, env) {
       return notFound('Site not found');
     }
 
-    if (!await accessControlUtil.hasAccess(site)) {
+    // Cross-tenant resolution: admins and S2S consumers holding `site:readAll` may look up
+    // any site by URL (platform enumeration). Everyone else must belong to the site's org.
+    // hasS2SCapability returns `not-s2s` without a DB call for non-S2S callers, so the extra
+    // fetch only happens for actual S2S consumers. See READALL_CAPABILITY_DESIGN.md.
+    const requestId = context?.invocation?.id || 'unknown';
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed && !(await accessControlUtil.hasAccess(site))) {
+      log.info(`[acl] Denied GET /sites/by-base-url - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
       return forbidden('Only users belonging to the organization can view its sites');
+    }
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /sites/by-base-url granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} requestId=${requestId}`);
     }
 
     return ok(SiteDto.toJSON(site));
@@ -893,6 +907,13 @@ function SitesController(ctx, log, env) {
           ...existingConfig.llmo,
           ...requestBody.config.llmo,
         };
+      }
+      // Reject malformed `llmo.detectedCdn` (array, stringified array, display name) before
+      // persisting. `Config()` would otherwise swallow the schema error and store the raw value,
+      // which then re-fails validation on every read.
+      const detectedCdnResult = detectedCdnPatchGuard(requestBody.config, badRequest);
+      if (detectedCdnResult?.error) {
+        return detectedCdnResult.error;
       }
       const auditTargetURLsResult = auditTargetURLsPatchGuard(
         merged,
