@@ -306,7 +306,7 @@ paths:
     $ref: './scrape-api.yaml#/get-scraped-content-list'
   /sites/{siteId}/files:
     $ref: './scrape-api.yaml#/get-files'
-  /config/{env}/{service}/redirects.txt:
+  /config/{service}/redirects.txt:
     $ref: './aso-overlay-api.yaml#/get-aso-redirects'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'

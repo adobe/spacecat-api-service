@@ -10,19 +10,16 @@ get-aso-redirects:
 
       Authenticated with the `X-ASO-API-Key` header (the inbound key the AEM
       dispatcher presents). Fronted by Fastly for edge caching; the dispatcher
-      polls this URL on its normal cycle. The `env` path segment is for Fastly
-      routing compatibility — each deployment serves its own env's bucket.
+      polls this URL on its normal cycle. Each deployment serves its own env's
+      bucket (`spacecat-<env>-aso-overlays`), so no env path segment is needed.
+
+      Authorization is per request: the `service` is resolved to a provisioned,
+      ASO-entitled site (org entitlement + site enrollment) before the overlay
+      is served; any miss returns `404` so the endpoint cannot enumerate programs.
 
       See ADR `aso-dispatcher-overlay` (Lite-E) in mysticat-architecture.
     operationId: getAsoRedirects
     parameters:
-      - name: env
-        in: path
-        required: true
-        description: Deployment environment segment (must match the serving deployment).
-        schema:
-          type: string
-          enum: [dev, stage, prod]
       - name: service
         in: path
         required: true
