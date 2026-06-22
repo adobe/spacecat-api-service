@@ -90,6 +90,24 @@ describe('AsoOverlayKeyHandler', () => {
     expect(mockLog.warn.called).to.be.true;
   });
 
+  it('returns null without throwing for a non-string header value (defensive)', async () => {
+    // headers.get normally yields string|null, but the constant-time compare must
+    // never throw on a non-string input (it would otherwise blow up in createHmac).
+    const authInfo = await handler.checkAuth(
+      makeRequest({ 'x-aso-api-key': 12345 }),
+      makeContext(),
+    );
+    expect(authInfo).to.be.null;
+  });
+
+  it('returns null when pathInfo has no method/suffix', async () => {
+    const authInfo = await handler.checkAuth(
+      makeRequest({ 'x-aso-api-key': API_KEY }),
+      makeContext({ pathInfo: {} }),
+    );
+    expect(authInfo).to.be.null;
+  });
+
   it('returns null and logs error when ASO_OVERLAY_API_KEY is not configured', async () => {
     const authInfo = await handler.checkAuth(
       makeRequest({ 'x-aso-api-key': API_KEY }),
