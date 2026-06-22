@@ -108,6 +108,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
+ * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -174,6 +175,7 @@ export default function getRouteHandlers(
   serenityController,
   elementsController,
   proxyController,
+  taskManagementController,
   redirectsController,
 ) {
   const staticRoutes = {};
@@ -260,6 +262,7 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
+    'POST /organizations/:organizationId/task-management/:provider/tickets': taskManagementController.createTicket,
     'GET /projects': projectsController.getAll,
     'POST /projects': projectsController.createProject,
     'GET /projects/:projectId': projectsController.getByID,
