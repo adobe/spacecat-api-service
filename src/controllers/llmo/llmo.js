@@ -2130,11 +2130,12 @@ function LlmoController(ctx) {
       const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 900);
       const externalId = crypto.randomUUID();
       const roleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
-      // TEMPORARY (testing only): default the trust to the dev signer account so the
-      // cross-account test works (dev signs, stage is the customer where the role is made).
-      // TODO: REMOVE before merge/prod — set EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN via env.
+      // TEMPORARY (testing only): default the trust to the dev signer's Lambda execution role
+      // (the exact identity that calls AssumeRole), not the whole account — smaller blast radius.
+      // TODO: REMOVE before prod — set EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN to the PROD
+      // spacecat-api-service Lambda execution role ARN via env (no in-code default).
       const trustedPrincipalArn = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN
-        || 'arn:aws:iam::682033462621:root';
+        || 'arn:aws:iam::682033462621:role/spacecat-role-lambda-generic';
 
       // Presign the (private) template so the customer's CloudFormation can read it
       // cross-account via the signature — no public bucket, no customer S3 access.
