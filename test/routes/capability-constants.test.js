@@ -46,7 +46,9 @@ describe('capability-constants drift coverage', () => {
   });
 
   it('every readAll constant is used by at least one route in routeRequiredCapabilities', () => {
-    const usedCaps = new Set(Object.values(routeRequiredCapabilities));
+    // Route values may be a single capability string or an array of acceptable
+    // capabilities; flatten so both shapes contribute to the used-capability set.
+    const usedCaps = new Set(Object.values(routeRequiredCapabilities).flat());
     READ_ALL_CONSTANTS.forEach((cap) => {
       expect(usedCaps.has(cap)).to.equal(
         true,
@@ -57,6 +59,7 @@ describe('capability-constants drift coverage', () => {
 
   it('every readAll capability used in routeRequiredCapabilities is exported as a constant', () => {
     const routeReadAllCaps = Object.values(routeRequiredCapabilities)
+      .flat()
       .filter((cap) => cap.endsWith(':readAll'));
     routeReadAllCaps.forEach((cap) => {
       expect(READ_ALL_CONSTANTS).to.include(
@@ -69,7 +72,7 @@ describe('capability-constants drift coverage', () => {
   it('every exported CAP_ constant is used by at least one route in routeRequiredCapabilities', () => {
     // Generalizes the readAll coverage to all capability constants (e.g. configuration:read):
     // an exported constant that no route requires is dead and should be removed or wired up.
-    const usedCaps = new Set(Object.values(routeRequiredCapabilities));
+    const usedCaps = new Set(Object.values(routeRequiredCapabilities).flat());
     ALL_CAP_CONSTANTS.forEach((cap) => {
       expect(usedCaps.has(cap)).to.equal(
         true,

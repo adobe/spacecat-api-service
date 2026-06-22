@@ -38,6 +38,7 @@ export async function handlePromptsResearchExport(sp, clients) {
     defaultSortKey: 'MENTIONED_BRANDS_COUNT',
     callExport: (clients_, req) => clients_.promptClient.promptsByTopicFTSExport(req),
     label: 'prompts research',
+    textFilterColumn: 'prompt',
   });
 }
 /* c8 ignore stop */

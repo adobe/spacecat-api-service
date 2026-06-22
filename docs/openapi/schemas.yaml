@@ -10269,6 +10269,144 @@ AiVisibilityV1PromptGapPromptsExportResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1PromptGapPromptsTotalsResponse:
+  type: object
+  description: |
+    Per-kind gap prompts counts from `GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals`.
+    Returns only the totals array without paginated data.
+  properties:
+    totals:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptGapPromptsTotalRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainRow:
+  type: object
+  description: |
+    One domain from Semrush v2 `GapSourceDomainsResponse.Domain` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    domain:
+      type: string
+    gapMentions:
+      type: array
+      description: Per-brand mention counts included in the gap for this source domain
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicMentionsByBrand'
+    targetMentions:
+      description: Mentions of the target brand sourced from this domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    sourcesCount:
+      description: Number of URLs from the domain used as a source (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    promptsCount:
+      description: Number of prompt responses using sources from the domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    organicTraffic:
+      description: Estimated organic traffic to the domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    totalBrandMentions:
+      description: All brand mentions sourced from this domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsResponse:
+  type: object
+  description: |
+    Gap source domains list from `GET /llmo/ai-visibility/v1/source/gap-source-domains`.
+    Wraps Semrush v2 source `GapSourceDomains` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceGapSourceDomainRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsTotalRow:
+  type: object
+  description: |
+    One row from Semrush `GapSourceDomainsTotalsResponse.TotalByKind` as protobuf JSON (camelCase).
+    Structurally identical to `AiVisibilityV1TopicGapTopicsTotalRow`.
+  properties:
+    kind:
+      description: Gap kind (`GAP_KIND` enum name or integer)
+      oneOf:
+        - type: string
+          enum:
+            - UNSPECIFIED
+            - ALL
+            - MISSING
+            - WEAK
+            - SHARED
+            - STRONG
+            - UNIQUE
+        - type: integer
+          enum: [0, 1, 2, 3, 4, 5, 6]
+    count:
+      description: Total source domains for this gap kind (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsTotalsResponse:
+  type: object
+  description: |
+    Per-kind gap source domains counts from
+    `GET /llmo/ai-visibility/v1/source/gap-source-domains-totals`.
+    Returns only the totals array without paginated data.
+  properties:
+    totals:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceGapSourceDomainsTotalRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsExportResponse:
+  type: object
+  description: |
+    Gap source domains CSV export from
+    `GET /llmo/ai-visibility/v1/source/gap-source-domains-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: gap-source-domains.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityPromptResearchExportResponse:
   type: object
   description: |
