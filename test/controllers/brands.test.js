@@ -919,6 +919,57 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(500);
     });
 
+    it('createPromptsByBrand returns 409 and logs at warn (not error) when INSERT fails with 23505', async () => {
+      const th = (v) => ({ then: (resolve) => resolve(v), catch: () => th(v) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  ...th({ data: [], error: null }),
+                  in: () => th({ data: [], error: null }),
+                }),
+              }),
+            }),
+            insert: () => ({
+              select: () => th({
+                data: null,
+                error: {
+                  code: '23505',
+                  message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+                },
+              }),
+            }),
+            update: () => ({ eq: () => th({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ id: 'p-1', prompt: 'Synthetic test prompt', regions: ['us'] }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(409);
+      expect(loggerStub.warn).to.have.been.called;
+      expect(loggerStub.error).to.not.have.been.called;
+    });
+
     it('updatePromptByBrandAndId returns 200 when prompt updated', async () => {
       const response = await brandsController.updatePromptByBrandAndId({
         ...context,
@@ -4563,6 +4614,86 @@ describe('Brands Controller', () => {
         expect(response.status).to.equal(201);
         expect(provisionStub.called).to.equal(false);
       });
+
+      it('saves a pending draft WITHOUT a primary URL: no provisioning, market stashed (201)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          // status pending, market chosen, but NO urls — the wizard's "Save as
+          // pending" from the Primary URL step.
+          data: {
+            name: 'New Brand',
+            status: 'pending',
+            urls: [],
+            semrushMarket: { market: 'us', languageCode: 'en' },
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        // Provisioning is deferred for a draft.
+        expect(provisionStub.called).to.equal(false);
+        // The market is stashed for activation; no primary URL yet.
+        const upsertArgs = upsertStub.firstCall.args[0];
+        expect(upsertArgs.brand.pendingSemrushProvisioning).to.deep.equal({
+          primaryUrl: null,
+          markets: [{ market: 'us', languageCode: 'en' }],
+        });
+        // A draft is never bound to a workspace at create time.
+        expect(upsertArgs.semrushWorkspaceId).to.equal(null);
+        expect(upsertArgs.forceBrandId).to.equal(null);
+      });
+
+      it('stashes the primary URL on a pending draft when one was entered (still no provisioning)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'New Brand',
+            status: 'pending',
+            urls: [{ value: 'https://acme.com/path' }],
+            semrushMarket: { market: 'us', languageCode: 'en' },
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(false);
+        expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
+          primaryUrl: 'https://acme.com/path',
+          markets: [{ market: 'us', languageCode: 'en' }],
+        });
+      });
+
+      it('still requires market and languageCode even for a pending draft', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', status: 'pending', semrushMarket: { market: 'us' } },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(provisionStub.called).to.equal(false);
+      });
     });
 
     it('returns 400 when brand name is missing', async () => {
@@ -4817,6 +4948,36 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       expect(syncStub).to.not.have.been.called;
+    });
+
+    it('strips system-controlled pendingSemrushProvisioning from a PATCH (no runtime injection)', async () => {
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: null });
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: sinon.stub().resolves({}),
+        createSerenityTransport: sinon.stub(),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          description: 'legit edit',
+          // An attacker-supplied stash that activation would otherwise trust.
+          pendingSemrushProvisioning: {
+            primaryUrl: 'https://evil.example',
+            markets: [{ market: 'us', languageCode: 'en' }],
+          },
+        },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(updateBrandStub).to.have.been.calledOnce;
+      const { updates } = updateBrandStub.firstCall.args[0];
+      expect(updates).to.not.have.property('pendingSemrushProvisioning');
     });
 
     it('does NOT re-sync a flat-mode brand (no sub-workspace) even when URLs change', async () => {

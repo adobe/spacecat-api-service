@@ -725,6 +725,14 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
+  /llmo/ai-visibility/v1/prompt-research/prompts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-prompts-export'
+  /llmo/ai-visibility/v1/prompt-research/brands-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-brands-export'
+  /llmo/ai-visibility/v1/prompt-research/source-domains-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-source-domains-export'
+  /llmo/ai-visibility/v1/prompt-research/topics-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-topics-export'
   /llmo/ai-visibility/v1/meta/meta:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-meta-meta'
 
