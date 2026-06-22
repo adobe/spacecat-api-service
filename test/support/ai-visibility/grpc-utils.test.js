@@ -64,6 +64,7 @@ import {
   mergeTopBrandsByDomainResponsesByMax,
   settledValueOrElse,
   settledFulfilledMap,
+  buildTextFilterQl,
 } from '../../../src/support/ai-visibility/grpc-utils.js';
 
 function sp(query) {
@@ -71,6 +72,25 @@ function sp(query) {
 }
 
 describe('grpc-utils', () => {
+  describe('buildTextFilterQl', () => {
+    it('builds a CONTAINS clause for the given column', () => {
+      expect(buildTextFilterQl('pdf', 'prompt')).to.equal('prompt CONTAINS "pdf"');
+      expect(buildTextFilterQl('adobe', 'name')).to.equal('name CONTAINS "adobe"');
+    });
+    it('trims the filter text', () => {
+      expect(buildTextFilterQl('  coffee  ', 'topic')).to.equal('topic CONTAINS "coffee"');
+    });
+    it('escapes embedded quotes and backslashes', () => {
+      expect(buildTextFilterQl('a"b\\c', 'domain')).to.equal('domain CONTAINS "a\\"b\\\\c"');
+    });
+    it('returns empty string for empty / whitespace / nullish input', () => {
+      expect(buildTextFilterQl('', 'prompt')).to.equal('');
+      expect(buildTextFilterQl('   ', 'prompt')).to.equal('');
+      expect(buildTextFilterQl(undefined, 'prompt')).to.equal('');
+      expect(buildTextFilterQl(null, 'prompt')).to.equal('');
+    });
+  });
+
   describe('settledValueOrElse / settledFulfilledMap', () => {
     it('settledValueOrElse returns value when fulfilled', () => {
       expect(settledValueOrElse({ status: 'fulfilled', value: 42 }, 0)).to.equal(42);

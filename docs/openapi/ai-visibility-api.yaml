@@ -118,6 +118,19 @@ x-ai-vis-search-query: &searchQueryParam
     type: string
     example: coffee
 
+x-ai-vis-text-filter: &textFilterParam
+  name: textFilter
+  in: query
+  required: false
+  description: |
+    Optional free-text filter applied server-side across the full result set (not just the
+    current page), via a `dimension_filter_ql` `CONTAINS` clause on the dataset's primary
+    column (prompts→`prompt`, topics→`topic`, brands→`name`, source-domains→`domain`). When
+    set, `total` reflects the filtered count. Distinct from `searchQuery` (the topic FTS query).
+  schema:
+    type: string
+    example: pdf
+
 x-ai-vis-topic-id: &topicIdParam
   name: topicId
   in: query
@@ -1078,6 +1091,7 @@ ai-visibility-topics-research:
       - *regionParam
       - *engineParam
       - *ftsTopicsSortByParam
+      - *textFilterParam
       - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
@@ -1172,6 +1186,7 @@ ai-visibility-topics-research-prompts:
       - *regionParam
       - *engineParam
       - *ftsPromptsSortByParam
+      - *textFilterParam
       - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
@@ -1206,6 +1221,7 @@ ai-visibility-topics-research-brands:
       - *regionParam
       - *engineParam
       - *ftsBrandsSortByParam
+      - *textFilterParam
       - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
@@ -1242,6 +1258,7 @@ ai-visibility-topics-research-source-domains:
       - *regionParam
       - *engineParam
       - *ftsSourceDomainsSortByParam
+      - *textFilterParam
       - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
@@ -1276,6 +1293,7 @@ ai-visibility-v1-prompt-research-prompts-export:
       - *regionParam
       - *engineParam
       - *ftsPromptsSortByParam
+      - *textFilterParam
       - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
@@ -1309,6 +1327,7 @@ ai-visibility-v1-prompt-research-brands-export:
       - *regionParam
       - *engineParam
       - *ftsBrandsSortByParam
+      - *textFilterParam
       - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
@@ -1342,6 +1361,7 @@ ai-visibility-v1-prompt-research-source-domains-export:
       - *regionParam
       - *engineParam
       - *ftsSourceDomainsSortByParam
+      - *textFilterParam
       - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
@@ -1375,6 +1395,7 @@ ai-visibility-v1-prompt-research-topics-export:
       - *regionParam
       - *engineParam
       - *ftsTopicsSortByParam
+      - *textFilterParam
       - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
