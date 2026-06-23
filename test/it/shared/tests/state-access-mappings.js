@@ -71,9 +71,9 @@ function expectMappingDto(m) {
  * Shared StateAccessMappings endpoint tests.
  *
  * Exercises the full PostgREST round-trip for the hybrid-model state layer:
- * create / list / patch / soft-revoke / history, plus validation and the
- * partial-unique-index semantics (active duplicate → 409; re-create after
- * revoke → 201). The `admin` persona is used throughout because it is an
+ * create / list / patch (including empty-to-remove-access) / history, plus
+ * validation and the active-duplicate → 409 semantics. The `admin` persona is
+ * used throughout because it is an
  * internal identity that bypasses `facsWrapper` — the controller logic and
  * the real `facs_access_mappings` table are what's under test here, not the
  * capability gate (covered by the facsWrapper unit suite).
@@ -83,7 +83,7 @@ function expectMappingDto(m) {
  */
 export default function stateAccessMappingsTests(getHttpClient, resetData) {
   describe('StateAccessMappings', () => {
-    describe('lifecycle: create → list → patch → revoke → history', () => {
+    describe('lifecycle: create → list → patch → empty', () => {
       before(() => resetData());
 
       let created;
@@ -163,48 +163,37 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.body.items[0].grantedCapabilities).to.have.members(LLMO_CAPS_UPDATED);
       });
 
-      it('DELETE soft-revokes the binding (204)', async () => {
+      it('PATCH to an empty array removes access (binding stays active, grants nothing)', async () => {
         const http = getHttpClient();
-        // The IT http-client's delete() carries no request body (its second
-        // arg is extra headers), so no revoke reason is supplied here — the
-        // reason path is covered by the controller unit tests.
-        const res = await http.admin.delete(`${BASE}/${created.id}`);
-        expect(res.status).to.equal(204);
+        const res = await http.admin.patch(`${BASE}/${created.id}`, {
+          grantedCapabilities: [],
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.id).to.equal(created.id);
+        expect(res.body.grantedCapabilities).to.be.an('array').with.lengthOf(0);
+        expect(res.body.revokedAt).to.equal(null);
       });
 
-      it('GET (active) no longer returns the revoked binding', async () => {
+      it('GET (active) still returns the emptied binding with no capabilities', async () => {
         const http = getHttpClient();
         const res = await http.admin.get(
           `${BASE}?resourceType=brand&resourceId=${BRAND_RESOURCE_ID}`,
         );
         expect(res.status).to.equal(200);
-        expect(res.body.items).to.be.an('array').with.lengthOf(0);
+        expect(res.body.items).to.be.an('array').with.lengthOf(1);
+        expect(res.body.items[0].id).to.equal(created.id);
+        expect(res.body.items[0].grantedCapabilities).to.be.an('array').with.lengthOf(0);
       });
 
-      it('GET history returns the revoked binding with tombstone fields', async () => {
+      it('GET history returns the active binding', async () => {
         const http = getHttpClient();
         const res = await http.admin.get(
           `${HISTORY}?resourceType=brand&resourceId=${BRAND_RESOURCE_ID}`,
         );
         expect(res.status).to.equal(200);
         const row = res.body.items.find((m) => m.id === created.id);
-        expect(row, 'revoked row present in history').to.be.an('object');
-        expectIsoTimestamp(row.revokedAt, 'revokedAt');
-        expect(row.revokedBy).to.be.a('string');
-      });
-
-      it('POST the same natural key again after revoke succeeds (partial unique index)', async () => {
-        const http = getHttpClient();
-        const res = await http.admin.post(BASE, {
-          subjectType: 'user',
-          subjectId: USER_SUBJECT,
-          resourceType: 'brand',
-          resourceId: BRAND_RESOURCE_ID,
-          grantedCapabilities: ['llmo/can_view'],
-        });
-        expect(res.status).to.equal(201);
-        expect(res.body.id).to.not.equal(created.id);
-        expect(res.body.revokedAt).to.equal(null);
+        expect(row, 'binding present in history').to.be.an('object');
+        expect(row.revokedAt).to.equal(null);
       });
     });
 
@@ -356,21 +345,9 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         });
         expect(res.status).to.equal(404);
       });
-
-      it('DELETE returns 400 for an invalid UUID', async () => {
-        const http = getHttpClient();
-        const res = await http.admin.delete(`${BASE}/not-a-uuid`);
-        expect(res.status).to.equal(400);
-      });
-
-      it('DELETE returns 404 for an unknown id', async () => {
-        const http = getHttpClient();
-        const res = await http.admin.delete(`${BASE}/${BRAND_RESOURCE_ID}`);
-        expect(res.status).to.equal(404);
-      });
     });
 
-    describe('audit-trail emit: create / patch / revoke write audit events', () => {
+    describe('audit-trail emit: create / patch write audit events', () => {
       // The api-service IT PostgREST client authenticates as `postgrest_writer`
       // (POSTGREST_API_KEY = POSTGREST_WRITER_JWT), which holds INSERT on the
       // append-only `facs_access_mapping_audit_events` table, so the emit lands.
@@ -421,20 +398,6 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.body.items).to.be.an('array').with.lengthOf(1);
         expect(res.body.items[0].outcome).to.equal('allow');
         expect(res.body.items[0].grantedCapabilities).to.have.members(LLMO_CAPS_UPDATED);
-      });
-
-      it('DELETE emits an allow/revoke audit event', async () => {
-        const http = getHttpClient();
-        const del = await http.admin.delete(`${BASE}/${mappingId}`);
-        expect(del.status).to.equal(204);
-
-        const res = await http.admin.get(
-          `${AUDIT_BASE}?mappingId=${mappingId}&operation=revoke`,
-        );
-        expect(res.status).to.equal(200);
-        expect(res.body.items).to.be.an('array').with.lengthOf(1);
-        expect(res.body.items[0].operation).to.equal('revoke');
-        expect(res.body.items[0].outcome).to.equal('allow');
       });
     });
 
@@ -528,16 +491,13 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.status).to.equal(403);
       });
 
-      it('DELETE 403s on a binding belonging to an unmanaged resource', async () => {
+      it('PATCH-empty removes access on the managed binding (200)', async () => {
         const http = getHttpClient();
-        const res = await http.brandManager.delete(`${BASE}/${UNMANAGED_MAPPING_ID}`);
-        expect(res.status).to.equal(403);
-      });
-
-      it('DELETE revokes a binding on the managed resource (204)', async () => {
-        const http = getHttpClient();
-        const res = await http.brandManager.delete(`${BASE}/${managedMappingId}`);
-        expect(res.status).to.equal(204);
+        const res = await http.brandManager.patch(`${BASE}/${managedMappingId}`, {
+          grantedCapabilities: [],
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.grantedCapabilities).to.be.an('array').with.lengthOf(0);
       });
 
       it('GET audit-logs 403s (org-wide read is FACS-only)', async () => {

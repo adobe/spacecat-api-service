@@ -15,7 +15,6 @@ import {
   createResponse,
   forbidden,
   internalServerError,
-  noContent,
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
@@ -31,7 +30,6 @@ import {
   listFacsAccessMappingHistory,
   listFacsAccessMappingAuditEvents,
   requirePostgrestForFacsMappings,
-  revokeFacsAccessMappingById,
   updateFacsAccessMappingCapabilities,
 } from '../support/state-access-mapping-utils.js';
 
@@ -204,7 +202,6 @@ function toAuditEventDto(row) {
  *   - GET    /state/access-mappings/history   — list active + revoked
  *   - POST   /state/access-mappings           — create one binding
  *   - PATCH  /state/access-mappings/:id       — replace granted capabilities
- *   - DELETE /state/access-mappings/:id       — soft-revoke a binding
  *   - GET    /product/capabilities            — product capability catalog
  *   - GET    /user/capabilities/:resourceId   — caller's effective capabilities
  *
@@ -242,10 +239,20 @@ function StateAccessMappingsController(context) {
    * Validates that every entry in `grantedCapabilities` is a string of the
    * shape `<product-lower>/<capability>` AND belongs to the product's
    * capability catalog. Returns an error message string, or null on success.
+   *
+   * @param {*} grantedCapabilities
+   * @param {string} product
+   * @param {object} [opts]
+   * @param {boolean} [opts.allowEmpty=false] - When true, an empty array is
+   *   valid. PATCH uses this so a binding can be emptied (active row that grants
+   *   nothing = "remove access"); create still requires at least one capability.
    */
-  function validateGrantedCapabilities(grantedCapabilities, product) {
-    if (!Array.isArray(grantedCapabilities) || grantedCapabilities.length === 0) {
-      return 'grantedCapabilities must be a non-empty array';
+  function validateGrantedCapabilities(grantedCapabilities, product, { allowEmpty = false } = {}) {
+    if (!Array.isArray(grantedCapabilities)) {
+      return 'grantedCapabilities must be an array';
+    }
+    if (grantedCapabilities.length === 0) {
+      return allowEmpty ? null : 'grantedCapabilities must be a non-empty array';
     }
     const productLower = product.toLowerCase();
     const catalog = new Set(getProductCapabilityCatalog(product));
@@ -725,7 +732,9 @@ function StateAccessMappingsController(context) {
       return badRequest('request body is required');
     }
     const { grantedCapabilities } = data;
-    const capErr = validateGrantedCapabilities(grantedCapabilities, product);
+    // PATCH may empty the capability set (active row that grants nothing =
+    // remove access); create still requires at least one capability.
+    const capErr = validateGrantedCapabilities(grantedCapabilities, product, { allowEmpty: true });
     if (capErr) {
       return badRequest(capErr);
     }
@@ -783,77 +792,6 @@ function StateAccessMappingsController(context) {
         'Failed to patch state-layer access mapping',
       );
       return internalServerError('Failed to update access mapping');
-    }
-  }
-
-  /**
-   * DELETE /state/access-mappings/:id — soft-revoke a binding.
-   * 204 on success, 404 when no active row matched.
-   */
-  async function revokeMapping(ctx) {
-    const pre = preamble(ctx);
-    if (pre.error) {
-      return pre.error;
-    }
-    const { product, imsOrgId } = pre;
-    const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
-    if (gateErr) {
-      return gateErr;
-    }
-
-    const { id } = ctx.params || {};
-    if (!hasText(id) || !isValidUUID(id)) {
-      return badRequest('id must be a valid UUID');
-    }
-    const revokeReason = ctx.data && typeof ctx.data === 'object' && ctx.data.reason
-      ? ctx.data.reason
-      : null;
-
-    try {
-      const { postgrestClient } = ctx.dataAccess.services;
-      // A state-layer manager may only revoke bindings on resources they manage
-      // (hybrid-model §8.3); org-wide managers skip this fetch.
-      if (!authority.orgWide) {
-        const existing = await getFacsAccessMappingById(postgrestClient, { id, imsOrgId, product });
-        if (!existing) {
-          return notFound('Mapping not found');
-        }
-        if (!canActOnResource(authority, existing.resource_id)) {
-          return forbidden(
-            `Caller may only manage resources where they hold ${product.toLowerCase()}/can_manage_users`,
-          );
-        }
-      }
-      const tombstone = await revokeFacsAccessMappingById(postgrestClient, {
-        id,
-        imsOrgId,
-        revokedBy: resolveCallerUserIdent(ctx),
-        revokeReason,
-      });
-      if (!tombstone) {
-        return notFound('Mapping not found');
-      }
-      await emitAuditEvent(ctx, {
-        imsOrgId,
-        product,
-        operation: 'revoke',
-        outcome: 'allow',
-        statusCode: 204,
-        mappingId: tombstone.id,
-        bindingSubjectType: tombstone.subject_type,
-        bindingSubjectId: tombstone.subject_id,
-        resourceType: tombstone.resource_type,
-        resourceId: tombstone.resource_id,
-        grantedCapabilities: tombstone.granted_capabilities,
-        revokeReason,
-      });
-      return noContent();
-    } catch (error) {
-      log.error(
-        { tag: 'state-access-mappings', err: error.message, id },
-        'Failed to revoke state-layer access mapping',
-      );
-      return internalServerError('Failed to revoke access mapping');
     }
   }
 
@@ -1103,7 +1041,6 @@ function StateAccessMappingsController(context) {
     listHistory,
     createMapping,
     patchMapping,
-    revokeMapping,
     getProductCapabilities,
     getUserCapabilities,
     getAuditLogs,

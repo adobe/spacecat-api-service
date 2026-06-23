@@ -719,7 +719,6 @@ export default function getRouteHandlers(
     'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
     'POST /state/access-mappings': stateAccessMappingsController.createMapping,
     'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
-    'DELETE /state/access-mappings/:id': stateAccessMappingsController.revokeMapping,
     'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
     'GET /user/capabilities/:resourceId': stateAccessMappingsController.getUserCapabilities,
     'GET /organizations/:organizationId/permission/audit-logs': stateAccessMappingsController.getAuditLogs,

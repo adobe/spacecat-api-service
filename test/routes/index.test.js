@@ -521,7 +521,6 @@ describe('getRouteHandlers', () => {
     listHistory: sinon.stub(),
     createMapping: sinon.stub(),
     patchMapping: sinon.stub(),
-    revokeMapping: sinon.stub(),
     getProductCapabilities: sinon.stub(),
     getUserCapabilities: sinon.stub(),
   };
@@ -1178,7 +1177,6 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/referral-traffic/weeks',
       'GET /admin/users/:userId',
       'PATCH /state/access-mappings/:id',
-      'DELETE /state/access-mappings/:id',
       'GET /user/capabilities/:resourceId',
       'GET /organizations/:organizationId/permission/audit-logs',
       'GET /sites/:siteId/agentic-categories',

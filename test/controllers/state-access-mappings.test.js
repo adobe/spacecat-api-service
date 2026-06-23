@@ -111,7 +111,6 @@ async function loadController(supportStubs = {}) {
     listFacsAccessMappings: sinon.stub().resolves([]),
     listFacsAccessMappingHistory: sinon.stub().resolves([]),
     createFacsAccessMappings: sinon.stub().resolves({ created: [], skipped: [] }),
-    revokeFacsAccessMappingById: sinon.stub().resolves(null),
     updateFacsAccessMappingCapabilities: sinon.stub().resolves(null),
     listFacsAccessMappingAuditEvents: sinon.stub().resolves([]),
     insertFacsAccessMappingAuditEvent: sinon.stub().resolves({}),
@@ -548,6 +547,33 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 400 when grantedCapabilities is not an array', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: 'llmo/can_view' },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('allows emptying the capability set (active row that grants nothing)', async () => {
+      const updated = makeRow({ granted_capabilities: [] });
+      const { Controller, stubs } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
+      const ctx = makeContext({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: [] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.grantedCapabilities).to.deep.equal([]);
+      expect(stubs.updateFacsAccessMappingCapabilities.firstCall.args[1].grantedCapabilities)
+        .to.deep.equal([]);
+    });
+
     it('returns 200 with the updated row (via the capability-edit RPC helper)', async () => {
       const updated = makeRow({ granted_capabilities: ['llmo/can_view', 'llmo/can_configure'] });
       const updateStub = sinon.stub().resolves(updated);
@@ -630,95 +656,6 @@ describe('StateAccessMappingsController', () => {
     });
   });
 
-  describe('DELETE /state/access-mappings/:id (revokeMapping)', () => {
-    it('returns 400 when id is not a UUID', async () => {
-      const { Controller } = await loadController();
-      const ctx = makeContext({ pathParams: { id: 'not-uuid' } });
-      const res = await Controller(ctx).revokeMapping(ctx);
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 503 when postgrest is unavailable', async () => {
-      const { Controller } = await loadController({
-        requirePostgrestForFacsMappings: () => ({ status: 503 }),
-      });
-      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
-      const res = await Controller(ctx).revokeMapping(ctx);
-      expect(res.status).to.equal(503);
-    });
-
-    it('returns 204 when a tombstone is returned', async () => {
-      const { Controller } = await loadController({
-        revokeFacsAccessMappingById: sinon.stub().resolves(makeRow({ revoked_at: '2026-01-02T00:00:00Z' })),
-      });
-      const ctx = makeContext({
-        pathParams: { id: VALID_UUID_MAPPING },
-        body: { reason: 'user-request' },
-      });
-      const res = await Controller(ctx).revokeMapping(ctx);
-      expect(res.status).to.equal(204);
-    });
-
-    it('returns 204 with no reason in body', async () => {
-      const { Controller } = await loadController({
-        revokeFacsAccessMappingById: sinon.stub().resolves(makeRow()),
-      });
-      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
-      const res = await Controller(ctx).revokeMapping(ctx);
-      expect(res.status).to.equal(204);
-    });
-
-    it('emits a revoke audit event (allow) carrying the reason on success', async () => {
-      const tombstone = makeRow({ revoked_at: '2026-01-02T00:00:00Z' });
-      const { Controller, stubs } = await loadController({
-        revokeFacsAccessMappingById: sinon.stub().resolves(tombstone),
-      });
-      const ctx = makeContext({
-        pathParams: { id: VALID_UUID_MAPPING },
-        body: { reason: 'user-request' },
-      });
-      const res = await Controller(ctx).revokeMapping(ctx);
-      expect(res.status).to.equal(204);
-      expect(stubs.insertFacsAccessMappingAuditEvent.calledOnce).to.be.true;
-      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
-      expect(event).to.include({
-        operation: 'revoke',
-        outcome: 'allow',
-        mappingId: tombstone.id,
-        revokeReason: 'user-request',
-      });
-    });
-
-    it('still returns 204 when the audit write fails (warning only)', async () => {
-      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
-      const { Controller } = await loadController({
-        revokeFacsAccessMappingById: sinon.stub().resolves(makeRow({ revoked_at: '2026-01-02T00:00:00Z' })),
-        insertFacsAccessMappingAuditEvent: sinon.stub().rejects(new Error('boom')),
-      });
-      const res = await Controller(ctx).revokeMapping(ctx);
-      expect(res.status).to.equal(204);
-      expect(ctx.log.warn.called).to.be.true;
-    });
-
-    it('returns 404 when nothing was revoked', async () => {
-      const { Controller } = await loadController({
-        revokeFacsAccessMappingById: sinon.stub().resolves(null),
-      });
-      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
-      const res = await Controller(ctx).revokeMapping(ctx);
-      expect(res.status).to.equal(404);
-    });
-
-    it('returns 500 when the helper throws', async () => {
-      const { Controller } = await loadController({
-        revokeFacsAccessMappingById: sinon.stub().rejects(new Error('boom')),
-      });
-      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
-      const res = await Controller(ctx).revokeMapping(ctx);
-      expect(res.status).to.equal(500);
-    });
-  });
-
   describe('controller-level can_manage_users gate', () => {
     // These routes carry no ReBAC-scoped resource, so facsWrapper defers to the
     // controller when the JWT lacks the capability. The controller must enforce
@@ -763,13 +700,6 @@ describe('StateAccessMappingsController', () => {
         body: { grantedCapabilities: ['llmo/can_view'] },
       });
       const res = await Controller(ctx).patchMapping(ctx);
-      expect(res.status).to.equal(403);
-    });
-
-    it('revokeMapping returns 403 without can_manage_users', async () => {
-      const { Controller } = await loadController();
-      const ctx = denyCtx({ pathParams: { id: VALID_UUID_MAPPING } });
-      const res = await Controller(ctx).revokeMapping(ctx);
       expect(res.status).to.equal(403);
     });
 
@@ -997,30 +927,6 @@ describe('StateAccessMappingsController', () => {
       });
       const res = await Controller(ctx).patchMapping(ctx);
       expect(res.status).to.equal(404);
-    });
-
-    it('revokeMapping allows revoking a binding on a managed resource', async () => {
-      const { Controller } = await loadController({
-        listFacsAccessMappings: sinon.stub().resolves([managerRow()]),
-        getFacsAccessMappingById: sinon.stub().resolves(makeRow({ resource_id: MANAGED })),
-        revokeFacsAccessMappingById: sinon.stub().resolves(
-          makeRow({ resource_id: MANAGED, revoked_at: '2026-01-02T00:00:00Z' }),
-        ),
-      });
-      const ctx = stateMgrCtx({ pathParams: { id: VALID_UUID_MAPPING } });
-      const res = await Controller(ctx).revokeMapping(ctx);
-      expect(res.status).to.equal(204);
-    });
-
-    it('revokeMapping 403s when the target row is on an unmanaged resource', async () => {
-      const { Controller, stubs } = await loadController({
-        listFacsAccessMappings: sinon.stub().resolves([managerRow()]),
-        getFacsAccessMappingById: sinon.stub().resolves(makeRow({ resource_id: UNMANAGED })),
-      });
-      const ctx = stateMgrCtx({ pathParams: { id: VALID_UUID_MAPPING } });
-      const res = await Controller(ctx).revokeMapping(ctx);
-      expect(res.status).to.equal(403);
-      expect(stubs.revokeFacsAccessMappingById.called).to.be.false;
     });
 
     it('getAuditLogs 403s for a state-layer manager (org-wide read is FACS-only)', async () => {
