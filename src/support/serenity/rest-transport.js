@@ -12,13 +12,19 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../utils.js';
+// Typed Semrush Project Engine client, vendored under third-party/ (the upstream
+// @adobe/spacecat-shared-project-engine-client is private and not published; see
+// third-party/project-engine-client/PROVENANCE.md). It owns the project-API
+// prefix ('/enterprise/projects/api'), the IMS-Bearer auth, and request shaping.
+import { createSerenityProjectEngineApiClient } from '../../../third-party/project-engine-client/index.js';
 
-const API_PREFIX = '/enterprise/projects/api';
 // Workspace lifecycle (create subworkspace / status / family / resources / members)
 // is served by a DIFFERENT gateway service than project ops — the
 // "user-manager" API under /enterprise/users/api (verified live 2026-06-15
-// against the dev parent; the project prefix 404s these routes). Project ops
-// stay on API_PREFIX above.
+// against the dev parent; the project prefix 404s these routes). Project ops are
+// owned by the typed client above; only this prefix is still built by hand here,
+// because no typed user-manager client exists yet (the upstream package is a
+// types-only foundation slice).
 const USERS_API_PREFIX = '/enterprise/users/api';
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
@@ -105,9 +111,9 @@ function baseUrl(env) {
 }
 
 /**
- * Builds the outbound auth header. The Adobe-hosted Semrush gateway
- * authenticates via the caller's IMS bearer token; the cookie / Auth-Data-Jwt
- * branches that existed on feat/prompts-management are deliberately removed.
+ * Builds the outbound auth header for the hand-rolled user-manager calls. The
+ * Adobe-hosted Semrush gateway authenticates via the caller's IMS bearer token.
+ * (The project-API client applies the same header itself.)
  */
 function buildHeaders(imsToken) {
   if (!hasText(imsToken)) {
@@ -135,6 +141,12 @@ async function parseBody(response) {
   }
 }
 
+/**
+ * Hand-rolled request for the user-manager gateway (the typed client covers the
+ * project gateway only). Mirrors the project client's behaviour: 15s timeout
+ * mapped to a 504, non-2xx mapped to a SerenityTransportError carrying the
+ * upstream status + parsed body.
+ */
 async function request(method, url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -174,23 +186,78 @@ async function request(method, url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_
 // All path-segment interpolations route through encodeURIComponent so a
 // caller-supplied id containing reserved URL chars can't break out of the
 // expected segment. UUIDs are safe by construction today but the policy
-// applies uniformly.
+// applies uniformly. (Project-API ids are encoded by the typed client.)
 function enc(segment) {
   return encodeURIComponent(String(segment ?? ''));
 }
 
-function aioPromptsPath(semrushWorkspaceId, projectId, suffix) {
-  return `${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/aio/prompts${suffix}`;
+/**
+ * Wraps global fetch with the transport's 15s ceiling and the
+ * `Accept: application/json` header sent on every call — neither of which the
+ * typed client imposes itself. An abort maps to the same 504
+ * SerenityTransportError the hand-rolled user-manager path raises. openapi-fetch
+ * invokes this with a `Request` object as `input`; the timeout signal is applied
+ * via the `init` argument (which fetch honours even for a Request input).
+ */
+function createTimeoutFetch(timeoutMs) {
+  return async function timeoutFetch(input, init) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    if (input instanceof Request && !input.headers.has('Accept')) {
+      input.headers.set('Accept', 'application/json');
+    }
+    try {
+      return await fetch(input, { ...(init ?? {}), signal: controller.signal });
+    } catch (e) {
+      if (e?.name === 'AbortError') {
+        throw new SerenityTransportError(
+          504,
+          `Semrush request timed out after ${timeoutMs}ms`,
+        );
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 }
 
-function aioBrandUrlsPath(semrushWorkspaceId, projectId, benchmarkId) {
-  return `${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/aio/benchmarks/${enc(benchmarkId)}/brand_urls`;
+/**
+ * Translates an openapi-fetch result `{ data, error, response }` into the
+ * transport's throw-or-return contract. The typed client never throws on an HTTP
+ * error — it returns the parsed error body in `error` and the raw `response`. A
+ * non-2xx becomes a SerenityTransportError (upstream status + parsed body, kept
+ * for server-side logging and redacted for clients by the controller's
+ * mapError); a 2xx returns the parsed body (or null for an empty body), matching
+ * the previous hand-rolled `request()` return shape exactly.
+ */
+function unwrap(method, result) {
+  // openapi-fetch always resolves to `{ data, error, response }` with a real
+  // `response` — a thrown fetch/auth error propagates before unwrap is reached —
+  // so `response` is accessed directly rather than defensively.
+  const { data, error, response } = result;
+  if (!response.ok) {
+    // openapi-fetch surfaces an empty error body as '' (not undefined); normalise
+    // it to null so `.body` matches the previous hand-rolled `request()` shape
+    // (which returned null for an empty body).
+    const body = error ?? data ?? null;
+    throw new SerenityTransportError(
+      response.status,
+      `Semrush ${method} ${response.url} failed: ${response.status}`,
+      body === '' ? null : body,
+    );
+  }
+  return data ?? null;
 }
 
 /**
  * Creates the Semrush HTTP client. Each request is authenticated with the
  * caller's IMS bearer token; the Adobe gateway exchanges it server-side for
  * Semrush's internal credential.
+ *
+ * Project-API operations are issued through the vendored typed Project Engine
+ * client; the sub-workspace lifecycle operations remain hand-rolled against the
+ * separate user-manager gateway.
  *
  * @param {object} args
  * @param {object} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL override).
@@ -208,6 +275,28 @@ export function createSerenityTransport({ env, imsToken }) {
   // opt-in flag, which no deployed environment sets (local test-cleanup only).
   const allowWorkspaceDelete = env?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
 
+  // Typed Project Engine client over the project gateway. The auth getter raises
+  // the transport's own 401 on a missing token (instead of the client's generic
+  // empty-token error) so the controller's mapError keeps classifying it as an
+  // auth failure. maxRetries:0 preserves the one-shot behaviour the hand-rolled
+  // transport had; the injected fetch re-adds the 15s timeout + Accept header the
+  // client does not impose. `root` is the validated origin; the client appends
+  // its own '/enterprise/projects/api' prefix.
+  const projects = createSerenityProjectEngineApiClient({
+    baseUrl: root,
+    authToken: () => {
+      if (!hasText(imsToken)) {
+        throw new SerenityTransportError(
+          401,
+          'Missing IMS bearer token for Semrush transport',
+        );
+      }
+      return imsToken;
+    },
+    maxRetries: 0,
+    fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
+  });
+
   return {
     /**
      * POST /v2/.../aio/prompts/by_tags — paginated list of prompts in a
@@ -220,14 +309,19 @@ export function createSerenityTransport({ env, imsToken }) {
      * the fields the upstream documents as accepted.
      */
     async listPromptsByTags(semrushWorkspaceId, projectId, body) {
-      const url = `${root}${aioPromptsPath(semrushWorkspaceId, projectId, '/by_tags')}`;
-      return request('POST', url, imsToken, {
-        tag_ids: body?.tag_ids ?? [],
-        page: body?.page ?? 1,
-        limit: body?.limit ?? 200,
-        search: body?.search,
-        unassigned: body?.unassigned,
-      });
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/by_tags',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: {
+            tag_ids: body?.tag_ids ?? [],
+            page: body?.page ?? 1,
+            limit: body?.limit ?? 200,
+            search: body?.search,
+            unassigned: body?.unassigned,
+          },
+        },
+      ));
     },
 
     /**
@@ -239,8 +333,13 @@ export function createSerenityTransport({ env, imsToken }) {
      * key.
      */
     async createTaggedPrompts(semrushWorkspaceId, projectId, promptsByTag) {
-      const url = `${root}${aioPromptsPath(semrushWorkspaceId, projectId, '/tagged')}`;
-      return request('POST', url, imsToken, { prompts: promptsByTag });
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/tagged',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { prompts: promptsByTag },
+        },
+      ));
     },
 
     /**
@@ -248,8 +347,13 @@ export function createSerenityTransport({ env, imsToken }) {
      * this project. Body shape: { ids: [...] }.
      */
     async deletePromptsByIds(semrushWorkspaceId, projectId, ids) {
-      const url = `${root}${aioPromptsPath(semrushWorkspaceId, projectId, '')}`;
-      return request('DELETE', url, imsToken, { ids });
+      return unwrap('DELETE', await projects.DELETE(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { ids },
+        },
+      ));
     },
 
     /**
@@ -258,8 +362,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * this is called.
      */
     async publishProject(semrushWorkspaceId, projectId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/publish`;
-      return request('POST', url, imsToken, undefined);
+      return unwrap('POST', await projects.POST(
+        '/v1/workspaces/{id}/projects/{project_id}/publish',
+        { params: { path: { id: semrushWorkspaceId, project_id: projectId } } },
+      ));
     },
 
     /**
@@ -268,12 +374,15 @@ export function createSerenityTransport({ env, imsToken }) {
      * expects as `CBF_model`.
      */
     async listAiModels(semrushWorkspaceId, projectId, { page = 1, limit = 100 } = {}) {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: String(limit),
-      });
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models?${params.toString()}`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await projects.GET(
+        '/v1/workspaces/{id}/projects/{project_id}/ai_models',
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId },
+            query: { page, limit },
+          },
+        },
+      ));
     },
 
     /**
@@ -284,12 +393,15 @@ export function createSerenityTransport({ env, imsToken }) {
      * brand-create to seed the new project's prompts (tagged `topic:<NAME>`).
      */
     async getBrandTopics(semrushWorkspaceId, { domain, country }) {
-      const params = new URLSearchParams({
-        domain: String(domain ?? ''),
-        country: String(country ?? ''),
-      });
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/brand-topics?${params.toString()}`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await projects.GET(
+        '/v1/workspaces/{id}/brand-topics',
+        {
+          params: {
+            path: { id: semrushWorkspaceId },
+            query: { domain: String(domain ?? ''), country: String(country ?? '') },
+          },
+        },
+      ));
     },
 
     /**
@@ -300,16 +412,23 @@ export function createSerenityTransport({ env, imsToken }) {
      * so pre-creating a tag that a later prompt also carries does not duplicate.
      */
     async createProjectTags(semrushWorkspaceId, projectId, names) {
-      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/aio/tags`;
-      return request('POST', url, imsToken, { names });
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { names },
+        },
+      ));
     },
 
     /**
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
      */
     async createProject(semrushWorkspaceId, body) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects`;
-      return request('POST', url, imsToken, body);
+      return unwrap('POST', await projects.POST(
+        '/v1/workspaces/{id}/projects',
+        { params: { path: { id: semrushWorkspaceId } }, body },
+      ));
     },
 
     /**
@@ -323,8 +442,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * Callers (handleDeleteMarket) treat upstream 404 as idempotent success.
      */
     async deleteProject(semrushWorkspaceId, projectId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}`;
-      return request('DELETE', url, imsToken, undefined);
+      return unwrap('DELETE', await projects.DELETE(
+        '/v1/workspaces/{id}/projects/{project_id}',
+        { params: { path: { id: semrushWorkspaceId, project_id: projectId } } },
+      ));
     },
 
     /**
@@ -337,8 +458,13 @@ export function createSerenityTransport({ env, imsToken }) {
      * routes have no v2 variant (v2 ai_models is POST-only) and stay on v1.
      */
     async addAiModel(semrushWorkspaceId, projectId, modelId) {
-      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models`;
-      return request('POST', url, imsToken, { model_id: modelId });
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/ai_models',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { model_id: modelId },
+        },
+      ));
     },
 
     /**
@@ -347,8 +473,13 @@ export function createSerenityTransport({ env, imsToken }) {
      * `ProjectAIModelResponse`, NOT the catalog `model.id`).
      */
     async deleteAiModelsByIds(semrushWorkspaceId, projectId, ids) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models`;
-      return request('DELETE', url, imsToken, { ids });
+      return unwrap('DELETE', await projects.DELETE(
+        '/v1/workspaces/{id}/projects/{project_id}/ai_models',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { ids },
+        },
+      ));
     },
 
     /**
@@ -358,9 +489,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * Returns {page, total, items: [{id, key, name, icon}]}.
      */
     async listGlobalAiModels({ page = 1, limit = 100 } = {}) {
-      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-      const url = `${root}${API_PREFIX}/v1/ai_models?${params.toString()}`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await projects.GET(
+        '/v1/ai_models',
+        { params: { query: { page, limit } } },
+      ));
     },
 
     /**
@@ -369,17 +501,15 @@ export function createSerenityTransport({ env, imsToken }) {
      * caller is expected to cache the result (catalog is stable).
      */
     async listLanguages() {
-      const url = `${root}${API_PREFIX}/v1/languages`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await projects.GET('/v1/languages', {}));
     },
 
     // ─────────────────────────────────────────────────────────────────────
     // Sub-workspace lifecycle (serenity dual-mode, subworkspace path).
     //
-    // These are thin URL+verb wrappers, deliberately colocated with the
-    // project ops so the later swap to the typed sub-workspace-API client is
-    // mechanical (call sites don't change, only these internals). Behaviour
-    // pins live in serenity-docs brand-semrush-workspace-provisioning-details
+    // These remain thin hand-rolled URL+verb wrappers against the SEPARATE
+    // user-manager gateway (no typed client exists for it yet). Behaviour pins
+    // live in serenity-docs brand-semrush-workspace-provisioning-details
     // §4/§5/§7 and the design's §6 error classification (see errors.js).
     // ─────────────────────────────────────────────────────────────────────
 
@@ -465,8 +595,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * live-view shape with `brand_names: null` for drafts).
      */
     async listProjects(workspaceId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects?type=ai`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await projects.GET(
+        '/v1/workspaces/{id}/projects',
+        { params: { path: { id: workspaceId }, query: { type: 'ai' } } },
+      ));
     },
 
     /**
@@ -478,9 +610,15 @@ export function createSerenityTransport({ env, imsToken }) {
      * destructive PUT.
      */
     async getProject(workspaceId, projectId, { draft = true } = {}) {
-      const params = new URLSearchParams({ draft: String(draft), type: 'ai' });
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}?${params.toString()}`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await projects.GET(
+        '/v1/workspaces/{id}/projects/{project_id}',
+        {
+          params: {
+            path: { id: workspaceId, project_id: projectId },
+            query: { draft, type: 'ai' },
+          },
+        },
+      ));
     },
 
     /**
@@ -492,8 +630,13 @@ export function createSerenityTransport({ env, imsToken }) {
      * resulting { ci_competitors: [...] }.
      */
     async updateCiCompetitors(workspaceId, projectId, ciCompetitors) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ci/competitors`;
-      return request('PUT', url, imsToken, { ci_competitors: ciCompetitors });
+      return unwrap('PUT', await projects.PUT(
+        '/v1/workspaces/{id}/projects/{project_id}/ci/competitors',
+        {
+          params: { path: { id: workspaceId, project_id: projectId } },
+          body: { ci_competitors: ciCompetitors },
+        },
+      ));
     },
 
     /**
@@ -502,8 +645,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * market-detail read only, never per-item in the list (would be N+1).
      */
     async getInitStatus(workspaceId, projectId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/aio/init_status`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await projects.GET(
+        '/v1/workspaces/{id}/projects/{project_id}/aio/init_status',
+        { params: { path: { id: workspaceId, project_id: projectId } } },
+      ));
     },
 
     // ─────────────────────────────────────────────────────────────────────
@@ -522,8 +667,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * URL endpoints require. Returns `{ aio_benchmarks: [...] }`.
      */
     async listBenchmarks(workspaceId, projectId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models/benchmarks`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await projects.GET(
+        '/v1/workspaces/{id}/projects/{project_id}/ai_models/benchmarks',
+        { params: { path: { id: workspaceId, project_id: projectId } } },
+      ));
     },
 
     /**
@@ -535,8 +682,13 @@ export function createSerenityTransport({ env, imsToken }) {
      * auto-provisioned one (the `benchmark_id` brand URLs must attach to).
      */
     async createBenchmarks(workspaceId, projectId, benchmarks) {
-      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models/benchmarks`;
-      return request('POST', url, imsToken, benchmarks);
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/ai_models/benchmarks',
+        {
+          params: { path: { id: workspaceId, project_id: projectId } },
+          body: benchmarks,
+        },
+      ));
     },
 
     /**
@@ -546,8 +698,13 @@ export function createSerenityTransport({ env, imsToken }) {
      * competitor that was removed from the brand.
      */
     async deleteBenchmarks(workspaceId, projectId, ids) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models/benchmarks`;
-      return request('DELETE', url, imsToken, { ids });
+      return unwrap('DELETE', await projects.DELETE(
+        '/v1/workspaces/{id}/projects/{project_id}/ai_models/benchmarks',
+        {
+          params: { path: { id: workspaceId, project_id: projectId } },
+          body: { ids },
+        },
+      ));
     },
 
     /**
@@ -556,8 +713,14 @@ export function createSerenityTransport({ env, imsToken }) {
      * brand-edit re-sync to diff the live set before adding/removing.
      */
     async listBrandUrls(workspaceId, projectId, benchmarkId) {
-      const url = `${root}${aioBrandUrlsPath(workspaceId, projectId, benchmarkId)}`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await projects.GET(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/benchmarks/{benchmark_id}/brand_urls',
+        {
+          params: {
+            path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
+          },
+        },
+      ));
     },
 
     /**
@@ -567,8 +730,15 @@ export function createSerenityTransport({ env, imsToken }) {
      * duplicated) and counted in the response `existing_count`.
      */
     async createBrandUrls(workspaceId, projectId, benchmarkId, entries) {
-      const url = `${root}${aioBrandUrlsPath(workspaceId, projectId, benchmarkId)}`;
-      return request('POST', url, imsToken, entries);
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/benchmarks/{benchmark_id}/brand_urls',
+        {
+          params: {
+            path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
+          },
+          body: entries,
+        },
+      ));
     },
 
     /**
@@ -576,8 +746,15 @@ export function createSerenityTransport({ env, imsToken }) {
      * by id. Body `{ ids: [...] }`. Ids not in this benchmark are ignored.
      */
     async deleteBrandUrls(workspaceId, projectId, benchmarkId, ids) {
-      const url = `${root}${aioBrandUrlsPath(workspaceId, projectId, benchmarkId)}`;
-      return request('DELETE', url, imsToken, { ids });
+      return unwrap('DELETE', await projects.DELETE(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/benchmarks/{benchmark_id}/brand_urls',
+        {
+          params: {
+            path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
+          },
+          body: { ids },
+        },
+      ));
     },
   };
 }
