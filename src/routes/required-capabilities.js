@@ -151,6 +151,7 @@ export const INTERNAL_ROUTES = [
   // Entitlement upsert + PLG site enrollment - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
   'POST /sites/:siteId/site-enrollments',
+  'POST /sites/:siteId/entitlements',
   // Feature flags write - admin only, mysticat-backed org config
   'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
   'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',

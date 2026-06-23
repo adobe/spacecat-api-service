@@ -603,6 +603,7 @@ export default function getRouteHandlers(
     'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
+    'POST /sites/:siteId/entitlements': entitlementController.createSiteEntitlement,
     'GET /organizations/:organizationId/feature-flags': featureFlagsController.listByOrganization,
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName':
       featureFlagsController.putByOrganizationProductAndName,
