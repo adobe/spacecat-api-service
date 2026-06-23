@@ -325,7 +325,7 @@ function PreflightController(ctx, log, env) {
    * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
    * @param {string} siteId - The site ID.
    * @param {string} url - The page URL to analyze.
-   * @param {string} [authorizationHeader] - Optional customer-site page-auth header.
+   * @param {string} [pageAuthHeader] - Optional customer-site page-auth header.
    * @param {string} [imsServiceToken] - Optional spacecat IMS v3 service token (raw access_token).
    */
   async function callMysticatAnalyze(
@@ -333,7 +333,7 @@ function PreflightController(ctx, log, env) {
     scanId,
     siteId,
     url,
-    authorizationHeader,
+    pageAuthHeader,
     imsServiceToken,
   ) {
     const controller = new AbortController();
@@ -346,7 +346,7 @@ function PreflightController(ctx, log, env) {
         headers: {
           'Content-Type': 'application/json',
           ...(hasText(imsServiceToken) && { Authorization: `Bearer ${imsServiceToken}` }),
-          ...(hasText(authorizationHeader) && { 'x-page-auth': authorizationHeader }),
+          ...(hasText(pageAuthHeader) && { 'x-page-auth': pageAuthHeader }),
         },
         body: JSON.stringify({
           site_id: siteId,
@@ -464,7 +464,7 @@ function PreflightController(ctx, log, env) {
       log.warn(`checkEnableAuthentication failed for ${previewBaseURL}: ${e.message}`);
       enableAuthentication = false;
     }
-    let authorizationHeader;
+    let pageAuthHeader;
     if (enableAuthentication) {
       let promiseTokenObj;
       try {
@@ -480,7 +480,7 @@ function PreflightController(ctx, log, env) {
         const authOptions = promiseTokenObj ? { promiseToken: promiseTokenObj } : {};
         const accessToken = await retrievePageAuthentication(site, context, authOptions);
         const isBearer = site.getDeliveryType() === DELIVERY_TYPES.AEM_CS && !!promiseTokenObj;
-        authorizationHeader = `${isBearer ? 'Bearer' : 'token'} ${accessToken}`;
+        pageAuthHeader = `${isBearer ? 'Bearer' : 'token'} ${accessToken}`;
       } catch (e) {
         log.error(`Failed to retrieve page authentication: ${e.message}`);
         return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Error retrieving page authentication', 500);
@@ -489,9 +489,11 @@ function PreflightController(ctx, log, env) {
 
     // Mint a spacecat-api-service IMS service token for the Mystique CGW
     // edge gate (SITES-43236 / SITES-46699 / mystique-deploy PR #463). Sent
-    // on the dedicated x-ims-authorization header — separate from
-    // `Authorization` above, which carries the customer site's page-auth
-    // token for DRS upstream.
+    // on the `Authorization` header (SITES-46967 swap — was previously on a
+    // dedicated `x-ims-authorization` header; moved to the default slot so
+    // CGW emits the X-Gw-Ims-Client-Id identity header downstream). The
+    // customer page-auth that previously rode `Authorization` now rides
+    // `x-page-auth` and is forwarded to DRS upstream by mystique.
     //
     // Constructs a custom-env ImsClient with the dedicated PREFLIGHT_IMS_*
     // credentials provisioned in Vault for this S2S use case (SITES-46699).
@@ -594,7 +596,7 @@ function PreflightController(ctx, log, env) {
         asyncJob.getId(),
         siteId,
         url,
-        authorizationHeader,
+        pageAuthHeader,
         imsServiceToken,
       );
     } catch (mysticatError) {
