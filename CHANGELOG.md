@@ -1,3 +1,10 @@
+## [1.589.4](https://github.com/adobe/spacecat-api-service/compare/v1.589.3...v1.589.4) (2026-06-23)
+
+
+### Bug Fixes
+
+* **SITES-44243:** server-derive executedBy and add executedByUser audit trail ([#2445](https://github.com/adobe/spacecat-api-service/issues/2445)) ([0ce7036](https://github.com/adobe/spacecat-api-service/commit/0ce70366524e05d14dd85ce82e462e5778a3977c))
+
 ## [1.589.3](https://github.com/adobe/spacecat-api-service/compare/v1.589.2...v1.589.3) (2026-06-22)
 
 
