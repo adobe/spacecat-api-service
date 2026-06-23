@@ -58,7 +58,10 @@ import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import {
+  buildReservedDomains,
+  dropReservedCompetitors,
   removedCompetitorDomains,
+  resolveReservedDomains,
   syncCompetitorBenchmarksAcrossMarkets,
 } from '../support/serenity/competitor-benchmarks.js';
 import {
@@ -1512,6 +1515,25 @@ function BrandsController(ctx, log, env) {
         }
       }
 
+      // Never store a competitor that is one of the brand's own properties (its
+      // primary or own website URLs — at create the only market is the primary).
+      // The benchmark sync already drops these, but they must not land in the
+      // stored competitor list either. Social/earned domains are not reserved.
+      if (Array.isArray(brandData.competitors) && brandData.competitors.length > 0) {
+        const primaryDomain = brandDomainFromPayload(brandData);
+        const reservedDomains = buildReservedDomains(
+          primaryDomain ? [primaryDomain] : [],
+          brandData.urls,
+        );
+        const { kept, dropped } = dropReservedCompetitors(brandData.competitors, reservedDomains);
+        if (dropped.length > 0) {
+          log.info('brands: dropped self-referential competitor(s) on create', {
+            dropped: dropped.map((c) => c?.url).filter(Boolean),
+          });
+          brandData.competitors = kept;
+        }
+      }
+
       const created = await upsertBrand({
         organizationId: spaceCatId,
         brand: brandData,
@@ -1664,6 +1686,46 @@ function BrandsController(ctx, log, env) {
         }
       }
 
+      // A competitor ("other brand to track") must never be one of the brand's
+      // OWN properties — its primary, any of its market/project domains, or its
+      // own website URLs. Such a self-reference can't be tracked as a competitor
+      // (it would benchmark the brand against itself), so strip it BEFORE the row
+      // is written — it must not be stored at all, not just skipped at sync time.
+      // Social/earned domains are NOT reserved (third-party platforms). Runs only
+      // when competitors are actually edited.
+      const competitorsToGuard = competitorsTouched
+        && Array.isArray(updates.competitors) && updates.competitors.length > 0;
+      if (competitorsToGuard) {
+        const brandState = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        // Use the incoming URLs when this same PATCH changes them, else the stored ones.
+        const websiteUrls = updates.urls !== undefined ? updates.urls : (brandState?.urls || []);
+        const brandOwnUrls = [brandState?.baseUrl, ...websiteUrls];
+
+        let reservedDomains;
+        if (hasText(brandState?.semrushWorkspaceId)) {
+          // Semrush brand: market/project domains come from the project listing.
+          const imsToken = getImsUserTokenStrict(context);
+          const transport = createSerenityTransport({ env: context.env, imsToken });
+          reservedDomains = await resolveReservedDomains(
+            transport,
+            brandState.semrushWorkspaceId,
+            brandOwnUrls,
+          );
+        } else {
+          // Flat-mode brand: no projects — reserve the primary + own website URLs.
+          reservedDomains = buildReservedDomains([], brandOwnUrls);
+        }
+
+        const { kept, dropped } = dropReservedCompetitors(updates.competitors, reservedDomains);
+        if (dropped.length > 0) {
+          log.info('brands: dropped self-referential competitor(s) on update', {
+            brandId,
+            dropped: dropped.map((c) => c?.url).filter(Boolean),
+          });
+          updates.competitors = kept;
+        }
+      }
+
       const updated = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -1717,6 +1779,10 @@ function BrandsController(ctx, log, env) {
               removed,
               updated.semrushWorkspaceId,
               log,
+              // Reserve the brand's own website URLs (every market/project domain
+              // is reserved from the project listing) so a competitor can't be one
+              // of the brand's own properties.
+              updated.urls,
             );
           }
         } catch (syncError) {

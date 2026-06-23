@@ -30,12 +30,81 @@ import {
  */
 
 /**
+ * Builds the set of the brand's OWN normalized domains — its primary, every
+ * market/project domain, and its own website URLs — that a competitor must never
+ * collide with. Tracking your own property as a competitor would create a
+ * benchmark that double-counts the brand against itself (or, for the project's
+ * own domain, silently no-ops), so these are excluded from competitor sync.
+ *
+ * Social / earned domains are intentionally NOT reserved: those are third-party
+ * platform domains (e.g. a social network), legitimately also trackable.
+ *
+ * @param {Array<string>} [domains=[]] - project/market domains (and the primary).
+ * @param {Array<string|{value:string}>} [urls=[]] - the brand's own website URLs.
+ * @returns {Set<string>} normalized reserved domains.
+ */
+export function buildReservedDomains(domains = [], urls = []) {
+  const set = new Set();
+  for (const d of Array.isArray(domains) ? domains : []) {
+    const n = normalizeBenchmarkDomain(d);
+    if (n !== null) {
+      set.add(n);
+    }
+  }
+  for (const u of Array.isArray(urls) ? urls : []) {
+    const n = normalizeBenchmarkDomain(typeof u === 'string' ? u : u?.value);
+    if (n !== null) {
+      set.add(n);
+    }
+  }
+  return set;
+}
+
+/**
+ * Resolves the brand's reserved domains for the persist-time guard: lists the
+ * brand's projects (every market domain, incl. the primary) and folds in the
+ * brand's own website URLs. Used to strip self-referential competitors BEFORE
+ * they are stored, so `brand.competitors` never holds the brand's own property.
+ *
+ * @returns {Promise<Set<string>>} normalized reserved domains.
+ */
+export async function resolveReservedDomains(transport, workspaceId, brandOwnUrls = []) {
+  const listing = await transport.listProjects(workspaceId);
+  const projects = Array.isArray(listing?.items) ? listing.items : [];
+  return buildReservedDomains(projects.map((p) => p?.domain), brandOwnUrls);
+}
+
+/**
+ * Partitions competitors into the ones to keep and the self-referential ones to
+ * drop (their domain is one of the brand's `reservedDomains`). Pure — the caller
+ * persists `kept` and logs `dropped`.
+ *
+ * @returns {{ kept: object[], dropped: object[] }}
+ */
+export function dropReservedCompetitors(competitors, reservedDomains) {
+  const list = Array.isArray(competitors) ? competitors : [];
+  const kept = [];
+  const dropped = [];
+  for (const c of list) {
+    const domain = normalizeBenchmarkDomain(c?.url);
+    if (domain !== null && reservedDomains.has(domain)) {
+      dropped.push(c);
+    } else {
+      kept.push(c);
+    }
+  }
+  return { kept, dropped };
+}
+
+/**
  * Builds the `{ name, domain }[]` competitor benchmarks to track for a market,
  * region-filtered (reuses {@link regionApplies}). The domain is extracted from
- * the competitor `url`; entries without a usable url/domain or name are skipped.
+ * the competitor `url`; entries without a usable url/domain or name are skipped,
+ * as are any whose domain is one of the brand's own `reservedDomains` (its
+ * primary, market domains, or own website URLs — a competitor can't be us).
  * De-duped by normalized domain (first-seen name wins).
  */
-export function collectCompetitorBenchmarks(competitors, market) {
+export function collectCompetitorBenchmarks(competitors, market, reservedDomains = new Set()) {
   const list = Array.isArray(competitors) ? competitors : [];
   const seen = new Set();
   const out = [];
@@ -45,7 +114,7 @@ export function collectCompetitorBenchmarks(competitors, market) {
       continue;
     }
     const domain = normalizeBenchmarkDomain(c?.url);
-    if (domain === null || seen.has(domain)) {
+    if (domain === null || seen.has(domain) || reservedDomains.has(domain)) {
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -97,8 +166,9 @@ export async function syncCompetitorBenchmarksForProject(
   removedDomains,
   market,
   log,
+  reservedDomains = new Set(),
 ) {
-  const desired = collectCompetitorBenchmarks(competitors, market);
+  const desired = collectCompetitorBenchmarks(competitors, market, reservedDomains);
   const removedSet = new Set(
     (Array.isArray(removedDomains) ? removedDomains : [])
       .map((d) => normalizeBenchmarkDomain(d))
@@ -159,6 +229,9 @@ export async function syncCompetitorBenchmarksForProject(
  * additions + delete removals, then republish (best-effort) when anything
  * changed. Create/delete errors propagate; a quota 405 on republish is tolerated.
  *
+ * @param {Array<string|{value:string}>} [brandOwnUrls=[]] - the brand's own
+ *   website URLs, reserved (with every project domain) so a competitor can't be
+ *   one of the brand's own properties.
  * @returns {Promise<{markets: number, created: number, deleted: number}>}
  */
 export async function syncCompetitorBenchmarksAcrossMarkets(
@@ -167,9 +240,18 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
   removedDomains,
   workspaceId,
   log,
+  brandOwnUrls = [],
 ) {
   const listing = await transport.listProjects(workspaceId);
   const projects = Array.isArray(listing?.items) ? listing.items : [];
+
+  // The brand's own domains across all its markets — every project's domain (the
+  // primary is one of them) plus the brand's own website URLs. A competitor whose
+  // domain matches any of these is dropped from the sync (can't track yourself).
+  const reservedDomains = buildReservedDomains(
+    projects.map((p) => p?.domain),
+    brandOwnUrls,
+  );
 
   let markets = 0;
   let created = 0;
@@ -193,6 +275,7 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
         removedDomains,
         market,
         log,
+        reservedDomains,
       );
       created += result.created;
       deleted += result.deleted;

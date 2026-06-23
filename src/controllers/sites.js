@@ -56,6 +56,7 @@ import {
   logSiteOrphanedAfterCreate,
   resolveProductCode,
 } from '../support/tier-provisioning.js';
+import { getBrandBySite } from '../support/brands-storage.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -824,6 +825,35 @@ function SitesController(ctx, log, env) {
     const requestBody = context.data;
     if (!isObject(requestBody)) {
       return badRequest('Request body required');
+    }
+
+    // A site's URL is immutable once it backs a Semrush-managed brand. That brand's
+    // tracked domain lives on its Semrush projects/markets, which have no
+    // domain-update path (the domain is set only at project-create time), so
+    // letting the SpaceCat site URL drift would desync the site from its Semrush
+    // projects. Only the URL is gated here — every other site field stays editable.
+    // The brand lookup runs only when a URL change is actually requested, so the
+    // common patch path (no baseURL) pays no extra query.
+    //
+    // TODO (~2026-07-07): Semrush is expected to support changing a project's
+    // primary URL — which is its main (own-brand, `main_brand: true`) benchmark
+    // domain, see ensureOwnBrandBenchmark in support/serenity/brand-urls.js — in
+    // ~2 weeks (heads-up received 2026-06-23). Once available, relax this guard to
+    // propagate the new URL to each market's main benchmark (and republish) instead
+    // of blocking the edit.
+    if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
+      const postgrestClient = context.dataAccess?.services?.postgrestClient;
+      if (postgrestClient?.from) {
+        const attachedBrand = await getBrandBySite(
+          site.getOrganizationId(),
+          site.getId(),
+          postgrestClient,
+          log,
+        );
+        if (hasText(attachedBrand?.semrushWorkspaceId)) {
+          return forbidden('Updating the URL of a site attached to a Semrush-managed brand is not allowed');
+        }
+      }
     }
 
     let updates = false;

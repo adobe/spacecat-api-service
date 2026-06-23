@@ -150,13 +150,18 @@ describe('Sites Controller', () => {
   let sitesController;
   let context;
   let updateRumConfigStub;
+  let getBrandBySiteStub;
   let SitesControllerMocked;
 
   before(async () => {
     updateRumConfigStub = sandbox.stub().resolves(true);
+    getBrandBySiteStub = sandbox.stub().resolves(null);
     SitesControllerMocked = (await esmock('../../src/controllers/sites.js', {
       '../../src/support/rum-config-service.js': {
         updateRumConfig: updateRumConfigStub,
+      },
+      '../../src/support/brands-storage.js': {
+        getBrandBySite: getBrandBySiteStub,
       },
     })).default;
   });
@@ -732,6 +737,68 @@ describe('Sites Controller', () => {
     expect(site.save).to.have.not.been.called;
     expect(response.status).to.equal(403);
     expect(error).to.have.property('message', 'Updating organization ID is not allowed');
+  });
+
+  it('returns forbidden when changing the URL of a site attached to a Semrush-managed brand', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves({ semrushWorkspaceId: 'sub-ws-123' });
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(getBrandBySiteStub).to.have.been.calledOnce;
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    expect(error).to.have.property(
+      'message',
+      'Updating the URL of a site attached to a Semrush-managed brand is not allowed',
+    );
+  });
+
+  it('allows changing the URL of a site not attached to a Semrush-managed brand', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves(null);
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.been.calledOnce;
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+  });
+
+  it('does not check brand attachment when the URL is unchanged', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      // baseURL equals the site's current URL, so the URL-immutability guard is skipped.
+      data: { baseURL: 'https://site1.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.not.been.called;
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
   });
 
   it('returns bad request when updating a site if id not provided', async () => {

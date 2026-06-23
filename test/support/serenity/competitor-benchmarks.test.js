@@ -16,8 +16,11 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
 import {
+  buildReservedDomains,
   collectCompetitorBenchmarks,
+  dropReservedCompetitors,
   removedCompetitorDomains,
+  resolveReservedDomains,
   syncCompetitorBenchmarksForProject,
   syncCompetitorBenchmarksAcrossMarkets,
 } from '../../../src/support/serenity/competitor-benchmarks.js';
@@ -51,6 +54,79 @@ describe('competitor-benchmarks helpers', () => {
     it('returns [] for empty / non-array input', () => {
       expect(collectCompetitorBenchmarks(null, 'us')).to.deep.equal([]);
       expect(collectCompetitorBenchmarks([], 'us')).to.deep.equal([]);
+    });
+
+    it('drops competitors whose domain is one of the brand\'s reserved domains', () => {
+      const competitors = [
+        { name: 'Self primary', url: 'https://www.brand.com', regions: ['us'] },
+        { name: 'Self DE market', url: 'https://brand.de/path', regions: ['us'] },
+        { name: 'Self website url', url: 'https://shop.brand.io', regions: ['us'] },
+        { name: 'Real competitor', url: 'https://rival.com', regions: ['us'] },
+      ];
+      const reserved = buildReservedDomains(
+        ['brand.com', 'brand.de'],
+        ['https://shop.brand.io'],
+      );
+      expect(collectCompetitorBenchmarks(competitors, 'us', reserved)).to.deep.equal([
+        { name: 'Real competitor', domain: 'rival.com' },
+      ]);
+    });
+  });
+
+  describe('buildReservedDomains', () => {
+    it('normalizes + dedupes domains and brand URLs (string or { value })', () => {
+      const reserved = buildReservedDomains(
+        ['https://www.brand.com', 'brand.com', 'brand.de'],
+        [{ value: 'https://shop.brand.io' }, 'https://www.brand.de'],
+      );
+      expect([...reserved].sort()).to.deep.equal(['brand.com', 'brand.de', 'shop.brand.io']);
+    });
+
+    it('tolerates non-array / empty / unparseable inputs', () => {
+      expect([...buildReservedDomains()].length).to.equal(0);
+      expect([...buildReservedDomains(null, undefined)].length).to.equal(0);
+      expect([...buildReservedDomains(['not a url', ''], [null, { value: '' }])].length).to.equal(0);
+    });
+  });
+
+  describe('dropReservedCompetitors', () => {
+    it('partitions self-referential competitors out of the kept list', () => {
+      const competitors = [
+        { name: 'Self', url: 'https://www.brand.com', regions: ['us'] },
+        { name: 'Rival', url: 'https://rival.com', regions: ['us'] },
+        { name: 'No URL', regions: ['us'] }, // unparseable domain → kept (not reserved)
+      ];
+      const reserved = buildReservedDomains(['brand.com'], []);
+      const { kept, dropped } = dropReservedCompetitors(competitors, reserved);
+      expect(kept.map((c) => c.name)).to.deep.equal(['Rival', 'No URL']);
+      expect(dropped.map((c) => c.name)).to.deep.equal(['Self']);
+    });
+
+    it('returns everything kept when nothing is reserved / non-array input', () => {
+      const competitors = [{ name: 'Rival', url: 'https://rival.com' }];
+      expect(dropReservedCompetitors(competitors, new Set())).to.deep.equal({
+        kept: competitors, dropped: [],
+      });
+      expect(dropReservedCompetitors(null, new Set())).to.deep.equal({ kept: [], dropped: [] });
+    });
+  });
+
+  describe('resolveReservedDomains', () => {
+    it('lists projects and folds project domains + brand URLs into the set', async () => {
+      const transport = {
+        listProjects: sandbox.stub().resolves({
+          items: [{ domain: 'brand.com' }, { domain: 'brand.de' }],
+        }),
+      };
+      const reserved = await resolveReservedDomains(transport, WS, ['https://shop.brand.io']);
+      expect([...reserved].sort()).to.deep.equal(['brand.com', 'brand.de', 'shop.brand.io']);
+      expect(transport.listProjects).to.have.been.calledOnceWith(WS);
+    });
+
+    it('treats a non-array listProjects response as no project domains', async () => {
+      const transport = { listProjects: sandbox.stub().resolves({}) };
+      const reserved = await resolveReservedDomains(transport, WS, ['https://brand.com']);
+      expect([...reserved]).to.deep.equal(['brand.com']);
     });
   });
 
@@ -158,6 +234,41 @@ describe('competitor-benchmarks helpers', () => {
       ]);
       expect(transport.publishProject).to.have.been.calledTwice;
       expect(result).to.deep.equal({ markets: 2, created: 2, deleted: 0 });
+    });
+
+    it('drops self-referential competitors (own primary, other market domains, brand URLs)', async () => {
+      const competitors = [
+        { name: 'US rival', url: 'https://rival.com', regions: ['us'] },
+        { name: 'Self primary', url: 'https://www.brand.com', regions: ['us'] },
+        { name: 'Self DE market', url: 'https://brand.de/path', regions: ['us'] },
+        { name: 'Self website', url: 'https://shop.brand.io', regions: ['us'] },
+      ];
+      const transport = {
+        listProjects: sandbox.stub().resolves({
+          items: [
+            { id: 'p-us', domain: 'brand.com', settings: { ai: { country: { code: 'us' } } } },
+            { id: 'p-de', domain: 'brand.de', settings: { ai: { country: { code: 'de' } } } },
+          ],
+        }),
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['x'], existing_count: 0 }),
+        deleteBenchmarks: sandbox.stub().resolves(null),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncCompetitorBenchmarksAcrossMarkets(
+        transport,
+        competitors,
+        [],
+        WS,
+        undefined,
+        ['https://shop.brand.io'], // brand's own website URL → reserved
+      );
+      // Only the real rival survives for p-us; the three self-references (own
+      // primary brand.com, other-market brand.de, own website shop.brand.io) drop.
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, 'p-us', [
+        { brand_name: 'US rival', domain: 'rival.com' },
+      ]);
+      expect(result).to.deep.equal({ markets: 2, created: 1, deleted: 0 });
     });
 
     it('logs the failing project/market (status only) and rethrows when a market sync throws mid-fan-out', async () => {

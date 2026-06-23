@@ -32,7 +32,7 @@ import {
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { TYPE_TAG, topicTag } from '../prompt-tags.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
-import { syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
+import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 
 /**
  * Subworkspace-mode market handlers (serenity design §3/§5). The brand has its own
@@ -412,6 +412,12 @@ export async function handleCreateMarketSubworkspace(
   // ours to remove yet). Best-effort: a competitor-sync hiccup must not abort the
   // brand create.
   try {
+    // Reserve the brand's own domains (this market's project domain + the brand's
+    // own website URLs) so a competitor can't be one of the brand's own properties.
+    const reservedDomains = buildReservedDomains(
+      [body.brandDomain],
+      brandUrlSources?.urls,
+    );
     await syncCompetitorBenchmarksForProject(
       transport,
       workspaceId,
@@ -420,6 +426,7 @@ export async function handleCreateMarketSubworkspace(
       [],
       body.market,
       log,
+      reservedDomains,
     );
   } catch (e) {
     log?.warn?.('handleCreateMarketSubworkspace: competitor benchmark sync failed (non-fatal)', {
