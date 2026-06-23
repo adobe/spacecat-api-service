@@ -309,13 +309,17 @@ function PreflightController(ctx, log, env) {
    * Mysticat processes the analysis asynchronously and writes results directly to the AsyncJob
    * identified by scanId.
    *
-   * Two distinct auth headers are sent (SITES-43236 / mystique-deploy PR #463):
-   *  - `Authorization`: the customer site's page-auth token, forwarded by
-   *    Mysticat to DRS for authenticated page-HTML fetch.
-   *  - `x-ims-authorization`: spacecat-api-service's own IMS service token,
-   *    validated at the Ethos CGW-Flex edge before reaching the Mysticat pod.
-   *    Kept on a dedicated header — not `Authorization` — so the IMS edge gate
-   *    does not collide with the customer's page-auth token above.
+   * Two distinct auth headers are sent (SITES-46967 — header layout swap):
+   *  - `Authorization`: spacecat-api-service's own IMS service token,
+   *    validated at the Ethos CGW-Flex edge before reaching the Mysticat
+   *    pod. On the default header so CGW emits the `X-Gw-Ims-Client-Id`
+   *    identity header downstream (CGW only forwards identity headers when
+   *    the token is read from the default `Authorization` slot — empirically
+   *    confirmed under SITES-46874).
+   *  - `x-page-auth`: the customer site's page-auth token, forwarded by
+   *    Mysticat to DRS for authenticated page-HTML fetch. Moved off
+   *    `Authorization` to make room for the IMS service token (previously
+   *    rode `Authorization`, the IMS token rode `x-ims-authorization`).
    *
    * @param {string} mysticatBaseUrl - The base URL of the Mystique service (MYSTIQUE_API_BASE_URL).
    * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
@@ -341,8 +345,8 @@ function PreflightController(ctx, log, env) {
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
-          ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
-          ...(hasText(imsServiceToken) && { 'x-ims-authorization': `Bearer ${imsServiceToken}` }),
+          ...(hasText(imsServiceToken) && { Authorization: `Bearer ${imsServiceToken}` }),
+          ...(hasText(authorizationHeader) && { 'x-page-auth': authorizationHeader }),
         },
         body: JSON.stringify({
           site_id: siteId,
