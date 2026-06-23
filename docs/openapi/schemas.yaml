@@ -4088,6 +4088,20 @@ Fix:
       format: date-time
     executedBy:
       type: string
+      description: IMS user ID of the caller who executed the fix. Server-derived; not client-settable.
+      readOnly: true
+    executedByUser:
+      type: object
+      description: Resolved IMS profile for the user who executed the fix. Present on getAllForOpportunity and getByID when the executor identity was successfully resolved. Omitted from getByStatus.
+      readOnly: true
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
     executedAt:
       type: string
       format: date-time
@@ -4231,9 +4245,6 @@ FixUpdate:
       description: Optional array of suggestion IDs to associate with this fix. Replaces existing associations.
       items:
         $ref: '#/Id'
-    executedBy:
-      type: string
-      description: Email or identifier of who executed the fix
     executedAt:
       $ref: '#/DateTime'
       description: ISO timestamp when the fix was executed
