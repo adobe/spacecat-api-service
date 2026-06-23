@@ -318,6 +318,43 @@ describe('Opportunities Controller', () => {
     expect(opportunity).to.have.property('id', OPPORTUNITY_ID);
   });
 
+  describe('locale validation', () => {
+    const invalidLocaleContext = { data: { locale: 'fr-FR' } };
+
+    it('getAllForSite returns bad request for invalid locale', async () => {
+      const response = await opportunitiesController.getAllForSite({
+        params: { siteId: SITE_ID },
+        ...invalidLocaleContext,
+      });
+      expect(mockOpportunityDataAccess.Opportunity.allBySiteId.called).to.be.false;
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Invalid locale format');
+    });
+
+    it('getByStatus returns bad request for invalid locale', async () => {
+      const response = await opportunitiesController.getByStatus({
+        params: { siteId: SITE_ID, status: 'NEW' },
+        ...invalidLocaleContext,
+      });
+      expect(mockOpportunityDataAccess.Opportunity.allBySiteIdAndStatus.called).to.be.false;
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Invalid locale format');
+    });
+
+    it('getByID returns bad request for invalid locale', async () => {
+      const response = await opportunitiesController.getByID({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        ...invalidLocaleContext,
+      });
+      expect(mockOpportunityDataAccess.Opportunity.findById.called).to.be.false;
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Invalid locale format');
+    });
+  });
+
   it('gets all opportunities for a site by status returns bad request if no site ID is passed', async () => {
     const response = await opportunitiesController.getByStatus({ params: {} });
     expect(mockOpportunityDataAccess.Opportunity.allBySiteIdAndStatus.calledOnce).to.be.false;

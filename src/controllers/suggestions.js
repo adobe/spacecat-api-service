@@ -32,6 +32,7 @@ import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } fr
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
+import { isValidLocale } from '../utils/validations.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
@@ -301,7 +302,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const viewParam = context.data?.view;
     const statusParam = context.data?.status;
-    const locale = context.data?.locale || null;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -377,7 +382,11 @@ function SuggestionsController(ctx, sqs, env) {
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
-    const locale = context.data?.locale || null;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -443,7 +452,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
     const viewParam = context.data?.view;
-    const locale = context.data?.locale || null;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -496,7 +509,11 @@ function SuggestionsController(ctx, sqs, env) {
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
-    const locale = context.data?.locale || null;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -563,7 +580,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId || undefined;
     const suggestionId = context.params?.suggestionId || undefined;
     const viewParam = context.data?.view;
-    const locale = context.data?.locale || null;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');

@@ -562,6 +562,72 @@ describe('Suggestions Controller', () => {
     expect(suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
   });
 
+  describe('locale validation', () => {
+    const invalidLocaleContext = { data: { locale: 'fr-FR' } };
+    const baseParams = {
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    };
+
+    it('getAllForOpportunity returns bad request for invalid locale', async () => {
+      const response = await suggestionsController.getAllForOpportunity({
+        ...baseParams,
+        ...invalidLocaleContext,
+      });
+      expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.called).to.be.false;
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Invalid locale format');
+    });
+
+    it('getAllForOpportunityPaged returns bad request for invalid locale', async () => {
+      const response = await suggestionsController.getAllForOpportunityPaged({
+        ...baseParams,
+        params: { ...baseParams.params, limit: '10' },
+        ...invalidLocaleContext,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Invalid locale format');
+    });
+
+    it('getByStatus returns bad request for invalid locale', async () => {
+      const response = await suggestionsController.getByStatus({
+        ...baseParams,
+        params: { ...baseParams.params, status: 'NEW' },
+        ...invalidLocaleContext,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Invalid locale format');
+    });
+
+    it('getByStatusPaged returns bad request for invalid locale', async () => {
+      const response = await suggestionsController.getByStatusPaged({
+        ...baseParams,
+        params: { ...baseParams.params, status: 'NEW', limit: '10' },
+        ...invalidLocaleContext,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Invalid locale format');
+    });
+
+    it('getByID returns bad request for invalid locale', async () => {
+      const response = await suggestionsController.getByID({
+        ...baseParams,
+        params: { ...baseParams.params, suggestionId: SUGGESTION_IDS[0] },
+        ...invalidLocaleContext,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Invalid locale format');
+    });
+  });
+
   it('returns all suggestions when grant filtering throws an error', async () => {
     mockSuggestionGrant.splitSuggestionsByGrantStatus.rejects(new Error('db failure'));
     const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {

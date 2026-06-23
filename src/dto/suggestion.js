@@ -20,6 +20,20 @@ import { Suggestion } from '@adobe/spacecat-shared-data-access';
 export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
 
 /**
+ * Supported localizable fields that can be translated for suggestions.
+ * @type {string[]}
+ */
+export const ALLOWED_I18N_FIELDS = [
+  'title',
+  'description',
+  'rationale',
+  'aiRationale',
+  'aiSuggestion',
+  'actionItems',
+  'persona',
+];
+
+/**
  * Valid skip reasons when a suggestion is marked as SKIPPED.
  * @type {string[]}
  */
@@ -84,9 +98,18 @@ export const SuggestionDto = {
     // Apply locale projection and strip the internal i18n key from the response
     // eslint-disable-next-line no-unused-vars
     const { i18n, ...baseData } = rawData ?? {};
-    const data = (locale && i18n?.[locale])
-      ? { ...baseData, ...i18n[locale] }
-      : baseData;
+    let data = baseData;
+
+    if (locale && i18n?.[locale]) {
+      const localized = i18n[locale];
+      const filteredLocalized = {};
+      for (const field of ALLOWED_I18N_FIELDS) {
+        if (localized[field] != null) {
+          filteredLocalized[field] = localized[field];
+        }
+      }
+      data = { ...baseData, ...filteredLocalized };
+    }
 
     const skipReason = suggestion.getSkipReason?.();
     const skipDetail = suggestion.getSkipDetail?.();

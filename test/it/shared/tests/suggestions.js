@@ -79,6 +79,34 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
+
+      it('user: returns French title in data when locale=fr_fr', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
+
+        const sugg1 = res.body.find((s) => s.id === SUGG_1_ID);
+        expect(sugg1).to.exist;
+        expect(sugg1.data.title).to.equal("Mettre à jour l'image principale");
+        expect(sugg1.data).to.not.have.property('i18n');
+      });
+
+      it('user: returns English title when locale is omitted', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(BASE);
+        expect(res.status).to.equal(200);
+
+        const sugg1 = res.body.find((s) => s.id === SUGG_1_ID);
+        expect(sugg1.data.title).to.equal('Update hero image');
+      });
+
+      it('user: returns 400 for invalid locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr`);
+        expect(res.status).to.equal(400);
+        expect(res.body).to.have.property('message', 'Invalid locale format');
+      });
     });
 
     describe('GET .../suggestions/paged/:limit', () => {
@@ -213,6 +241,22 @@ export default function suggestionTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get(`${BASE}/not-a-uuid`);
         expect(res.status).to.equal(400);
+      });
+
+      it('user: returns French title in data when locale=fr_fr', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${SUGG_1_ID}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expectSuggestionDto(res.body);
+        expect(res.body.data.title).to.equal("Mettre à jour l'image principale");
+        expect(res.body.data).to.not.have.property('i18n');
+      });
+
+      it('user: returns 400 for invalid locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${SUGG_1_ID}?locale=fr-fr`);
+        expect(res.status).to.equal(400);
+        expect(res.body).to.have.property('message', 'Invalid locale format');
       });
     });
 

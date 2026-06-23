@@ -28,7 +28,17 @@ export const opportunities = [
     title: 'Fix CWV issues',
     description: 'Improve Core Web Vitals scores',
     status: 'NEW',
-    data: { cwvMetric: 'lcp', currentScore: 3200, targetScore: 2500 },
+    data: {
+      cwvMetric: 'lcp',
+      currentScore: 3200,
+      targetScore: 2500,
+      i18n: {
+        fr_fr: {
+          title: 'Corriger les problèmes CWV',
+          description: 'Améliorer les scores Core Web Vitals',
+        },
+      },
+    },
     runbook: 'https://wiki.example.com/runbooks/cwv-optimization',
     guidance: { steps: ['Review affected pages', 'Optimize LCP resources', 'Re-audit'] },
     tags: ['performance', 'cwv'],

@@ -79,6 +79,36 @@ export default function opportunityTests(getHttpClient, resetData) {
         const res = await http.admin.get('/sites/not-a-uuid/opportunities');
         expect(res.status).to.equal(400);
       });
+
+      it('user: returns French title and description when locale=fr_fr', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+
+        const oppty1 = res.body.find((o) => o.id === OPPTY_1_ID);
+        expect(oppty1).to.exist;
+        expect(oppty1.title).to.equal('Corriger les problèmes CWV');
+        expect(oppty1.description).to.equal('Améliorer les scores Core Web Vitals');
+        expect(oppty1.data).to.not.have.property('i18n');
+      });
+
+      it('user: returns English when locale is omitted', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities`);
+        expect(res.status).to.equal(200);
+
+        const oppty1 = res.body.find((o) => o.id === OPPTY_1_ID);
+        expect(oppty1.title).to.equal('Fix CWV issues');
+        expect(oppty1.description).to.equal('Improve Core Web Vitals scores');
+      });
+
+      it('user: returns 400 for invalid locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities?locale=fr-FR`);
+        expect(res.status).to.equal(400);
+        expect(res.body).to.have.property('message', 'Invalid locale format');
+      });
     });
 
     describe('GET /sites/:siteId/opportunities/by-status/:status', () => {
@@ -124,6 +154,26 @@ export default function opportunityTests(getHttpClient, resetData) {
         expect(res.body[0].id).to.equal(OPPTY_1_ID);
         expect(res.body[0].status).to.equal('NEW');
       });
+
+      it('user: returns French title when locale=fr_fr', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(
+          `/sites/${SITE_1_ID}/opportunities/by-status/NEW?locale=fr_fr`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].title).to.equal('Corriger les problèmes CWV');
+        expect(res.body[0].description).to.equal('Améliorer les scores Core Web Vitals');
+      });
+
+      it('user: returns 400 for invalid locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(
+          `/sites/${SITE_1_ID}/opportunities/by-status/NEW?locale=invalid`,
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body).to.have.property('message', 'Invalid locale format');
+      });
     });
 
     describe('GET /sites/:siteId/opportunities/:opportunityId', () => {
@@ -167,6 +217,27 @@ export default function opportunityTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get(`/sites/${SITE_1_ID}/opportunities/not-a-uuid`);
         expect(res.status).to.equal(400);
+      });
+
+      it('user: returns French title and description when locale=fr_fr', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(
+          `/sites/${SITE_1_ID}/opportunities/${OPPTY_1_ID}?locale=fr_fr`,
+        );
+        expect(res.status).to.equal(200);
+        expectOpportunityDto(res.body);
+        expect(res.body.title).to.equal('Corriger les problèmes CWV');
+        expect(res.body.description).to.equal('Améliorer les scores Core Web Vitals');
+        expect(res.body.data).to.not.have.property('i18n');
+      });
+
+      it('user: returns 400 for invalid locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(
+          `/sites/${SITE_1_ID}/opportunities/${OPPTY_1_ID}?locale=FR_fr`,
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body).to.have.property('message', 'Invalid locale format');
       });
     });
 

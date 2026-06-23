@@ -97,6 +97,28 @@ describe('OpportunityDto', () => {
         expect(json.description).to.equal('English description');
       });
 
+      it('promotes empty-string translations (intentional blank override)', () => {
+        const oppty = createMockOppty({
+          i18n: { fr_fr: { title: '', description: '' } },
+        });
+
+        const json = OpportunityDto.toJSON(oppty, 'fr_fr');
+
+        expect(json.title).to.equal('');
+        expect(json.description).to.equal('');
+      });
+
+      it('falls back to English when locale field is null', () => {
+        const oppty = createMockOppty({
+          i18n: { fr_fr: { title: 'Titre français', description: null } },
+        });
+
+        const json = OpportunityDto.toJSON(oppty, 'fr_fr');
+
+        expect(json.title).to.equal('Titre français');
+        expect(json.description).to.equal('English description');
+      });
+
       it('strips i18n key from data even without locale param', () => {
         const oppty = createMockOppty({
           i18n: { fr_fr: { title: 'Titre français' } },
@@ -118,7 +140,7 @@ describe('OpportunityDto', () => {
 
         expect(json.title).to.equal('English title');
         expect(json.description).to.equal('English description');
-        expect(json.data).to.deep.equal({});
+        expect(json.data).to.be.null;
       });
 
       it('handles getData returning empty object gracefully', () => {

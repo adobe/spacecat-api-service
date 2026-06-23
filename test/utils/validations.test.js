@@ -11,7 +11,7 @@
  */
 
 import { expect } from 'chai';
-import { validateRepoUrl, checkBodySize } from '../../src/utils/validations.js';
+import { validateRepoUrl, checkBodySize, isValidLocale } from '../../src/utils/validations.js';
 
 // Helper to build Uint8Array of given length
 function makeBytes(len) {
@@ -56,6 +56,30 @@ describe('utils/validations', () => {
     it('considers null / undefined as empty', () => {
       expect(checkBodySize(null, 1)).to.be.true;
       expect(checkBodySize(undefined, 1)).to.be.true;
+    });
+  });
+
+  describe('isValidLocale', () => {
+    it('returns true for undefined or null', () => {
+      expect(isValidLocale(undefined)).to.be.true;
+      expect(isValidLocale(null)).to.be.true;
+    });
+
+    it('returns true for valid locale format', () => {
+      expect(isValidLocale('fr_fr')).to.be.true;
+      expect(isValidLocale('ja_jp')).to.be.true;
+      expect(isValidLocale('en_us')).to.be.true;
+    });
+
+    it('returns false for invalid locale format', () => {
+      expect(isValidLocale('fr')).to.be.false;
+      expect(isValidLocale('FR_FR')).to.be.false;
+      expect(isValidLocale('fr-fr')).to.be.false;
+      expect(isValidLocale('fr_')).to.be.false;
+      expect(isValidLocale('_fr')).to.be.false;
+      expect(isValidLocale('')).to.be.false;
+      expect(isValidLocale(123)).to.be.false;
+      expect(isValidLocale({})).to.be.false;
     });
   });
 });
