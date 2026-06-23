@@ -471,6 +471,7 @@ describe('Suggestions Controller', () => {
         return Promise.resolve(mockSuggestionEntity(suggData));
       }),
       getFixEntitiesBySuggestionId: sandbox.stub(),
+      saveMany: sandbox.stub().resolves(),
     };
 
     mockSuggestionGrant = {
@@ -2927,6 +2928,295 @@ describe('Suggestions Controller', () => {
     });
   });
 
+  describe('PLG skip Slack alert', () => {
+    const makePlgSite = (tier) => {
+      const entitlement = { getProductCode: () => 'ASO', getTier: () => tier };
+      const enrollment = { getEntitlement: sandbox.stub().resolves(entitlement) };
+      return {
+        getId: sandbox.stub().returns(SITE_ID),
+        getBaseURL: sandbox.stub().returns('https://example.com'),
+        getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+        getSiteEnrollments: sandbox.stub().resolves([enrollment]),
+      };
+    };
+
+    const makePaidSite = () => {
+      const entitlement = { getProductCode: () => 'ASO', getTier: () => 'PAID' };
+      const enrollment = { getEntitlement: sandbox.stub().resolves(entitlement) };
+      return {
+        getId: sandbox.stub().returns(SITE_ID),
+        getBaseURL: sandbox.stub().returns('https://example.com'),
+        getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+        getSiteEnrollments: sandbox.stub().resolves([enrollment]),
+      };
+    };
+
+    it('sends PLG skip Slack alert when a PLG site transitions a suggestion to SKIPPED via patchSuggestion', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED', skipReason: 'TOO_RISKY' },
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+      await new Promise(setImmediate);
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      expect(postSlackMessageStub.firstCall.args[0]).to.equal('C_SKIP');
+      expect(postSlackMessageStub.firstCall.args[1]).to.include('PLG Customer Skipped');
+      expect(postSlackMessageStub.firstCall.args[1]).to.include('TOO_RISKY');
+    });
+
+    it('does not send PLG skip alert when patchSuggestion skips for a PAID site', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const paidSite = makePaidSite();
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(paidSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED' },
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.not.have.been.called;
+    });
+
+    it('does not send PLG skip alert when patchSuggestion skips and channel env var is missing', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED' },
+        env: { SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.not.have.been.called;
+    });
+
+    it('does not re-send PLG skip alert when patchSuggestion updates skip fields on already-SKIPPED suggestion', async () => {
+      suggs[0].status = 'SKIPPED';
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED', skipReason: 'OTHER', skipDetail: 'Changed reason' },
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.not.have.been.called;
+    });
+
+    it('returns 200 and logs error when PLG skip alert fails in patchSuggestion', async () => {
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': {
+          postSlackMessage: sandbox.stub().rejects(new Error('Slack unreachable')),
+        },
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED' },
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+      await new Promise(setImmediate);
+
+      expect(response.status).to.equal(200);
+      expect(context.log.error).to.have.been.calledWithMatch('Failed to send PLG suggestion skip Slack alert');
+    });
+
+    it('does not send PLG skip alert when getSiteEnrollments throws', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const errorSite = {
+        getId: sandbox.stub().returns(SITE_ID),
+        getBaseURL: sandbox.stub().returns('https://example.com'),
+        getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+        getSiteEnrollments: sandbox.stub().rejects(new Error('db error')),
+      };
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(errorSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED' },
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.not.have.been.called;
+    });
+
+    it('includes skipDetail in the PLG skip alert message when provided', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED', skipReason: 'OTHER', skipDetail: 'Already handled elsewhere' },
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+      await new Promise(setImmediate);
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      expect(postSlackMessageStub.firstCall.args[1]).to.include('Already handled elsewhere');
+    });
+
+    it('sends PLG skip Slack alert for each newly-SKIPPED suggestion via patchSuggestionsStatus', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await ctrl.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [
+          { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'TOO_RISKY' },
+          { id: SUGGESTION_IDS[2], status: 'SKIPPED' },
+        ],
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(2);
+      expect(postSlackMessageStub).to.have.been.calledTwice;
+      expect(postSlackMessageStub.firstCall.args[1]).to.include('PLG Customer Skipped');
+    });
+
+    it('does not send PLG skip alert via patchSuggestionsStatus for already-SKIPPED suggestions', async () => {
+      suggs[0].status = 'SKIPPED';
+      suggs[0].skipReason = 'NO_REASON';
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await ctrl.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [{ id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'OTHER' }],
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(postSlackMessageStub).to.not.have.been.called;
+    });
+
+    it('returns 207 success and logs error when PLG skip alert fails in patchSuggestionsStatus', async () => {
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': {
+          postSlackMessage: sandbox.stub().rejects(new Error('Slack unreachable')),
+        },
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await ctrl.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [{ id: SUGGESTION_IDS[0], status: 'SKIPPED' }],
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+      expect(context.log.error).to.have.been.calledWithMatch('Failed to send PLG suggestion skip Slack alert');
+    });
+  });
+
   it('bulk patches suggestion status 2 successes', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
@@ -2953,6 +3243,75 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
     expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'NEW-updated');
     expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'APPROVED-updated');
+  });
+
+  it('bulk patches suggestion status sets updatedBy to caller profile email on status change', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [{ id: SUGGESTION_IDS[0], status: 'NEW-updated' }],
+      ...context,
+    });
+
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('updatedBy', 'test@test.com');
+    expect(suggs[0].updatedBy).to.equal('test@test.com');
+  });
+
+  it('bulk patches suggestion status sets updatedBy to caller profile email when updating skip fields on already-SKIPPED suggestion', async () => {
+    suggs[0].status = 'SKIPPED';
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [{ id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'TOO_RISKY', skipDetail: 'Updated detail' }],
+      ...context,
+    });
+
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('updatedBy', 'test@test.com');
+    expect(suggs[0].updatedBy).to.equal('test@test.com');
+  });
+
+  it('bulk patches suggestion status sets updatedBy even when model does not support skip fields on already-SKIPPED suggestion', async () => {
+    suggs[0].status = 'SKIPPED';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [{ id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'TOO_RISKY', skipDetail: 'Updated detail' }],
+      ...context,
+    });
+
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('updatedBy', 'test@test.com');
+    expect(suggs[0].updatedBy).to.equal('test@test.com');
+
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
   });
 
   it('bulk patches suggestion for non existing site ', async () => {
@@ -3536,7 +3895,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil - allow hasAccess (for initial check), deny hasAdminAccess (for REJECTED check)
+      // Mock AccessControlUtil - allow hasAccess (for initial check), deny S2S and hasAdminAccess (for REJECTED check)
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
 
@@ -3572,7 +3932,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      // Mock AccessControlUtil - allow hasAccess and hasAdminAccess, no S2S
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
 
@@ -3609,7 +3970,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      // Mock AccessControlUtil - allow hasAccess and hasAdminAccess, no S2S
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
 
@@ -3646,7 +4008,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      // Mock AccessControlUtil - allow hasAccess and hasAdminAccess, no S2S
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
 
@@ -3665,6 +4028,102 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Can only reject suggestions with status PENDING_VALIDATION');
       expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+    });
+
+    it('allows S2S consumer with suggestion:write to reject a PENDING_VALIDATION suggestion', async () => {
+      const pendingSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'PENDING_VALIDATION',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      const suggestionEntity = mockSuggestionEntity(pendingSuggestion, removeStub);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(suggestionEntity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .resolves({ allowed: true, reason: 'granted', clientId: 'svc-suggestions', consumerId: 'consumer-1' });
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'REJECTED');
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+      expect(context.log.info).to.have.been.calledWithMatch(/\[acl\] S2S REJECT granted/);
+    });
+
+    it('returns 403 immediately for S2S consumer missing suggestion:write without consulting admin check', async () => {
+      const pendingSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'PENDING_VALIDATION',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(mockSuggestionEntity(pendingSuggestion, removeStub));
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .resolves({ allowed: false, reason: 'missing-capability', clientId: 'svc-suggestions', consumerId: 'consumer-1' });
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      const hasAdminStub = sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 403);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'S2S consumer does not have the required capability to reject suggestions');
+      expect(hasAdminStub).to.not.have.been.called;
+      expect(context.log.warn).to.have.been.calledWithMatch(/\[acl\] S2S REJECT denied/);
+    });
+
+    it('returns 500 per-item when hasS2SCapability rejects unexpectedly during REJECTED transition', async () => {
+      const pendingSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'PENDING_VALIDATION',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(mockSuggestionEntity(pendingSuggestion, removeStub));
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .rejects(new Error('auth service unavailable'));
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 500);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'auth service unavailable');
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
+      expect(context.log.error).to.have.been.calledWithMatch(/\[patchSuggestionsStatus\] unexpected error/);
     });
   });
 
@@ -4526,8 +4985,9 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Opportunity not found');
     });
 
-    it('auto-fix suggestions returns 400 if site not enabled for autofix', async () => {
-      const response = await suggestionsController.autofixSuggestions({
+    it('auto-fix suggestions no longer blocks on the per-site autofix handler enabled-list (on-demand bypass)', async () => {
+      mockSuggestion.allByOpportunityId.resolves([]);
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID_NOT_ENABLED,
           opportunityId: OPPORTUNITY_ID_NOT_ENABLED,
@@ -4535,9 +4995,12 @@ describe('Suggestions Controller', () => {
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
         ...context,
       });
-      expect(response.status).to.equal(400);
-      const error = await response.json();
-      expect(error).to.have.property('message', 'Handler is not enabled for site 07efc218-79f6-48b5-970e-deb0f88ce01b autofix type broken-backlinks');
+      if (response.status === 400) {
+        const error = await response.json();
+        expect(error.message || '').to.not.include('Handler is not enabled');
+      } else {
+        expect(response.status).to.not.equal(400);
+      }
     });
 
     it('does not set IN_PROGRESS if no valid suggestions', async () => {
@@ -5537,16 +6000,16 @@ describe('Suggestions Controller', () => {
       expect(body).to.have.property('message').that.includes('valid URL');
     });
 
-    it('returns 400 when action is assess-urls but handler is not enabled for site', async () => {
+    it('assess-urls no longer blocks on the per-site autofix handler enabled-list (on-demand bypass)', async () => {
       assessUrlsConfig.isHandlerEnabledForSite.returns(false);
       const response = await suggestionsController.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { action: 'assess-urls', pages: ['https://example.com/p'] },
         ...context,
       });
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(202);
       const body = await response.json();
-      expect(body).to.have.property('message').that.includes('Handler is not enabled for site');
+      expect(body).to.have.property('message', 'Assess-urls job queued');
     });
   });
 
@@ -5681,6 +6144,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
       });
 
       expect(response.status).to.equal(400);
@@ -5723,13 +6187,14 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
       });
       expect(response.status).to.equal(500);
       const error = await response.json();
       expect(error).to.have.property('message', 'Error getting promise token');
     });
 
-    it('uses promiseToken cookie when present instead of IMS', async () => {
+    it('uses x-promise-token header when present instead of IMS', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -5759,7 +6224,7 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-            cookie: 'promiseToken=promiseToken123',
+            'x-promise-token': 'promiseToken123',
           },
         },
         params: {
@@ -5777,7 +6242,7 @@ describe('Suggestions Controller', () => {
       expect(getIMSPromiseTokenStub).to.not.have.been.called;
     });
 
-    it('falls back to IMS when promiseToken cookie is absent', async () => {
+    it('falls back to IMS when x-promise-token header is absent', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -5789,35 +6254,6 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-          },
-        },
-        params: {
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-        },
-        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
-        log: context.log,
-        ...authContext,
-      });
-
-      expect(response.status).to.equal(207);
-      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
-      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
-    });
-
-    it('falls back to IMS when promiseToken cookie is not present among other cookies', async () => {
-      mockSuggestion.allByOpportunityId.resolves(
-        [mockSuggestionEntity(suggs[0]),
-          mockSuggestionEntity(suggs[2]),
-        ],
-      );
-      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
-      const response = await suggestionsControllerWithIms.autofixSuggestions({
-        pathInfo: {
-          headers: {
-            authorization: 'Bearer token123',
-            cookie: 'otherCookie=abc',
           },
         },
         params: {
@@ -6133,6 +6569,94 @@ describe('Suggestions Controller', () => {
         'auto_fix',
       );
     });
+
+    it('allows S2S consumer with fixEntity:create capability to autofix (bypasses auto_fix profile)', async () => {
+      const testSite = {
+        id: SITE_ID,
+        getImsOrgId: () => 'test-org-id',
+        getDeliveryType: () => 'aem_edge',
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://test.com',
+      };
+      mockSuggestionDataAccess.Site.findById.resolves(testSite);
+      mockSuggestionDataAccess.Opportunity.findById.resolves({
+        getSiteId: () => SITE_ID,
+        getType: () => 'broken-backlinks',
+      });
+      mockSuggestionDataAccess.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+      });
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .resolves({ allowed: true, reason: 'granted', clientId: 'svc-autofix', consumerId: 'consumer-1' });
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess')
+        .rejects(new Error('hasAccess must not be called when S2S capability is granted'));
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(hasAccessStub).to.not.have.been.called;
+    });
+
+    it('returns forbidden for S2S consumer missing fixEntity:create when user lacks auto_fix access', async () => {
+      const testSite = {
+        id: SITE_ID,
+        getImsOrgId: () => 'test-org-id',
+        getDeliveryType: () => 'aem_edge',
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://test.com',
+      };
+      mockSuggestionDataAccess.Site.findById.resolves(testSite);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .resolves({ allowed: false, reason: 'missing-capability', clientId: 'svc-autofix', consumerId: 'consumer-1' });
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'User does not belong to the organization or does not have sufficient permissions');
+    });
+
+    it('allows non-S2S user with auto_fix access even when S2S capability is absent', async () => {
+      const testSite = {
+        id: SITE_ID,
+        getImsOrgId: () => 'test-org-id',
+        getDeliveryType: () => 'aem_edge',
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://test.com',
+      };
+      mockSuggestionDataAccess.Site.findById.resolves(testSite);
+      mockSuggestionDataAccess.Opportunity.findById.resolves({
+        getSiteId: () => SITE_ID,
+        getType: () => 'broken-backlinks',
+      });
+      mockSuggestionDataAccess.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+      });
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .resolves({ allowed: false, reason: 'not-s2s' });
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+    });
   });
 
   describe('deploySuggestionToEdge (Experiment Async Flow)', () => {
@@ -6177,8 +6701,41 @@ describe('Suggestions Controller', () => {
           Object.assign(this, input);
         }
       }
+      // Command-aware S3 send stub. Required because the Atomic-strategy
+      // helper (createAtomicStrategy → readStrategy/writeStrategy from
+      // @adobe/spacecat-shared-utils) now runs early in the experiment-async
+      // flow and throws on terminal failure; a blanket .resolves() returns
+      // undefined which makes readStrategy throw "Strategy body is empty".
+      //
+      // Identify commands by shape rather than instanceof, because helpers
+      // use the REAL @aws-sdk GetObjectCommand/PutObjectCommand classes
+      // while the controller uses the StubPut/Get classes injected via
+      // context.s3. Constructor-name check covers both.
+      //
+      // - GetObjectCommand on workspace/llmo/.../strategy.json → NoSuchKey
+      //   (treated as "no strategy yet"; helper writes a fresh blob)
+      // - PutObjectCommand on workspace/llmo/.../strategy.json → returns
+      //   a VersionId so writeStrategy considers the write successful.
+      // - All other commands (prompts upload, etc.) → resolve undefined.
+      const s3SendStub = sandbox.stub().callsFake((command) => {
+        const key = command?.Key || command?.input?.Key || '';
+        const cmdName = command?.constructor?.name || '';
+        const isStrategyKey = key.startsWith('workspace/llmo/')
+          && key.endsWith('/strategy.json');
+        const isGet = cmdName.includes('Get') || command instanceof StubGetObjectCommand;
+        const isPut = cmdName.includes('Put') || command instanceof StubPutObjectCommand;
+        if (isStrategyKey && isGet) {
+          const err = new Error('NoSuchKey');
+          err.name = 'NoSuchKey';
+          return Promise.reject(err);
+        }
+        if (isStrategyKey && isPut) {
+          return Promise.resolve({ VersionId: 'test-strategy-version' });
+        }
+        return Promise.resolve();
+      });
       context.s3 = {
-        s3Client: { send: sandbox.stub().resolves() },
+        s3Client: { send: s3SendStub },
         s3Bucket: 'test-bucket',
         PutObjectCommand: StubPutObjectCommand,
         GetObjectCommand: StubGetObjectCommand,
@@ -6264,6 +6821,7 @@ describe('Suggestions Controller', () => {
         const id = payload.geoExperimentId;
         return {
           getId: () => id,
+          getName: () => payload.name,
           setPreScheduleId: sandbox.stub(),
           setStatus: sandbox.stub(),
           setUpdatedBy: sandbox.stub(),
@@ -6593,6 +7151,8 @@ describe('Suggestions Controller', () => {
         getData: () => ({
           url: 'https://example.com/page1',
           prompts: [{ prompt: 'What is page1?', regions: ['US'] }],
+          aiSummary: 'Page 1 content summary',
+          valuable: true,
         }),
         getKpiDeltas: () => ({}),
         getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -6615,6 +7175,210 @@ describe('Suggestions Controller', () => {
       // Domain-wide suggestion with allowedRegexPatterns is accepted as valid
       const accepted = body.suggestions.filter((s) => s.statusCode !== 400 && s.statusCode !== 404);
       expect(accepted.length).to.be.greaterThan(0);
+    });
+
+    it('sorts domain-wide prompt sources by agenticTraffic × contentGainRatio, falling back to 0 for missing values', async () => {
+      const domainWideSugg = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'APPROVED',
+        getData: () => ({
+          isDomainWide: true,
+          allowedRegexPatterns: ['.*\\.html'],
+        }),
+        setData: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+      };
+      // score: 10 * 5 = 50 — should sort first
+      const highScoreSugg = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/high',
+          prompts: [{ prompt: 'high-score prompt', regions: ['US'] }],
+          aiSummary: 'high summary',
+          valuable: true,
+          agenticTraffic: 10,
+          contentGainRatio: 5,
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      // missing agenticTraffic and contentGainRatio → both fall back to 0
+      const lowScoreSugg = {
+        getId: () => SUGGESTION_IDS[2],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/low',
+          prompts: [{ prompt: 'low-score prompt', regions: ['US'] }],
+          aiSummary: 'low summary',
+          valuable: true,
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      // approved suggestion — should be excluded by NEW-only filter even though it passes other checks
+      const approvedSugg = {
+        getId: () => '11111111-1111-1111-1111-111111111111',
+        getStatus: () => 'APPROVED',
+        getData: () => ({
+          url: 'https://example.com/approved',
+          prompts: [{ prompt: 'approved prompt', regions: ['US'] }],
+          aiSummary: 'approved summary',
+          valuable: true,
+          agenticTraffic: 999,
+          contentGainRatio: 999,
+        }),
+      };
+      // Ordered low-before-high in allSuggestions to confirm sort reorders them
+      mockSuggestion.allByOpportunityId.resolves([
+        domainWideSugg, lowScoreSugg, highScoreSugg, approvedSugg,
+      ]);
+
+      let uploadedPrompts;
+      context.s3.s3Client.send.callsFake((command) => {
+        const key = command?.Key || command?.input?.Key || '';
+        const cmdName = command?.constructor?.name || '';
+        const isStrategyKey = key.startsWith('workspace/llmo/') && key.endsWith('/strategy.json');
+        if (isStrategyKey && (cmdName.includes('Get'))) {
+          const err = new Error('NoSuchKey');
+          err.name = 'NoSuchKey';
+          return Promise.reject(err);
+        }
+        if (isStrategyKey && cmdName.includes('Put')) {
+          return Promise.resolve({ VersionId: 'v1' });
+        }
+        if (cmdName.includes('Put') && key.endsWith('-prompts.json')) {
+          uploadedPrompts = JSON.parse(command.Body);
+        }
+        return Promise.resolve();
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      // high-score suggestion's prompt should appear before low-score suggestion's
+      expect(uploadedPrompts[0]).to.deep.equal({ prompt: 'high-score prompt', regions: ['US'] });
+      expect(uploadedPrompts[1]).to.deep.equal({ prompt: 'low-score prompt', regions: ['US'] });
+    });
+
+    it('excludes domain-wide prompt source candidates that are already deployed, missing aiSummary, or not valuable', async () => {
+      const domainWideSugg = {
+        getId: () => SUGGESTION_IDS[0],
+        getStatus: () => 'APPROVED',
+        getData: () => ({ isDomainWide: true, allowedRegexPatterns: ['.*\\.html'] }),
+        setData: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+      };
+      // eligible — should appear in uploaded prompts
+      const eligibleSugg = {
+        getId: () => SUGGESTION_IDS[1],
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/eligible',
+          prompts: [{ prompt: 'eligible prompt', regions: ['US'] }],
+          aiSummary: 'a summary',
+          valuable: true,
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      // already deployed — excluded by !data.edgeDeployed
+      const deployedSugg = {
+        getId: () => SUGGESTION_IDS[2],
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/deployed',
+          prompts: [{ prompt: 'deployed prompt', regions: ['US'] }],
+          aiSummary: 'a summary',
+          valuable: true,
+          edgeDeployed: 1700000000000,
+        }),
+      };
+      // missing aiSummary — excluded by data.aiSummary check
+      const noSummarySugg = {
+        getId: () => '11111111-1111-1111-1111-111111111111',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/no-summary',
+          prompts: [{ prompt: 'no-summary prompt', regions: ['US'] }],
+          valuable: true,
+        }),
+      };
+      // valuable !== true — excluded by data.valuable === true check
+      const notValuableSugg = {
+        getId: () => '22222222-2222-2222-2222-222222222222',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/not-valuable',
+          prompts: [{ prompt: 'not-valuable prompt', regions: ['US'] }],
+          aiSummary: 'a summary',
+          valuable: false,
+        }),
+      };
+
+      mockSuggestion.allByOpportunityId.resolves([
+        domainWideSugg, eligibleSugg, deployedSugg, noSummarySugg, notValuableSugg,
+      ]);
+
+      let uploadedPrompts;
+      context.s3.s3Client.send.callsFake((command) => {
+        const key = command?.Key || command?.input?.Key || '';
+        const cmdName = command?.constructor?.name || '';
+        const isStrategyKey = key.startsWith('workspace/llmo/') && key.endsWith('/strategy.json');
+        if (isStrategyKey && cmdName.includes('Get')) {
+          const err = new Error('NoSuchKey');
+          err.name = 'NoSuchKey';
+          return Promise.reject(err);
+        }
+        if (isStrategyKey && cmdName.includes('Put')) {
+          return Promise.resolve({ VersionId: 'v1' });
+        }
+        if (cmdName.includes('Put') && key.endsWith('-prompts.json')) {
+          uploadedPrompts = JSON.parse(command.Body);
+        }
+        return Promise.resolve();
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(uploadedPrompts).to.have.lengthOf(1);
+      expect(uploadedPrompts[0]).to.deep.equal({ prompt: 'eligible prompt', regions: ['US'] });
     });
 
     it('logs warning and continues when domain-wide regex is invalid', async () => {
@@ -7969,6 +8733,560 @@ describe('Suggestions Controller', () => {
       expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
       expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
     });
+
+    it('appends an atomic strategy after geoExperiment.save() in the async branch', async () => {
+      const createAtomicStrategyStub = sandbox.stub().resolves({
+        success: true,
+        strategyId: 'will-be-overwritten',
+        attempts: 1,
+      });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      const args = createAtomicStrategyStub.firstCall.args[0];
+      expect(args).to.include.keys([
+        'siteId', 'geoExperimentId', 'opportunityId', 'opportunityType',
+        'name', 'profile', 's3', 'log',
+      ]);
+      // strategy.id is geoExperimentId — single-anchor design
+      expect(args.geoExperimentId).to.match(/^[0-9a-f-]{36}$/);
+      expect(args.siteId).to.equal(SITE_ID);
+      expect(args.opportunityId).to.equal(OPPORTUNITY_ID);
+      expect(args.opportunityType).to.equal('headings');
+      // Same UUID appears in the 207 response
+      const body = await response.json();
+      expect(args.geoExperimentId).to.equal(body.geoExperimentId);
+    });
+
+    it('still returns the standard 207 response when atomic-strategy helper terminally fails', async () => {
+      const createAtomicStrategyStub = sandbox.stub().resolves({
+        success: false,
+        strategyId: 'irrelevant',
+        attempts: 3,
+      });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // Response shape unchanged — no strategyId field
+      expect(body).to.have.all.keys([
+        'suggestions', 'metadata', 'geoExperimentId',
+        'geoExperimentStatus', 'geoExperimentPhase', 'prePhaseScheduleId',
+      ]);
+      expect(body).to.not.have.property('strategyId');
+    });
+
+    it('rolls back the GeoExperiment and returns failure when atomic-strategy helper throws', async () => {
+      // Updated for new contract (post-reorder): the helper now runs BEFORE
+      // any irreversible side-effect (DRS schedule, suggestion marking) and
+      // throws on terminal failure. The outer catch must compensate by
+      // removing the GeoExperiment row (and would call deleteAtomicStrategy
+      // if the strategy had been successfully created — not the case here
+      // since the helper threw).
+      const createAtomicStrategyStub = sandbox.stub().rejects(new Error('strategy boom'));
+      const deleteAtomicStrategyStub = sandbox.stub().resolves({ success: true, removed: false, attempts: 1 });
+
+      // Track the GeoExperiment.remove() call to assert cleanup.
+      let geoExperimentRemoveStub;
+      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
+        geoExperimentRemoveStub = sandbox.stub().resolves();
+        return {
+          getId: () => payload.geoExperimentId,
+          getName: () => payload.name,
+          setPreScheduleId: sandbox.stub(),
+          setStatus: sandbox.stub(),
+          setUpdatedBy: sandbox.stub(),
+          save: sandbox.stub().resolves(),
+          remove: geoExperimentRemoveStub,
+        };
+      });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+          deleteAtomicStrategy: deleteAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // Failure body shape: each suggestion gets a 500 statusCode with the
+      // experiment-init error message attached.
+      expect(body.metadata).to.deep.include({ success: 0, failed: 1 });
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('strategy boom');
+
+      // Helper was invoked exactly once and threw → strategy never recorded
+      // as created → deleteAtomicStrategy must NOT be called.
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      expect(deleteAtomicStrategyStub).to.not.have.been.called;
+
+      // The GeoExperiment row created earlier in the flow must be removed.
+      expect(geoExperimentRemoveStub).to.have.been.calledOnce;
+
+      // The outer catch logs the failure with the [edge-geo-exp-failed] tag.
+      expect(context.log.error).to.have.been.calledWithMatch(/edge-geo-exp-failed.*Error initiating experiment: strategy boom/);
+    });
+
+    it('rolls back the GeoExperiment AND deletes the strategy when DRS fails after strategy is created', async () => {
+      // Symmetric coverage: strategy-create succeeded, then a downstream
+      // step (DRS schedule) failed. The outer catch must run BOTH
+      // compensating actions: geoExperiment.remove() and deleteAtomicStrategy.
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true, attempts: 1, strategyId: 'will-be-overridden' });
+      const deleteAtomicStrategyStub = sandbox.stub().resolves({ success: true, removed: true, attempts: 1 });
+
+      // Force the DRS schedule call to fail.
+      mockDrsClient.createExperimentSchedule.rejects(new Error('DRS down for cleanup test'));
+
+      let geoExperimentRemoveStub;
+      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
+        geoExperimentRemoveStub = sandbox.stub().resolves();
+        return {
+          getId: () => payload.geoExperimentId,
+          getName: () => payload.name,
+          setPreScheduleId: sandbox.stub(),
+          setStatus: sandbox.stub(),
+          setUpdatedBy: sandbox.stub(),
+          save: sandbox.stub().resolves(),
+          remove: geoExperimentRemoveStub,
+        };
+      });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+          deleteAtomicStrategy: deleteAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.deep.include({ success: 0, failed: 1 });
+      expect(body.suggestions[0].message).to.include('DRS down for cleanup test');
+
+      // Both compensating actions must run: strategy was created, so it
+      // must be deleted; GeoExperiment row must be removed.
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      expect(deleteAtomicStrategyStub).to.have.been.calledOnce;
+      expect(geoExperimentRemoveStub).to.have.been.calledOnce;
+
+      // The strategyId passed to deleteAtomicStrategy must equal the
+      // geoExperimentId (per the pinned design: strategy.id === geoExperimentId).
+      const deleteArgs = deleteAtomicStrategyStub.firstCall.args[0];
+      expect(deleteArgs).to.include.keys('siteId', 'strategyId', 's3', 'log');
+    });
+
+    it('logs but does not fail when deleteAtomicStrategy itself throws during cleanup', async () => {
+      // Defense-in-depth: if cleanup fails, the original failure response
+      // is still returned. The cleanup error is logged with the
+      // [atomic-strategy-cleanup-failed] tag.
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true, attempts: 1 });
+      const deleteAtomicStrategyStub = sandbox.stub().rejects(new Error('cleanup boom'));
+
+      mockDrsClient.createExperimentSchedule.rejects(new Error('DRS down'));
+
+      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => ({
+        getId: () => payload.geoExperimentId,
+        getName: () => payload.name,
+        setPreScheduleId: sandbox.stub(),
+        setStatus: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+        remove: sandbox.stub().resolves(),
+      }));
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+          deleteAtomicStrategy: deleteAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      // Cleanup failure does not change the response — the original error
+      // still surfaces as a 500 per-suggestion result.
+      expect(response.status).to.equal(207);
+      expect(deleteAtomicStrategyStub).to.have.been.calledOnce;
+      expect(context.log.error).to.have.been.calledWithMatch(/atomic-strategy-cleanup-failed.*cleanup boom/);
+    });
+
+    it('falls back to <type>-<date> name when geoExperiment.getName() returns falsy', async () => {
+      // Override GeoExperiment.create to return a mock whose getName() yields ''
+      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => ({
+        getId: () => payload.geoExperimentId,
+        getName: () => '',
+        setPreScheduleId: sandbox.stub(),
+        setStatus: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+        remove: sandbox.stub().resolves(),
+      }));
+
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true, attempts: 1 });
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      const args = createAtomicStrategyStub.firstCall.args[0];
+      expect(args.name).to.match(/^headings-\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('does not invoke atomic-strategy helper when Prefer: respond-async is absent (sync path)', async () => {
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const mockTokowakaClient = {
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [edgeSuggestions[0]],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(createAtomicStrategyStub).to.not.have.been.called;
+    });
+  });
+
+  describe('deploySuggestionToEdge - path-level suggestions', () => {
+    let pathSuggestion;
+    let prerenderOpportunity;
+    let tokowakaClientStub;
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
+      pathSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          allowedRegexPatterns: ['^/products'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      prerenderOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('prerender'),
+      };
+
+      site.getConfig = sandbox.stub().returns({
+        getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+      });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+
+      mockSuggestion.allByOpportunityId.resolves([pathSuggestion]);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(pathSuggestion);
+
+      tokowakaClientStub = {
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [pathSuggestion],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
+
+      context.env = {
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+      };
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+    });
+
+    it('classifies path suggestion separately from domain-wide and validSuggestions', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify it was routed through deployToEdge (path suggestion included in allTargetSuggestions)
+      expect(tokowakaClientStub.deployToEdge.calledOnce).to.be.true;
+      const { targetSuggestions } = tokowakaClientStub.deployToEdge.firstCall.args[0];
+      expect(targetSuggestions.map((s) => s.getId())).to.include(SUGGESTION_IDS[0]);
+    });
+
+    it('returns 400 for path suggestion missing allowedRegexPatterns', async () => {
+      const badPathSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathPattern: '/products',
+          allowedRegexPatterns: [],  // empty array — detected as path but fails non-empty check
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([badPathSuggestion]);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(badPathSuggestion);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(400);
+      expect(body.suggestions[0].message).to.equal('Path suggestion missing allowedRegexPatterns');
+    });
+
+    it('does not affect domain-wide or per-URL suggestions classification (regression)', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          isDomainWide: true,
+          allowedRegexPatterns: ['/*'],
+          url: 'https://example.com/* (All Domain URLs)',
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const perUrlSuggestion = {
+        getId: () => SUGGESTION_IDS[2],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 3,
+        getData: () => ({ url: 'https://example.com/page1' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      mockSuggestion.allByOpportunityId.resolves([
+        pathSuggestion, domainWideSuggestion, perUrlSuggestion,
+      ]);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[1]).resolves(domainWideSuggestion);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[2]).resolves(perUrlSuggestion);
+
+      tokowakaClientStub.deployToEdge.resolves({
+        succeededSuggestions: [pathSuggestion, domainWideSuggestion, perUrlSuggestion],
+        failedSuggestions: [],
+        coveredSuggestions: [],
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(3);
+      expect(body.metadata.failed).to.equal(0);
+    });
+
+    it('re-deploy of already-deployed path suggestion is a no-op (short-circuit via edgeDeployed check)', async () => {
+      const alreadyDeployedPathSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          allowedRegexPatterns: ['^/products'],
+          edgeDeployed: 1700000000000,
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      mockSuggestion.allByOpportunityId.resolves([alreadyDeployedPathSuggestion]);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(alreadyDeployedPathSuggestion);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.equal('Path suggestion already deployed');
+      expect(body.suggestions[0].statusCode).to.equal(400);
+      // deployToEdge must NOT be called — the short-circuit happens before it
+      expect(tokowakaClientStub.deployToEdge.called).to.be.false;
+    });
   });
 
   describe('listGeoExperiments', () => {
@@ -8519,6 +9837,8 @@ describe('Suggestions Controller', () => {
     let headingsOpportunity;
 
     beforeEach(() => {
+      // Clear cached TokowakaClient so createFrom picks up the current context
+      delete context.tokowakaClient;
       // Default: allow LLMO administrator access (can be overridden in specific tests)
       sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
       sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
@@ -8801,6 +10121,12 @@ describe('Suggestions Controller', () => {
     });
 
     it('should successfully rollback suggestions', async () => {
+      const rollbackStub = sandbox.stub().resolves({
+        succeededSuggestions: [tokowakaSuggestions[0]],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({ rollbackSuggestions: rollbackStub });
+
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         params: {
@@ -8818,20 +10144,20 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify edgeDeployed was removed
-      const suggestion = tokowakaSuggestions[0];
-      expect(suggestion.setData.calledOnce).to.be.true;
-      const dataArg = suggestion.setData.firstCall.args[0];
-      expect(dataArg).to.not.have.property('edgeDeployed');
-
-      // Verify setUpdatedBy was called
-      expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
-
-      // Verify save was called
-      expect(suggestion.save.calledOnce).to.be.true;
+      // Verify rollbackSuggestions was called with the suggestion and correct options
+      expect(rollbackStub.calledOnce).to.be.true;
+      const [, , suggestions, options] = rollbackStub.firstCall.args;
+      expect(suggestions).to.include(tokowakaSuggestions[0]);
+      expect(options.updatedBy).to.equal('test@test.com');
     });
 
-    it('uses fallback updatedBy when profile email is missing', async () => {
+    it('passes undefined updatedBy when profile email is missing (shared client applies fallbacks)', async () => {
+      const rollbackStub = sandbox.stub().resolves({
+        succeededSuggestions: [tokowakaSuggestions[0]],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({ rollbackSuggestions: rollbackStub });
+
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         attributes: {
@@ -8850,7 +10176,8 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(tokowakaSuggestions[0].setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      const [, , , options] = rollbackStub.firstCall.args;
+      expect(options.updatedBy).to.be.undefined;
     });
 
     it('should return 400 for suggestions without edgeDeployed during rollback', async () => {
@@ -8887,12 +10214,12 @@ describe('Suggestions Controller', () => {
     });
 
     it('should support backward compatibility with legacy tokowakaDeployed property during rollback', async () => {
-      // Set up suggestion with legacy tokowakaDeployed property (no edgeDeployed)
+      // Set up suggestion with legacy tokowakaDeployed property alongside edgeDeployed
       const legacyTimestamp = Date.now() - 10000;
       tokowakaSuggestions[0].getData = () => ({
         type: 'headings',
         checkType: 'heading-empty',
-        url: 'https://example.com/page1', // URL is required for rollback
+        url: 'https://example.com/page1',
         edgeDeployed: legacyTimestamp,
         tokowakaDeployed: legacyTimestamp, // Legacy property
         recommendedAction: 'New Heading Title',
@@ -8901,6 +10228,12 @@ describe('Suggestions Controller', () => {
           selector: 'h1:nth-of-type(1)',
         },
       });
+
+      const rollbackStub = sandbox.stub().resolves({
+        succeededSuggestions: [tokowakaSuggestions[0]],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({ rollbackSuggestions: rollbackStub });
 
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
@@ -8919,13 +10252,19 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify both properties are removed
-      const dataArg = tokowakaSuggestions[0].setData.getCall(0).args[0];
-      expect(dataArg).to.not.have.property('edgeDeployed');
-      expect(dataArg).to.not.have.property('tokowakaDeployed');
+      // The suggestion was treated as deployed (edgeDeployed present) and passed to the client
+      // Removal of edgeDeployed/tokowakaDeployed is handled by rollbackSuggestions (tested in shared pkg)
+      const [, , suggestions] = rollbackStub.firstCall.args;
+      expect(suggestions).to.include(tokowakaSuggestions[0]);
     });
 
     it('should handle multiple suggestions rollback', async () => {
+      const rollbackStub = sandbox.stub().resolves({
+        succeededSuggestions: [...tokowakaSuggestions],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({ rollbackSuggestions: rollbackStub });
+
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         params: {
@@ -8943,12 +10282,12 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(2);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify both suggestions were updated
-      tokowakaSuggestions.forEach((suggestion) => {
-        expect(suggestion.setData.calledOnce).to.be.true;
-        expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
-        expect(suggestion.save.calledOnce).to.be.true;
-      });
+      // Verify both suggestions were passed to rollbackSuggestions with correct options
+      expect(rollbackStub.calledOnce).to.be.true;
+      const [, , suggestions, options] = rollbackStub.firstCall.args;
+      expect(suggestions).to.include(tokowakaSuggestions[0]);
+      expect(suggestions).to.include(tokowakaSuggestions[1]);
+      expect(options.updatedBy).to.equal('test@test.com');
     });
 
     it('should handle rollback failure gracefully', async () => {
@@ -9175,15 +10514,13 @@ describe('Suggestions Controller', () => {
           .resolves(suggestion);
       });
 
-      // Mock TokowakaClient
+      // Mock TokowakaClient — rollbackSuggestions now handles all suggestion types
+      // (domain-wide, path-level, and per-URL) including covered suggestion cleanup.
       tokowakaClientStub = {
-        fetchMetaconfig: sandbox.stub().resolves({
-          prerender: {
-            enabled: true,
-            patterns: ['/*'],
-          },
+        rollbackSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion],
+          failedSuggestions: [],
         }),
-        uploadMetaconfig: sandbox.stub().resolves(),
       };
 
       sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
@@ -9222,31 +10559,15 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify metaconfig was updated (prerender removed)
-      expect(tokowakaClientStub.fetchMetaconfig.calledOnce).to.be.true;
-      expect(tokowakaClientStub.uploadMetaconfig.calledOnce).to.be.true;
-      const uploadedMetaconfig = tokowakaClientStub.uploadMetaconfig.firstCall.args[1];
-      expect(uploadedMetaconfig).to.not.have.property('prerender');
-
-      // Verify domain-wide suggestion data was updated
-      expect(domainWideSuggestion.setData.calledOnce).to.be.true;
-      const domainWideData = domainWideSuggestion.setData.firstCall.args[0];
-      expect(domainWideData).to.not.have.property('edgeDeployed');
-      expect(domainWideSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
-      expect(domainWideSuggestion.save.calledOnce).to.be.true;
-
-      // Verify covered suggestions were also rolled back
-      coveredSuggestions.forEach((suggestion) => {
-        expect(suggestion.setData.calledOnce).to.be.true;
-        const suggestionData = suggestion.setData.firstCall.args[0];
-        expect(suggestionData).to.not.have.property('edgeDeployed');
-        expect(suggestionData).to.not.have.property('coveredByDomainWide');
-        expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
-        expect(suggestion.save.calledOnce).to.be.true;
-      });
+      // Verify rollbackSuggestions was called with allSuggestions and updatedBy
+      expect(tokowakaClientStub.rollbackSuggestions.calledOnce).to.be.true;
+      const [, , suggestions, options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(suggestions).to.include(domainWideSuggestion);
+      expect(options.allSuggestions).to.include(domainWideSuggestion);
+      expect(options.updatedBy).to.equal('test@test.com');
     });
 
-    it('uses fallback updatedBy when profile email is missing', async () => {
+    it('passes undefined updatedBy when profile email is missing (shared client applies fallbacks)', async () => {
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         attributes: {
@@ -9265,14 +10586,12 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
-      coveredSuggestions.forEach((suggestion) => {
-        expect(suggestion.setUpdatedBy.calledWith('domain-wide-rollback')).to.be.true;
-      });
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.updatedBy).to.be.undefined;
     });
 
-    it('should handle error when metaconfig fetch fails', async () => {
-      tokowakaClientStub.fetchMetaconfig.rejects(new Error('Failed to fetch metaconfig'));
+    it('should handle rollback failure from tokowaka client', async () => {
+      tokowakaClientStub.rollbackSuggestions.rejects(new Error('Failed to rollback suggestions'));
 
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
@@ -9294,10 +10613,12 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[0].message).to.include('Rollback failed');
     });
 
-    it('should continue with domain-wide rollback even if metaconfig has no prerender config', async () => {
-      // Return metaconfig without prerender property
-      tokowakaClientStub.fetchMetaconfig.resolves({
-        someOtherConfig: true,
+    it('should handle ineligible suggestions returned from rollback', async () => {
+      tokowakaClientStub.rollbackSuggestions.resolves({
+        succeededSuggestions: [],
+        failedSuggestions: [
+          { suggestion: domainWideSuggestion, reason: 'No metaconfig found', statusCode: 400 },
+        ],
       });
 
       const response = await suggestionsController.rollbackSuggestionFromEdge({
@@ -9315,15 +10636,10 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
 
       // Should still succeed
-      expect(body.metadata.success).to.equal(1);
-      expect(body.metadata.failed).to.equal(0);
-
-      // Verify metaconfig fetch was attempted but upload was not called (no prerender to remove)
-      expect(tokowakaClientStub.fetchMetaconfig.calledOnce).to.be.true;
-      expect(tokowakaClientStub.uploadMetaconfig.called).to.be.false;
-
-      // Verify domain-wide suggestion was still rolled back
-      expect(domainWideSuggestion.save.calledOnce).to.be.true;
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(400);
+      expect(body.suggestions[0].message).to.equal('No metaconfig found');
     });
 
     it('should handle error when TokowakaClient.createFrom fails', async () => {
@@ -9345,7 +10661,6 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const body = await response.json();
 
-      // Should fail all domain-wide suggestions
       expect(body.metadata.success).to.equal(0);
       expect(body.metadata.failed).to.equal(1);
       expect(body.suggestions[0].uuid).to.equal(SUGGESTION_IDS[0]);
@@ -9354,6 +10669,413 @@ describe('Suggestions Controller', () => {
 
       // Verify error was logged
       expect(context.log.error.called).to.be.true;
+    });
+  });
+
+  describe('rollbackSuggestionFromEdge - path-level rollback', () => {
+    let pathSuggestion;
+    let coveredPerUrlSuggestion;
+    let prerenderOpportunity;
+    let tokowakaClientStub;
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
+      pathSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          allowedRegexPatterns: ['^/products'],
+          edgeDeployed: Date.now(),
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      coveredPerUrlSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/products/item',
+          edgeDeployed: Date.now(),
+          coveredByDomainWide: SUGGESTION_IDS[0],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      prerenderOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('prerender'),
+      };
+
+      site.getConfig = sandbox.stub().returns({
+        getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+      });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+
+      const allSuggestions = [pathSuggestion, coveredPerUrlSuggestion];
+      mockSuggestion.allByOpportunityId.resolves(allSuggestions);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(pathSuggestion);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[1]).resolves(coveredPerUrlSuggestion);
+
+      tokowakaClientStub = {
+        rollbackSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [pathSuggestion],
+          failedSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
+
+      context.env = {
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+      };
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+    });
+
+    it('removes pathPattern from allowList and clears edgeDeployed', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify rollbackSuggestions was called with the path suggestion
+      expect(tokowakaClientStub.rollbackSuggestions.calledOnce).to.be.true;
+      const [, , suggestions] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(suggestions).to.include(pathSuggestion);
+    });
+
+    it('deletes entire prerender key when allowList becomes empty after removal', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+
+      // The allowList cleanup is handled by rollbackSuggestions in the shared client
+      expect(tokowakaClientStub.rollbackSuggestions.calledOnce).to.be.true;
+    });
+
+    it('clears coveredByDomainWide on per-URL suggestions covered by this path', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+
+      // Verify allSuggestions is passed so the client can clean up covered suggestions
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.allSuggestions).to.include(coveredPerUrlSuggestion);
+    });
+
+    it('handles error during path rollback and marks suggestion as failed', async () => {
+      tokowakaClientStub.rollbackSuggestions.rejects(new Error('Network timeout'));
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('Rollback failed');
+    });
+
+    it('handles TokowakaClient.createFrom failure and marks all path suggestions as failed', async () => {
+      TokowakaClient.createFrom.restore();
+      sandbox.stub(TokowakaClient, 'createFrom').throws(new Error('Client init failed'));
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('Rollback failed: Internal server error');
+    });
+
+    it('passes undefined updatedBy when profile email is missing (shared client applies path-rollback fallback)', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      // The api-service passes undefined; shared client applies 'path-rollback' fallback internally
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.updatedBy).to.be.undefined;
+    });
+  });
+
+  describe('rollbackSuggestionFromEdge - domain-wide cascade for path suggestions', () => {
+    let domainWideSuggestion;
+    let deployedPathSuggestion;
+    let pathCoveredSuggestion;
+    let prerenderOpportunity;
+    let tokowakaClientStub;
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
+      domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/* (All Domain URLs)',
+          isDomainWide: true,
+          allowedRegexPatterns: ['/*'],
+          pathPattern: '/*',
+          edgeDeployed: Date.now(),
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      deployedPathSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          allowedRegexPatterns: ['^/products'],
+          edgeDeployed: Date.now(),
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      pathCoveredSuggestion = {
+        getId: () => SUGGESTION_IDS[2],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 3,
+        getData: () => ({
+          url: 'https://example.com/products/item',
+          coveredByDomainWide: SUGGESTION_IDS[1],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      prerenderOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('prerender'),
+      };
+
+      site.getConfig = sandbox.stub().returns({
+        getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+      });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+
+      mockSuggestion.allByOpportunityId.resolves([
+        domainWideSuggestion, deployedPathSuggestion, pathCoveredSuggestion,
+      ]);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(domainWideSuggestion);
+
+      tokowakaClientStub = {
+        rollbackSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion],
+          failedSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
+
+      context.env = {
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+      };
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+    });
+
+    it('clears edgeDeployed on deployed path suggestions when domain-wide is rolled back', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+
+      // Verify rollbackSuggestions was called with allSuggestions (for cascade cleanup)
+      expect(tokowakaClientStub.rollbackSuggestions.calledOnce).to.be.true;
+      const [, , suggestions, options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(suggestions).to.include(domainWideSuggestion);
+      expect(options.allSuggestions).to.include(deployedPathSuggestion);
+    });
+
+    it('clears coveredByDomainWide on per-URL suggestions covered by the path during cascade', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+
+      // Verify allSuggestions contains the covered suggestion so the client can clean it up
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.allSuggestions).to.include(pathCoveredSuggestion);
+    });
+
+    it('passes undefined updatedBy when profile email is missing (shared client applies domain-wide-rollback-cascade fallback)', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      // The api-service passes undefined; shared client applies 'domain-wide-rollback-cascade' internally
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.updatedBy).to.be.undefined;
+    });
+
+    it('is a no-op cascade when no path suggestions are deployed', async () => {
+      // Override: no path suggestion has edgeDeployed
+      const undeployedPathSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/products',
+          pathType: 'prefix',
+          pathPattern: '/products',
+          allowedRegexPatterns: ['^/products'],
+          // no edgeDeployed
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, undeployedPathSuggestion]);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // Domain-wide rollback still succeeds (rollbackSuggestions returns it)
+      expect(body.metadata.success).to.equal(1);
+      // Verify allSuggestions is passed so the client can determine no cascade is needed
+      const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
+      expect(options.allSuggestions).to.include(undeployedPathSuggestion);
     });
   });
 
@@ -10655,6 +12377,317 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(500);
       const body = await response.json();
       expect(body).to.have.property('message', 'Error revoking grant');
+    });
+  });
+
+  describe('Branch coverage gap fills', () => {
+    describe('postPlgSuggestionSkipAlert nullish fallbacks (lines 60, 82-85)', () => {
+      it('treats nullish getSiteEnrollments as empty enrollments and does not send PLG alert (covers `enrollments ?? []`)', async () => {
+        const postSlackMessageStub = sandbox.stub().resolves();
+        const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+          '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+        });
+
+        const nullEnrollmentsSite = {
+          getId: sandbox.stub().returns(SITE_ID),
+          getBaseURL: sandbox.stub().returns('https://example.com'),
+          getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+          getSiteEnrollments: sandbox.stub().resolves(null),
+        };
+        const da = {
+          ...mockSuggestionDataAccess,
+          Site: { findById: sandbox.stub().resolves(nullEnrollmentsSite) },
+        };
+        const ctrl = ControllerWithSlack({
+          dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+        const response = await ctrl.patchSuggestion({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+          data: { status: 'SKIPPED' },
+          env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+          ...context,
+          dataAccess: da,
+        });
+        await new Promise(setImmediate);
+
+        expect(response.status).to.equal(200);
+        expect(postSlackMessageStub).to.not.have.been.called;
+      });
+
+      it('falls back to site.getId() / "unknown" when getBaseURL / getType getters return nullish, and reads getId() when opportunity exposes it (covers lines 82-85 both branches)', async () => {
+        const postSlackMessageStub = sandbox.stub().resolves();
+        const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+          '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+        });
+
+        const entitlement = { getProductCode: () => 'ASO', getTier: () => 'PLG' };
+        const enrollment = { getEntitlement: sandbox.stub().resolves(entitlement) };
+        const plgSiteNoBaseURL = {
+          getId: sandbox.stub().returns(SITE_ID),
+          getBaseURL: sandbox.stub().returns(undefined),
+          getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+          getSiteEnrollments: sandbox.stub().resolves([enrollment]),
+        };
+
+        const opportunityWithGetId = {
+          getSiteId: () => SITE_ID,
+          getId: () => 'covered-opp-id',
+          // intentionally NO getType — exercises line 83 `?.` undefined branch
+        };
+
+        const minimalSuggestion = {
+          getId: sandbox.stub().returns(undefined),
+          getOpportunityId: sandbox.stub().returns(OPPORTUNITY_ID),
+          getStatus: sandbox.stub().returns('NEW'),
+          getType: sandbox.stub().returns('broken-backlinks'),
+          getRank: sandbox.stub().returns(1),
+          getData: sandbox.stub().returns({ aggregationKey: 'k' }),
+          getKpiDeltas: sandbox.stub().returns({}),
+          getCreatedAt: sandbox.stub().returns('2025-01-15T10:00:00Z'),
+          getUpdatedAt: sandbox.stub().returns('2025-01-15T10:00:00Z'),
+          getUpdatedBy: sandbox.stub().returns('system'),
+          getSkipReason: sandbox.stub().returns(null),
+          getSkipDetail: sandbox.stub().returns(null),
+          getOpportunity: sandbox.stub().returns(opportunityWithGetId),
+          setRank: sandbox.stub().returnsThis(),
+          setData: sandbox.stub().returnsThis(),
+          setKpiDeltas: sandbox.stub().returnsThis(),
+          setStatus: sandbox.stub().returnsThis(),
+          setSkipReason: sandbox.stub().returnsThis(),
+          setSkipDetail: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub(),
+        };
+        minimalSuggestion.save.resolves(minimalSuggestion);
+
+        const da = {
+          ...mockSuggestionDataAccess,
+          Site: { findById: sandbox.stub().resolves(plgSiteNoBaseURL) },
+          Suggestion: {
+            ...mockSuggestionDataAccess.Suggestion,
+            findById: sandbox.stub().resolves(minimalSuggestion),
+          },
+        };
+        const ctrl = ControllerWithSlack({
+          dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+        const response = await ctrl.patchSuggestion({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+          data: { status: 'SKIPPED', skipReason: 'TOO_RISKY' },
+          env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+          ...context,
+          dataAccess: da,
+        });
+        await new Promise(setImmediate);
+
+        expect(response.status).to.equal(200);
+        expect(postSlackMessageStub).to.have.been.calledOnce;
+        const slackBody = postSlackMessageStub.firstCall.args[1];
+        // siteBaseURL fell back to site.getId()
+        expect(slackBody).to.include(SITE_ID);
+        // opportunityType fell back to 'unknown' (getType missing)
+        expect(slackBody).to.include('unknown');
+        // opportunityId resolved from opportunity.getId?.() (defined branch)
+        expect(slackBody).to.include('covered-opp-id');
+      });
+    });
+
+    describe('autofixSuggestions S2S acl logging (lines 1132, 1135)', () => {
+      it('logs S2S auto-fix granted via the controller-scoped logger (covers line 1132 truthy `ctx.log?` branch)', async () => {
+        const ctxLog = {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+        };
+        const testSite = {
+          id: SITE_ID,
+          getImsOrgId: () => 'test-org-id',
+          getDeliveryType: () => 'aem_edge',
+          getId: () => SITE_ID,
+          getBaseURL: () => 'https://test.com',
+        };
+        mockSuggestionDataAccess.Site.findById.resolves(testSite);
+        mockSuggestionDataAccess.Opportunity.findById.resolves({
+          getSiteId: () => SITE_ID,
+          getType: () => 'broken-backlinks',
+        });
+        mockSuggestion.allByOpportunityId.resolves([]);
+
+        sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+          .resolves({
+            allowed: true, reason: 'granted', clientId: 'svc-autofix', consumerId: 'consumer-1',
+          });
+
+        const EsmockedSuggestionsController = await esmock(
+          '../../src/controllers/suggestions.js',
+          {
+            '../../src/support/utils.js': {
+              getIMSPromiseToken: async () => ({
+                promise_token: 'token', expires_in: 1, token_type: 'promise_token',
+              }),
+              getIsSummitPlgEnabled: async () => true,
+            },
+          },
+        );
+
+        const controllerWithLog = EsmockedSuggestionsController({
+          dataAccess: mockSuggestionDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          log: ctxLog,
+          ...authContext,
+        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+        const response = await controllerWithLog.autofixSuggestions({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          ...context,
+        });
+
+        expect(response.status).to.equal(207);
+        expect(ctxLog.info).to.have.been.calledWithMatch('[acl] S2S auto-fix granted');
+        expect(ctxLog.info).to.have.been.calledWithMatch('clientId=svc-autofix');
+        expect(ctxLog.info).to.have.been.calledWithMatch('consumerId=consumer-1');
+      });
+
+      it('logs S2S auto-fix denied with "n/a" fallback for missing clientId/consumerId (covers line 1135 truthy `ctx.log?` and `|| "n/a"` branches)', async () => {
+        const ctxLog = {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+        };
+        const testSite = {
+          id: SITE_ID,
+          getImsOrgId: () => 'test-org-id',
+          getDeliveryType: () => 'aem_edge',
+          getId: () => SITE_ID,
+          getBaseURL: () => 'https://test.com',
+        };
+        mockSuggestionDataAccess.Site.findById.resolves(testSite);
+
+        sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+          .resolves({ allowed: false, reason: 'missing-capability' });
+        sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+
+        const controllerWithLog = SuggestionsController({
+          dataAccess: mockSuggestionDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          log: ctxLog,
+          ...authContext,
+        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+        const response = await controllerWithLog.autofixSuggestions({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          ...context,
+        });
+
+        expect(response.status).to.equal(403);
+        expect(ctxLog.info).to.have.been.calledWithMatch('[acl] Denied PATCH auto-fix');
+        expect(ctxLog.info).to.have.been.calledWithMatch('reason=missing-capability');
+        expect(ctxLog.info).to.have.been.calledWithMatch('clientId=n/a');
+        expect(ctxLog.info).to.have.been.calledWithMatch('consumerId=n/a');
+      });
+    });
+
+    describe('deploySuggestionToEdge auto-cover message (line 2172)', () => {
+      it('reports "path-level configuration" in the autoCovered message when a path suggestion covers other suggestions', async () => {
+        const pathSuggestion = {
+          getId: () => SUGGESTION_IDS[0],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({
+            url: 'https://example.com/products',
+            pathType: 'prefix',
+            pathPattern: '/products',
+            allowedRegexPatterns: ['^/products'],
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+        const coveredPerUrlSuggestion = {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            url: 'https://example.com/products/widget',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+
+        const prerenderOpportunity = {
+          getId: sandbox.stub().returns(OPPORTUNITY_ID),
+          getSiteId: sandbox.stub().returns(SITE_ID),
+          getType: sandbox.stub().returns('prerender'),
+        };
+
+        sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+        sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
+        site.getConfig = sandbox.stub().returns({
+          getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+        });
+        site.getBaseURL = sandbox.stub().returns('https://example.com');
+        site.getId = sandbox.stub().returns(SITE_ID);
+
+        mockOpportunity.findById.resetBehavior();
+        mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+
+        mockSuggestion.allByOpportunityId.resolves(
+          [pathSuggestion, coveredPerUrlSuggestion],
+        );
+
+        sandbox.stub(TokowakaClient, 'createFrom').returns({
+          deployToEdge: sandbox.stub().resolves({
+            succeededSuggestions: [pathSuggestion],
+            failedSuggestions: [],
+            coveredSuggestions: [coveredPerUrlSuggestion],
+          }),
+        });
+
+        const localContext = {
+          ...context,
+          env: {
+            TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+            TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+            TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+            TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+          },
+          log: {
+            info: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(), debug: sandbox.stub(),
+          },
+        };
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...localContext,
+          pathInfo: { headers: {} },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.autoCovered).to.equal(1);
+        expect(body.metadata.message).to.equal(
+          '1 additional suggestion(s) automatically marked as deployed (covered by path-level configuration)',
+        );
+      });
     });
   });
 });

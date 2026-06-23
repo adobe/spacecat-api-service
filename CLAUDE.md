@@ -17,6 +17,7 @@ npm run test-postdeploy    # Run post-deployment tests
 npm run test-e2e           # Run end-to-end tests (30s timeout)
 npm run lint               # Run ESLint
 npm run lint:fix           # Auto-fix linting issues
+npm run type-check         # Opt-in tsc --checkJs over // @ts-check files (serenity); blocking gate
 ```
 
 ### Single Test Execution
@@ -49,6 +50,25 @@ npm run deploy-dev        # Deploy to dev environment
 npm run deploy-stage      # Deploy to stage environment
 npm run deploy            # Deploy to production
 ```
+
+## Lambda Bundle Constraints
+
+**Source code is bundled into a single Lambda artifact via `helix-deploy` (esbuild). Tests import from source where `import.meta.url` resolves to the real source path — the failure mode of "works in tests, breaks in production" is the bundling layer dropping a non-JS sibling asset on its way into the zip.**
+
+History: SITES-45260 — `handlers/projects.js` read `data/locations.json` synchronously at module load via `readFileSync(import.meta.url)`. The JSON was not in `package.json` `hlx.static`, so `helix-deploy` never copied it into the Lambda zip. Every cold start hit `ENOENT … data/locations.json`, the module export went undefined, and the deploy wrapper raised `TypeError: main2 is not a function` on every invocation. Tests stayed green throughout.
+
+### Rules
+
+- **Do NOT use `readFileSync(import.meta.url, ...)` or any sibling-file reads at module load.** The bundled artifact does not preserve source-relative paths — `import.meta.url` resolves to the bundle location, not the original source location. Anything you read from a sibling path will be missing.
+- **Prefer JS-module imports for static data.** Inline JSON / locale data / lookup tables as `export const FOO = { ... }` in a `.js` file and `import` it normally. The bundler resolves it at build time; no FS access at runtime; no static-asset registry to maintain. This is the preferred shape — see `src/support/serenity/* JS modules`.
+- **If you must keep a file as a non-JS asset**, declare its repo-relative path in `package.json` under `hlx.static` so `helix-deploy` copies it into the Lambda zip. Do NOT compute its runtime path from `import.meta.url` — read it from the Lambda task root (`process.env.LAMBDA_TASK_ROOT` or a known absolute path inside the zip).
+- **JSON import attributes** (`import x from './x.json' with { type: 'json' }`) are blocked by the repo's eslint parser today; don't try to work around the lint rule. Use the JS-module pattern instead.
+
+### CI gate
+
+The bundle is validated in CI by the `bundle-build: true` input on the `adobe/mysticat-ci` reusable workflow (`.github/workflows/ci.yaml`) — it runs `npm run build` (`hedy -v --test-bundle`) and invokes the bundled `lambda()` against a healthcheck, catching the module-load failures that source-only lint+test+coverage miss (SITES-45260). The gate lives upstream; don't re-add a repo-local `bundle-build` job.
+
+If you touch the bundle layer (new asset, a dependency that uses FS at boot, `hlx.static` changes, new top-level side-effects), run `npm run build` locally before pushing — faster than waiting on CI.
 
 ## Architecture Overview
 
@@ -179,11 +199,43 @@ const hasAccess = await accessControlUtil.hasAccess(
 );
 ```
 
+**S2S consumer capability pattern** — use this instead of a bare `hasAdminAccess()` when a route is already mapped in `required-capabilities.js` and should be reachable by S2S consumers:
+
+```javascript
+import { CAP_CONFIGURATION_WRITE } from '../routes/capability-constants.js';
+
+// Dual-layer check: admin bypass first, then fresh DB fetch for S2S consumers.
+// Returns a forbidden Response when denied, null when access is granted.
+const authorizeWrite = async (context, route) => {
+  const requestId = context?.invocation?.id || 'unknown';
+  const isAdmin = accessControlUtil.hasAdminAccess();
+  const s2sResult = isAdmin
+    ? { allowed: false, reason: 'admin-bypass' }
+    : await accessControlUtil.hasS2SCapability(CAP_CONFIGURATION_WRITE);
+  if (!isAdmin && !s2sResult.allowed) {
+    log.info(`[acl] Denied ${route} - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+    return forbidden('Forbidden');
+  }
+  if (s2sResult.allowed) {
+    log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_CONFIGURATION_WRITE} requestId=${requestId}`);
+  }
+  return null;
+};
+
+// In the handler:
+const denied = await authorizeWrite(context, 'PATCH /configurations/latest');
+if (denied) {
+  return denied;
+}
+```
+
+Capability constants live in `src/routes/capability-constants.js`. Both the route map (`required-capabilities.js`) and the controller must reference the **same constant** — the `capability-constants drift coverage` test enforces this. See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the full two-layer design.
+
 **Authentication precedence** (checked in order):
 1. JWT with scopes
 2. Adobe IMS
 3. Scoped API Key (fine-grained permissions)
-4. Legacy API Key (backward compatibility)
+4. Route-Scoped Legacy API Key (`POST /event/fulfillment` and `POST /slack/channels/invite-by-user-id` only — frozen list, SITES-34224)
 
 ### Queue-Based Async Pattern
 

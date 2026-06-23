@@ -14,6 +14,95 @@
 import crypto from 'node:crypto';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
+import { classifyIntents } from './intent-classifier.js';
+import { throwOnPgConstraintViolation } from './errors.js';
+import { INTENT_VALUES, normalizeIntent } from './intent.js';
+
+// Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
+// live in `./intent.js` so the LLM intent classifier can reuse them without an
+// import cycle. Existing importers of these from `prompts-storage.js` keep working.
+export { INTENT_VALUES, normalizeIntent };
+
+/**
+ * Per-client cache of whether `prompts.intent` is selectable/writable. Keyed by
+ * the PostgREST client so unit tests (fresh mock clients) never bleed state and
+ * production detects once per client instance. Absent = unknown (try with
+ * intent); `false` = known-missing (skip intent up front).
+ *
+ * Why best-effort instead of bumping the IT image: the integration PostgREST
+ * image is pinned to a data-service version that predates the `intent`
+ * migration, and bumping it pulls in unrelated migrations + a constraint that
+ * rejects the IT seed brand. So the code self-defends: when `intent` is absent,
+ * prompts are still written/read WITHOUT intent rather than 500-ing.
+ *
+ * TODO: remove this fallback (the WeakMap, `isMissingIntentColumnError`, and the
+ * try/detect/retry in withMissingIntentFallback) once the IT PostgREST image in
+ * `test/it/postgres/docker-compose.yml` is bumped to a mysticat-data-service
+ * version >= v5.27.0 that includes the `intent` column. Tracked in SITES-39521.
+ */
+const intentColumnSupported = new WeakMap();
+
+/**
+ * Detects a PostgREST/Postgres error that indicates the `intent` column is
+ * absent. Covers the insert/upsert error (`PGRST204`, "Could not find the
+ * 'intent' column of 'prompts' in the schema cache") and the select error
+ * (`42703`, "column prompts.intent does not exist").
+ *
+ * Gated on the two specific error codes first, THEN on the column being
+ * `intent`. This deliberately avoids broad message matching: an error that
+ * merely mentions "intent" and "column" (e.g. a future check-constraint
+ * violation "column intent violates check constraint") must NOT be treated as
+ * a missing column, or the fallback would latch off and silently drop the
+ * intent the caller sent — the exact data-loss bug this code exists to fix.
+ *
+ * @param {*} error - Error object from a PostgREST response (`{ message, details, hint, code }`)
+ * @returns {boolean} true when the error is specifically about a missing `intent` column
+ */
+export function isMissingIntentColumnError(error) {
+  if (!error) {
+    return false;
+  }
+  const code = String(error.code || '').toUpperCase();
+  if (code !== '42703' && code !== 'PGRST204') {
+    return false;
+  }
+  const haystack = [error.message, error.details, error.hint]
+    .filter((v) => v != null)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes('intent');
+}
+
+/**
+ * Removes the `intent` key from a row/patch (used when the column is known-absent).
+ */
+function stripIntent(row) {
+  const { intent: _, ...rest } = row;
+  return rest;
+}
+
+/**
+ * Runs a PostgREST op that may reference `prompts.intent`, transparently degrading
+ * when the column is absent (see intentColumnSupported). `run(includeIntent)` builds
+ * AND executes the op with or without intent and resolves to a PostgREST result
+ * (`{ error, ... }`). On the first missing-`intent`-column error for a client it
+ * caches the fact and retries once without intent; subsequent calls skip intent up
+ * front. Centralizes the try/detect/cache/retry the read and write paths share.
+ *
+ * @param {object} postgrestClient - PostgREST client (WeakMap key)
+ * @param {(includeIntent: boolean) => Promise<object>} run - builds+executes the op
+ * @returns {Promise<object>} the PostgREST result
+ */
+async function withMissingIntentFallback(postgrestClient, run) {
+  const includeIntent = intentColumnSupported.get(postgrestClient) !== false;
+  const result = await run(includeIntent);
+  if (includeIntent && result?.error && isMissingIntentColumnError(result.error)) {
+    intentColumnSupported.set(postgrestClient, false);
+    return run(false);
+  }
+  return result;
+}
+
 /**
  * Resolves brandId (path param) to Postgres brands.id (uuid).
  * Tries: 1) valid uuid lookup, 2) case-insensitive name lookup.
@@ -55,31 +144,44 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
 }
 
 /**
- * Resolves category business key to categories.id (uuid).
+ * Resolves a category UUID to categories.id (uuid), validating that the row
+ * belongs to the organization. The v2 API exposes only the UUID primary key
+ * (`categories.id`) as the category identifier, so the input must be a UUID.
+ *
+ * Returns null for anything that is not a valid UUID or does not resolve to a
+ * row in the org. Callers that filter by category MUST treat null as "no
+ * match" (return empty), never as "no filter" — the legacy dual-path
+ * (UUID-or-business-key) silently dropped the filter when a UUID-shaped
+ * business key failed to resolve, returning every prompt for the brand
+ * (LLMO-5515).
  *
  * @param {string} organizationId - SpaceCat organization UUID
- * @param {string} categoryId - Business key (e.g. "photoshop-photo-editing")
+ * @param {string} categoryId - categories.id UUID
  * @param {object} postgrestClient - PostgREST client
  * @returns {Promise<string|null>} categories.id (uuid) or null
  */
 export async function resolveCategoryUuid(organizationId, categoryId, postgrestClient) {
-  if (!hasText(categoryId) || !postgrestClient?.from) {
+  if (!hasText(categoryId) || !isValidUUID(categoryId) || !postgrestClient?.from) {
     return null;
   }
   const { data, error } = await postgrestClient
     .from('categories')
     .select('id')
     .eq('organization_id', organizationId)
-    .eq('category_id', categoryId)
+    .eq('id', categoryId)
     .maybeSingle();
   return !error && data?.id ? data.id : null;
 }
 
 /**
- * Resolves topic business key to topics.id (uuid).
+ * Resolves topic business key or UUID to topics.id (uuid).
+ * When topicId is a UUID it is looked up by primary key scoped to the
+ * organization (consistent with resolveBrandUuid) — this validates org
+ * ownership rather than blindly trusting the caller-supplied UUID.
+ * When topicId is a business key it is looked up by topic_id as before.
  *
  * @param {string} organizationId - SpaceCat organization UUID
- * @param {string} topicId - Business key
+ * @param {string} topicId - Business key or UUID
  * @param {object} postgrestClient - PostgREST client
  * @returns {Promise<string|null>} topics.id (uuid) or null
  */
@@ -87,12 +189,11 @@ export async function resolveTopicUuid(organizationId, topicId, postgrestClient)
   if (!hasText(topicId) || !postgrestClient?.from) {
     return null;
   }
-  const { data, error } = await postgrestClient
-    .from('topics')
-    .select('id')
-    .eq('organization_id', organizationId)
-    .eq('topic_id', topicId)
-    .maybeSingle();
+  const query = postgrestClient.from('topics').select('id').eq('organization_id', organizationId);
+  const { data, error } = await (isValidUUID(topicId)
+    ? query.eq('id', topicId)
+    : query.eq('topic_id', topicId)
+  ).maybeSingle();
   return !error && data?.id ? data.id : null;
 }
 
@@ -129,7 +230,9 @@ async function buildLookupMaps(organizationId, postgrestClient) {
  * Ensures that all referenced categories and topics exist in their respective
  * tables. Creates any missing ones (by name) and updates the lookup maps in place.
  * Map keys are normalized (lowercase + trim) for case-insensitive matching.
- * The name is also used as the business key (category_id / topic_id) for new entries.
+ * New categories dedup on (organization_id, name) — the legacy `category_id`
+ * business key is no longer set and falls to its random DB default (LLMO-5515).
+ * New topics still set the `topic_id` business key from the name.
  */
 // eslint-disable-next-line max-len
 async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy) {
@@ -154,13 +257,12 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
         .upsert(
           missingCatNames.map((name) => ({
             organization_id: organizationId,
-            category_id: name,
             name,
             origin: 'human',
             status: 'active',
             updated_by: updatedBy,
           })),
-          { onConflict: 'organization_id,category_id' },
+          { onConflict: 'organization_id,name' },
         )
         .select('id,name')
         .then(({ data, error }) => {
@@ -232,6 +334,7 @@ function mapRowToPrompt(row) {
     status: row.status || 'active',
     origin: row.origin || 'human',
     source: row.source || 'config',
+    intent: row.intent ?? null,
     createdAt: row.created_at,
     createdBy: row.created_by,
     updatedAt: row.updated_at,
@@ -270,8 +373,8 @@ function mapRowToPrompt(row) {
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
  * @param {string} [params.brandId] - Filter by brand (uuid or config id)
- * @param {string} [params.categoryId] - Filter by category business key
- * @param {string} [params.topicId] - Filter by topic business key
+ * @param {string} [params.categoryId] - Filter by category UUID (categories.id)
+ * @param {string} [params.topicId] - Filter by topic business key or UUID
  * @param {string} [params.status] - Filter by status (active, pending, deleted)
  * @param {string} [params.search] - Free-text search across prompt text, name,
  * topic name, category name
@@ -320,7 +423,32 @@ export async function listPrompts({
   const pageNum = Math.max(1, Number(page) || 1);
   const offset = (pageNum - 1) * limitNum;
 
-  const select = `
+  // Resolve category/topic filters up front and FAIL CLOSED: when a filter is
+  // requested but does not resolve to a row in this org, return an empty page
+  // rather than dropping the filter and returning every prompt for the brand.
+  // Mirrors the brandUuid guard above. The unfiltered-leak this prevents was
+  // LLMO-5515 (a UUID-shaped category business key that resolved to no row).
+  const emptyPage = {
+    items: [], total: 0, limit: limitNum, page: pageNum,
+  };
+
+  let categoryUuid = null;
+  if (hasText(categoryId)) {
+    categoryUuid = await resolveCategoryUuid(organizationId, categoryId, postgrestClient);
+    if (!categoryUuid) {
+      return emptyPage;
+    }
+  }
+
+  let topicUuid = null;
+  if (hasText(topicId)) {
+    topicUuid = await resolveTopicUuid(organizationId, topicId, postgrestClient);
+    if (!topicUuid) {
+      return emptyPage;
+    }
+  }
+
+  const buildSelect = (includeIntent) => `
     id,
     prompt_id,
     name,
@@ -328,7 +456,7 @@ export async function listPrompts({
     regions,
     status,
     origin,
-    source,
+    source,${includeIntent ? '\n    intent,' : ''}
     category_id,
     topic_id,
     brand_id,
@@ -337,70 +465,69 @@ export async function listPrompts({
     updated_at,
     updated_by,
     brands(id,name),
-    categories(id,category_id,name,origin),
+    categories(id,name,origin),
     topics(id,topic_id,name)
   `;
 
-  let baseQuery = postgrestClient
-    .from('prompts')
-    .select(select, { count: 'exact' })
-    .eq('organization_id', organizationId);
+  // Best-effort against environments where `prompts.intent` is absent (see
+  // intentColumnSupported): try with intent, and on a missing-column error
+  // remember it for this client and re-run the select without intent.
+  const run = (includeIntent) => {
+    let baseQuery = postgrestClient
+      .from('prompts')
+      .select(buildSelect(includeIntent), { count: 'exact' })
+      .eq('organization_id', organizationId);
 
-  // Sorting
-  const sortCol = SORT_COLUMN_MAP[sort];
-  if (sortCol) {
-    const ascending = order === 'asc';
-    if (sortCol.includes('(')) {
-      const [foreignTable, col] = sortCol.replace(')', '').split('(');
-      baseQuery = baseQuery.order(col, { ascending, foreignTable });
+    // Sorting
+    const sortCol = SORT_COLUMN_MAP[sort];
+    if (sortCol) {
+      const ascending = order === 'asc';
+      if (sortCol.includes('(')) {
+        const [foreignTable, col] = sortCol.replace(')', '').split('(');
+        baseQuery = baseQuery.order(col, { ascending, foreignTable });
+      } else {
+        baseQuery = baseQuery.order(sortCol, { ascending });
+      }
+      baseQuery = baseQuery.order('id', { ascending: true });
     } else {
-      baseQuery = baseQuery.order(sortCol, { ascending });
+      baseQuery = baseQuery
+        .order('updated_at', { ascending: false })
+        .order('id', { ascending: true });
     }
-    baseQuery = baseQuery.order('id', { ascending: true });
-  } else {
-    baseQuery = baseQuery
-      .order('updated_at', { ascending: false })
-      .order('id', { ascending: true });
-  }
 
-  if (brandUuid) {
-    baseQuery = baseQuery.eq('brand_id', brandUuid);
-  }
-  if (hasText(status)) {
-    baseQuery = baseQuery.eq('status', status);
-  } else {
-    baseQuery = baseQuery.neq('status', 'deleted');
-  }
+    if (brandUuid) {
+      baseQuery = baseQuery.eq('brand_id', brandUuid);
+    }
+    if (hasText(status)) {
+      baseQuery = baseQuery.eq('status', status);
+    } else {
+      baseQuery = baseQuery.neq('status', 'deleted');
+    }
 
-  if (hasText(origin)) {
-    baseQuery = baseQuery.eq('origin', origin);
-  }
+    if (hasText(origin)) {
+      baseQuery = baseQuery.eq('origin', origin);
+    }
 
-  if (hasText(region)) {
-    baseQuery = baseQuery.contains('regions', [region]);
-  }
+    if (hasText(region)) {
+      baseQuery = baseQuery.contains('regions', [region]);
+    }
 
-  if (hasText(search)) {
-    const term = `%${search}%`;
-    baseQuery = baseQuery.or(`text.ilike.${term},name.ilike.${term}`);
-  }
+    if (hasText(search)) {
+      const term = `%${search}%`;
+      baseQuery = baseQuery.or(`text.ilike.${term},name.ilike.${term}`);
+    }
 
-  if (hasText(categoryId) || hasText(topicId)) {
-    const categoryUuid = hasText(categoryId)
-      ? await resolveCategoryUuid(organizationId, categoryId, postgrestClient)
-      : null;
-    const topicUuid = hasText(topicId)
-      ? await resolveTopicUuid(organizationId, topicId, postgrestClient)
-      : null;
     if (categoryUuid) {
       baseQuery = baseQuery.eq('category_id', categoryUuid);
     }
     if (topicUuid) {
       baseQuery = baseQuery.eq('topic_id', topicUuid);
     }
-  }
 
-  const { data: rows, error, count } = await baseQuery.range(offset, offset + limitNum - 1);
+    return baseQuery.range(offset, offset + limitNum - 1);
+  };
+
+  const { data: rows, error, count } = await withMissingIntentFallback(postgrestClient, run);
 
   if (error) {
     throw new Error(`Failed to list prompts: ${error.message}`);
@@ -440,7 +567,9 @@ export async function getPromptById({
     return null;
   }
 
-  const { data, error } = await postgrestClient
+  // Best-effort against environments where `prompts.intent` is absent: try with
+  // intent, and on a missing-column error remember it and re-run without intent.
+  const run = (includeIntent) => postgrestClient
     .from('prompts')
     .select(`
       id,
@@ -450,7 +579,7 @@ export async function getPromptById({
       regions,
       status,
       origin,
-      source,
+      source,${includeIntent ? '\n      intent,' : ''}
       category_id,
       topic_id,
       brand_id,
@@ -459,13 +588,15 @@ export async function getPromptById({
       updated_at,
       updated_by,
       brands(id,name),
-      categories(id,category_id,name,origin),
+      categories(id,name,origin),
       topics(id,topic_id,name)
     `)
     .eq('organization_id', organizationId)
     .eq('brand_id', brandUuid)
     .eq('prompt_id', promptId)
     .maybeSingle();
+
+  const { data, error } = await withMissingIntentFallback(postgrestClient, run);
 
   if (error) {
     throw new Error(`Failed to get prompt: ${error.message}`);
@@ -496,6 +627,8 @@ export async function upsertPrompts({
   prompts,
   postgrestClient,
   updatedBy = 'system',
+  classifyIntent,
+  classifyIntentBatchTimeoutMs,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
@@ -527,7 +660,7 @@ export async function upsertPrompts({
 
   const getKey = (p) => {
     const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();
-    return `${String(p.prompt || p.text || '').trim()}:${norm.join(',')}`;
+    return `${String(p.prompt || p.text || '').trim().toLowerCase()}:${norm.join(',')}`;
   };
 
   const existingById = new Map((existing || []).map((p) => [p.prompt_id, p]));
@@ -568,6 +701,7 @@ export async function upsertPrompts({
       status: p.status || 'active',
       origin: p.origin || 'human',
       source: p.source || 'config',
+      intent: normalizeIntent(p.intent),
       updated_by: updatedBy,
     };
 
@@ -585,13 +719,96 @@ export async function upsertPrompts({
     }
   }
 
+  // Guard against uq_prompt_text_region_per_brand: deduplicate toInsert by
+  // (lower(text), sorted_regions) before the bulk INSERT. For a new brand
+  // existingByKey is empty, so cross-topic text collisions all land here.
+  // Deterministic tie-break: sort by (topic_id, prompt_id) asc, keep first.
+  // Each drop is logged (warn) with a text hash — auditable without echoing
+  // customer data. Dropped entries are removed from processed so counts stay
+  // honest. Guard is > 1: a single-row batch cannot collide with itself.
+  if (toInsert.length > 1) {
+    const dedupKey = (row) => {
+      const t = String(row.text || '').trim().toLowerCase();
+      const r = [...(row.regions || [])].map((x) => String(x).toLowerCase()).sort().join(',');
+      return `${t}:${r}`;
+    };
+    const sortedForDedup = [...toInsert].sort((a, b) => {
+      const tCmp = String(a.topic_id ?? '').localeCompare(String(b.topic_id ?? ''));
+      return tCmp !== 0 ? tCmp : String(a.prompt_id).localeCompare(String(b.prompt_id));
+    });
+    const winnerByKey = new Map();
+    const droppedIds = new Set();
+    for (const row of sortedForDedup) {
+      const key = dedupKey(row);
+      if (winnerByKey.has(key)) {
+        droppedIds.add(row.prompt_id);
+        // eslint-disable-next-line no-console
+        console.warn('[upsertPrompts] dedup-drop', {
+          brand_id: row.brand_id,
+          text_hash: crypto.createHash('sha256').update(row.text || '').digest('hex').slice(0, 12),
+          dropped_prompt_id: row.prompt_id,
+          dropped_topic_id: row.topic_id ?? null,
+          winning_prompt_id: winnerByKey.get(key).prompt_id,
+          winning_topic_id: winnerByKey.get(key).topic_id ?? null,
+        });
+      } else {
+        winnerByKey.set(key, row);
+      }
+    }
+    if (droppedIds.size > 0) {
+      const keep = (r) => !droppedIds.has(r.prompt_id);
+      toInsert.splice(0, toInsert.length, ...toInsert.filter(keep));
+      processed.splice(0, processed.length, ...processed.filter(keep));
+    }
+  }
+
+  // Best-effort intent classification for prompts that arrived WITHOUT an
+  // intent (typically human-added). Pipeline prompts already carry a
+  // normalized intent and are skipped. Failures leave intent null; they MUST
+  // NOT block the write — the backfill/reconciliation path covers them later.
+  if (typeof classifyIntent === 'function') {
+    const rowsNeedingIntent = [...toInsert, ...toUpdate]
+      .filter((r) => r.intent === null && hasText(r.text));
+    if (rowsNeedingIntent.length > 0) {
+      const intentByText = await classifyIntents(
+        classifyIntent,
+        rowsNeedingIntent.map((r) => r.text),
+        { timeoutMs: classifyIntentBatchTimeoutMs },
+      );
+      const apply = (r) => {
+        const classified = intentByText.get(r.text);
+        // Only overwrite when we actually got a bucket back — a null/absent
+        // result (failed or timed-out classification) leaves intent as null.
+        if (r.intent === null && hasText(r.text) && classified != null) {
+          // eslint-disable-next-line no-param-reassign
+          r.intent = classified;
+        }
+      };
+      toInsert.forEach(apply);
+      toUpdate.forEach(apply);
+      // Keep the returned payload consistent with what was persisted.
+      processed.forEach(apply);
+    }
+  }
+
   let created = 0;
   let updated = 0;
   const skipped = prompts.length - toInsert.length - toUpdate.length;
 
+  // Best-effort against environments where `prompts.intent` is absent: the
+  // shared helper drops intent and retries when the column is missing.
   if (toInsert.length > 0) {
-    const { data: inserted, error } = await postgrestClient.from('prompts').insert(toInsert).select();
+    const { data: inserted, error } = await withMissingIntentFallback(
+      postgrestClient,
+      (includeIntent) => postgrestClient
+        .from('prompts')
+        .insert(includeIntent ? toInsert : toInsert.map(stripIntent))
+        .select(),
+    );
     if (error) {
+      throwOnPgConstraintViolation(error, {
+        23505: { status: 409, message: 'A prompt with the same text and region already exists for this brand.' },
+      });
       throw new Error(`Failed to insert prompts: ${error.message}`);
     }
     created = inserted?.length ?? toInsert.length;
@@ -599,8 +816,14 @@ export async function upsertPrompts({
 
   for (const row of toUpdate) {
     const { id, ...patch } = row;
-    // eslint-disable-next-line no-await-in-loop, max-len
-    const { error } = await postgrestClient.from('prompts').update(patch).eq('id', id);
+    // eslint-disable-next-line no-await-in-loop
+    const { error } = await withMissingIntentFallback(
+      postgrestClient,
+      (includeIntent) => postgrestClient
+        .from('prompts')
+        .update(includeIntent ? patch : stripIntent(patch))
+        .eq('id', id),
+    );
     if (error) {
       throw new Error(`Failed to update prompt: ${error.message}`);
     }
@@ -614,6 +837,7 @@ export async function upsertPrompts({
     status: r.status,
     origin: r.origin,
     source: r.source,
+    intent: r.intent,
     createdAt: r.created_at,
     createdBy: r.created_by,
     updatedBy: r.updated_by,
@@ -635,6 +859,9 @@ export async function upsertPrompts({
  * @param {object} params.updates - Partial prompt fields to update
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} params.updatedBy - User performing the update
+ * @param {((text: string) => Promise<string|null>)} [params.classifyIntent] -
+ *   Optional best-effort classifier; used only when the text changes WITHOUT an
+ *   explicit intent. Non-fatal: a null result simply leaves intent unset.
  * @returns {Promise<object|null>} Updated prompt or null if not found
  */
 export async function updatePromptById({
@@ -644,6 +871,7 @@ export async function updatePromptById({
   updates,
   postgrestClient,
   updatedBy = 'system',
+  classifyIntent,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -665,6 +893,17 @@ export async function updatePromptById({
   if (updates.origin !== undefined) {
     patch.origin = updates.origin;
   }
+  if (updates.intent !== undefined) {
+    // The shared fallback strips intent when the column is known-absent.
+    patch.intent = normalizeIntent(updates.intent);
+  } else if (typeof classifyIntent === 'function' && hasText(patch.text)) {
+    // No intent supplied but the text changed: best-effort classify the new
+    // text. Non-fatal — a null result simply leaves intent unset on the patch.
+    const intent = await classifyIntent(patch.text).catch(() => null);
+    if (intent !== null) {
+      patch.intent = intent;
+    }
+  }
   if (updates.categoryId !== undefined) {
     patch.category_id = hasText(updates.categoryId)
       ? await resolveCategoryUuid(organizationId, updates.categoryId, postgrestClient)
@@ -676,14 +915,19 @@ export async function updatePromptById({
       : null;
   }
 
-  const { data, error } = await postgrestClient
+  const runUpdate = (p) => postgrestClient
     .from('prompts')
-    .update(patch)
+    .update(p)
     .eq('organization_id', organizationId)
     .eq('brand_id', brandUuid)
     .eq('prompt_id', promptId)
     .select()
     .maybeSingle();
+
+  const { data, error } = await withMissingIntentFallback(
+    postgrestClient,
+    (includeIntent) => runUpdate(includeIntent ? patch : stripIntent(patch)),
+  );
 
   if (error) {
     throw new Error(`Failed to update prompt: ${error.message}`);
@@ -698,6 +942,96 @@ export async function updatePromptById({
     promptId,
     postgrestClient,
   });
+}
+
+/**
+ * Normalizes a regions array for set comparison: lower-cased, trimmed, non-empty
+ * codes, sorted. Used by the brand-region consistency guard so casing/order
+ * differences never defeat the removed-region comparison.
+ *
+ * @param {string[]} regions
+ * @returns {string[]} normalized, sorted region codes
+ */
+function normalizeRegionsForCompare(regions) {
+  if (!Array.isArray(regions)) {
+    return [];
+  }
+  return regions
+    .filter((r) => r != null)
+    .map((r) => (typeof r === 'string' ? r : String(r)).trim().toLowerCase())
+    .filter((r) => r.length > 0)
+    .sort();
+}
+
+/**
+ * Counts, per region, how many of a brand's non-deleted prompts still use each
+ * of the given regions (LLMO-5645). Used to guard a brand-level region change:
+ * DRS schedules off each prompt's `regions`, so a region must not be removed
+ * from a brand while prompts still reference it (that would orphan those
+ * prompts on a market the brand no longer covers). The operator relocates the
+ * prompts first; comparison is case-insensitive. Deleted prompts are skipped.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {string} params.brandUuid - brands.id (uuid)
+ * @param {string[]} params.oldRegions - brand regions BEFORE the update
+ * @param {string[]} params.newRegions - brand regions AFTER the update
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {object} [params.log] - Logger
+ * @returns {Promise<Record<string, number>>} map of removed region (lowercase)
+ *   → count of prompts still using it; empty when nothing blocks the change
+ */
+export async function findPromptsBlockingRegionRemoval({
+  organizationId,
+  brandUuid,
+  oldRegions,
+  newRegions,
+  postgrestClient,
+  log = console,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const newSet = new Set(normalizeRegionsForCompare(newRegions));
+  const removed = normalizeRegionsForCompare(oldRegions).filter((r) => !newSet.has(r));
+  if (removed.length === 0) {
+    return {};
+  }
+
+  // Fetch the brand's non-deleted prompts. A single brand carries tens to a few
+  // hundred prompts in practice; cap the read and warn (never silently truncate)
+  // if a brand somehow exceeds it so the operator knows the check was partial.
+  const READ_CAP = 5000;
+  const { data, error } = await postgrestClient
+    .from('prompts')
+    .select('id, regions')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandUuid)
+    .neq('status', 'deleted')
+    .limit(READ_CAP);
+
+  if (error) {
+    throw new Error(`Failed to read prompts for region consistency check: ${error.message}`);
+  }
+
+  const prompts = data || [];
+  if (prompts.length >= READ_CAP) {
+    log.warn?.(`findPromptsBlockingRegionRemoval: brand ${brandUuid} has >= ${READ_CAP} prompts; `
+      + 'consistency check may be partial');
+  }
+
+  const counts = {};
+  prompts.forEach((p) => {
+    const promptRegions = new Set(normalizeRegionsForCompare(p.regions));
+    removed.forEach((r) => {
+      if (promptRegions.has(r)) {
+        counts[r] = (counts[r] || 0) + 1;
+      }
+    });
+  });
+
+  return counts;
 }
 
 /**
@@ -790,5 +1124,48 @@ export async function bulkDeletePrompts({
   return {
     metadata: { total, success, failure: failures.length },
     failures,
+  };
+}
+
+export async function checkPromptsExist({ brandUuid, prompts, postgrestClient }) {
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient.rpc('rpc_check_prompts_exist', {
+    p_brand_id: brandUuid,
+    p_prompts: prompts,
+  });
+
+  if (error) {
+    throw new Error(`checkPromptsExist RPC failed: ${error.message}`);
+  }
+
+  return data ?? [];
+}
+
+export async function getPromptStats({ organizationId, brandUuid, postgrestClient }) {
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient.rpc('rpc_brand_prompt_stats', {
+    p_organization_id: organizationId,
+    p_brand_id: brandUuid,
+  });
+
+  if (error) {
+    throw new Error(`getPromptStats RPC failed: ${error.message}`);
+  }
+
+  const row = Array.isArray(data) ? (data[0] ?? {}) : (data ?? {});
+  const intents = Object.fromEntries(
+    INTENT_VALUES.map((k) => [k, Number(row[`intent_${k}`]) || 0]),
+  );
+
+  return {
+    branded: Number(row.branded) || 0,
+    unbranded: Number(row.unbranded) || 0,
+    intents,
   };
 }

@@ -147,6 +147,7 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
   const oldCompetitors = oldConfig?.competitors?.competitors || [];
   const oldDeletedPrompts = oldConfig?.deleted?.prompts || {};
   const oldIgnoredPrompts = oldConfig?.ignored?.prompts || {};
+  const oldClaims = oldConfig?.claims || {};
 
   const stats = {
     categories: { total: 0, modified: 0 },
@@ -158,6 +159,7 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
     deletedPrompts: { total: 0, modified: 0 },
     ignoredPrompts: { total: 0, modified: 0 },
     categoryUrls: { total: 0 },
+    claims: { modified: false },
   };
 
   // 1. Categories
@@ -356,6 +358,8 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
       }
     });
   }
+
+  stats.claims.modified = !deepEqual(newConfig.claims || {}, oldClaims);
 
   return { newConfig, stats };
 };

@@ -12,8 +12,9 @@
 
 /* eslint-disable max-statements-per-line, max-len -- AI Visibility handler surface */
 
+import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import { TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM, BRAND_TOPICS_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
-import { PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
+import { PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM, PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
 import { BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/brand/enums_pb.js';
 import { SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
@@ -21,8 +22,110 @@ import {
   optionalLlmFromQuery, llmToEngine,
   sourceDomainsByTopicFtsRows,
   LLM_ENUM, FTS_LLMS, TOPIC_INTENT_SLUG,
-  settledValueOrElse,
+  settledValueOrElse, resolveTopicIds, buildTextFilterQl,
 } from '../grpc-utils.js';
+
+/* ------------------------------------------------------------------ */
+/*  Sort param parsing for FTS topic-research endpoints                */
+/* ------------------------------------------------------------------ */
+
+const TOPICS_SORT_BY = {
+  RELEVANCE_SCORE: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.RELEVANCE_SCORE,
+  VOLUME: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME,
+};
+
+const PROMPTS_SORT_BY = {
+  PROMPT: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.PROMPT,
+  MENTIONED_BRANDS_COUNT: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT,
+  SOURCES_COUNT: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.SOURCES_COUNT,
+  RELEVANCE_SCORE: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.RELEVANCE_SCORE,
+};
+
+// `promptsByTopicIDs` uses its own order-by enum (no RELEVANCE_SCORE — relevance is a
+// topic-level, not prompt-level, sort). Numeric values otherwise match PROMPTS_SORT_BY.
+const PROMPTS_BY_TOPIC_IDS_SORT_BY = {
+  PROMPT: PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY_ENUM.PROMPT,
+  MENTIONED_BRANDS_COUNT: PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT,
+  SOURCES_COUNT: PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY_ENUM.SOURCES_COUNT,
+};
+
+const BRANDS_SORT_BY = {
+  NAME: BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.NAME,
+  MENTIONS: BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS,
+  SOURCES_COUNT: BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.SOURCES_COUNT,
+};
+
+const SOURCE_DOMAINS_SORT_BY = {
+  DOMAIN: SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.DOMAIN,
+  SOURCES_COUNT: SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.SOURCES_COUNT,
+  MENTIONS: SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS,
+  ORGANIC_TRAFFIC: SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC,
+};
+
+/**
+ * Parses optional `sortBy` and `sortDirection` query params against an endpoint-specific
+ * allowlist and returns the resolved gRPC enum values plus an ordering direction multiplier
+ * for in-process merge-sort. Invalid values produce a `400` response envelope under `error`;
+ * callers must short-circuit on `error` before reading the other fields.
+ *
+ * Defaults are independent: omitting `sortBy` keeps `defaultByKey`; omitting `sortDirection`
+ * keeps `DESC`. This mirrors the v1 brand-topics / brand-prompts handler contract.
+ *
+ * @param {URLSearchParams} sp
+ * @param {Record<string, number>} sortByMap allowlisted UPPER_SNAKE names → gRPC enum values
+ * @param {string} defaultByKey one of the keys of sortByMap (used when sp omits `sortBy`)
+ * @returns {{ error: { status: 400, body: object } } | { by: number, direction: number, sortByKey: string, dirMult: 1 | -1, error?: undefined }}
+ */
+function resolveFtsSort(sp, sortByMap, defaultByKey) {
+  const rawBy = sp.get('sortBy');
+  if (rawBy && !Object.prototype.hasOwnProperty.call(sortByMap, rawBy)) {
+    return {
+      error: {
+        status: 400,
+        body: {
+          error: 'invalid_sort_by',
+          message: `sortBy must be one of: ${Object.keys(sortByMap).join(', ')}`,
+        },
+      },
+    };
+  }
+  const sortByKey = rawBy || defaultByKey;
+  const by = sortByMap[sortByKey];
+
+  const rawDir = sp.get('sortDirection');
+  if (rawDir && rawDir !== 'ASC' && rawDir !== 'DESC') {
+    return {
+      error: {
+        status: 400,
+        body: {
+          error: 'invalid_sort_direction',
+          message: 'sortDirection must be ASC or DESC',
+        },
+      },
+    };
+  }
+  const direction = rawDir === 'ASC' ? ORDER_DIRECTION_ENUM.ASC : ORDER_DIRECTION_ENUM.DESC;
+  const dirMult = rawDir === 'ASC' ? 1 : -1;
+
+  return {
+    by, direction, sortByKey, dirMult,
+  };
+}
+
+// Numeric comparator with intentional 0-fallback: Semrush gRPC responses occasionally
+// omit numeric fields (e.g. `volume`, `organicTraffic`) or return non-finite stringy
+// values, and `Number(undefined) || 0` keeps the sort stable rather than producing NaN
+// (which would make `Array.prototype.sort` non-deterministic). Missing values therefore
+// rank identically to genuine zeros — on ASC they cluster at the start, on DESC at the
+// end. If we ever need to distinguish "missing" from "zero" in the sort order, replace
+// this with an explicit sentinel-aware comparator instead of relying on the truthy `||`.
+function cmpNum(a, b) {
+  return (Number(a) || 0) - (Number(b) || 0);
+}
+
+function cmpStr(a, b) {
+  return String(a ?? '').localeCompare(String(b ?? ''));
+}
 
 /* c8 ignore start -- branch fan-out / defensive paths; see test/support/ai-visibility/handlers/topics.test.js */
 const DISTINCT_TOPIC_IDS_PAGE = 1000;
@@ -40,6 +143,7 @@ export async function countTopicRowsByTopicsByFtsPaging(country, query, llm, cli
   const q = String(query || '').trim();
   if (!q) { return 0; }
   const maxPages = resolveDistinctTopicIdsMaxPages(opts);
+  const dimensionFilterQl = opts?.dimensionFilterQl ?? '';
   async function pull(offset, total, pagesLeft) {
     if (pagesLeft <= 0) {
       return total;
@@ -50,6 +154,7 @@ export async function countTopicRowsByTopicsByFtsPaging(country, query, llm, cli
       query: q,
       order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME },
       range: { limit: DISTINCT_TOPIC_IDS_PAGE, offset },
+      ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
     }).catch(() => ({ topics: [] }));
     const topics = raw.topics || [];
     if (topics.length === 0) {
@@ -65,6 +170,7 @@ export async function countDistinctTopicIdsAcrossFtsLlms(country, query, clients
   const q = String(query || '').trim();
   if (!q) { return 0; }
   const maxPages = resolveDistinctTopicIdsMaxPages(opts);
+  const dimensionFilterQl = opts?.dimensionFilterQl ?? '';
   const seen = new Set();
   async function pullForLlm(llm, offset, pagesLeft) {
     if (pagesLeft <= 0) {
@@ -76,6 +182,7 @@ export async function countDistinctTopicIdsAcrossFtsLlms(country, query, clients
       query: q,
       order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME },
       range: { limit: DISTINCT_TOPIC_IDS_PAGE, offset },
+      ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
     }).catch(() => ({ topics: [] }));
     const topics = raw.topics || [];
     if (topics.length === 0) {
@@ -181,6 +288,12 @@ async function brandsAndSourceDomainsMetricsByFtsAllModels(country, query, clien
   }
 }
 
+// UI/proto field-name map for prompt rows. Two renames are deliberate and load-bearing
+// for downstream consumers (notably `promptsResearchSortKey`):
+//   proto `mentionedBrandsCount` -> UI `mentions`
+//   proto `sourcesCount`         -> UI `citedPages`
+// If you ever sort by these in the merge path, read `row.mentions` / `row.citedPages`
+// off the mapped row, NOT the proto field names.
 function mapPromptRow(p) {
   const tv = p.topicVolume;
   return {
@@ -193,6 +306,22 @@ function mapPromptRow(p) {
     mentions: num(p.mentionedBrandsCount),
     citedPages: num(p.sourcesCount),
     ...(tv != null && tv !== '' ? { topicVolume: num(tv) } : {}),
+    ...(p.briefResponse ? { responseExcerpt: p.briefResponse } : {}),
+  };
+}
+
+// Maps a `PromptsByTopicIDsResponse.Prompt` row. Unlike the FTS prompt row, this gRPC
+// response carries no `topicName` / `topicVolume`, so those are omitted here — callers
+// fetching by topic already know the topic (and backfill name/volume from the parent row).
+function mapTopicIdsPromptRow(p) {
+  return {
+    prompt: p.prompt,
+    promptHash: String(p.promptHash ?? ''),
+    serpId: String(p.serpId ?? ''),
+    topicId: String(p.topicId ?? ''),
+    engine: llmToEngine(p.llm),
+    mentions: num(p.mentionedBrandsCount),
+    citedPages: num(p.sourcesCount),
     ...(p.briefResponse ? { responseExcerpt: p.briefResponse } : {}),
   };
 }
@@ -301,6 +430,19 @@ export async function handleTopicsResearchStats(sp, clients) {
   return { status: 200, body: attachRelatedTopicsAiVolume(body, metricsVol) };
 }
 
+/**
+ * @param {{ sortByKey: string, dirMult: 1 | -1 }} sort
+ */
+function topicsResearchComparator(sort) {
+  const { sortByKey, dirMult } = sort;
+  // Tiebreak by topic name ASC to keep ordering deterministic and to preserve the
+  // pre-existing default behaviour on the RELEVANCE_SCORE + DESC path.
+  if (sortByKey === 'VOLUME') {
+    return (a, b) => cmpNum(a.topicVolume, b.topicVolume) * dirMult || cmpStr(a.topic, b.topic);
+  }
+  return (a, b) => cmpNum(a.relevanceScore, b.relevanceScore) * dirMult || cmpStr(a.topic, b.topic);
+}
+
 export async function handleTopicsResearch(sp, clients) {
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -308,12 +450,16 @@ export async function handleTopicsResearch(sp, clients) {
   if (!q) {
     return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
   }
+  const sort = resolveFtsSort(sp, TOPICS_SORT_BY, 'RELEVANCE_SCORE');
+  if (sort.error) { return sort.error; }
+  const order = { by: sort.by, direction: sort.direction };
+  const dimensionFilterQl = buildTextFilterQl(sp.get('textFilter'), 'topic');
   const llm = optionalLlmFromQuery(sp);
   if (llm) {
     const pair = await Promise.allSettled([
-      countTopicRowsByTopicsByFtsPaging(country, q, llm, clients),
+      countTopicRowsByTopicsByFtsPaging(country, q, llm, clients, { dimensionFilterQl }),
       clients.topicClient.topicsByFTS({
-        country, llm, query: q, order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.RELEVANCE_SCORE }, range: { limit, offset },
+        country, llm, query: q, order, range: { limit, offset }, ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
       }),
     ]);
     const listTotal = settledValueOrElse(pair[0], 0);
@@ -336,9 +482,9 @@ export async function handleTopicsResearch(sp, clients) {
     };
   }
   const pairAll = await Promise.all([
-    countDistinctTopicIdsAcrossFtsLlms(country, q, clients),
+    countDistinctTopicIdsAcrossFtsLlms(country, q, clients, { dimensionFilterQl }),
     Promise.all(FTS_LLMS.map((l) => clients.topicClient.topicsByFTS({
-      country, llm: l, query: q, order: { by: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.RELEVANCE_SCORE }, range: { limit, offset },
+      country, llm: l, query: q, order, range: { limit, offset }, ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
     }).catch(() => ({ topics: [] })))),
   ]);
   const topicsTotalDistinct = pairAll[0];
@@ -361,9 +507,7 @@ export async function handleTopicsResearch(sp, clients) {
       }
     }
   }
-  const merged = Array.from(seen.values()).sort(
-    (a, b) => b.relevanceScore - a.relevanceScore || a.topic.localeCompare(b.topic),
-  );
+  const merged = Array.from(seen.values()).sort(topicsResearchComparator(sort));
   const data = merged.slice(0, limit);
   return {
     status: 200,
@@ -401,20 +545,193 @@ export async function handleTopicsStats(sp, clients) {
   };
 }
 
+/**
+ * @param {{ sortByKey: string }} sort
+ * @returns {(row: object) => number | string}
+ *
+ * Note on field names: rows passed here are post-`mapPromptRow`, so the proto fields
+ * `mentionedBrandsCount` and `sourcesCount` are exposed as `mentions` and `citedPages`
+ * respectively. Sorting on the proto names would silently no-op.
+ */
+function promptsResearchSortKey(sort) {
+  if (sort.sortByKey === 'PROMPT') {
+    return (row) => row.promptNormKey;
+  }
+  if (sort.sortByKey === 'SOURCES_COUNT') {
+    return (row) => row.citedPages;
+  }
+  return (row) => row.mentions;
+}
+
+/**
+ * Group-level aggregator: picks the "best" sort key across the group rows
+ * honouring direction. For DESC we want the highest value to surface the
+ * group first; for ASC we want the lowest.
+ */
+function reduceGroupSortKey(values, sort) {
+  if (sort.sortByKey === 'PROMPT') {
+    return values[0];
+  }
+  if (sort.dirMult === -1) {
+    return values.reduce((acc, v) => (v > acc ? v : acc), Number.NEGATIVE_INFINITY);
+  }
+  return values.reduce((acc, v) => (v < acc ? v : acc), Number.POSITIVE_INFINITY);
+}
+
+/**
+ * Merges per-LLM prompt list pages into one de-duplicated, sorted, capped page.
+ * Shared by the searchQuery (FTS) and topicId (`promptsByTopicIDs`) prompt paths —
+ * upstream they differ only in the gRPC call and the row mapper passed here.
+ * @param {Array<{ prompts?: object[] }>} listResults parallel to FTS_LLMS
+ * @param {Array<{ total?: * }>} totalsResults parallel to FTS_LLMS
+ * @param {{ sortByKey: string, dirMult: 1 | -1 }} sort
+ * @param {(p: object) => object} mapRow maps a raw gRPC prompt to an API row
+ * @param {number} limit page size
+ * @returns {{ data: object[], total: number }}
+ */
+function mergeMultiLlmPromptRows(listResults, totalsResults, sort, mapRow, limit) {
+  const total = totalsResults.reduce((sum, r) => sum + num(r.total), 0);
+  const sortKey = promptsResearchSortKey(sort);
+  const isStringSort = sort.sortByKey === 'PROMPT';
+  const seen = new Map();
+  for (let i = 0; i < FTS_LLMS.length; i += 1) {
+    const engineSlug = llmToEngine(FTS_LLMS[i]);
+    for (const p of (listResults[i]?.prompts || [])) {
+      const row = mapRow(p);
+      row.engine = engineSlug || row.engine;
+      const promptNorm = String(row.prompt ?? '').trim().toLowerCase();
+      const key = row.promptHash && row.serpId
+        ? `${row.topicId}|${row.promptHash}|${row.serpId}|${row.engine}|${promptNorm}`
+        : `${row.topicId}|${promptNorm}|${row.engine}`;
+      if (!seen.has(key)) {
+        const withKeys = { ...row, promptNormKey: promptNorm };
+        withKeys.mentionSortKey = sortKey(withKeys);
+        seen.set(key, withKeys);
+      }
+    }
+  }
+  const byNorm = new Map();
+  for (const row of seen.values()) {
+    const norm = row.promptNormKey;
+    if (!byNorm.has(norm)) { byNorm.set(norm, []); }
+    byNorm.get(norm).push(row);
+  }
+  const groups = [...byNorm.values()].map((rows) => {
+    const sorted = [...rows].sort((a, b) => {
+      const cmp = isStringSort
+        ? cmpStr(a.mentionSortKey, b.mentionSortKey)
+        : cmpNum(a.mentionSortKey, b.mentionSortKey);
+      return cmp * sort.dirMult || cmpStr(a.prompt, b.prompt);
+    });
+    const groupKey = reduceGroupSortKey(sorted.map((r) => r.mentionSortKey), sort);
+    const multiEngine = new Set(sorted.map((r) => r.engine)).size > 1;
+    return {
+      rows: sorted, groupKey, multiEngine, norm: sorted[0].promptNormKey,
+    };
+  });
+  groups.sort((a, b) => {
+    const cmp = isStringSort ? cmpStr(a.groupKey, b.groupKey) : cmpNum(a.groupKey, b.groupKey);
+    return cmp * sort.dirMult || cmpStr(a.norm, b.norm);
+  });
+  const overflowCap = limit + FTS_LLMS.length - 1;
+  const picked = [];
+  for (const g of groups) {
+    if (g.multiEngine) {
+      const n = g.rows.length;
+      if (n <= FTS_LLMS.length) {
+        const nextLen = picked.length + n;
+        if (nextLen <= limit) {
+          picked.push(...g.rows);
+        } else if (picked.length < limit && nextLen <= overflowCap) {
+          picked.push(...g.rows);
+        }
+      }
+    } else if (picked.length < limit) { picked.push(g.rows[0]); }
+  }
+  return { data: picked.map(stripPromptDedupeKeys), total };
+}
+
+/**
+ * Fetches one page of prompts for the given topic ids via `promptsByTopicIDs`
+ * (+ `promptsByTopicIDsTotal`) in a SINGLE call. For the all-engines view this uses
+ * `LLM_ENUM.ALL` so the backend aggregates and paginates server-side. A per-LLM fan-out
+ * + client merge cannot paginate correctly here: each LLM receives the same `offset`, and
+ * the summed total over-counts the merged set, so page 2+ comes back empty. Pass a specific
+ * `llm` to scope to a single engine.
+ * @returns {Promise<{ data: object[], total: number }>}
+ */
+async function promptsByTopicIdsPage({
+  clients, topicIds, country, llm, order, limit, offset, dimensionFilterQl = '',
+}) {
+  const llmEnum = llm ?? LLM_ENUM.ALL;
+  // For a single-engine request, force the requested engine on every row; for ALL, each row
+  // carries its own engine (mapped from `p.llm` in mapTopicIdsPromptRow).
+  const singleEngineSlug = llm ? llmToEngine(llm) : '';
+  const filterField = dimensionFilterQl ? { dimensionFilterQl } : {};
+  const pr = await Promise.allSettled([
+    clients.promptClient.promptsByTopicIDsTotal({
+      country, llm: llmEnum, topicIds, ...filterField,
+    }),
+    clients.promptClient.promptsByTopicIDs({
+      country, llm: llmEnum, topicIds, order, range: { limit, offset }, ...filterField,
+    }),
+  ]);
+  if (pr[1].status !== 'fulfilled') {
+    throw pr[1].reason;
+  }
+  const raw = pr[1].value;
+  const totalsRaw = settledValueOrElse(pr[0], { total: 0 });
+  const data = (raw.prompts || []).map((p) => {
+    const row = mapTopicIdsPromptRow(p);
+    if (singleEngineSlug) { row.engine = singleEngineSlug; }
+    return row;
+  });
+  return { data, total: num(totalsRaw.total) };
+}
+
 export async function handleTopicsResearchPrompts(sp, clients) {
+  const topicFilter = resolveTopicIds(sp);
+  if (!topicFilter.ok) { return { status: topicFilter.status, body: topicFilter.body }; }
+  const hasTopicIds = topicFilter.topicIds.length > 0;
+
   const searchQuery = sp.get('searchQuery')?.trim();
-  if (!searchQuery) {
+  // searchQuery is required only for the free-text path; fetching by topicId does not need it.
+  if (!hasTopicIds && !searchQuery) {
     return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
   }
+
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
   const llm = optionalLlmFromQuery(sp);
+  const dimensionFilterQl = buildTextFilterQl(sp.get('textFilter'), 'prompt');
+  const filterField = dimensionFilterQl ? { dimensionFilterQl } : {};
+
+  if (hasTopicIds) {
+    const sort = resolveFtsSort(sp, PROMPTS_BY_TOPIC_IDS_SORT_BY, 'MENTIONED_BRANDS_COUNT');
+    if (sort.error) { return sort.error; }
+    const order = { by: sort.by, direction: sort.direction };
+    const { data, total } = await promptsByTopicIdsPage({
+      clients, topicIds: topicFilter.topicIds, country, llm, order, limit, offset, dimensionFilterQl,
+    });
+    return {
+      status: 200,
+      body: {
+        data, total, offset, limit,
+      },
+    };
+  }
+
+  const sort = resolveFtsSort(sp, PROMPTS_SORT_BY, 'MENTIONED_BRANDS_COUNT');
+  if (sort.error) { return sort.error; }
+  const order = { by: sort.by, direction: sort.direction };
   if (llm) {
     const engineSlug = llmToEngine(llm);
     const pr = await Promise.allSettled([
-      clients.promptClient.promptsByTopicFTSTotals({ country, llm, query: searchQuery }),
+      clients.promptClient.promptsByTopicFTSTotals({
+        country, llm, query: searchQuery, ...filterField,
+      }),
       clients.promptClient.promptsByTopicFTS({
-        country, llm, query: searchQuery, order: { by: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT }, range: { limit, offset },
+        country, llm, query: searchQuery, order, range: { limit, offset }, ...filterField,
       }),
     ]);
     if (pr[1].status !== 'fulfilled') {
@@ -435,62 +752,14 @@ export async function handleTopicsResearchPrompts(sp, clients) {
     };
   }
   const prPair = await Promise.all([
-    Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicFTSTotals({ country, llm: l, query: searchQuery }).catch(() => ({ total: 0 })))),
+    Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicFTSTotals({
+      country, llm: l, query: searchQuery, ...filterField,
+    }).catch(() => ({ total: 0 })))),
     Promise.all(FTS_LLMS.map((l) => clients.promptClient.promptsByTopicFTS({
-      country, llm: l, query: searchQuery, order: { by: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT }, range: { limit, offset },
+      country, llm: l, query: searchQuery, order, range: { limit, offset }, ...filterField,
     }).catch(() => ({ prompts: [] })))),
   ]);
-  const totalsResults = prPair[0];
-  const listResults = prPair[1];
-  const total = totalsResults.reduce((sum, r) => sum + num(r.total), 0);
-  const seen = new Map();
-  for (let i = 0; i < FTS_LLMS.length; i += 1) {
-    const engineSlug = llmToEngine(FTS_LLMS[i]);
-    for (const p of (listResults[i]?.prompts || [])) {
-      const row = mapPromptRow(p);
-      row.engine = engineSlug || row.engine;
-      const promptNorm = String(row.prompt ?? '').trim().toLowerCase();
-      const key = row.promptHash && row.serpId
-        ? `${row.topicId}|${row.promptHash}|${row.serpId}|${row.engine}|${promptNorm}`
-        : `${row.topicId}|${promptNorm}|${row.engine}`;
-      if (!seen.has(key)) {
-        seen.set(key, { ...row, mentionSortKey: row.mentions, promptNormKey: promptNorm });
-      }
-    }
-  }
-  const byNorm = new Map();
-  for (const row of seen.values()) {
-    const norm = row.promptNormKey;
-    if (!byNorm.has(norm)) { byNorm.set(norm, []); }
-    byNorm.get(norm).push(row);
-  }
-  const groups = [...byNorm.values()].map((rows) => {
-    const sorted = [...rows].sort(
-      (a, b) => b.mentionSortKey - a.mentionSortKey || (a.prompt || '').localeCompare(b.prompt || ''),
-    );
-    const maxSort = Math.max(0, ...sorted.map((r) => r.mentionSortKey));
-    const multiEngine = new Set(sorted.map((r) => r.engine)).size > 1;
-    return {
-      rows: sorted, maxSort, multiEngine, norm: sorted[0].promptNormKey,
-    };
-  });
-  groups.sort((a, b) => b.maxSort - a.maxSort || a.norm.localeCompare(b.norm));
-  const overflowCap = limit + FTS_LLMS.length - 1;
-  const picked = [];
-  for (const g of groups) {
-    if (g.multiEngine) {
-      const n = g.rows.length;
-      if (n <= FTS_LLMS.length) {
-        const nextLen = picked.length + n;
-        if (nextLen <= limit) {
-          picked.push(...g.rows);
-        } else if (picked.length < limit && nextLen <= overflowCap) {
-          picked.push(...g.rows);
-        }
-      }
-    } else if (picked.length < limit) { picked.push(g.rows[0]); }
-  }
-  const data = picked.map(stripPromptDedupeKeys);
+  const { data, total } = mergeMultiLlmPromptRows(prPair[1], prPair[0], sort, mapPromptRow, limit);
   return {
     status: 200,
     body: {
@@ -499,19 +768,40 @@ export async function handleTopicsResearchPrompts(sp, clients) {
   };
 }
 
+/**
+ * @param {{ sortByKey: string, dirMult: 1 | -1 }} sort
+ */
+function brandsResearchComparator(sort) {
+  const { sortByKey, dirMult } = sort;
+  if (sortByKey === 'NAME') {
+    return (a, b) => cmpStr(a.name, b.name) * dirMult || cmpStr(a.domain, b.domain);
+  }
+  if (sortByKey === 'SOURCES_COUNT') {
+    return (a, b) => cmpNum(a.sourceDomainsCount, b.sourceDomainsCount) * dirMult || cmpStr(a.domain, b.domain);
+  }
+  return (a, b) => cmpNum(a.mentions, b.mentions) * dirMult || cmpStr(a.domain, b.domain);
+}
+
 export async function handleTopicsResearchBrands(sp, clients) {
   const searchQuery = sp.get('searchQuery')?.trim();
   if (!searchQuery) {
     return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
   }
+  const sort = resolveFtsSort(sp, BRANDS_SORT_BY, 'MENTIONS');
+  if (sort.error) { return sort.error; }
+  const order = { by: sort.by, direction: sort.direction };
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
+  const dimensionFilterQl = buildTextFilterQl(sp.get('textFilter'), 'name');
+  const filterField = dimensionFilterQl ? { dimensionFilterQl } : {};
   const llm = optionalLlmFromQuery(sp);
   if (llm) {
     const br = await Promise.allSettled([
-      clients.brandClient.brandsByTopicFTSTotals({ country, llm, query: searchQuery }),
+      clients.brandClient.brandsByTopicFTSTotals({
+        country, llm, query: searchQuery, ...filterField,
+      }),
       clients.brandClient.brandsByTopicFTS({
-        country, llm, query: searchQuery, order: { by: BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS }, range: { limit, offset },
+        country, llm, query: searchQuery, order, range: { limit, offset }, ...filterField,
       }),
     ]);
     if (br[1].status !== 'fulfilled') {
@@ -528,9 +818,11 @@ export async function handleTopicsResearchBrands(sp, clients) {
     };
   }
   const brPair = await Promise.all([
-    Promise.all(FTS_LLMS.map((l) => clients.brandClient.brandsByTopicFTSTotals({ country, llm: l, query: searchQuery }).catch(() => ({ total: 0 })))),
+    Promise.all(FTS_LLMS.map((l) => clients.brandClient.brandsByTopicFTSTotals({
+      country, llm: l, query: searchQuery, ...filterField,
+    }).catch(() => ({ total: 0 })))),
     Promise.all(FTS_LLMS.map((l) => clients.brandClient.brandsByTopicFTS({
-      country, llm: l, query: searchQuery, order: { by: BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS }, range: { limit, offset },
+      country, llm: l, query: searchQuery, order, range: { limit, offset }, ...filterField,
     }).catch(() => ({ brands: [] })))),
   ]);
   const totalsResults = brPair[0];
@@ -553,7 +845,7 @@ export async function handleTopicsResearchBrands(sp, clients) {
       }
     }
   }
-  const merged = Array.from(agg.values()).sort((a, b) => b.mentions - a.mentions || a.domain.localeCompare(b.domain));
+  const merged = Array.from(agg.values()).sort(brandsResearchComparator(sort));
   const data = merged.slice(0, limit);
   return {
     status: 200,
@@ -563,19 +855,49 @@ export async function handleTopicsResearchBrands(sp, clients) {
   };
 }
 
+/**
+ * @param {{ sortByKey: string, dirMult: 1 | -1 }} sort
+ */
+function sourceDomainsResearchComparator(sort) {
+  const { sortByKey, dirMult } = sort;
+  if (sortByKey === 'DOMAIN') {
+    // No tiebreak needed: the upstream `agg` Map is keyed by `sourceDomain`, so duplicate
+    // domains are merged before they reach this comparator. The sort key is therefore
+    // already unique across `merged` and a secondary key would never fire.
+    return (a, b) => cmpStr(a.sourceDomain, b.sourceDomain) * dirMult;
+  }
+  if (sortByKey === 'SOURCES_COUNT') {
+    return (a, b) => cmpNum(a.sourcesCount, b.sourcesCount) * dirMult || cmpStr(a.sourceDomain, b.sourceDomain);
+  }
+  if (sortByKey === 'ORGANIC_TRAFFIC') {
+    return (a, b) => cmpNum(a.organicTraffic ?? 0, b.organicTraffic ?? 0) * dirMult || cmpStr(a.sourceDomain, b.sourceDomain);
+  }
+  // MENTIONS default: preserve the historic three-level tiebreak for stability.
+  return (a, b) => cmpNum(a.mentions, b.mentions) * dirMult
+    || cmpNum(a.sourcesCount, b.sourcesCount) * dirMult
+    || cmpStr(a.sourceDomain, b.sourceDomain);
+}
+
 export async function handleTopicsResearchSourceDomains(sp, clients) {
   const searchQuery = sp.get('searchQuery')?.trim();
   if (!searchQuery) {
     return { status: 400, body: { error: 'missing_search_query', message: 'searchQuery is required' } };
   }
+  const sort = resolveFtsSort(sp, SOURCE_DOMAINS_SORT_BY, 'MENTIONS');
+  if (sort.error) { return sort.error; }
+  const order = { by: sort.by, direction: sort.direction };
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
+  const dimensionFilterQl = buildTextFilterQl(sp.get('textFilter'), 'domain');
+  const filterField = dimensionFilterQl ? { dimensionFilterQl } : {};
   const llm = optionalLlmFromQuery(sp);
   if (llm) {
     const sd = await Promise.allSettled([
-      clients.sourceClient.sourceDomainsByTopicFTSTotals({ country, llm, query: searchQuery }),
+      clients.sourceClient.sourceDomainsByTopicFTSTotals({
+        country, llm, query: searchQuery, ...filterField,
+      }),
       clients.sourceClient.sourceDomainsByTopicFTS({
-        country, llm, query: searchQuery, order: { by: SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS }, range: { limit, offset },
+        country, llm, query: searchQuery, order, range: { limit, offset }, ...filterField,
       }),
     ]);
     if (sd[1].status !== 'fulfilled') {
@@ -592,9 +914,11 @@ export async function handleTopicsResearchSourceDomains(sp, clients) {
     };
   }
   const sdPair = await Promise.all([
-    Promise.all(FTS_LLMS.map((l) => clients.sourceClient.sourceDomainsByTopicFTSTotals({ country, llm: l, query: searchQuery }).catch(() => ({ total: 0 })))),
+    Promise.all(FTS_LLMS.map((l) => clients.sourceClient.sourceDomainsByTopicFTSTotals({
+      country, llm: l, query: searchQuery, ...filterField,
+    }).catch(() => ({ total: 0 })))),
     Promise.all(FTS_LLMS.map((l) => clients.sourceClient.sourceDomainsByTopicFTS({
-      country, llm: l, query: searchQuery, order: { by: SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONS }, range: { limit, offset },
+      country, llm: l, query: searchQuery, order, range: { limit, offset }, ...filterField,
     }).catch(() => ({ sourceDomains: [] })))),
   ]);
   const totalsResults = sdPair[0];
@@ -618,11 +942,7 @@ export async function handleTopicsResearchSourceDomains(sp, clients) {
       }
     }
   }
-  const merged = Array.from(agg.values()).sort(
-    (a, b) => b.mentions - a.mentions
-      || b.sourcesCount - a.sourcesCount
-      || a.sourceDomain.localeCompare(b.sourceDomain),
-  );
+  const merged = Array.from(agg.values()).sort(sourceDomainsResearchComparator(sort));
   const data = merged.slice(0, limit);
   return {
     status: 200,

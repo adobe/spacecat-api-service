@@ -24,8 +24,8 @@ import {
 /**
  * Immutable baseline consumers for IT tests.
  * Consumer 1 — ACTIVE with site:read + site:write (no readAll).
- * Consumer 2 — ACTIVE with site:readAll + organization:readAll. Used to exercise
- *   the readAll capability path through GET /sites and GET /organizations.
+ * Consumer 2 — ACTIVE with site:readAll + organization:readAll + trialUser:read. Used to
+ *   exercise readAll and trialUser:read capability paths.
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
@@ -50,7 +50,7 @@ export const consumers = [
     ims_org_id: CONSUMER_2_IMS_ORG_ID,
     consumer_name: 'IT Test Consumer (readAll)',
     status: 'ACTIVE',
-    capabilities: ['site:readAll', 'organization:readAll'],
+    capabilities: ['site:readAll', 'organization:readAll', 'trialUser:read'],
     revoked_at: null,
     created_at: '2026-01-15T10:00:00.000Z',
     updated_at: '2026-01-15T10:00:00.000Z',

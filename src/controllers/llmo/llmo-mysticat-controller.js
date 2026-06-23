@@ -49,11 +49,14 @@ import {
   createAgenticTrafficByStatusHandler,
   createAgenticTrafficByUserAgentHandler,
   createAgenticTrafficByUrlHandler,
+  createAgenticTrafficHitsByUrlsHandler,
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficMoversHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
   createAgenticTrafficHasDataHandler,
+  createAgenticTrafficUrlsExportHandler,
+  createAgenticTrafficUrlsExportStatusHandler,
 } from './llmo-agentic-traffic.js';
 import {
   createReferralTrafficFilterDimensionsHandler,
@@ -195,6 +198,9 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getAgenticTrafficByUrl = createAgenticTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficHitsByUrls = createAgenticTrafficHitsByUrlsHandler(
+    getSiteAndValidateAccess,
+  );
   const getAgenticTrafficFilterDimensions = createAgenticTrafficFilterDimensionsHandler(
     getSiteAndValidateAccess,
   );
@@ -204,6 +210,10 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
+  const exportAgenticTrafficUrls = createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficUrlsExportStatus = createAgenticTrafficUrlsExportStatusHandler(
+    getSiteAndValidateAccess,
+  );
 
   const getReferralTrafficFilterDimensions = createReferralTrafficFilterDimensionsHandler(
     getSiteAndValidateAccess,
@@ -263,11 +273,14 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficByStatus,
     getAgenticTrafficByUserAgent,
     getAgenticTrafficByUrl,
+    getAgenticTrafficHitsByUrls,
     getAgenticTrafficFilterDimensions,
     getAgenticTrafficWeeks,
     getAgenticTrafficMovers,
     getAgenticTrafficUrlBrandPresence,
     getAgenticTrafficHasData,
+    exportAgenticTrafficUrls,
+    getAgenticTrafficUrlsExportStatus,
     getReferralTrafficFilterDimensions,
     getReferralTrafficKpis,
     getReferralTrafficTrend,

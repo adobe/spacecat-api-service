@@ -53,6 +53,14 @@ export const FixDto = {
       origin: fix.getOrigin(),
     };
 
+    // Include IMS-resolved user identity when executedBy was enriched at read time
+    // eslint-disable-next-line no-underscore-dangle
+    if (fix._executedByUser) {
+      // eslint-disable-next-line no-underscore-dangle
+      const { firstName, lastName, email } = fix._executedByUser;
+      result.executedByUser = { firstName, lastName, email };
+    }
+
     // Include suggestions if they are attached to the fix entity
     // eslint-disable-next-line no-underscore-dangle
     if (fix._suggestions && Array.isArray(fix._suggestions)) {

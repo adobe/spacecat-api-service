@@ -21,9 +21,11 @@ import * as Capabilities from '../../src/routes/capability-constants.js';
 const testDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(testDir, '..', '..');
 
-const READ_ALL_CONSTANTS = Object.entries(Capabilities)
+const ALL_CAP_CONSTANTS = Object.entries(Capabilities)
   .filter(([key]) => key.startsWith('CAP_'))
   .map(([, value]) => value);
+
+const READ_ALL_CONSTANTS = ALL_CAP_CONSTANTS.filter((cap) => cap.endsWith(':readAll'));
 
 /**
  * Drift assertions for the readAll capability surface.
@@ -44,7 +46,9 @@ describe('capability-constants drift coverage', () => {
   });
 
   it('every readAll constant is used by at least one route in routeRequiredCapabilities', () => {
-    const usedCaps = new Set(Object.values(routeRequiredCapabilities));
+    // Route values may be a single capability string or an array of acceptable
+    // capabilities; flatten so both shapes contribute to the used-capability set.
+    const usedCaps = new Set(Object.values(routeRequiredCapabilities).flat());
     READ_ALL_CONSTANTS.forEach((cap) => {
       expect(usedCaps.has(cap)).to.equal(
         true,
@@ -55,6 +59,7 @@ describe('capability-constants drift coverage', () => {
 
   it('every readAll capability used in routeRequiredCapabilities is exported as a constant', () => {
     const routeReadAllCaps = Object.values(routeRequiredCapabilities)
+      .flat()
       .filter((cap) => cap.endsWith(':readAll'));
     routeReadAllCaps.forEach((cap) => {
       expect(READ_ALL_CONSTANTS).to.include(
@@ -64,7 +69,19 @@ describe('capability-constants drift coverage', () => {
     });
   });
 
-  it('every readAll constant has an actual hasS2SCapability(CONST) call site (Layer 2 opt-in)', () => {
+  it('every exported CAP_ constant is used by at least one route in routeRequiredCapabilities', () => {
+    // Generalizes the readAll coverage to all capability constants (e.g. configuration:read):
+    // an exported constant that no route requires is dead and should be removed or wired up.
+    const usedCaps = new Set(Object.values(routeRequiredCapabilities).flat());
+    ALL_CAP_CONSTANTS.forEach((cap) => {
+      expect(usedCaps.has(cap)).to.equal(
+        true,
+        `Constant "${cap}" is exported but no route in required-capabilities.js requires it. Either map a route to it or remove the constant.`,
+      );
+    });
+  });
+
+  it('every CAP_ constant with an S2S opt-in has an actual hasS2SCapability(CONST) call site (Layer 2 opt-in)', () => {
     // Tighter assertion than "is the constant imported": there must be an actual
     // hasS2SCapability(...) invocation against the constant (or its literal value).
     // An import alone could rot if the call site is removed but the import is kept,
@@ -72,6 +89,9 @@ describe('capability-constants drift coverage', () => {
     const controllerFiles = [
       join(projectRoot, 'src/controllers/sites.js'),
       join(projectRoot, 'src/controllers/organizations.js'),
+      join(projectRoot, 'src/controllers/suggestions.js'),
+      join(projectRoot, 'src/controllers/configuration.js'),
+      join(projectRoot, 'src/controllers/trial-users.js'),
     ];
     const controllerSource = controllerFiles
       .map((file) => readFileSync(file, 'utf8'))
@@ -88,7 +108,7 @@ describe('capability-constants drift coverage', () => {
       const hasCallSite = callByName.test(controllerSource) || callByLiteral.test(controllerSource);
       expect(hasCallSite).to.equal(
         true,
-        `Constant ${name} ("${value}") has no hasS2SCapability(...) call site in sites.js / organizations.js. Without the Layer 2 check the endpoint stays admin-only - this is a silent denial of intended access.`,
+        `Constant ${name} ("${value}") has no hasS2SCapability(...) call site in any scanned controller (sites.js / organizations.js / suggestions.js / configuration.js). Without the Layer 2 check the endpoint stays admin-only - this is a silent denial of intended access.`,
       );
     });
   });

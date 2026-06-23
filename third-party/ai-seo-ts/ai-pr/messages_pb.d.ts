@@ -644,6 +644,13 @@ export declare type PromptRequest = Message<"semrush.services.ai_seo.pr.v1.Promp
    * @generated from field: optional string target_date = 6;
    */
   targetDate?: string;
+
+  /**
+   * target is the user's brand for response highlighting.
+   *
+   * @generated from field: optional semrush.services.ai_seo.common.v1.Brand target = 7;
+   */
+  target?: Brand;
 };
 
 /**
