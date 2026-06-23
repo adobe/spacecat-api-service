@@ -758,6 +758,7 @@ function StateAccessMappingsController(context) {
         imsOrgId,
         product,
         grantedCapabilities,
+        updatedBy: resolveCallerUserIdent(ctx),
       });
       if (!updated) {
         return notFound('Mapping not found');

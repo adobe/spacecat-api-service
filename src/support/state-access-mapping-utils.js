@@ -437,6 +437,10 @@ export async function createFacsAccessMappings(postgrestClient, {
     product,
     granted_capabilities: grantedCapabilities,
     created_by: createdBy ?? null,
+    // On create, last-modified is the creation itself — stamp the creator so a
+    // fresh row's `updated_by` reflects the actor. `updated_by` is NOT NULL;
+    // fall back to 'system' (the column default) when there's no caller ident.
+    updated_by: createdBy ?? 'system',
   }));
 
   // The active-row uniqueness index is PARTIAL (WHERE revoked_at IS NULL).
@@ -551,6 +555,9 @@ export async function revokeFacsAccessMappingById(postgrestClient, {
  * @param {string} args.imsOrgId            - REQUIRED — org scope guard.
  * @param {string} args.product             - REQUIRED — product scope guard.
  * @param {string[]} args.grantedCapabilities - New capability set (replaces).
+ * @param {string} [args.updatedBy]         - IMS ident of the editor; stamped
+ *                                             onto `updated_by` (RPC COALESCEs a
+ *                                             null back to 'system').
  * @returns {Promise<object|null>} The updated row, or `null` when no active
  *                                  row matched (unknown id, revoked, or a
  *                                  different org/product).
@@ -560,6 +567,7 @@ export async function updateFacsAccessMappingCapabilities(postgrestClient, {
   imsOrgId,
   product,
   grantedCapabilities,
+  updatedBy,
 }) {
   if (!id) {
     throw new Error('updateFacsAccessMappingCapabilities: id is required');
@@ -576,6 +584,8 @@ export async function updateFacsAccessMappingCapabilities(postgrestClient, {
       p_ims_org_id: imsOrgId,
       p_product: product,
       p_granted_capabilities: grantedCapabilities ?? [],
+      // Stamp the editor; the RPC COALESCEs a null back to 'system'.
+      p_updated_by: updatedBy ?? null,
     });
   if (error) {
     throw new Error(`updateFacsAccessMappingCapabilities failed: ${error.message}`);

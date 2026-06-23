@@ -394,6 +394,8 @@ describe('state-access-mapping-utils helpers', () => {
         ims_org_id: 'org-1',
         product: 'LLMO',
         created_by: 'admin@AdobeID',
+        // On create, updated_by mirrors the creator.
+        updated_by: 'admin@AdobeID',
       });
       expect(row.granted_capabilities).to.deep.equal(['llmo/can_view', 'llmo/can_configure']);
       expect(out.created).to.have.length(1);
@@ -474,6 +476,8 @@ describe('state-access-mapping-utils helpers', () => {
         subjects: [{ type: 'user', id: 'A@AdobeID' }],
       });
       expect(client.insertArgs[0].created_by).to.equal(null);
+      // No caller ident → updated_by falls back to the column default 'system'.
+      expect(client.insertArgs[0].updated_by).to.equal('system');
     });
   });
 
@@ -780,6 +784,7 @@ describe('state-access-mapping-utils helpers', () => {
         imsOrgId: 'org-1',
         product: 'LLMO',
         grantedCapabilities: ['llmo/can_view', 'llmo/can_deploy'],
+        updatedBy: 'editor@AdobeID',
       });
       expect(out).to.deep.equal(updated);
       const [fnName, args] = client.rpc.firstCall.args;
@@ -789,7 +794,16 @@ describe('state-access-mapping-utils helpers', () => {
         p_ims_org_id: 'org-1',
         p_product: 'LLMO',
         p_granted_capabilities: ['llmo/can_view', 'llmo/can_deploy'],
+        p_updated_by: 'editor@AdobeID',
       });
+    });
+
+    it('passes p_updated_by as null when updatedBy is omitted (RPC defaults to system)', async () => {
+      const client = fakePostgrestClient({ rpcResult: { data: { id: 'r1' }, error: null } });
+      await updateFacsAccessMappingCapabilities(client, {
+        id: 'r1', imsOrgId: 'org-1', product: 'LLMO', grantedCapabilities: ['llmo/can_view'],
+      });
+      expect(client.rpc.firstCall.args[1].p_updated_by).to.equal(null);
     });
 
     it('defaults grantedCapabilities to an empty array when omitted', async () => {
