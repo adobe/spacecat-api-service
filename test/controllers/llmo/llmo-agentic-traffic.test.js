@@ -1321,9 +1321,46 @@ describe('llmo-agentic-traffic', () => {
       expect(res.status).to.equal(200);
       expect(body.status).to.equal('ready');
       expect(body.downloadUrls).to.have.length(1);
+      const [, cmd] = ctx.s3.getSignedUrl.firstCall.args;
+      expect(cmd.input.ResponseContentDisposition).to.equal('attachment; filename="urls.csv"');
+      expect(cmd.input.ResponseContentType).to.equal('text/csv; charset=utf-8');
       const listCalls = ctx.s3.s3Client.send.getCalls()
         .filter((c) => c.args[0] instanceof ListObjectsV2Command);
       expect(listCalls).to.have.length(0);
+    });
+
+    it('sorts metadata.files by part number in fast path (out-of-order worker writes)', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.getSignedUrl = sinon.stub()
+        .onFirstCall()
+        .resolves('https://signed.example.com/part1')
+        .onSecondCall()
+        .resolves('https://signed.example.com/part2');
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.reject(new Error('should not be called'));
+        }
+        const prefix = command.input.Key.replace(/\/metadata\.json$/, '');
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 20,
+              // Worker wrote part2 before part1 — fast path must sort before signing.
+              files: [`${prefix}/urls.csv_part2`, `${prefix}/urls.csv_part1`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      const calls = ctx.s3.getSignedUrl.getCalls();
+      // After sorting, part1 key must be signed first.
+      expect(calls[0].args[1].input).to.include({ ResponseContentDisposition: 'attachment; filename="urls_part1.csv"' });
+      expect(calls[1].args[1].input).to.include({ ResponseContentDisposition: 'attachment; filename="urls_part2.csv"' });
     });
 
     it('falls back to ListObjectsV2 when metadata.files contains out-of-prefix keys', async () => {
@@ -1751,6 +1788,15 @@ describe('llmo-agentic-traffic', () => {
       expect(body.rowCount).to.equal(10);
       expect(body.filesUploaded).to.equal(2);
       expect(body.bytesUploaded).to.equal(1000);
+      const getSignedUrlCalls = ctx.s3.getSignedUrl.getCalls();
+      expect(getSignedUrlCalls[0].args[1].input).to.include({
+        ResponseContentDisposition: 'attachment; filename="urls_part1.csv"',
+        ResponseContentType: 'text/csv; charset=utf-8',
+      });
+      expect(getSignedUrlCalls[1].args[1].input).to.include({
+        ResponseContentDisposition: 'attachment; filename="urls_part2.csv"',
+        ResponseContentType: 'text/csv; charset=utf-8',
+      });
     });
 
     it('returns failed (ADR enum + message) when metadata reports a failed export', async () => {

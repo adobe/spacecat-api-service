@@ -340,8 +340,15 @@ async function buildExportReadyResponse(ctx, bucket, exportId, csvKeys, metadata
   const keysToSign = csvKeys.slice(0, MAX_EXPORT_DOWNLOAD_URLS);
   const { s3Region } = getExportConfig(ctx);
   const signingClient = getSigningClient(ctx, s3Region);
-  const downloadUrls = await Promise.all(keysToSign.map(async (key) => {
-    const command = new ctx.s3.GetObjectCommand({ Bucket: bucket, Key: key });
+  const downloadUrls = await Promise.all(keysToSign.map(async (key, i) => {
+    const partSuffix = keysToSign.length > 1 ? `_part${i + 1}` : '';
+    const filename = `urls${partSuffix}.csv`;
+    const command = new ctx.s3.GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ResponseContentDisposition: `attachment; filename="${filename}"`,
+      ResponseContentType: 'text/csv; charset=utf-8',
+    });
     return ctx.s3.getSignedUrl(signingClient, command, { expiresIn });
   }));
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
@@ -860,7 +867,11 @@ export function createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess) 
           // Fast path: sign worker-written files[] directly. Validated first.
           if (metadata?.status === 'success'
             && Array.isArray(metadata.files) && metadata.files.length > 0) {
-            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId);
+            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId)
+              .sort((a, b) => {
+                const partNum = (k) => Number(k.match(PART_SUFFIX_PATTERN)?.[1] ?? 0);
+                return partNum(a) - partNum(b);
+              });
             if (safeFiles.length === metadata.files.length) {
               return buildExportReadyResponse(ctx, s3Bucket, exportId, safeFiles, metadata);
             }
@@ -964,7 +975,11 @@ export function createAgenticTrafficUrlsExportStatusHandler(getSiteAndValidateAc
           // Fast path: sign worker-written files[] directly. Validated first.
           if (metadata?.status === 'success'
             && Array.isArray(metadata.files) && metadata.files.length > 0) {
-            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId);
+            const safeFiles = validateFilesAgainstPrefix(metadata.files, siteId, exportId)
+              .sort((a, b) => {
+                const partNum = (k) => Number(k.match(PART_SUFFIX_PATTERN)?.[1] ?? 0);
+                return partNum(a) - partNum(b);
+              });
             if (safeFiles.length === metadata.files.length) {
               return buildExportReadyResponse(ctx, s3Bucket, exportId, safeFiles, metadata);
             }
