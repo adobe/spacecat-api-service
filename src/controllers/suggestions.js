@@ -49,7 +49,7 @@ import {
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
-import { DOMAIN_WIDE_COVERED_MARKING_TYPE } from '../support/edge-routing-utils.js';
+import { PATTERN_COVERED_MARKING_TYPE } from '../support/edge-routing-utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -2010,10 +2010,10 @@ function SuggestionsController(ctx, sqs, env) {
           await context.sqs.sendMessage(
             context.env.IMPORT_WORKER_QUEUE_URL,
             {
-              type: DOMAIN_WIDE_COVERED_MARKING_TYPE,
+              type: PATTERN_COVERED_MARKING_TYPE,
               siteId,
               opportunityId,
-              domainWideSuggestionIds: succeededDomainWideIds,
+              patternBasedSuggestionIds: succeededDomainWideIds,
             },
           );
           context.log.info(`[edge-deploy] Queued domain-wide covered marking for ${succeededDomainWideIds.length} domain-wide suggestion(s)`);
