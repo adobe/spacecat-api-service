@@ -321,6 +321,7 @@ describe('getRouteHandlers', () => {
     patchLlmoCdnLogsFilter: () => null,
     patchLlmoCdnBucketConfig: () => null,
     onboardCustomer: () => null,
+    onboardSiteOnly: () => null,
     offboardCustomer: () => null,
     queryFiles: () => null,
     patchLlmoDataRow: () => null,
@@ -480,9 +481,6 @@ describe('getRouteHandlers', () => {
     getBrandsSourceOpportunities: sinon.stub(),
     getBrandsCompetitors: sinon.stub(),
     getCompetitorsMetrics: sinon.stub(),
-    getCompetitorsGapTopics: sinon.stub(),
-    getCompetitorsGapSourceDomains: sinon.stub(),
-    getCompetitorsGapPrompts: sinon.stub(),
     getMeta: sinon.stub(),
     getPromptsResponsesLatest: sinon.stub(),
     getPromptsResponses: sinon.stub(),
@@ -502,7 +500,11 @@ describe('getRouteHandlers', () => {
     getV1PromptBrandPromptsExport: sinon.stub(),
     getV1PromptGapPrompts: sinon.stub(),
     getV1PromptGapPromptsExport: sinon.stub(),
+    getV1PromptGapPromptsTotals: sinon.stub(),
     getV1PromptPromptResponse: sinon.stub(),
+    getV1SourceGapSourceDomains: sinon.stub(),
+    getV1SourceGapSourceDomainsExport: sinon.stub(),
+    getV1SourceGapSourceDomainsTotals: sinon.stub(),
     getV1PromptResearchPromptsExport: sinon.stub(),
     getV1PromptResearchBrandsExport: sinon.stub(),
     getV1PromptResearchSourceDomainsExport: sinon.stub(),
@@ -544,6 +546,10 @@ describe('getRouteHandlers', () => {
 
   const mockProxyController = {
     getPreview: sinon.stub(),
+  };
+
+  const mockRedirectsController = {
+    getRedirects: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -606,6 +612,7 @@ describe('getRouteHandlers', () => {
       mockAgenticPageTypesController,
       mockSerenityController,
       mockProxyController,
+      mockRedirectsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -654,9 +661,6 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/brands/source-opportunities',
       'GET /llmo/ai-visibility/brands/competitors',
       'GET /llmo/ai-visibility/competitors/metrics',
-      'GET /llmo/ai-visibility/competitors/gap-topics',
-      'GET /llmo/ai-visibility/competitors/gap-source-domains',
-      'GET /llmo/ai-visibility/competitors/gap-prompts',
       'GET /llmo/ai-visibility/meta',
       'GET /llmo/ai-visibility/prompts/responses/latest',
       'GET /llmo/ai-visibility/prompts/responses',
@@ -676,7 +680,11 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export',
+      'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals',
       'GET /llmo/ai-visibility/v1/prompt/prompt-response',
+      'GET /llmo/ai-visibility/v1/source/gap-source-domains',
+      'GET /llmo/ai-visibility/v1/source/gap-source-domains-export',
+      'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals',
       'GET /llmo/ai-visibility/v1/prompt-research/prompts-export',
       'GET /llmo/ai-visibility/v1/prompt-research/brands-export',
       'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export',
@@ -728,9 +736,6 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/brands/source-opportunities']).to.equal(mockAiVisibilityController.getBrandsSourceOpportunities);
     expect(staticRoutes['GET /llmo/ai-visibility/brands/competitors']).to.equal(mockAiVisibilityController.getBrandsCompetitors);
     expect(staticRoutes['GET /llmo/ai-visibility/competitors/metrics']).to.equal(mockAiVisibilityController.getCompetitorsMetrics);
-    expect(staticRoutes['GET /llmo/ai-visibility/competitors/gap-topics']).to.equal(mockAiVisibilityController.getCompetitorsGapTopics);
-    expect(staticRoutes['GET /llmo/ai-visibility/competitors/gap-source-domains']).to.equal(mockAiVisibilityController.getCompetitorsGapSourceDomains);
-    expect(staticRoutes['GET /llmo/ai-visibility/competitors/gap-prompts']).to.equal(mockAiVisibilityController.getCompetitorsGapPrompts);
     expect(staticRoutes['GET /llmo/ai-visibility/meta']).to.equal(mockAiVisibilityController.getMeta);
     expect(staticRoutes['GET /llmo/ai-visibility/prompts/responses/latest']).to.equal(mockAiVisibilityController.getPromptsResponsesLatest);
     expect(staticRoutes['GET /llmo/ai-visibility/prompts/responses']).to.equal(mockAiVisibilityController.getPromptsResponses);
@@ -750,7 +755,11 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptBrandPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts']).to.equal(mockAiVisibilityController.getV1PromptGapPrompts);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptGapPromptsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals']).to.equal(mockAiVisibilityController.getV1PromptGapPromptsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompt-response']).to.equal(mockAiVisibilityController.getV1PromptPromptResponse);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomains);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains-export']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomainsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains-totals']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomainsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/prompts-export']).to.equal(mockAiVisibilityController.getV1PromptResearchPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/brands-export']).to.equal(mockAiVisibilityController.getV1PromptResearchBrandsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/source-domains-export']).to.equal(mockAiVisibilityController.getV1PromptResearchSourceDomainsExport);
@@ -1020,6 +1029,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs/:jobId/result',
       'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
       'GET /consent-banner/:jobId',
+      'GET /config/:service/redirects.txt',
       'GET /sites/:siteId/scraped-content/:type',
       'GET /sites/:siteId/metadata',
       'GET /sites/:siteId/files',
@@ -1070,6 +1080,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
       'GET /sites/:siteId/llmo/strategy/demo/recommendations',
       'POST /sites/:siteId/llmo/offboard',
+      'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
       'POST /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-config',
       'POST /sites/:siteId/llmo/edge-optimize-config/stage',
@@ -1382,6 +1393,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customer-intent/:intentKey'].paramNames).to.deep.equal(['siteId', 'intentKey']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/offboard'].handler).to.equal(mockLlmoController.offboardCustomer);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/offboard'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /v2/orgs/:spaceCatId/llmo/onboard-site'].handler).to.equal(mockLlmoController.onboardSiteOnly);
+    expect(dynamicRoutes['POST /v2/orgs/:spaceCatId/llmo/onboard-site'].paramNames).to.deep.equal(['spaceCatId']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config'].handler).to.equal(mockLlmoController.createOrUpdateEdgeConfig);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].handler).to.equal(mockLlmoController.getEdgeConfig);

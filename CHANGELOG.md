@@ -1,3 +1,74 @@
+# [1.591.0](https://github.com/adobe/spacecat-api-service/compare/v1.590.0...v1.591.0) (2026-06-23)
+
+
+### Features
+
+* **aso-overlay:** dual-key overlap for API key rotation (ADR I13) ([#2663](https://github.com/adobe/spacecat-api-service/issues/2663)) ([6526443](https://github.com/adobe/spacecat-api-service/commit/6526443f2a2a8f9f5173c85254fab080a34bd66e)), closes [#611](https://github.com/adobe/spacecat-api-service/issues/611) [#2638](https://github.com/adobe/spacecat-api-service/issues/2638)
+* paid-gated self-serve site-only onboarding endpoint | LLMO-5606 ([#2657](https://github.com/adobe/spacecat-api-service/issues/2657)) ([b2cf861](https://github.com/adobe/spacecat-api-service/commit/b2cf8613d79a869df453af9c031818d99dd3f54b))
+
+# [1.590.0](https://github.com/adobe/spacecat-api-service/compare/v1.589.4...v1.590.0) (2026-06-23)
+
+
+### Features
+
+* opt-in TypeScript type-checking (checkJs + JSDoc) for /serenity routes ([#2669](https://github.com/adobe/spacecat-api-service/issues/2669)) ([3d59fd4](https://github.com/adobe/spacecat-api-service/commit/3d59fd418db0a4eea165d5a0395c80434a525ce9)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.589.4](https://github.com/adobe/spacecat-api-service/compare/v1.589.3...v1.589.4) (2026-06-23)
+
+
+### Bug Fixes
+
+* **SITES-44243:** server-derive executedBy and add executedByUser audit trail ([#2445](https://github.com/adobe/spacecat-api-service/issues/2445)) ([0ce7036](https://github.com/adobe/spacecat-api-service/commit/0ce70366524e05d14dd85ce82e462e5778a3977c))
+
+## [1.589.3](https://github.com/adobe/spacecat-api-service/compare/v1.589.2...v1.589.3) (2026-06-22)
+
+
+### Bug Fixes
+
+* ensure stale suggestion grants are cleaned up on token cycle transitions ([#2368](https://github.com/adobe/spacecat-api-service/issues/2368)) ([8f48778](https://github.com/adobe/spacecat-api-service/commit/8f48778e8a23cae14b16323b1f05e93c9984fb55))
+
+## [1.589.2](https://github.com/adobe/spacecat-api-service/compare/v1.589.1...v1.589.2) (2026-06-22)
+
+
+### Bug Fixes
+
+* remove toc and wikipedia-analysis from ASO paid onboarding profile ([#2662](https://github.com/adobe/spacecat-api-service/issues/2662)) ([f0d9cff](https://github.com/adobe/spacecat-api-service/commit/f0d9cff020cc187d4b10f6b9133a1e4e1aa7b4b3))
+
+## [1.589.1](https://github.com/adobe/spacecat-api-service/compare/v1.589.0...v1.589.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* **prerender:** remove URL batching, pass mode to audit-worker ([#2659](https://github.com/adobe/spacecat-api-service/issues/2659)) ([6967ee8](https://github.com/adobe/spacecat-api-service/commit/6967ee8c75e9726f5ff33d34b96bfd644569182f)), closes [adobe/spacecat-audit-worker#2713](https://github.com/adobe/spacecat-audit-worker/issues/2713) [adobe/spacecat-audit-worker#2713](https://github.com/adobe/spacecat-audit-worker/issues/2713) [adobe/spacecat-audit-worker#2713](https://github.com/adobe/spacecat-audit-worker/issues/2713)
+
+# [1.589.0](https://github.com/adobe/spacecat-api-service/compare/v1.588.0...v1.589.0) (2026-06-22)
+
+
+### Features
+
+* **redirects:** serve ASO redirect overlay via api-service (Lite-E) ([#2638](https://github.com/adobe/spacecat-api-service/issues/2638)) ([a900c15](https://github.com/adobe/spacecat-api-service/commit/a900c151978df6e29b431296b80e49201090992f)), closes [#617](https://github.com/adobe/spacecat-api-service/issues/617)
+
+# [1.588.0](https://github.com/adobe/spacecat-api-service/compare/v1.587.1...v1.588.0) (2026-06-22)
+
+
+### Features
+
+* v1 gap-prompts-totals + gap-source-domains endpoints | LLMO-5619 ([#2647](https://github.com/adobe/spacecat-api-service/issues/2647)) ([90817b7](https://github.com/adobe/spacecat-api-service/commit/90817b7d003b3b3aeb70c191c17c81d995b1f6b1)), closes [#2609](https://github.com/adobe/spacecat-api-service/issues/2609)
+
+## [1.587.1](https://github.com/adobe/spacecat-api-service/compare/v1.587.0...v1.587.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* **agentic-traffic:** map google-ai-mode and copilot platform codes to DB values ([#2660](https://github.com/adobe/spacecat-api-service/issues/2660)) ([3b37cce](https://github.com/adobe/spacecat-api-service/commit/3b37ccebf966040833fbbe31e7f0af0c0fde4afc))
+
+# [1.587.0](https://github.com/adobe/spacecat-api-service/compare/v1.586.0...v1.587.0) (2026-06-22)
+
+
+### Features
+
+* **s2s:** allow readAll consumers to use by-base-url and by-ims-org-id ([#2640](https://github.com/adobe/spacecat-api-service/issues/2640)) ([abb0775](https://github.com/adobe/spacecat-api-service/commit/abb0775fa3ba5cdd0f98a3b0898a57c0b99fab8e))
+
 # [1.586.0](https://github.com/adobe/spacecat-api-service/compare/v1.585.1...v1.586.0) (2026-06-21)
 
 

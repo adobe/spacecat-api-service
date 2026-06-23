@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, getImsUserTokenStrict } from '../utils.js';
@@ -65,6 +67,9 @@ export function initialMarketProjectName(market, languageCode) {
  * @param {string} params.languageCode - BCP-47 language code for the initial market.
  * @param {string} params.brandDomain - brand domain for the upstream project.
  * @param {string[]} params.modelIds - AI models (LLMs) to attach to the project.
+ * @param {boolean} [params.generateTopics] - when true (default), generate +
+ *   attach topics/prompts (top N by volume) at create; when false, create the
+ *   project empty (models still attached when supplied).
  * @param {string[]} [params.brandAliases] - brand aliases; with the brand name
  *   they classify each generated prompt as `type:branded` / `type:non-branded`.
  * @param {object} [params.brandUrlSources] - the brand's URL sources
@@ -106,7 +111,7 @@ export async function provisionBrandSubworkspace(context, {
   const resolvedLanguageCode = hasText(languageCode) ? languageCode : 'en';
 
   const parentWorkspaceId = await resolveWorkspaceId(context, spaceCatId);
-  if (!hasText(parentWorkspaceId)) {
+  if (!parentWorkspaceId || !hasText(parentWorkspaceId)) {
     throw new ErrorWithStatusCode('Organization has no Semrush workspace configured', 400);
   }
 
@@ -117,6 +122,7 @@ export async function provisionBrandSubworkspace(context, {
   const imsToken = getImsUserTokenStrict(context);
   const transport = createSerenityTransport({ env: context.env, imsToken });
 
+  /** @type {string|null} */
   let capturedWorkspaceId = null;
   const brandStub = {
     getId: () => brandId,
@@ -134,7 +140,7 @@ export async function provisionBrandSubworkspace(context, {
   // compensation can't fire), and repeated failed creates would drain the pool.
   // Best-effort; never masks the original error.
   const releaseCapturedOnFailure = async () => {
-    if (!hasText(capturedWorkspaceId)) {
+    if (!capturedWorkspaceId || !hasText(capturedWorkspaceId)) {
       return;
     }
     try {
@@ -176,9 +182,9 @@ export async function provisionBrandSubworkspace(context, {
         modelIds,
         generateTopics,
         topicCap: generateTopics ? MAX_TOPICS_ON_CREATE : 0,
-        standardTags: STANDARD_PROMPT_TAGS,
+        standardTags: [...STANDARD_PROMPT_TAGS],
         brandAliases,
-        projectTags: PROJECT_STANDARD_TAGS,
+        projectTags: [...PROJECT_STANDARD_TAGS],
         brandUrlSources,
         competitors,
         // A project with neither models nor generated prompts would publish
@@ -209,10 +215,13 @@ export async function provisionBrandSubworkspace(context, {
       result.status,
     );
   }
-  if (!hasText(capturedWorkspaceId)) {
+  if (!capturedWorkspaceId || !hasText(capturedWorkspaceId)) {
     throw new ErrorWithStatusCode('Semrush provisioning returned no sub-workspace id', 502);
   }
-  return { semrushWorkspaceId: capturedWorkspaceId, published: Boolean(result.body?.published) };
+  return {
+    semrushWorkspaceId: capturedWorkspaceId,
+    published: Boolean(/** @type {{ published?: boolean }} */ (result.body || {}).published),
+  };
 }
 
 /**

@@ -240,6 +240,22 @@ export default function fixTests(getHttpClient, resetData) {
         expect(res.body.fixes[0].fix.type).to.equal('CODE_CHANGE');
       });
 
+      it('user: server-derives executedBy from JWT, ignoring client-supplied value', async () => {
+        const http = getHttpClient();
+        const res = await http.user.post(BASE, [
+          {
+            type: 'CODE_CHANGE',
+            changeDetails: { file: '/server-derive-test.js' },
+            executedBy: 'attacker@evil.org',
+          },
+        ]);
+        expectBatch207(res, 1, 'fixes');
+        const { fix } = res.body.fixes[0];
+        // The server must use the JWT sub claim, never the client-supplied string.
+        expect(fix.executedBy).to.equal('test-user@example.com');
+        expect(fix.executedBy).to.not.equal('attacker@evil.org');
+      });
+
       it('user: creates fix with suggestion association', async () => {
         const http = getHttpClient();
         const res = await http.user.post(BASE, [
@@ -290,6 +306,17 @@ export default function fixTests(getHttpClient, resetData) {
         expect(res.status).to.equal(200);
         expectFixDto(res.body);
         expect(res.body.changeDetails.file).to.equal('/updated.js');
+      });
+
+      it('user: server-derives executedBy from JWT when intent signal is present', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`${BASE}/${testFixId}`, {
+          executedBy: 'attacker@evil.org',
+        });
+        expect(res.status).to.equal(200);
+        // The server must use the JWT sub claim, never the client-supplied string.
+        expect(res.body.executedBy).to.equal('test-user@example.com');
+        expect(res.body.executedBy).to.not.equal('attacker@evil.org');
       });
 
       it('user: returns 403 for denied site', async () => {

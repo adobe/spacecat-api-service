@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { createSerenityProjectEngineApiClient } from '@adobe/spacecat-shared-project-engine-client';
 import { createSerenityUserManagerApiClient } from '@adobe/spacecat-shared-user-manager-client';
@@ -551,7 +553,7 @@ export function createSerenityTransport({ env, imsToken }) {
         {
           params: {
             path: { id: workspaceId, project_id: projectId },
-            query: { draft, type: 'ai' },
+            query: { draft: String(draft), type: 'ai' },
           },
         },
       ));

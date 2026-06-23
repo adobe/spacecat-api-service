@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
@@ -181,6 +183,18 @@ function brandedTypeTag(promptText, needles) {
  *
  * Prompt text is the createTaggedPrompts key, so identical text across topics
  * collapses to one entry (last tag set wins) — acceptable and rare.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} workspaceId - sub-workspace the project lives in.
+ * @param {string} projectId - project to attach generated prompts to.
+ * @param {object} options - generation options.
+ * @param {string} options.domain - brand domain to generate topics for.
+ * @param {string} options.country - market/country code to generate topics for.
+ * @param {number} [options.topicCap=0] - keep the top N topics by volume (0 = all).
+ * @param {string[]} [options.standardTags=[]] - tags added to every generated prompt.
+ * @param {string[]} [options.brandNames=[]] - brand name + aliases for branded
+ *   classification (substring match, case-insensitive).
+ * @param {object} log - logger.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   domain, country, topicCap = 0, standardTags = [], brandNames = [],
@@ -231,6 +245,11 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  * resumable state, not an orphan (design §7). The duplicate-create race is
  * accepted (oldest-wins reads + alert).
  *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {object} brand - brand record/stub being provisioned.
+ * @param {string} parentWorkspaceId - parent workspace the sub-workspace is carved from.
+ * @param {object} body - request body ({ market, languageCode, brandDomain, ... }).
+ * @param {object} log - logger.
  * @param {string|null} [preResolvedWorkspaceId] - when set (the activate batch
  *   path), the sub-workspace is already ensured/sized; skip the per-call ensure
  *   and create directly against it. Omitted on the single-market POST path.
@@ -303,7 +322,7 @@ export async function handleCreateMarketSubworkspace(
   // activate() ensures the sub-workspace once for the whole batch (sized to the
   // real market count) and passes it in here. The single-market POST /markets
   // path passes nothing, so we ensure on the spot, sized for one market.
-  const workspaceId = hasText(preResolvedWorkspaceId)
+  const workspaceId = preResolvedWorkspaceId && hasText(preResolvedWorkspaceId)
     ? preResolvedWorkspaceId
     : await ensureSubworkspace(transport, brand, parentWorkspaceId, 1, log, {}, reloadPointer);
 
