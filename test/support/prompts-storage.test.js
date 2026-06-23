@@ -1100,12 +1100,14 @@ describe('prompts-storage', () => {
       expect(result.updated).to.equal(1);
     });
 
-    it('skips a deleted prompt matched by prompt_id without updating or inserting', async () => {
+    it('restores a soft-deleted prompt matched by prompt_id (update back to active, no insert)', async () => {
       const deletedRow = {
         id: 'row-uuid', prompt_id: 'del-1', text: 'Deleted text', regions: [], status: 'deleted',
       };
       const existingData = { data: [deletedRow], error: null };
-      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const updateEqStub = sinon.stub().returns(thenable({ error: null }));
+      const updateStub = sinon.stub().returns({ eq: updateEqStub });
+      const insertSpy = sinon.stub().returns({ select: () => thenable({ data: [], error: null }) });
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -1118,7 +1120,7 @@ describe('prompts-storage', () => {
                   }),
                 }),
               }),
-              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              insert: insertSpy,
               update: updateStub,
             };
           }
@@ -1131,13 +1133,19 @@ describe('prompts-storage', () => {
         prompts: [{ id: 'del-1', prompt: 'Deleted text', regions: [] }],
         postgrestClient: client,
       });
-      expect(result.updated).to.equal(0);
+      // Match on the soft-deleted row now updates it instead of skipping.
+      expect(result.updated).to.equal(1);
       expect(result.created).to.equal(0);
-      expect(result.skipped).to.equal(1);
-      expect(updateStub.callCount).to.equal(0);
+      expect(result.skipped).to.equal(0);
+      expect(insertSpy.callCount).to.equal(0);
+      expect(updateStub.callCount).to.equal(1);
+      // The patch restores status to 'active'.
+      expect(updateStub.firstCall.args[0]).to.include({ status: 'active' });
+      // ...targeting the existing soft-deleted row by its uuid.
+      expect(updateEqStub.calledWith('id', 'row-uuid')).to.equal(true);
     });
 
-    it('skips a deleted prompt matched by text+regions without inserting', async () => {
+    it('restores a soft-deleted prompt matched by text+regions (update back to active, no insert)', async () => {
       const deletedRow = {
         id: 'row-uuid', prompt_id: 'del-2', text: 'Same text', regions: ['us'], status: 'deleted',
       };
@@ -1145,6 +1153,8 @@ describe('prompts-storage', () => {
       const insertSpy = sinon.stub().returns({
         select: () => thenable({ data: [], error: null }),
       });
+      const updateEqStub = sinon.stub().returns(thenable({ error: null }));
+      const updateStub = sinon.stub().returns({ eq: updateEqStub });
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -1155,7 +1165,7 @@ describe('prompts-storage', () => {
                 }),
               }),
               insert: insertSpy,
-              update: () => ({ eq: () => thenable({ error: null }) }),
+              update: updateStub,
             };
           }
           return makeChain({});
@@ -1168,9 +1178,13 @@ describe('prompts-storage', () => {
         prompts: [{ prompt: 'Same text', regions: ['us'] }],
         postgrestClient: client,
       });
-      expect(result.skipped).to.equal(1);
+      expect(result.updated).to.equal(1);
       expect(result.created).to.equal(0);
+      expect(result.skipped).to.equal(0);
       expect(insertSpy.callCount).to.equal(0);
+      expect(updateStub.callCount).to.equal(1);
+      expect(updateStub.firstCall.args[0]).to.include({ status: 'active' });
+      expect(updateEqStub.calledWith('id', 'row-uuid')).to.equal(true);
     });
 
     it('throws on insert error', async () => {
