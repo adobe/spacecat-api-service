@@ -44,6 +44,7 @@ import {
   OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
   EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
   detectAemCsFastlyForDomain,
+  baseUrlHasPathname,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
@@ -1451,6 +1452,17 @@ function LlmoController(ctx) {
         }
       }
 
+      // Guard: the AEMCS Fastly routing API operates at domain level only.
+      // Enabling it for a subpath site would intercept all traffic on the host,
+      // not just the intended subpath. Reject until path-scoped routing lands (LLMO-4579).
+      if (baseUrlHasPathname(baseURL)) {
+        log.warn(`Site scoped to pathname cannot use host-level auto-routing: ${baseURL}`);
+        return ok({
+          message: 'Automated CDN routing is not supported for pathname scoped sites. Please contact domain-level site owner or contact support for assistance.',
+          ...metaconfig,
+        });
+      }
+
       let cdnTypeNormalized = null;
       if (hasText(cdnType)) {
         log.info(`[edge-optimize-routing] ${baseURL} CDN routing config requested for site ${siteId},`
@@ -1479,23 +1491,6 @@ function LlmoController(ctx) {
       }
       // CDN routing — only when cdnType is provided
       if (cdnTypeNormalized) {
-        // Guard: the AEMCS Fastly routing API operates at domain level only.
-        // Enabling it for a subpath site would intercept all traffic on the host,
-        // not just the intended subpath. Reject until path-scoped routing lands (LLMO-4579).
-        try {
-          const siteUrlForGuard = baseURL.startsWith('http') ? baseURL : `https://${baseURL}`;
-          const siteUrlObj = new URL(siteUrlForGuard);
-          if (siteUrlObj.pathname && siteUrlObj.pathname !== '/') {
-            log.warn(`Subpath site cannot use host-level auto-routing: ${baseURL}`);
-            return ok({
-              message: 'Automated CDN routing is not supported for subpath sites. Please contact domain-level site owner or contact support for assistance.',
-              ...metaconfig,
-            });
-          }
-        } catch {
-          // Malformed URL — let the subsequent probe step surface the error
-        }
-
         // Exchange promise token from cookie for an IMS user token
         let imsUserToken;
         try {

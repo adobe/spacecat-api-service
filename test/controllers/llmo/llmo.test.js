@@ -6264,9 +6264,9 @@ describe('LlmoController', () => {
         mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(200);
-        expect((await result.json()).message).to.include('subpath sites');
+        expect((await result.json()).message).to.include('pathname scoped sites');
         expect(mockLog.warn).to.have.been.calledWith(
-          sinon.match(/Subpath site cannot use host-level auto-routing/),
+          sinon.match(/Site scoped to pathname cannot use host-level auto-routing/),
         );
         expect(callCdnRoutingApiStub).to.not.have.been.called;
       });
