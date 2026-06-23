@@ -13,6 +13,7 @@
 import {
   createResponse,
   badRequest,
+  internalServerError,
   notFound,
   ok, forbidden,
 } from '@adobe/spacecat-shared-http-utils';
@@ -22,13 +23,18 @@ import {
   isString,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
 import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
+import {
+  ensureOrgEntitlement,
+  resolveProductCode,
+} from '../support/tier-provisioning.js';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -59,25 +65,52 @@ function OrganizationsController(ctx, env) {
 
   /**
    * Creates an organization. The organization ID is generated automatically.
+   *
+   * Write-time tier provisioning: when an organization is newly created, it ensures org
+   * entitlement via TierClient using the existing tier when present, otherwise FREE_TRIAL.
+   * Idempotent re-POSTs do not run provisioning.
+   *
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Organization response.
    */
   const createOrganization = async (context) => {
+    const { log } = ctx;
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new Organizations');
     }
+    const { productCode, error: productCodeError } = resolveProductCode(context);
+    if (productCodeError) {
+      return badRequest(productCodeError);
+    }
+    let organization;
+    let status;
     // check if the organization already exists
-    const organization = await Organization.findByImsOrgId(context.data.imsOrgId);
-    if (organization) {
-      return createResponse(OrganizationDto.toJSON(organization), 200);
+    const existingOrganization = await Organization.findByImsOrgId(context.data.imsOrgId);
+    if (existingOrganization) {
+      organization = existingOrganization;
+      status = 200;
+    } else {
+      try {
+        organization = await Organization.create(context.data);
+        status = 201;
+      } catch (e) {
+        return badRequest(e.message);
+      }
     }
 
-    try {
-      const organizationCreated = await Organization.create(context.data);
-      return createResponse(OrganizationDto.toJSON(organizationCreated), 201);
-    } catch (e) {
-      return badRequest(e.message);
+    if (productCode && status === 201) {
+      try {
+        await ensureOrgEntitlement(context, organization, productCode, log);
+      } catch (error) {
+        log.error(
+          `Error ensuring entitlement for organization ${organization.getId()}: ${error.message}`,
+          error,
+        );
+        return internalServerError('Failed to ensure entitlement for organization');
+      }
     }
+
+    return createResponse(OrganizationDto.toJSON(organization), status);
   };
 
   /**
@@ -153,8 +186,23 @@ function OrganizationsController(ctx, env) {
       return notFound(`Organization not found by IMS org ID: ${imsOrgId}`);
     }
 
-    if (!await accessControlUtil.hasAccess(organization)) {
+    // Cross-tenant resolution: admins and S2S consumers holding `organization:readAll` may
+    // look up any organization by IMS org ID (platform enumeration). Everyone else must
+    // belong to the organization. hasS2SCapability returns `not-s2s` without a DB call for
+    // non-S2S callers, so the extra fetch only happens for actual S2S consumers.
+    // See READALL_CAPABILITY_DESIGN.md.
+    const { log } = ctx;
+    const requestId = context?.invocation?.id || 'unknown';
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_ORG_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed && !(await accessControlUtil.hasAccess(organization))) {
+      log.info(`[acl] Denied GET /organizations/by-ims-org-id - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
       return forbidden('Only users belonging to the organization can view it');
+    }
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /organizations/by-ims-org-id granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_ORG_READ_ALL} requestId=${requestId}`);
     }
 
     return ok(OrganizationDto.toJSON(organization));
@@ -343,7 +391,50 @@ function OrganizationsController(ctx, env) {
       updates = true;
     }
 
+    if (isString(requestBody.semrushWorkspaceId)
+      && requestBody.semrushWorkspaceId !== organization.getSemrushWorkspaceId()) {
+      // semrushWorkspaceId binds the Adobe org to a Semrush workspace - billing
+      // and access-level concern. Restrict to admins, unlike the other fields
+      // that any org member can update.
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can set semrushWorkspaceId');
+      }
+      organization.setSemrushWorkspaceId(requestBody.semrushWorkspaceId);
+      updates = true;
+    }
+
     if (isObject(requestBody.config)) {
+      if (isObject(requestBody.config.defaults)) {
+        if (!accessControlUtil.hasAdminAccess()) {
+          return forbidden('Only admins can update config.defaults');
+        }
+        const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
+        for (const [productCode, entry] of Object.entries(requestBody.config.defaults)) {
+          if (!VALID_PRODUCT_CODES.has(productCode)) {
+            return badRequest(`Unknown product code in config.defaults: ${productCode}`);
+          }
+          if (isObject(entry) && entry.siteId != null) {
+            if (!isValidUUID(entry.siteId)) {
+              return badRequest(`Invalid siteId for product ${productCode} in config.defaults`);
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const site = await Site.findById(entry.siteId);
+            if (!site || site.getOrganizationId() !== organization.getId()) {
+              return badRequest(`config.defaults.${productCode}: site not found or does not belong to this organization`);
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const siteTierClient = await TierClient.createForSite(context, site, productCode);
+            // eslint-disable-next-line no-await-in-loop
+            const { entitlement, siteEnrollment } = await siteTierClient.checkValidEntitlement();
+            if (!entitlement) {
+              return badRequest(`config.defaults.${productCode}: organization does not have an entitlement for this product`);
+            }
+            if (!siteEnrollment) {
+              return badRequest(`config.defaults.${productCode}: site is not enrolled for this product`);
+            }
+          }
+        }
+      }
       organization.setConfig(requestBody.config);
       updates = true;
     }

@@ -74,7 +74,9 @@ describe('categories-storage', () => {
 
       const result = await listCategories({ organizationId: ORG_ID, postgrestClient });
       expect(result).to.have.length(1);
-      expect(result[0].id).to.equal('brand-awareness');
+      // `id` is now the UUID primary key (categories.id), not the legacy
+      // category_id business key. `uuid` is an alias carrying the same value.
+      expect(result[0].id).to.equal('uuid-1');
       expect(result[0].uuid).to.equal('uuid-1');
       expect(result[0].name).to.equal('Brand Awareness');
       expect(result[0].createdAt).to.equal('2026-01-01T00:00:00Z');
@@ -192,25 +194,15 @@ describe('categories-storage', () => {
       })).to.be.rejectedWith('Category name is required');
     });
 
-    it('rejects names that canonicalize to a degenerate slug when no id is supplied', async () => {
-      // Non-ASCII-only names collapse to a bare "-" via the slug derivation
-      // `replace(/[^a-z0-9]+/g, '-')`. Rejecting at the API boundary keeps
-      // such rows from landing with meaningless FKs. Caller can opt out
-      // by supplying an explicit `id`.
-      const postgrestClient = createSequentialClient([
-        { data: null, error: null },
-      ]);
-      await expect(createCategory({
-        organizationId: ORG_ID,
-        category: { name: '日本語' },
-        postgrestClient,
-      })).to.be.rejectedWith(/empty slug/);
-    });
-
-    it('accepts non-ASCII names when the client supplies an explicit slug', async () => {
+    it('inserts non-ASCII (e.g. multibyte) names without deriving a slug', async () => {
+      // Regression guard for LLMO-5515: a multibyte name like "日本語" used
+      // to collapse to a degenerate slug and either throw or fall back to a
+      // random UUID-shaped category_id. We no longer derive a slug at all —
+      // the UUID primary key is the only identifier, so the insert just
+      // succeeds and the returned `id` is the server-assigned UUID.
       const insertedRow = {
         id: 'uuid-jp',
-        category_id: 'japanese-cat',
+        category_id: 'gen-random-default-ignored',
         name: '日本語',
         status: 'active',
         origin: 'human',
@@ -226,14 +218,44 @@ describe('categories-storage', () => {
 
       const result = await createCategory({
         organizationId: ORG_ID,
-        category: { id: 'japanese-cat', name: '日本語' },
+        category: { name: '日本語' },
         postgrestClient,
         updatedBy: 'user@test.com',
       });
 
       expect(result.created).to.be.true;
       expect(result.outcome).to.equal('insert');
-      expect(result.category.id).to.equal('japanese-cat');
+      expect(result.category.id).to.equal('uuid-jp');
+    });
+
+    it('ignores a client-supplied id on insert — the UUID primary key is authoritative', async () => {
+      // The v2 API no longer accepts a client-supplied slug. Even if a legacy
+      // caller sends `id`, it is dropped: the returned `id` is the DB UUID PK.
+      const insertedRow = {
+        id: 'uuid-server-assigned',
+        category_id: 'ignored',
+        name: 'New Category',
+        status: 'active',
+        origin: 'human',
+        created_at: '2026-04-20',
+        created_by: 'user@test.com',
+        updated_at: '2026-04-20',
+        updated_by: 'user@test.com',
+      };
+      const postgrestClient = createSequentialClient([
+        { data: null, error: null },
+        { data: insertedRow, error: null },
+      ]);
+
+      const result = await createCategory({
+        organizationId: ORG_ID,
+        category: { id: 'client-slug', name: 'New Category' },
+        postgrestClient,
+        updatedBy: 'user@test.com',
+      });
+
+      expect(result.created).to.be.true;
+      expect(result.category.id).to.equal('uuid-server-assigned');
     });
 
     it('canonicalizes the stored name (trim, whitespace-collapse, NFC) and finds case-variants as existing', async () => {
@@ -308,8 +330,9 @@ describe('categories-storage', () => {
       });
 
       expect(capturedInsert.row.name).to.equal('Edge Case');
-      // Slug is derived from the canonical name too.
-      expect(capturedInsert.row.category_id).to.equal('edge-case');
+      // No slug/business key is derived anymore — the DB default fills
+      // category_id (a deprecated column) and the UUID PK is authoritative.
+      expect(capturedInsert.row).to.not.have.property('category_id');
     });
 
     it('inserts a new category when no row matches by name', async () => {
@@ -341,7 +364,7 @@ describe('categories-storage', () => {
 
       expect(result.created).to.be.true;
       expect(result.outcome).to.equal('insert');
-      expect(result.category.id).to.equal('my-new-category');
+      expect(result.category.id).to.equal('uuid-new');
       expect(result.category.name).to.equal('My New Category');
       expect(result.category.createdAt).to.equal('2026-03-01T00:00:00Z');
     });
@@ -378,7 +401,7 @@ describe('categories-storage', () => {
       expect(result.created).to.be.false;
       expect(result.outcome).to.equal('noop');
       expect(result.category.uuid).to.equal('uuid-existing');
-      expect(result.category.id).to.equal('baseurl-discovery-research');
+      expect(result.category.id).to.equal('uuid-existing');
       // Audit fields preserved — no UPDATE fired.
       expect(result.category.updatedBy).to.equal('first@test.com');
       expect(postgrestClient.from).to.have.been.calledOnce;
@@ -558,7 +581,7 @@ describe('categories-storage', () => {
       expect(result.created).to.be.false;
       expect(result.outcome).to.equal('race_retry_noop');
       expect(result.category.uuid).to.equal('uuid-raced');
-      expect(result.category.id).to.equal('concurrent');
+      expect(result.category.id).to.equal('uuid-raced');
     });
 
     it('marks the race-recovery path outcome as race_retry when a patch actually applies', async () => {
@@ -603,16 +626,16 @@ describe('categories-storage', () => {
       expect(result.category.status).to.equal('active');
     });
 
-    it('surfaces a typed 409 when a 23505 fires against a non-name constraint (slug collision)', async () => {
-      // Scenario: client POSTs {id: 'foo', name: 'NewName'}. Lookup by
-      // 'NewName' finds nothing. INSERT trips `uq_category_id_per_org`
-      // because slug `foo` is already occupied by a different row with a
-      // different name. Mirror the topics pattern — surface as a typed
-      // 409 with constraint echo so callers don't see a generic 500 on
-      // what is really a constraint conflict. LLMO-4370 #5/#6.
+    it('surfaces a typed 409 when a 23505 fires against a non-name constraint', async () => {
+      // Defensive path: any 23505 whose constraint is NOT
+      // `uq_category_name_per_org` is surfaced as a typed 409 with the
+      // constraint echoed, rather than a generic 500. The legacy
+      // `uq_category_per_org` constraint still exists on the deprecated
+      // category_id column (DB drop deferred — LLMO-5515); a DB-default
+      // UUID collision there would land here. Mirror the topics pattern.
       const insertError = {
         code: '23505',
-        message: 'duplicate key value violates unique constraint "uq_category_id_per_org"',
+        message: 'duplicate key value violates unique constraint "uq_category_per_org"',
       };
       const postgrestClient = createSequentialClient([
         { data: null, error: null },
@@ -621,12 +644,12 @@ describe('categories-storage', () => {
 
       const err = await createCategory({
         organizationId: ORG_ID,
-        category: { id: 'foo', name: 'NewName' },
+        category: { name: 'NewName' },
         postgrestClient,
       }).catch((e) => e);
 
       expect(err.status).to.equal(409);
-      expect(err.message).to.include('uq_category_id_per_org');
+      expect(err.message).to.include('uq_category_per_org');
       expect(err.cause).to.equal(insertError);
     });
 
@@ -791,7 +814,7 @@ describe('categories-storage', () => {
       expect(result.outcome).to.equal('resurrect');
       expect(result.category.uuid).to.equal('uuid-deleted');
       expect(result.category.status).to.equal('active');
-      expect(result.category.id).to.equal('legacy-slug');
+      expect(result.category.id).to.equal('uuid-deleted');
     });
 
     // Resurrection × provenance matrix — LLMO-4370 #10.
@@ -962,11 +985,13 @@ describe('categories-storage', () => {
 
       expect(log.warn).to.have.been.calledOnce;
       // Structured fields are passed as a second arg so operators can
-      // filter by organization_id / category_id in Coralogix.
+      // filter by organization_id / category_uuid in Coralogix. We log the
+      // stable UUID (categories.id), not the retired category_id business
+      // key (LLMO-5515).
       const [, fields] = log.warn.firstCall.args;
       expect(fields).to.include({
         organization_id: ORG_ID,
-        category_id: 'curated-warn',
+        category_uuid: 'uuid-warn',
         attempted_origin: 'ai',
         current_origin: 'human',
       });
@@ -1041,7 +1066,9 @@ describe('categories-storage', () => {
       });
 
       expect(result).to.not.be.null;
-      expect(result.id).to.equal('test');
+      // `id` is the UUID primary key (categories.id), not the retired
+      // category_id business key (LLMO-5515).
+      expect(result.id).to.equal('uuid-1');
       expect(result.origin).to.equal('ai');
       expect(result.status).to.equal('pending');
     });

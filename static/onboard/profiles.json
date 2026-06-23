@@ -23,10 +23,10 @@
 	},
 	"aso_plg": {
 		"audits": {
+			"scrape-top-pages": {},
 			"alt-text": {},
 			"cwv": {},
 			"broken-backlinks": {},
-			"scrape-top-pages": {},
 			"broken-backlinks-auto-suggest": {},
 			"broken-backlinks-auto-fix": {},
 			"alt-text-auto-fix": {},
@@ -130,7 +130,10 @@
 			"hreflang": {},
 			"security-vulnerabilities": {},
 			"security-vulnerabilities-auto-suggest": {},
-			"wikipedia-analysis": {}
+			"structured-data": {},
+			"sitemap": {},
+			"money-pages": {},
+			"cwv-trends-audit": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
@@ -139,6 +142,8 @@
 			"all-traffic": {},
             "traffic-analysis": {},
 			"user-engagement": {},
+			"cwv-trends-onboard": {},
+			"cwv-trends-daily": {},
 			"cwv-weekly": {},
 			"ahref-paid-pages": {}
 		},

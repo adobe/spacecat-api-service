@@ -21,6 +21,7 @@ import AccessControlUtil from '../src/support/access-control-util.js';
 use(sinonChai);
 
 const s2sAuthWrapperStub = (fn) => fn;
+const authWrapperStub = (fn) => fn;
 
 const tokowakaTestShim = {
   default: class TokowakaClientStub {
@@ -51,6 +52,7 @@ const { main } = await esmock(
   {
     '@adobe/spacecat-shared-http-utils': {
       s2sAuthWrapper: s2sAuthWrapperStub,
+      authWrapper: authWrapperStub,
     },
   },
   {
@@ -131,6 +133,7 @@ describe('Index Tests', () => {
         IMS_CLIENT_CODE: 'mock-client-code',
         IMS_CLIENT_SECRET: 'mock-client-secret',
         IMPORT_CONFIGURATION: '{}',
+        POSTGREST_URL: 'https://postgrest.test',
         REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/reports-queue',
         S3_REPORT_BUCKET: 'test-reports-bucket',
         S3_MYSTIQUE_BUCKET: 'test-mystique-bucket',
@@ -247,6 +250,31 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Site Id is invalid. Please provide a valid UUID.');
   });
 
+  it('accepts UUID v7 site ids (RFC 9562) — gateway must not v4-restrict', async () => {
+    // Mystique-side site / opportunity / suggestion IDs are progressively
+    // moving to UUID v7 (sortable). The route gate used to v4-restrict the
+    // siteId, returning 400 "Site Id is invalid" on a syntactically valid v7
+    // UUID. The gateway must accept any UUID version and let the controller
+    // decide whether the row exists. (Variant nibble is independently clamped
+    // to `[89ab]` in the gate regex; that's still enforced.)
+    const v7SiteId = '019cde0c-fe79-76b2-bc50-a40e1b1b1c36';
+    context.pathInfo.suffix = `/sites/${v7SiteId}`;
+
+    request = new Request(
+      `${baseUrl}/sites/${v7SiteId}`,
+      { headers: { 'x-api-key': apiKey } },
+    );
+
+    const resp = await main(request, context);
+
+    // Past the gateway — controller may 404 or 200 depending on fixture, but
+    // it MUST NOT be a 400 with the "Site Id is invalid" message.
+    expect(resp.status).to.not.equal(400);
+    expect(resp.headers.plain()['x-error']).to.not.equal(
+      'Site Id is invalid. Please provide a valid UUID.',
+    );
+  });
+
   it('handles plgOnboardingId not correctly formatted error', async () => {
     context.pathInfo.suffix = '/plg/records/not-a-uuid';
 
@@ -335,6 +363,54 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Execution Id is invalid. Please provide a valid UUID.');
   });
 
+  it('rejects bare /tools/scrape/jobs/by-url misroute with invalid jobId', async () => {
+    context.pathInfo.suffix = '/tools/scrape/jobs/by-url';
+
+    request = new Request(`${baseUrl}/tools/scrape/jobs/by-url`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('rejects /sites/:siteId/preflights/:preflightId with invalid preflightId UUID', async () => {
+    const validSiteId = 'a1b2c3d4-1234-5678-9abc-def012345678';
+    context.pathInfo.suffix = `/sites/${validSiteId}/preflights/not-a-uuid`;
+
+    request = new Request(
+      `${baseUrl}/sites/${validSiteId}/preflights/not-a-uuid`,
+      { headers: { 'x-api-key': apiKey } },
+    );
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Preflight Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('rejects bare /tools/scrape/jobs/by-base-url misroute with invalid jobId', async () => {
+    context.pathInfo.suffix = '/tools/scrape/jobs/by-base-url';
+
+    request = new Request(`${baseUrl}/tools/scrape/jobs/by-base-url`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('rejects bare /tools/import/jobs/by-date-range misroute with invalid jobId', async () => {
+    context.pathInfo.suffix = '/tools/import/jobs/by-date-range';
+
+    request = new Request(`${baseUrl}/tools/import/jobs/by-date-range`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
+  });
+
   it('handles dynamic route errors', async () => {
     context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
 
@@ -368,7 +444,7 @@ describe('Index Tests', () => {
     expect(context.dataAccess.Audit.findBySiteIdAndAuditTypeAndAuditedAt).to.have.been.calledOnce;
   });
 
-  it('wires readOnlyAdminWrapper with routeCapabilities', async () => {
+  it('wires readOnlyAdminWrapper with routeCapabilities and internalRoutes', async () => {
     let capturedOpts;
     const { main: testMain } = await esmock('../src/index.js', {
       '@adobe/spacecat-shared-http-utils': {
@@ -386,6 +462,12 @@ describe('Index Tests', () => {
     expect(capturedOpts.routeCapabilities, 'routeCapabilities must be a non-empty object').to.be.an('object').that.is.not.empty;
     // Sanity-check a known read route is present so an accidental empty map is caught
     expect(capturedOpts.routeCapabilities).to.have.property('GET /sites/:siteId');
+    // internalRoutes must also be wired so the readOnlyAdminWrapper can recognise
+    // routes that are intentionally excluded from S2S consumer access.
+    expect(capturedOpts, 'internalRoutes must be passed to readOnlyAdminWrapper').to.have.property('internalRoutes');
+    expect(capturedOpts.internalRoutes, 'internalRoutes must be a non-empty array').to.be.an('array').that.is.not.empty;
+    // Sanity-check a known internal route is present so an accidental empty list is caught
+    expect(capturedOpts.internalRoutes).to.include('POST /event/fulfillment');
     expect(testMain).to.exist; // reference to satisfy no-unused-vars
   });
 });

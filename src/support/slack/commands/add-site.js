@@ -17,6 +17,7 @@ import {
 } from '../../../utils/slack/base.js';
 
 import { findDeliveryType } from '../../utils.js';
+import { updateRumConfig } from '../../rum-config-service.js';
 
 import BaseCommand from './base.js';
 
@@ -90,6 +91,12 @@ function AddSiteCommand(context) {
       if (!newSite) {
         await say(':x: Problem adding the site. Please contact the admins.');
         return;
+      }
+
+      try {
+        await updateRumConfig(newSite, context);
+      } catch (e) {
+        log.warn(`[add-site] RUM config update failed for ${baseURL}: ${e.message}`);
       }
 
       let message = `:white_check_mark: *Successfully added new site <${baseURL}|${baseURL}>*.\n`;

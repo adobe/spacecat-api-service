@@ -163,11 +163,128 @@ async function detectAdobeManagedCdn(domain, log) {
     return bareResult;
   }
 
-  if (wwwResult === null || bareResult === null) {
+  if (wwwResult === null && bareResult === null) {
     return null;
   }
 
   return 'byocdn-other';
+}
+
+/* ============================================================================
+ * Phase 1.5 — Case 0: AEM CS WAF Simple Proxy HTTP probe.
+ *
+ * When Phase 1 DNS resolves cleanly to non-Adobe IPs ('byocdn-other'), a WAF
+ * may sit in front of AEM CS Fastly. Four signals confirm this topology:
+ *   1. x-correlation-id echoed unchanged in every response
+ *   2. x-edgeoptimize-request-id present in every response
+ *   3. x-request-id unique across all AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT responses (no caching)
+ *   4. x-aem-debug response header contains host=<probed-domain>
+ *
+ * AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT sequential probes (default 3). All four signals must hold
+ * across every response; any failure returns null.
+ * ========================================================================== */
+
+export const EDGE_OPTIMIZE_USER_AGENT = 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0';
+export const UA_ROUTING_HEADER = 'x-edgeoptimize-request-id';
+
+const AEMCS_WAF_SIMPLE_PROXY_PROBE_TIMEOUT_MS = 3000;
+const TEST_CORRELATION_ID = 'adobeedgetest';
+const AEM_DEBUG_VALUE = 'edge=true';
+const HEADER_AEM_DEBUG = 'x-aem-debug';
+const HEADER_CORRELATION_ID = 'x-correlation-id';
+const HEADER_REQUEST_ID = 'x-request-id';
+
+// Number of sequential probes sent to verify all Case 0: WAF Simple Proxy signals.
+// Increase to raise the false-positive bar; decrease to reduce latency.
+export const AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT = 3;
+
+async function makeAemCsWafSimpleProxyProbe(domain, log) {
+  const url = `https://${domain}/`;
+  // Disable only the local @adobe/fetch response cache so repeated probes
+  // always hit the network from this process. This Request.cache option is not an
+  // outbound Cache-Control header, so it does not bypass or alter customer CDN caching.
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'manual',
+      cache: 'no-store',
+      timeout: AEMCS_WAF_SIMPLE_PROXY_PROBE_TIMEOUT_MS,
+      headers: {
+        [HEADER_CORRELATION_ID]: TEST_CORRELATION_ID,
+        [HEADER_AEM_DEBUG]: AEM_DEBUG_VALUE,
+        'User-Agent': EDGE_OPTIMIZE_USER_AGENT,
+      },
+    });
+    const responseHeaders = {};
+    response.headers.forEach((value, key) => {
+      responseHeaders[key.toLowerCase()] = value;
+    });
+    if (response.body && typeof response.body.cancel === 'function') {
+      response.body.cancel();
+    }
+    return responseHeaders;
+  } catch (err) {
+    log?.warn?.('[cdn-detection] Phase 1.5 probe failed', { domain, message: err?.message });
+    return null;
+  }
+}
+
+function checkCachingAtProxy(responses, log, domain) {
+  if (!responses.every((r) => r[HEADER_CORRELATION_ID] === TEST_CORRELATION_ID)) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 1 absent — x-correlation-id not echoed', { domain });
+    return false;
+  }
+  if (!responses.every((r) => r[UA_ROUTING_HEADER])) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 2 absent — no edgeoptimize request-id header', { domain });
+    return false;
+  }
+  const requestIds = responses.map((r) => r[HEADER_REQUEST_ID]);
+  if (requestIds.some((rid) => !rid) || new Set(requestIds).size < responses.length) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 3 absent — x-request-id not unique or missing', { domain });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Phase 1.5: Detect AEM CS Fastly behind a WAF simple proxy (Case 0).
+ *
+ * Sends AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT sequential HTTP probes and verifies four signals
+ * that uniquely identify AEM CS Fastly responses. Returns 'aem-cs-fastly'
+ * when all signals are confirmed, null otherwise.
+ */
+export async function detectAemCsFastlyWafSimpleProxy(domain, log) {
+  const allResponses = [];
+  /* eslint-disable no-await-in-loop -- sequential probes; each must see a unique x-request-id */
+  for (let i = 0; i < AEMCS_WAF_SIMPLE_PROXY_PROBE_COUNT; i += 1) {
+    const resp = await makeAemCsWafSimpleProxyProbe(domain, log);
+    if (!resp) {
+      return null;
+    }
+    allResponses.push(resp);
+  }
+  /* eslint-enable no-await-in-loop */
+
+  if (!checkCachingAtProxy(allResponses, log, domain)) {
+    return null;
+  }
+
+  // Signal 4: x-aem-debug host= field equals the probed domain.
+  // Must match the host= field exactly, not x-forwarded-host= (Case 1 sites have the AEM
+  // origin in host= but the public domain in x-forwarded-host=, so substring includes()
+  // would produce a false positive for Case 1). The host token can appear anywhere
+  // in the debug header, separated by spaces, semicolons, commas, or other text.
+  const signal4 = allResponses.every((r) => {
+    const hostField = (r[HEADER_AEM_DEBUG] || '').match(/(?:^|[^\w-])host=([^,\s;]+)/)?.[1] ?? '';
+    return hostField === domain;
+  });
+  if (!signal4) {
+    log?.info?.('[cdn-detection] Phase 1.5: signal 4 absent — x-aem-debug host mismatch', { domain });
+    return null;
+  }
+
+  log?.info?.('[cdn-detection] Phase 1.5: all signals confirmed — AEM CS Fastly WAF simple proxy', { domain });
+  return 'aem-cs-fastly';
 }
 
 /* ============================================================================
@@ -178,9 +295,8 @@ async function detectAdobeManagedCdn(domain, log) {
  * of truth. Until that lands, this is an intentional duplicate of
  * spacecat-audit-worker/src/detect-cdn/cdn-detector.js.
  *
- * Probes HTTP headers first; on miss, walks the CNAME chain (system resolver
- * then DoH), then maps a single A-record IP to its ASN via ipinfo.io, then
- * runs PTR keyword matching as a final tiebreaker.
+ * Probes HTTP headers first; on miss, walks the CNAME chain (system resolver),
+ * then runs PTR keyword matching as a final tiebreaker.
  *
  * The detector returns descriptive labels (e.g. "Cloudflare", "Vercel"). The
  * LABEL_TO_LLMO_TOKEN adapter collapses every detected non-Adobe CDN to one
@@ -199,19 +315,6 @@ const CDN_DOMAIN_SIGNATURES = [
   { domains: ['azureedge.net', 'msecnd.net'], cdn: 'Azure Front Door / Azure CDN' },
   { domains: ['googleusercontent.com'], cdn: 'Google Cloud CDN' },
   { domains: ['alicdn.com', 'yundunwaf3.com'], cdn: 'Alibaba Cloud CDN' },
-];
-
-/**
- * CDN identification by ASN when CNAME chain doesn't match a known provider.
- */
-const CDN_ASN_SIGNATURES = [
-  { asns: [13335], cdn: 'Cloudflare' },
-  { asns: [54113], cdn: 'Fastly' },
-  { asns: [16509], cdn: 'CloudFront' },
-  { asns: [20940, 16625, 21342], cdn: 'Akamai' },
-  { asns: [8075], cdn: 'Azure Front Door / Azure CDN' },
-  { asns: [15169], cdn: 'Google Cloud CDN' },
-  { asns: [24429, 37963], cdn: 'Alibaba Cloud CDN' },
 ];
 
 /**
@@ -392,90 +495,6 @@ function headersFromResponse(response) {
   return { cdn };
 }
 
-/** DoH JSON endpoints. Google primary; Cloudflare fallback so a single-provider
- * outage doesn't take down Phase 2 fallback for every customer. */
-const DOH_GOOGLE_RESOLVE = 'https://dns.google/resolve';
-const DOH_CLOUDFLARE_RESOLVE = 'https://cloudflare-dns.com/dns-query';
-
-async function dohQuerySingle(endpoint, name, typeNum, timeout) {
-  const url = `${endpoint}?name=${encodeURIComponent(name)}&type=${typeNum}`;
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: 'application/dns-json' },
-      redirect: 'follow',
-      follow: 5,
-    });
-    clearTimeout(id);
-    if (!response.ok) {
-      return null;
-    }
-    const data = await response.json();
-    return data && Array.isArray(data.Answer) ? data : { Answer: [] };
-  } catch {
-    clearTimeout(id);
-    return null;
-  }
-}
-
-async function dohQuery(name, typeNum, opts = {}) {
-  const { timeout = 3000, log } = opts;
-  let data = await dohQuerySingle(DOH_GOOGLE_RESOLVE, name, typeNum, timeout);
-  if (data) {
-    return data;
-  }
-  data = await dohQuerySingle(DOH_CLOUDFLARE_RESOLVE, name, typeNum, timeout);
-  if (data) {
-    return data;
-  }
-  log?.warn?.('[cdn-detection] DoH query failed (both providers)', { name, type: typeNum });
-  return { Answer: [] };
-}
-
-function normalizeDohName(data) {
-  /* c8 ignore next 3 -- defensive; callers only pass string values from DoH Answer.data */
-  if (typeof data !== 'string') {
-    return '';
-  }
-  return data.replace(/\.$/, '').trim();
-}
-
-async function getCnameChainDoh(hostname, log) {
-  const chain = [];
-  let current = hostname.replace(/\.$/, '');
-  const maxHops = 10;
-
-  /* eslint-disable no-await-in-loop -- Each CNAME hop depends on the previous answer. */
-  for (let hop = 0; hop < maxHops; hop += 1) {
-    chain.push(current);
-    const { Answer = [] } = await dohQuery(current, 5, { timeout: 3000, log });
-    const cname = Answer.find((a) => a.type === 5);
-    if (!cname?.data) {
-      break;
-    }
-    current = normalizeDohName(cname.data);
-    if (!current) {
-      break;
-    }
-  }
-  /* eslint-enable no-await-in-loop */
-
-  return chain;
-}
-
-async function getOneIpDoh(hostname, log) {
-  const { Answer = [] } = await dohQuery(hostname, 1, { timeout: 3000, log });
-  const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/;
-  for (const a of Answer) {
-    if (a.type === 1 && typeof a.data === 'string' && ipv4.test(a.data)) {
-      return a.data;
-    }
-  }
-  return null;
-}
-
 async function getCnameChain(hostname, log) {
   const chain = [];
   let current = hostname.replace(/\.$/, '');
@@ -527,35 +546,6 @@ async function getPtrHostnames(ip, log) {
   }
 }
 
-async function getAsnForIp(ip, options = {}) {
-  const { timeout = 3000, log } = options;
-  const url = `https://ipinfo.io/${ip}/json`;
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: 'follow',
-      follow: 5,
-    });
-    clearTimeout(id);
-    if (!response.ok) {
-      return null;
-    }
-    const data = await response.json();
-    const org = data?.org;
-    if (typeof org !== 'string') {
-      return null;
-    }
-    const m = org.match(/^AS(\d+)/);
-    return m ? parseInt(m[1], 10) : null;
-  } catch (err) {
-    clearTimeout(id);
-    log?.warn?.('[cdn-detection] ASN lookup failed', { ip, message: err?.message });
-    return null;
-  }
-}
-
 // Suffix-anchored CNAME match: a hostname matches a signature domain `d`
 // only when it equals `d` or ends with `.d`. Substring `includes()` would
 // classify `evil.fastly.net.attacker.com` as Fastly, which is the bug the
@@ -567,24 +557,11 @@ function matchCdnByCname(cnameChain) {
   }
   for (const { domains, cdn } of CDN_DOMAIN_SIGNATURES) {
     for (const hostname of cnameChain) {
-      /* c8 ignore next -- defensive; getCnameChain/getCnameChainDoh always push strings */
+      /* c8 ignore next -- defensive; getCnameChain always pushes strings */
       const lower = (hostname || '').toLowerCase().replace(/\.$/, '');
       if (domains.some((d) => lower === d || lower.endsWith(`.${d}`))) {
         return cdn;
       }
-    }
-  }
-  return null;
-}
-
-function matchCdnByAsn(asn) {
-  /* c8 ignore next 3 -- defensive; caller passes parseInt output filtered for null */
-  if (typeof asn !== 'number' || Number.isNaN(asn)) {
-    return null;
-  }
-  for (const { asns, cdn } of CDN_ASN_SIGNATURES) {
-    if (asns.includes(asn)) {
-      return cdn;
     }
   }
   return null;
@@ -601,7 +578,7 @@ async function detectCdnFromDnsFallback(url, options = {}) {
   }
   /* c8 ignore stop */
 
-  // Track whether any DNS / DoH / ASN / PTR stage produced usable data.
+  // Track whether any DNS / PTR stage produced usable data.
   // Distinguishes a clean "no match" from a fully inconclusive run, which
   // detectCdnForDomain uses to choose between 'byocdn-other' and null.
   let probeSucceeded = false;
@@ -610,7 +587,7 @@ async function detectCdnFromDnsFallback(url, options = {}) {
   if (cnameChainSystem.length > 1) {
     probeSucceeded = true;
   }
-  let cdnFromCname = matchCdnByCname(cnameChainSystem);
+  const cdnFromCname = matchCdnByCname(cnameChainSystem);
   if (cdnFromCname) {
     log?.info?.('[cdn-detection] Phase 2: detected by CNAME', { cdn: cdnFromCname, hostname });
     return { cdn: cdnFromCname, probeSucceeded: true };
@@ -621,30 +598,9 @@ async function detectCdnFromDnsFallback(url, options = {}) {
     return { cdn: cdnFromChainKw, probeSucceeded: true };
   }
 
-  const cnameChainDoh = await getCnameChainDoh(hostname, log);
-  if (cnameChainDoh.length > 1) {
-    probeSucceeded = true;
-  }
-  cdnFromCname = matchCdnByCname(cnameChainDoh);
-  if (cdnFromCname) {
-    log?.info?.('[cdn-detection] Phase 2: detected by CNAME (DoH)', { cdn: cdnFromCname, hostname });
-    return { cdn: cdnFromCname, probeSucceeded: true };
-  }
-  const cdnFromDohKw = matchCdnByKeywords(cnameChainDoh.join(' '));
-  if (cdnFromDohKw) {
-    log?.info?.('[cdn-detection] Phase 2: detected by DNS name keywords (DoH)', { cdn: cdnFromDohKw, hostname });
-    return { cdn: cdnFromDohKw, probeSucceeded: true };
-  }
-
-  const ip = (await getOneIp(hostname, log)) || (await getOneIpDoh(hostname, log));
+  const ip = await getOneIp(hostname, log);
   if (ip) {
     probeSucceeded = true;
-    const asn = await getAsnForIp(ip, { timeout: 3000, log });
-    const cdnFromAsn = asn !== null ? matchCdnByAsn(asn) : null;
-    if (cdnFromAsn) {
-      log?.info?.('[cdn-detection] Phase 2: detected by ASN', { cdn: cdnFromAsn, asn });
-      return { cdn: cdnFromAsn, probeSucceeded: true };
-    }
     const ptrHostnames = await getPtrHostnames(ip, log);
     for (const ptr of ptrHostnames) {
       const fromPtrKw = matchCdnByKeywords(ptr);
@@ -747,7 +703,7 @@ async function detectCdnFromUrl(url, options = {}) {
 /**
  * Phase 2 entry: returns { token, probeSucceeded } where token is the LLMO
  * byocdn-X token (or null when no signal matched). probeSucceeded reflects
- * whether at least one underlying probe (HTTP HEAD/GET, DNS, DoH, ASN, PTR)
+ * whether at least one underlying probe (HTTP HEAD/GET, DNS, PTR)
  * produced data, so callers can distinguish a clean miss from an inconclusive
  * run.
  */
@@ -772,13 +728,17 @@ async function detectGenericCdnToken(url, log) {
 /**
  * Detects the CDN for a given hostname or URL.
  *
- * Two-phase detection:
- *   Phase 1 — DNS-only check for Adobe-managed CDNs (AEM CS Fastly,
- *             Adobe Commerce Cloud Fastly). Cheap and authoritative when matched.
- *   Phase 2 — When Phase 1 doesn't match, runs a multi-signal probe ported from
- *             spacecat-audit-worker (HTTP headers → CNAME chain → DoH → ASN →
- *             PTR keywords). Result is mapped from a descriptive label to the
- *             LLMO byocdn-X token via LABEL_TO_LLMO_TOKEN.
+ * Three-phase detection:
+ *   Phase 1   — DNS-only check for Adobe-managed CDNs (AEM CS Fastly,
+ *               Adobe Commerce Cloud Fastly). Cheap and authoritative when matched.
+ *   Phase 1.5 — Case 0 (WAF Simple Proxy): when Phase 1 DNS resolves cleanly to
+ *               non-Adobe IPs, an HTTP probe with four signals (correlation echo,
+ *               request-id header, unique x-request-id, x-aem-debug host)
+ *               distinguishes AEM CS Fastly behind a WAF from a genuine third-party CDN.
+ *   Phase 2   — When Phase 1 doesn't match, runs a multi-signal probe ported from
+ *               spacecat-audit-worker (HTTP headers → CNAME chain → PTR keywords).
+ *               Result is mapped from a descriptive label to the LLMO byocdn-X
+ *               token via LABEL_TO_LLMO_TOKEN.
  *
  * Returns:
  *   - 'aem-cs-fastly' | 'commerce-fastly'  — Phase 1 hit
@@ -835,6 +795,19 @@ export async function detectCdnForDomain(input, log) {
       return phase1;
     }
 
+    // Phase 1.5: Case 0 — AEM CS WAF Simple Proxy.
+    // DNS resolved cleanly to non-Adobe IPs; an HTTP probe with four signals
+    // distinguishes WAF-proxied AEM CS from a genuine third-party CDN.
+    if (phase1 === 'byocdn-other') {
+      let aemcsWafSimpleProxyResult = await detectAemCsFastlyWafSimpleProxy(`www.${bareDomain}`, log);
+      if (!aemcsWafSimpleProxyResult) {
+        aemcsWafSimpleProxyResult = await detectAemCsFastlyWafSimpleProxy(bareDomain, log);
+      }
+      if (aemcsWafSimpleProxyResult === 'aem-cs-fastly') {
+        return aemcsWafSimpleProxyResult;
+      }
+    }
+
     const { token: phase2Token, probeSucceeded } = await detectGenericCdnToken(url, log);
     if (phase2Token) {
       return phase2Token;
@@ -851,8 +824,8 @@ export async function detectCdnForDomain(input, log) {
       return 'byocdn-other';
     }
     // Phase 1 succeeded with no match, Phase 2 produced no data anywhere
-    // (HTTP probes, DNS, DoH, ASN/PTR all failed). Treat as inconclusive
-    // rather than mislead callers with a stale 'byocdn-other'.
+    // (HTTP probes, DNS, PTR all failed). Treat as inconclusive rather than
+    // mislead callers with a stale 'byocdn-other'.
     return null;
     /* c8 ignore next 4 */
   } catch (err) {

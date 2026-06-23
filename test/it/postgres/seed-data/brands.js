@@ -22,6 +22,7 @@ export const brands = [
     id: 'ab111111-1111-4111-b111-111111111111',
     organization_id: '11111111-1111-4111-b111-111111111111',
     name: 'Test Brand',
+    site_id: '33333333-3333-4333-b333-333333333333',
     status: 'active',
     origin: 'human',
     regions: ['us'],

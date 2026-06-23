@@ -33,8 +33,17 @@ export function buildEnv(publicKeyB64) {
     AWS_ENDPOINT_URL_S3: `http://localhost:${process.env.IT_MINIO_PORT || '9100'}`,
     S3_BUCKET_NAME: 'spacecat-it-test',
 
-    // IMS client (eager, hard-throws per-request)
-    IMS_HOST: 'https://dummy-ims.example.com',
+    // ASO redirect overlay endpoint (GET /config/:service/redirects.txt). The
+    // bucket name encodes the deployment env (dev); the controller reads from it
+    // with the Lambda's own role after resolving the service to an entitled site.
+    S3_ASO_OVERLAYS_BUCKET: 'spacecat-dev-aso-overlays',
+    ASO_OVERLAY_API_KEY: 'it-aso-overlay-key',
+
+    // IMS client (eager, hard-throws per-request). NB: hostname only, no
+    // scheme — ImsClient builds URLs as `https://${IMS_HOST}${endpoint}`,
+    // so a scheme-prefixed value yields `https://https://...` and fails
+    // DNS with `ENOTFOUND https`.
+    IMS_HOST: 'dummy-ims.example.com',
     IMS_CLIENT_ID: 'dummy-client-id',
     IMS_CLIENT_CODE: 'dummy-client-code',
     IMS_CLIENT_SECRET: 'dummy-client-secret',
