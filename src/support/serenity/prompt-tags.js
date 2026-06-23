@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 /**
  * Serenity prompt-tag taxonomy — the single source of truth for the
  * `dimension:value` tag strings attached to prompts (and registered as the tag
