@@ -2173,21 +2173,35 @@ function SuggestionsController(ctx, sqs, env) {
         .map(({ suggestion }) => suggestion.getId())
         .filter((id) => succeededSuggestions.some((s) => s.getId() === id));
 
-      if (succeededDomainWideIds.length > 0) {
+      const { IMPORT_WORKER_QUEUE_URL } = env;
+      if (succeededDomainWideIds.length > 0 && IMPORT_WORKER_QUEUE_URL) {
         try {
-          await context.sqs.sendMessage(
-            context.env.IMPORT_WORKER_QUEUE_URL,
-            {
-              type: PATTERN_COVERED_MARKING_TYPE,
-              siteId,
-              opportunityId,
-              patternBasedSuggestionIds: succeededDomainWideIds,
-            },
+          const coveredMarkingPayload = {
+            type: PATTERN_COVERED_MARKING_TYPE,
+            siteId,
+            opportunityId,
+            patternBasedSuggestionIds: succeededDomainWideIds,
+          };
+          const coveredMarkingPayloadSizeBytes = Buffer.byteLength(
+            JSON.stringify(coveredMarkingPayload),
+            'utf8',
+          );
+          context.log.info(
+            '[edge-deploy] Queueing pattern-based covered marking '
+            + `for ${succeededDomainWideIds.length} suggestion(s); `
+            + `payloadSizeBytes=${coveredMarkingPayloadSizeBytes}`,
+          );
+
+          await sqs.sendMessage(
+            IMPORT_WORKER_QUEUE_URL,
+            coveredMarkingPayload,
           );
           context.log.info(`[edge-deploy] Queued domain-wide covered marking for ${succeededDomainWideIds.length} domain-wide suggestion(s)`);
         } catch (sqsError) {
           context.log.warn(`[edge-deploy] Failed to queue domain-wide covered marking: ${sqsError.message}`);
         }
+      } else if (succeededDomainWideIds.length > 0) {
+        context.log.warn('[edge-deploy] IMPORT_WORKER_QUEUE_URL not configured; skipping covered-marking enqueue');
       }
     } catch (error) {
       context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error deploying to edge: ${error.message}`, error);

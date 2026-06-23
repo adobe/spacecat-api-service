@@ -8402,7 +8402,14 @@ describe('Suggestions Controller', () => {
       };
       mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
 
-      const sqsStub = { sendMessage: sandbox.stub().resolves() };
+      const suggestionsControllerWithImportWorkerQueue = SuggestionsController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker',
+      });
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().resolves({
           succeededSuggestions: [domainWideSuggestion],
@@ -8411,17 +8418,15 @@ describe('Suggestions Controller', () => {
         }),
       });
 
-      await suggestionsController.deploySuggestionToEdge({
+      await suggestionsControllerWithImportWorkerQueue.deploySuggestionToEdge({
         ...context,
-        sqs: sqsStub,
-        env: { IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker' },
         pathInfo: { headers: {} },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
       });
 
-      expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      const [queueUrl, payload] = sqsStub.sendMessage.firstCall.args;
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, payload] = mockSqs.sendMessage.firstCall.args;
       expect(queueUrl).to.equal('https://sqs.example.com/import-worker');
       expect(payload.type).to.equal('pattern-based-covered-marking');
       expect(payload.siteId).to.equal(SITE_ID);
@@ -8452,7 +8457,15 @@ describe('Suggestions Controller', () => {
       };
       mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
 
-      const sqsStub = { sendMessage: sandbox.stub().rejects(new Error('SQS unavailable')) };
+      const failingSqs = { sendMessage: sandbox.stub().rejects(new Error('SQS unavailable')) };
+      const suggestionsControllerWithFailingSqs = SuggestionsController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, failingSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker',
+      });
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().resolves({
           succeededSuggestions: [domainWideSuggestion],
@@ -8461,10 +8474,8 @@ describe('Suggestions Controller', () => {
         }),
       });
 
-      const response = await suggestionsController.deploySuggestionToEdge({
+      const response = await suggestionsControllerWithFailingSqs.deploySuggestionToEdge({
         ...context,
-        sqs: sqsStub,
-        env: { IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker' },
         pathInfo: { headers: {} },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
@@ -8472,6 +8483,54 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
       expect(context.log.warn.calledWithMatch('Failed to queue domain-wide covered marking')).to.equal(true);
+    });
+
+    it('logs warning and skips enqueue when IMPORT_WORKER_QUEUE_URL is missing', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/.*$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+
+      const suggestionsControllerWithoutImportWorkerQueue = SuggestionsController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      });
+
+      const response = await suggestionsControllerWithoutImportWorkerQueue.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+      expect(context.log.warn.calledWithMatch('IMPORT_WORKER_QUEUE_URL not configured')).to.equal(true);
     });
 
     it('skips non-domain suggestions without URL when evaluating domain-wide coverage', async () => {
