@@ -191,13 +191,9 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
       it('matches prompts whose stored region casing differs from the query', async () => {
         const http = getHttpClient();
 
-        // Region codes are persisted with mixed casing: onboard-llmo and
-        // Serenity provisioning store them UPPERCASE, while CSV / config-mapper
-        // imports store them lowercase. The UI always sends the code lowercased.
-        // Store one prompt UPPERCASE and one lowercase, then filter with the
-        // lowercased code — both must come back. A case-sensitive containment
-        // (the pre-LLMO-5755 behaviour) returned nothing for the uppercase row,
-        // which is what made the Creditsafe market filter look broken.
+        // Stored region codes can be lower- or upper-case. Store one prompt
+        // each way, then filter with the lowercased code — both must come back
+        // (a case-sensitive contains would miss the upper-case row). (LLMO-5755)
         const created = await http.admin.post(
           `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
           [

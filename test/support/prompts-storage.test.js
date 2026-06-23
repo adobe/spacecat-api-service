@@ -350,12 +350,9 @@ describe('prompts-storage', () => {
     });
 
     it('filters by region case-insensitively via array overlap (LLMO-5755)', async () => {
-      // Region codes are persisted UPPERCASE by some onboarding paths
-      // (onboard-llmo / Serenity provisioning) and lowercase by others
-      // (CSV / config-mapper). The UI sends the code lowercased, so the filter
-      // must match either case variant with an array-overlap query; a
-      // case-sensitive `.contains(['us'])` matched nothing for uppercase brands
-      // (e.g. Creditsafe), which is what made the market filter appear broken.
+      // Stored region codes can be lower- or upper-case, so the filter must
+      // match both variants via array overlap rather than a case-sensitive
+      // contains. (LLMO-5755)
       let overlapsCall = null;
       const recordingChain = (result) => {
         const chain = {

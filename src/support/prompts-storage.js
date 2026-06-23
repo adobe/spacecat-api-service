@@ -509,14 +509,8 @@ export async function listPrompts({
     }
 
     if (hasText(region)) {
-      // Region codes are persisted with inconsistent casing depending on the
-      // onboarding path: `onboard-llmo` and Serenity provisioning store them
-      // UPPERCASE (e.g. ['US','NO']), while CSV / config-mapper imports store
-      // them lowercase. The UI sends the code lowercased, so a case-sensitive
-      // `.contains` (regions @> ARRAY['us']) silently matches nothing for the
-      // uppercase brands. Match an array overlap against both case variants so
-      // the filter is case-insensitive without rewriting stored values.
-      // (LLMO-5755)
+      // Stored region codes can be lower- or upper-case, so match both
+      // variants — a case-sensitive `.contains` would miss the other. (LLMO-5755)
       const regionVariants = [...new Set([region.toLowerCase(), region.toUpperCase()])];
       baseQuery = baseQuery.overlaps('regions', regionVariants);
     }
