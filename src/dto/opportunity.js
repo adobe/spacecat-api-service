@@ -57,10 +57,10 @@ export const OpportunityDto = {
 
     if (locale && i18n?.[locale]) {
       const localized = i18n[locale];
-      if (localized.title) {
+      if (localized.title != null) {
         title = localized.title;
       }
-      if (localized.description) {
+      if (localized.description != null) {
         description = localized.description;
       }
     }
