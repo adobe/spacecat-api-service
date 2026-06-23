@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import {
@@ -86,7 +88,7 @@ export function removedCompetitorDomains(oldCompetitors, newCompetitors) {
  * competitors removed from the brand (`removedDomains`). Never deletes the
  * main-brand benchmark. Returns the change counts.
  *
- * @param {string[]} [removedDomains=[]] - normalized domains removed from the brand.
+ * @param {string[]} removedDomains - normalized domains removed from the brand.
  * @returns {Promise<{created: number, deleted: number, changed: boolean}>}
  */
 export async function syncCompetitorBenchmarksForProject(

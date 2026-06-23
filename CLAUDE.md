@@ -17,6 +17,7 @@ npm run test-postdeploy    # Run post-deployment tests
 npm run test-e2e           # Run end-to-end tests (30s timeout)
 npm run lint               # Run ESLint
 npm run lint:fix           # Auto-fix linting issues
+npm run type-check         # Opt-in tsc --checkJs over // @ts-check files (serenity); blocking gate
 ```
 
 ### Single Test Execution

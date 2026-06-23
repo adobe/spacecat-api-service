@@ -331,6 +331,30 @@ x-ai-vis-v1-gap-prompts-source-domain: &v1GapPromptsSourceDomainParam
     type: string
     example: nytimes.com
 
+x-ai-vis-v1-gap-source-domains-sort-by: &v1GapSourceDomainsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `DOMAINS_REQUEST_ORDER_BY` for Semrush v2 `GapSourceDomainsRequest.order.by` (protobuf name or integer).
+    Default when omitted: `ORGANIC_TRAFFIC` (5).
+  schema:
+    oneOf:
+      - type: string
+        enum:
+          - UNSPECIFIED
+          - DOMAIN
+          - MENTIONS
+          - SOURCES_COUNT
+          - PROMPTS_COUNT
+          - ORGANIC_TRAFFIC
+          - MENTIONS_COUNT_BY_BRAND
+          - MENTIONED_COMPETITORS
+          - TOTAL_COMPETITOR_MENTIONS
+      - type: integer
+        enum: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    example: ORGANIC_TRAFFIC
+
 x-ai-vis-sort-direction: &sortDirectionParam
   name: sortDirection
   in: query
@@ -747,193 +771,6 @@ ai-visibility-competitors-metrics:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityCompetitorsMetrics'
-      <<: *errorResponses
-    security:
-      - api_key: []
-
-ai-visibility-competitors-gap-topics:
-  get:
-    tags: [ai-visibility]
-    summary: Get competitor gap topics
-    description: |
-      Returns topics where competitors have presence but the target brand does not
-      (or vice versa). Data from `TopicService/GapTopics` and `GapTopicsTotals`.
-    operationId: getAiVisibilityCompetitorsGapTopics
-    parameters:
-      - *domainParam
-      - *competitorsParam
-      - *countryParam
-      - *regionParam
-      - *engineParam
-      - *limitParam
-      - *offsetParam
-      - name: searchQuery
-        in: query
-        required: false
-        description: |
-          Server-side search. Pushed to Semrush `GapTopicsRequest.dimension_filter_ql`
-          (and `GapTopicsTotals`) as `topic CONTAINS "<searchQuery>"`, so the returned
-          `total` reflects the filtered set. Quotes and backslashes are escaped.
-        schema:
-          type: string
-          example: running shoes
-      - name: sortBy
-        in: query
-        required: false
-        description: |
-          `TOPICS_REQUEST_ORDER_BY` for Semrush `order.by`. Unknown or omitted values fall
-          back to the default. Default: `MENTIONED_COMPETITORS`.
-        schema:
-          type: string
-          enum: [NAME, VISIBILITY, DIFFICULTY, MENTIONS, VOLUME, MENTIONS_COUNT_BY_BRAND, MENTIONED_COMPETITORS, TOTAL_COMPETITOR_MENTIONS]
-      - *sortDirectionParam
-      - name: gapKinds
-        in: query
-        required: false
-        description: Comma-separated gap kinds (`ALL`, `MISSING`, `SHARED`, `UNIQUE`)
-        schema:
-          type: string
-          example: ALL
-    responses:
-      '200':
-        description: Competitor gap topics retrieved successfully
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/AiVisibilityPaginatedResponse'
-      <<: *errorResponses
-    security:
-      - api_key: []
-
-ai-visibility-competitors-gap-source-domains:
-  get:
-    tags: [ai-visibility]
-    summary: Get competitor gap source domains
-    description: |
-      Returns source domains where competitors are cited but the target is not (or vice versa).
-      Data from `SourceService/GapSourceDomains` and `GapSourceDomainsTotals`.
-    operationId: getAiVisibilityCompetitorsGapSourceDomains
-    parameters:
-      - *domainParam
-      - *competitorsParam
-      - *countryParam
-      - *regionParam
-      - *engineParam
-      - *limitParam
-      - *offsetParam
-      - name: searchQuery
-        in: query
-        required: false
-        description: |
-          Server-side search. Pushed to Semrush `GapSourceDomainsRequest.dimension_filter_ql`
-          (and `GapSourceDomainsTotals`) as `domain CONTAINS "<searchQuery>"`, so the returned
-          `total` reflects the filtered set. Quotes and backslashes are escaped.
-        schema:
-          type: string
-          example: cdn.example.com
-      - name: sortBy
-        in: query
-        required: false
-        description: |
-          `DOMAINS_REQUEST_ORDER_BY` for Semrush `order.by`. Unknown or omitted values fall
-          back to the default. Default: `ORGANIC_TRAFFIC`.
-        schema:
-          type: string
-          enum: [DOMAIN, MENTIONS, SOURCES_COUNT, PROMPTS_COUNT, ORGANIC_TRAFFIC, MENTIONS_COUNT_BY_BRAND, MENTIONED_COMPETITORS, TOTAL_COMPETITOR_MENTIONS]
-      - *sortDirectionParam
-      - name: gapKinds
-        in: query
-        required: false
-        description: Comma-separated gap kinds (`ALL`, `MISSING`, `SHARED`, `UNIQUE`)
-        schema:
-          type: string
-          example: ALL
-    responses:
-      '200':
-        description: Competitor gap source domains retrieved successfully
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/AiVisibilityPaginatedResponse'
-      <<: *errorResponses
-    security:
-      - api_key: []
-
-ai-visibility-competitors-gap-prompts:
-  get:
-    tags: [ai-visibility]
-    summary: Get competitor gap prompts
-    description: |
-      Returns prompts where competitors are mentioned but the target brand is not
-      (or the reverse, depending on gap kind). Response is normalized to
-      `{ data, total, offset, limit }` envelope.
-      Data from `PromptService/GapPrompts`.
-    operationId: getAiVisibilityCompetitorsGapPrompts
-    parameters:
-      - *domainParam
-      - *competitorsParam
-      - *countryParam
-      - *regionParam
-      - *engineParam
-      - *limitParam
-      - *offsetParam
-      - name: searchQuery
-        in: query
-        required: false
-        description: |
-          Server-side search. Pushed to Semrush `GapPromptsRequest.dimension_filter_ql`
-          (and `GapPromptsTotals`) as `prompt CONTAINS "<searchQuery>"`, so the returned
-          `total` reflects the filtered set. Quotes and backslashes are escaped.
-        schema:
-          type: string
-          example: best running shoes
-      - name: sortBy
-        in: query
-        required: false
-        description: |
-          `GAP_PROMPTS_REQUEST_ORDER_BY` for Semrush `order.by`. Unknown or omitted values fall
-          back to the default. Default: `MENTIONED_BRANDS_COUNT`.
-        schema:
-          type: string
-          enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT, TOPIC_VOLUME]
-      - *sortDirectionParam
-      - name: topicId
-        in: query
-        required: false
-        description: |
-          When set, restricts gap prompts to this topic hash (sent to Semrush as
-          `GapPromptsRequest.topic_hash`, applied to both the list and `GapPromptsTotals`
-          calls). Enables the topic → prompts drill-down. Non-numeric values are ignored.
-        schema:
-          type: string
-          example: '12345'
-      - name: gapKinds
-        in: query
-        required: false
-        description: Comma-separated gap kinds (`ALL`, `MISSING`, `SHARED`, `UNIQUE`)
-        schema:
-          type: string
-          example: ALL
-      - name: promptTab
-        in: query
-        required: false
-        description: Tab alias (`all-prompts`, `missing`, `shared`, `unique`)
-        schema:
-          type: string
-          enum: [all-prompts, missing, shared, unique]
-      - name: tab
-        in: query
-        required: false
-        description: Alternative tab parameter (same values as `promptTab`)
-        schema:
-          type: string
-    responses:
-      '200':
-        description: Competitor gap prompts retrieved successfully
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/AiVisibilityGapPromptsResponse'
       <<: *errorResponses
     security:
       - api_key: []
@@ -1873,6 +1710,148 @@ ai-visibility-v1-prompt-gap-prompts-export:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1PromptGapPromptsExportResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-gap-prompts-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get gap prompts per-kind counts (Prompt v2)
+    description: |
+      Returns only the per-kind totals for gap prompts using Semrush `PromptService` v2
+      `GapPromptsTotals` (mirrors `GET /llmo/ai-visibility/v1/topic/gap-topics-totals`).
+      Accepts the same `topicId` (native `GapPromptsTotalsRequest.topic_hash`) and
+      `sourceDomain` (native `source_domain`) filters as
+      `GET /llmo/ai-visibility/v1/prompt/gap-prompts`, but no pagination, sort, or `gapKinds`
+      parameters. The response always includes totals for all gap kinds.
+
+      Use this endpoint to populate market-comparison prompt tab badge counts without fetching
+      full paginated data.
+    operationId: getAiVisibilityV1PromptGapPromptsTotals
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *topicIdOptionalParam
+      - *v1GapPromptsSourceDomainParam
+    responses:
+      '200':
+        description: Gap prompts per-kind counts retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptGapPromptsTotalsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-gap-source-domains:
+  get:
+    tags: [ai-visibility]
+    summary: Get gap source domains (Source v2 JSON)
+    description: |
+      Returns source domains with the gap between the target brand and its competitors using
+      Semrush `SourceService` v2 `GapSourceDomains`. Returns each row as **native protobuf JSON**
+      (camelCase) including `gapMentions` per competitor brand. Supports `sortBy` / `sortDirection`
+      on `DOMAINS_REQUEST_ORDER_BY` (default `ORGANIC_TRAFFIC` descending) and `searchQuery`
+      (forwarded as a `domain CONTAINS "<q>"` dimension filter). The response body is `{ data }`
+      plus `srFilters`; `offset` and `limit` are not echoed (use the query parameters).
+    operationId: getAiVisibilityV1SourceGapSourceDomains
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *v1GapSourceDomainsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *searchQueryParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap source domains (v2 source payload) retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceGapSourceDomainsResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-gap-source-domains-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export gap source domains as CSV (Source v2 JSON)
+    description: |
+      Exports source domains with the gap between the target brand and its competitors using
+      Semrush `SourceService` v2 `GapSourceDomainsExport`. The nested `GapSourceDomainsRequest`
+      uses the same filters and sorting as `/llmo/ai-visibility/v1/source/gap-source-domains`:
+      competitors, `gapKinds`, `searchQuery` (as a `domain CONTAINS` dimension filter),
+      `DOMAINS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`. The response is the native
+      Semrush `ExportResponse` protobuf JSON with CSV `fileContent` base64-encoded, plus
+      `fileName`, `contentType`, and `srFilters`.
+    operationId: getAiVisibilityV1SourceGapSourceDomainsExport
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *v1GapSourceDomainsSortByParam
+      - *sortDirectionParam
+      - *v1GapTopicsGapKindsParam
+      - *searchQueryParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Gap source domains CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceGapSourceDomainsExportResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-gap-source-domains-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get gap source domains per-kind counts (Source v2)
+    description: |
+      Returns only the per-kind totals for gap source domains using Semrush `SourceService` v2
+      `GapSourceDomainsTotals` (mirrors `GET /llmo/ai-visibility/v1/topic/gap-topics-totals`).
+      Accepts the same `searchQuery` filter as
+      `GET /llmo/ai-visibility/v1/source/gap-source-domains` (forwarded as a `domain CONTAINS`
+      dimension filter) but no pagination, sort, or `gapKinds` parameters. The response always
+      includes totals for all gap kinds.
+
+      Use this endpoint to populate market-comparison source-domain tab badge counts without
+      fetching full paginated data.
+    operationId: getAiVisibilityV1SourceGapSourceDomainsTotals
+    parameters:
+      - *domainParam
+      - *competitorsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *searchQueryParam
+    responses:
+      '200':
+        description: Gap source domains per-kind counts retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceGapSourceDomainsTotalsResponse'
       <<: *errorResponses
     security:
       - api_key: []

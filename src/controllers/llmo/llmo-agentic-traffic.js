@@ -60,6 +60,8 @@ const PLATFORM_CODE_TO_DB = {
   perplexity: 'Perplexity',
   gemini: 'Gemini',
   google: 'Google',
+  'google-ai-mode': 'Google AI Mode',
+  copilot: 'Copilot',
   amazon: 'Amazon',
 };
 
