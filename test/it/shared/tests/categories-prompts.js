@@ -183,6 +183,57 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
       });
     });
 
+    // ── The region/market filter is case-insensitive (LLMO-5755) ──
+
+    describe('Prompt-list region filter matches case-insensitively', () => {
+      before(() => resetData());
+
+      it('matches prompts whose stored region casing differs from the query', async () => {
+        const http = getHttpClient();
+
+        // Region codes are persisted with mixed casing: onboard-llmo and
+        // Serenity provisioning store them UPPERCASE, while CSV / config-mapper
+        // imports store them lowercase. The UI always sends the code lowercased.
+        // Store one prompt UPPERCASE and one lowercase, then filter with the
+        // lowercased code — both must come back. A case-sensitive containment
+        // (the pre-LLMO-5755 behaviour) returned nothing for the uppercase row,
+        // which is what made the Creditsafe market filter look broken.
+        const created = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+          [
+            { prompt: 'Uppercase region prompt', regions: ['US'] },
+            { prompt: 'Lowercase region prompt', regions: ['us'] },
+            { prompt: 'Other region prompt', regions: ['gb'] },
+          ],
+        );
+        expect(created.status).to.equal(201);
+        expect(created.body.created).to.equal(3);
+
+        // Lowercase query returns BOTH the US and us rows, not the gb one.
+        const filtered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?region=us`,
+        );
+        expect(filtered.status).to.equal(200);
+        expect(filtered.body.total).to.equal(2);
+        expect(filtered.body.items).to.have.lengthOf(2);
+
+        // Uppercase query is symmetric — also returns both rows.
+        const filteredUpper = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?region=US`,
+        );
+        expect(filteredUpper.status).to.equal(200);
+        expect(filteredUpper.body.total).to.equal(2);
+
+        // No filter returns all three — proving the filter narrowed the set
+        // rather than the brand simply having those prompts.
+        const unfiltered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+        );
+        expect(unfiltered.status).to.equal(200);
+        expect(unfiltered.body.total).to.equal(3);
+      });
+    });
+
     // ── Multibyte / non-ASCII-only names (LLMO-5515) ──
 
     describe('Category creation with an all-multibyte name (no explicit id)', () => {
