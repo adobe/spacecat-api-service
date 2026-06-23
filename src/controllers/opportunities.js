@@ -26,6 +26,7 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import { OpportunityDto } from '../dto/opportunity.js';
+import { isValidLocale } from '../utils/validations.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
@@ -96,7 +97,11 @@ function OpportunitiesController(ctx) {
    */
   const getAllForSite = async (context) => {
     const siteId = context.params?.siteId;
-    const locale = context.data?.locale || null;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -125,7 +130,11 @@ function OpportunitiesController(ctx) {
   const getByStatus = async (context) => {
     const siteId = context.params?.siteId;
     const status = context.params?.status;
-    const locale = context.data?.locale || null;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -157,7 +166,11 @@ function OpportunitiesController(ctx) {
   const getByID = async (context) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
-    const locale = context.data?.locale || null;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');

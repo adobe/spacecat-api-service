@@ -20,6 +20,21 @@ import { Suggestion } from '@adobe/spacecat-shared-data-access';
 export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
 
 /**
+ * Supported localizable fields that can be overridden from data.i18n translations.
+ * Only fields in this list are promoted from the locale map to prevent unexpected overrides.
+ * @type {string[]}
+ */
+export const ALLOWED_I18N_FIELDS = [
+  'title',
+  'description',
+  'rationale',
+  'aiRationale',
+  'aiSuggestion',
+  'actionItems',
+  'persona',
+];
+
+/**
  * Valid skip reasons when a suggestion is marked as SKIPPED.
  * @type {string[]}
  */
@@ -81,12 +96,25 @@ export const SuggestionDto = {
     const rawData = suggestion.getData();
     const opportunityType = opportunity?.getType() || null;
 
-    // Apply locale projection and strip the internal i18n key from the response
-    // eslint-disable-next-line no-unused-vars
-    const { i18n, ...baseData } = rawData ?? {};
-    const data = (locale && i18n?.[locale])
-      ? { ...baseData, ...i18n[locale] }
-      : baseData;
+    // Strip the internal i18n key and optionally promote allowed translated fields.
+    // Preserve null rawData — converting it to {} would change downstream behavior.
+    let data = rawData;
+    if (rawData) {
+      // eslint-disable-next-line no-unused-vars
+      const { i18n, ...baseData } = rawData;
+      if (locale && i18n?.[locale]) {
+        const localized = i18n[locale];
+        const filteredLocalized = {};
+        for (const field of ALLOWED_I18N_FIELDS) {
+          if (localized[field] != null) {
+            filteredLocalized[field] = localized[field];
+          }
+        }
+        data = { ...baseData, ...filteredLocalized };
+      } else {
+        data = baseData;
+      }
+    }
 
     const skipReason = suggestion.getSkipReason?.();
     const skipDetail = suggestion.getSkipDetail?.();
