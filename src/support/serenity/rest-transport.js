@@ -12,18 +12,15 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { createSerenityProjectEngineApiClient } from '@adobe/spacecat-shared-project-engine-client';
+import { createSerenityUserManagerApiClient } from '@adobe/spacecat-shared-user-manager-client';
 import { ErrorWithStatusCode } from '../utils.js';
-// The typed Semrush Project Engine client owns the project-API prefix
-// ('/enterprise/projects/api'), the IMS-Bearer auth, and request shaping.
-
-// Workspace lifecycle (create subworkspace / status / family / resources / members)
-// is served by a DIFFERENT gateway service than project ops — the
-// "user-manager" API under /enterprise/users/api (verified live 2026-06-15
-// against the dev parent; the project prefix 404s these routes). Project ops are
-// owned by the typed client above; only this prefix is still built by hand here,
-// because no typed user-manager client exists yet (the upstream package is a
-// types-only foundation slice).
-const USERS_API_PREFIX = '/enterprise/users/api';
+// Two typed Semrush clients back this transport, each owning its own gateway
+// prefix, IMS-Bearer auth, and request shaping:
+//  - Project Engine ('/enterprise/projects/api') — project / prompt / benchmark ops.
+//  - User Manager   ('/enterprise/users/api')    — sub-workspace lifecycle
+//    (create child / status / family / resources transfer / delete). A DIFFERENT
+//    gateway than project ops (verified live 2026-06-15: the project prefix 404s
+//    these routes); the typed client appends the prefix internally.
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
 // ceiling that still gives the user a clean error rather than a Lambda timeout.
@@ -106,87 +103,6 @@ function baseUrl(env) {
     );
   }
   return `${parsed.protocol}//${parsed.host}`;
-}
-
-/**
- * Builds the outbound auth header for the hand-rolled user-manager calls. The
- * Adobe-hosted Semrush gateway authenticates via the caller's IMS bearer token.
- * (The project-API client applies the same header itself.)
- */
-function buildHeaders(imsToken) {
-  if (!hasText(imsToken)) {
-    throw new SerenityTransportError(
-      401,
-      'Missing IMS bearer token for Semrush transport',
-    );
-  }
-  return {
-    Authorization: `Bearer ${imsToken}`,
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-  };
-}
-
-async function parseBody(response) {
-  const text = await response.text();
-  if (!text) {
-    return null;
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
-/**
- * Hand-rolled request for the user-manager gateway (the typed client covers the
- * project gateway only). Mirrors the project client's behaviour: 15s timeout
- * mapped to a 504, non-2xx mapped to a SerenityTransportError carrying the
- * upstream status + parsed body.
- */
-async function request(method, url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const init = {
-    method,
-    headers: buildHeaders(imsToken),
-    signal: controller.signal,
-  };
-  if (body !== undefined) {
-    init.body = JSON.stringify(body);
-  }
-  let response;
-  try {
-    response = await fetch(url, init);
-  } catch (e) {
-    if (e?.name === 'AbortError') {
-      throw new SerenityTransportError(
-        504,
-        `Semrush ${method} ${url} timed out after ${timeoutMs}ms`,
-      );
-    }
-    throw e;
-  } finally {
-    clearTimeout(timer);
-  }
-  const parsed = await parseBody(response);
-  if (!response.ok) {
-    throw new SerenityTransportError(
-      response.status,
-      `Semrush ${method} ${url} failed: ${response.status}`,
-      parsed,
-    );
-  }
-  return parsed;
-}
-
-// All path-segment interpolations route through encodeURIComponent so a
-// caller-supplied id containing reserved URL chars can't break out of the
-// expected segment. UUIDs are safe by construction today but the policy
-// applies uniformly. (Project-API ids are encoded by the typed client.)
-function enc(segment) {
-  return encodeURIComponent(String(segment ?? ''));
 }
 
 /**
@@ -273,24 +189,36 @@ export function createSerenityTransport({ env, imsToken }) {
   // opt-in flag, which no deployed environment sets (local test-cleanup only).
   const allowWorkspaceDelete = env?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
 
-  // Typed Project Engine client over the project gateway. The auth getter raises
-  // the transport's own 401 on a missing token (instead of the client's generic
-  // empty-token error) so the controller's mapError keeps classifying it as an
-  // auth failure. maxRetries:0 preserves the one-shot behaviour the hand-rolled
-  // transport had; the injected fetch re-adds the 15s timeout + Accept header the
-  // client does not impose. `root` is the validated origin; the client appends
-  // its own '/enterprise/projects/api' prefix.
+  // Shared IMS-bearer getter for both typed clients. Raises the transport's own
+  // 401 on a missing token (instead of the client's generic empty-token error)
+  // so the controller's mapError keeps classifying it as an auth failure.
+  const authToken = () => {
+    if (!hasText(imsToken)) {
+      throw new SerenityTransportError(
+        401,
+        'Missing IMS bearer token for Semrush transport',
+      );
+    }
+    return imsToken;
+  };
+
+  // Typed Project Engine client over the project gateway. maxRetries:0 preserves
+  // the one-shot behaviour the hand-rolled transport had; the injected fetch
+  // re-adds the 15s timeout + Accept header the client does not impose. `root` is
+  // the validated origin; the client appends its own '/enterprise/projects/api'
+  // prefix.
   const projects = createSerenityProjectEngineApiClient({
     baseUrl: root,
-    authToken: () => {
-      if (!hasText(imsToken)) {
-        throw new SerenityTransportError(
-          401,
-          'Missing IMS bearer token for Semrush transport',
-        );
-      }
-      return imsToken;
-    },
+    authToken,
+    maxRetries: 0,
+    fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
+  });
+
+  // Typed User Manager client over the sub-workspace lifecycle gateway. Same
+  // shape as the project client; appends its own '/enterprise/users/api' prefix.
+  const users = createSerenityUserManagerApiClient({
+    baseUrl: root,
+    authToken,
     maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
   });
@@ -505,10 +433,10 @@ export function createSerenityTransport({ env, imsToken }) {
     // ─────────────────────────────────────────────────────────────────────
     // Sub-workspace lifecycle (serenity dual-mode, subworkspace path).
     //
-    // These remain thin hand-rolled URL+verb wrappers against the SEPARATE
-    // user-manager gateway (no typed client exists for it yet). Behaviour pins
-    // live in serenity-docs brand-semrush-workspace-provisioning-details
-    // §4/§5/§7 and the design's §6 error classification (see errors.js).
+    // Routed through the typed User Manager client (`users`) against the SEPARATE
+    // user-manager gateway. Behaviour pins live in serenity-docs
+    // brand-semrush-workspace-provisioning-details §4/§5/§7 and the design's §6
+    // error classification (see errors.js).
     // ─────────────────────────────────────────────────────────────────────
 
     /**
@@ -521,8 +449,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * seconds; poll getWorkspaceStatus before creating projects against it.
      */
     async createSubworkspace(parentWorkspaceId, title, resources) {
-      const url = `${root}${USERS_API_PREFIX}/v2/workspaces/${enc(parentWorkspaceId)}/child`;
-      return request('POST', url, imsToken, { title, resources });
+      return unwrap('POST', await users.POST(
+        '/v2/workspaces/{id}/child',
+        { params: { path: { id: parentWorkspaceId } }, body: { title, resources } },
+      ));
     },
 
     /**
@@ -530,8 +460,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * create (creating projects against `not ready` can 500).
      */
     async getWorkspaceStatus(workspaceId) {
-      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}/status`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await users.GET(
+        '/v1/workspaces/{id}/status',
+        { params: { path: { id: workspaceId } } },
+      ));
     },
 
     /**
@@ -541,8 +473,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * project-empty sub-workspace (design §6).
      */
     async listWorkspaceFamily(parentWorkspaceId) {
-      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(parentWorkspaceId)}/family`;
-      return request('GET', url, imsToken, undefined);
+      return unwrap('GET', await users.GET(
+        '/v1/workspaces/{id}/family',
+        { params: { path: { id: parentWorkspaceId } } },
+      ));
     },
 
     /**
@@ -558,8 +492,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * what we send. The exact allocation values remain a Gate-A live-smoke pin.
      */
     async transferWorkspaceResources(workspaceId, payload) {
-      const url = `${root}${USERS_API_PREFIX}/v2/workspaces/${enc(workspaceId)}/resources/transfer`;
-      return request('POST', url, imsToken, { resources: payload });
+      return unwrap('POST', await users.POST(
+        '/v2/workspaces/{id}/resources/transfer',
+        { params: { path: { id: workspaceId } }, body: { resources: payload } },
+      ));
     },
 
     /**
@@ -580,8 +516,10 @@ export function createSerenityTransport({ env, imsToken }) {
           + 'SERENITY_ALLOW_WORKSPACE_DELETE=true to enable it locally.',
         );
       }
-      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}`;
-      return request('DELETE', url, imsToken, undefined);
+      return unwrap('DELETE', await users.DELETE(
+        '/v1/workspaces/{id}',
+        { params: { path: { id: workspaceId } } },
+      ));
     },
 
     /**

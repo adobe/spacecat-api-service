@@ -33,10 +33,9 @@ const PROJECT_ID = 'proj-xyz';
 // deterministic value so the URL-based assertions below stay stable.
 const TEST_ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://adobe-hackathon.semrush.com' };
 
-// The project-API methods now route through the vendored typed Project Engine
-// client (openapi-fetch), which calls the injected fetch with a `Request`
-// object; the hand-rolled user-manager methods still call fetch with
-// `(urlString, init)`. Real `Response` objects are returned so openapi-fetch can
+// All transport methods now route through the typed Semrush clients (Project
+// Engine + User Manager, both openapi-fetch), which call the injected fetch with
+// a `Request` object. Real `Response` objects are returned so openapi-fetch can
 // parse them the same way it parses live responses.
 function fetchOk(body) {
   return new Response(body == null ? null : JSON.stringify(body), {
@@ -52,9 +51,9 @@ function fetchFail(status, body) {
   });
 }
 
-// Normalises whatever the fetch seam received into a uniform shape, so the same
-// assertions cover both call styles: the typed-client project calls (a `Request`
-// object) and the hand-rolled user-manager calls (`(urlString, init)`).
+// Normalises whatever the fetch seam received into a uniform shape. Every method
+// now issues a typed-client call (a `Request` object); the `(urlString, init)`
+// branch is kept defensively for any non-Request call style.
 async function callOf(stub, n = 0) {
   const [input, init] = stub.getCall(n).args;
   if (typeof Request !== 'undefined' && input instanceof Request) {
@@ -737,7 +736,7 @@ describe('Semrush REST transport', () => {
         `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/child`,
       );
       expect(JSON.parse(call.body)).to.deep.equal({ title: 'Adobe Express', resources });
-      expect(call.header('X-Upload-Receipt')).to.equal(undefined);
+      expect(call.header('X-Upload-Receipt')).to.equal(null);
       expect(result.id).to.equal('subworkspace-ws-1');
     });
   });
@@ -863,10 +862,10 @@ describe('Semrush REST transport', () => {
       expect(result.initialized).to.equal(false);
     });
   });
-  // The user-manager gateway calls are still hand-rolled (no typed client yet),
-  // so their auth/timeout/error paths are exercised here directly (the project
-  // methods now route those same concerns through the typed client instead).
-  describe('user-manager gateway (hand-rolled) error paths', () => {
+  // The user-manager methods now route through the typed User Manager client, so
+  // their auth/timeout/error paths share the same plumbing as the project methods;
+  // they are exercised here via getWorkspaceStatus for completeness.
+  describe('user-manager gateway error paths', () => {
     it('throws SerenityTransportError(401) when imsToken is missing', async () => {
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: '' });
       await expect(transport.getWorkspaceStatus(WORKSPACE_ID))
@@ -954,23 +953,6 @@ describe('Semrush REST transport', () => {
 
       it('returns undefined when called with null (e?.message is undefined)', () => {
         expect(redactUpstreamMessage(null)).to.equal(undefined);
-      });
-    });
-
-    describe('enc nullish path via a user-manager call with undefined workspaceId', () => {
-      it('encodes undefined workspaceId as empty string (String(undefined ?? ""))', async () => {
-        // enc(undefined) -> String(undefined ?? '') = '' -> encodeURIComponent('') = ''.
-        // getWorkspaceStatus is hand-rolled and still uses enc(); the project-API
-        // methods now delegate id-encoding to the typed client.
-        fetchStub.resolves(fetchOk({ status: 'created' }));
-        const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-        await transport.getWorkspaceStatus(undefined);
-
-        const call = await callOf(fetchStub);
-        // The workspaceId segment is encoded as empty string, so the URL has //
-        // between /workspaces/ and /status (empty segment).
-        expect(call.url).to.include('/workspaces//status');
       });
     });
 

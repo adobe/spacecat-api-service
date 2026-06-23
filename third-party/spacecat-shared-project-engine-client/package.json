@@ -1,0 +1,38 @@
+{
+  "name": "@adobe/spacecat-shared-project-engine-client",
+  "version": "1.1.0",
+  "description": "Shared modules of the Spacecat Services - Semrush Project Engine client and generated types",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.0.0 <25.0.0",
+    "npm": ">=10.9.0 <12.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adobe/spacecat-shared.git"
+  },
+  "author": "",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/adobe/spacecat-shared/issues"
+  },
+  "homepage": "https://github.com/adobe/spacecat-shared/packages/spacecat-shared-project-engine-client/#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0"
+  },
+  "_vendored": "Temporary copy of the published file set; build devDependencies/scripts stripped. See third-party/VENDORED-SEMRUSH-CLIENTS.md"
+}
