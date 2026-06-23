@@ -64,6 +64,19 @@ import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-st
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
+// Allowed state_transition values on a backoffice review (SITES-43974). Validated
+// so the Learning Agent corpus never receives arbitrary free-text transitions.
+const FEEDBACK_STATE_TRANSITIONS = [
+  'PENDING_VALIDATION->NEW',
+  'PENDING_VALIDATION->REJECTED',
+  'EDIT',
+];
+
+// Defensive cap on reviews returned by ?include=reviews. Expected volume per
+// suggestion is 2-3, but this bounds payload size (esp. with ?include=patches)
+// and is backed by idx_feedback_event_suggestion (suggestion_id, event_time).
+const FEEDBACK_REVIEW_READ_LIMIT = 100;
+
 async function isSitePlgTier(site, log) {
   try {
     const enrollments = await site.getSiteEnrollments();
@@ -332,6 +345,9 @@ function SuggestionsController(ctx, sqs, env) {
     suggestionId,
     { includePatches = false } = {},
   ) => {
+    // Reviews are supplementary to the suggestion payload, so this read fails
+    // soft (returns []) rather than failing the whole getByID — intentionally
+    // different from the capture path, which returns 503 when the store is down.
     const postgrestClient = context.dataAccess?.services?.postgrestClient;
     if (!postgrestClient?.from) {
       context.log?.warn?.('feedback store (postgrestClient) unavailable; returning no reviews');
@@ -341,7 +357,8 @@ function SuggestionsController(ctx, sqs, env) {
       .from('feedback_event')
       .select('*')
       .eq('suggestion_id', suggestionId)
-      .order('event_time', { ascending: false });
+      .order('event_time', { ascending: false })
+      .limit(FEEDBACK_REVIEW_READ_LIMIT);
     if (error) {
       context.log?.error?.(`Failed to load reviews for suggestion ${suggestionId}: ${error.message}`);
       return [];
@@ -2847,6 +2864,9 @@ function SuggestionsController(ctx, sqs, env) {
       && !Object.values(REJECTION_CATEGORIES).includes(rejectionCategory)) {
       return badRequest('invalid rejection_category');
     }
+    if (stateTransition != null && !FEEDBACK_STATE_TRANSITIONS.includes(stateTransition)) {
+      return badRequest('invalid state_transition');
+    }
     if (detailMarkdown != null) {
       if (typeof detailMarkdown !== 'string') {
         return badRequest('detail_markdown must be a string');
@@ -2879,6 +2899,11 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     // reviewer_id is server-derived from the authenticated principal — never the body.
+    // NOTE: for IMS callers profile.email is the IMS user identifier (an opaque
+    // GUID like <id>@<authSrc>), NOT a mailbox. It is stable per user, so it
+    // serves reviewer-continuity as a training signal; it is documented as an
+    // opaque IMS user id (not "email") in schemas.yaml + the feedback_event
+    // column comment.
     const { profile } = context.attributes?.authInfo ?? {};
     const reviewerId = profile?.email ?? null;
 
@@ -2899,7 +2924,7 @@ function SuggestionsController(ctx, sqs, env) {
 
     const row = {
       event_id: eventId,
-      organization_id: site.getOrganizationId?.() ?? opportunity.getSiteId?.(),
+      organization_id: site.getOrganizationId(),
       site_id: siteId,
       suggestion_id: suggestionId,
       opportunity_type: opportunity.getType?.() ?? null,

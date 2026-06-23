@@ -1252,8 +1252,6 @@ site-opportunity-suggestion-backoffice-reviews:
         $ref: './responses.yaml#/404'
       '413':
         description: detail_markdown exceeds the 8 KB limit
-      '429':
-        $ref: './responses.yaml#/429'
       '500':
         $ref: './responses.yaml#/500'
       '503':

@@ -35,17 +35,22 @@ const ORG_ID = '5f3a8b2c-1d4e-4f6a-9b0c-1d2e3f4a5b6c';
  *   select('*').eq(...).order(...)           -> onOrder (review list)
  */
 function makePostgrestClient({ onInsert, onSelectSingle, onOrder } = {}) {
-  return {
+  const capturedInserts = [];
+  const client = {
+    capturedInserts,
     from() {
       let inserted = false;
       const chain = {
-        insert() {
+        insert(row) {
           inserted = true;
+          capturedInserts.push(row);
           return chain;
         },
         select() { return chain; },
         eq() { return chain; },
-        order() {
+        order() { return chain; },
+        // reviews read terminates on .limit(); insert/duplicate terminate on .single().
+        limit() {
           return Promise.resolve(onOrder ? onOrder() : { data: [], error: null });
         },
         single() {
@@ -58,6 +63,7 @@ function makePostgrestClient({ onInsert, onSelectSingle, onOrder } = {}) {
       return chain;
     },
   };
+  return client;
 }
 
 describe('Suggestions Controller - backoffice reviews', () => {
@@ -167,6 +173,22 @@ describe('Suggestions Controller - backoffice reviews', () => {
     expect(result.verdict).to.equal('down');
     expect(result.signal).to.equal('negative');
     expect(result).to.not.have.property('previousFix');
+    // organization_id derived from the site (not a site_id fallback); reviewer_id
+    // from the authenticated principal.
+    const inserted = context.dataAccess.services.postgrestClient.capturedInserts[0];
+    expect(inserted.organization_id).to.equal(ORG_ID);
+    expect(inserted.reviewer_id).to.equal('ese@adobe.com');
+  });
+
+  it('stores the IMS user id (GUID-shaped) as reviewer_id, not a literal email', async () => {
+    const context = makeContext({
+      postgrest: { onInsert: () => ({ data: { event_id: EVENT_ID, signal: 'negative', tier: 'free' }, error: null }) },
+    });
+    context.attributes.authInfo.profile.email = '82521DEADBEEF0123@AdobeOrg';
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(201);
+    const inserted = context.dataAccess.services.postgrestClient.capturedInserts[0];
+    expect(inserted.reviewer_id).to.equal('82521DEADBEEF0123@AdobeOrg');
   });
 
   it('rejects a missing event_id with 400 (FR-09)', async () => {
@@ -202,6 +224,22 @@ describe('Suggestions Controller - backoffice reviews', () => {
     context.data.rejectionCategory = 'nope';
     const response = await controller.createBackofficeReview(context);
     expect(response.status).to.equal(400);
+  });
+
+  it('rejects an invalid state_transition with 400', async () => {
+    const context = makeContext();
+    context.data.stateTransition = 'HACK->ARBITRARY';
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(400);
+  });
+
+  it('accepts a review with no state_transition', async () => {
+    const context = makeContext({
+      postgrest: { onInsert: () => ({ data: { event_id: EVENT_ID, signal: 'negative', tier: 'free' }, error: null }) },
+    });
+    delete context.data.stateTransition;
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(201);
   });
 
   it('rejects oversize detail_markdown with 413', async () => {

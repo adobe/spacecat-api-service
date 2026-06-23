@@ -17,8 +17,10 @@
  *  1. Secret-pattern scrub over `previous_fix`, `edited_fix`, and
  *     `detail_markdown` before the row is persisted. Even if a customer's code
  *     accidentally contains a credential, it never lands in the corpus.
- *  2. Allowlist-ish HTML sanitisation of `detail_markdown` — script / style /
- *     iframe / event-handler / dangerous-URI stripping.
+ *  2. Denylist HTML sanitisation of `detail_markdown` — script / style / iframe /
+ *     svg / noscript / template / event-handler / dangerous-URI stripping. The
+ *     spec calls for an allowlist sanitiser; that migration is a tracked
+ *     follow-up (see sanitizeMarkdown note below).
  *
  * The scrub never fails the row: the ESE has already submitted their verdict;
  * we redact and continue (don't lose the signal).
@@ -45,8 +47,16 @@ export const SECRET_PATTERNS = [
 
 /**
  * Strip dangerous HTML from a markdown string (NFR-05). Removes
- * script/style/iframe blocks, inline event-handler attributes, and
- * javascript:/data: URI schemes. Conservative — leaves ordinary markdown intact.
+ * script/style/iframe/svg/noscript/template blocks, inline event-handler
+ * attributes, and javascript:/data: URI schemes. Conservative — leaves ordinary
+ * markdown intact.
+ *
+ * NOTE: this is a denylist, not an allowlist. The spec (§5.1.5) calls for an
+ * allowlist sanitiser (nh3/bleach-equivalent; sanitize-html on the Node side).
+ * Denylists are inherently leaky (entity-encoded / mutation-XSS variants).
+ * Defence-in-depth holds today because the Backoffice renders this text via
+ * react-markdown WITHOUT rehype-raw, so embedded HTML is not executed. Moving to
+ * an allowlist sanitiser is tracked as a follow-up (SITES-43974 / OQ-5).
  *
  * @param {string} markdown
  * @returns {string} sanitised markdown
@@ -56,14 +66,16 @@ export function sanitizeMarkdown(markdown) {
     return markdown;
   }
   return markdown
-    // drop whole script/style/iframe elements (with or without a closing tag)
-    .replace(/<\s*(script|style|iframe)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
-    .replace(/<\s*(script|style|iframe)\b[^>]*>/gi, '')
-    // strip inline event-handler attributes: onclick=, onerror=, ...
+    // drop whole dangerous elements (with or without a closing tag), incl. the
+    // svg/noscript/template smuggling vectors and object/embed.
+    .replace(/<\s*(script|style|iframe|svg|noscript|template|object|embed)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|style|iframe|svg|noscript|template|object|embed)\b[^>]*>/gi, '')
+    // strip inline event-handler attributes: onclick=, onerror=, ... (the
+    // leading \s avoids mangling legitimate markdown URLs that contain `/on...=`).
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    // neutralise dangerous URI schemes
+    // neutralise dangerous URI schemes (incl. data:image/svg+xml — an XSS vector)
     .replace(/javascript:/gi, '')
-    .replace(/data:(?=text\/html|application)/gi, '');
+    .replace(/data:(?=text\/html|application|image\/svg)/gi, '');
 }
 
 /**

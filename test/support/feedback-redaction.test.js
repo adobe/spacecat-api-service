@@ -48,6 +48,24 @@ describe('feedback-redaction', () => {
       expect(sanitizeMarkdown('data:image/png;base64,AAA')).to.contain('data:image/png');
     });
 
+    it('strips <svg> blocks (svg-internal script vector)', () => {
+      expect(sanitizeMarkdown('a<svg><script>alert(1)</script></svg>b')).to.equal('ab');
+    });
+
+    it('strips <noscript> and <template> smuggling blocks', () => {
+      const out = sanitizeMarkdown('x<noscript><img src=y onerror=z></noscript><template>t</template>w');
+      expect(out).to.equal('xw');
+    });
+
+    it('neutralises data:image/svg+xml but leaves data:image/png alone', () => {
+      expect(sanitizeMarkdown('data:image/svg+xml,<svg onload=x>')).to.not.contain('data:image/svg');
+      expect(sanitizeMarkdown('data:image/png;base64,AAA')).to.contain('data:image/png');
+    });
+
+    it('strips <object> and <embed> elements', () => {
+      expect(sanitizeMarkdown('a<object data=x></object>b<embed src=y>c')).to.equal('abc');
+    });
+
     it('passes non-string values through untouched', () => {
       expect(sanitizeMarkdown(undefined)).to.equal(undefined);
       expect(sanitizeMarkdown(42)).to.equal(42);

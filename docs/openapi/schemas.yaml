@@ -11407,7 +11407,9 @@ SuggestionReview:
       description: Persisted training label, derived from the verdict.
     reviewerId:
       type: string
-      description: Server-derived reviewer identity (IMS email for backoffice). Null when not set.
+      description: >-
+        Server-derived, opaque IMS user identifier (e.g. <id>@<authSrc>) — NOT a
+        mailbox. Stable per user (reviewer-continuity signal). Null when not set.
     detailMarkdown:
       type: string
       description: Sanitised ESE rationale. Null when not provided.
