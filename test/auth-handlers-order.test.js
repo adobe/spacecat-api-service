@@ -55,6 +55,21 @@ describe('src/index.js authHandlers order contract', () => {
     });
   });
 
+  it('places AsoOverlayKeyHandler before path-agnostic handlers (path-scoped early-bail)', () => {
+    const order = parseAuthHandlersOrder();
+    const asoIdx = order.indexOf('AsoOverlayKeyHandler');
+    expect(asoIdx).to.be.greaterThan(-1, 'AsoOverlayKeyHandler must be in AUTH_HANDLERS');
+
+    // Like the webhook handler, this is path-scoped to GET /config/.../redirects.txt
+    // and must run before the path-agnostic handlers so an overlay request does not
+    // reach JwtHandler / AdobeImsHandler and fail with a misleading 401.
+    ['JwtHandler', 'AdobeImsHandler', 'ScopedApiKeyHandler'].forEach((name) => {
+      const idx = order.indexOf(name);
+      expect(idx).to.be.greaterThan(-1, `${name} must be in AUTH_HANDLERS`);
+      expect(asoIdx).to.be.lessThan(idx, `AsoOverlayKeyHandler must come before ${name}`);
+    });
+  });
+
   it('places ApiKeyImsHandler before AdobeImsHandler so /tools/api-keys is matched first', () => {
     // Per the IMS-to-JWT migration design (mysticat-architecture), the route-
     // scoped ApiKeyImsHandler must run BEFORE the global AdobeImsHandler.

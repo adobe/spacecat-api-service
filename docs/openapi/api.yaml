@@ -306,6 +306,8 @@ paths:
     $ref: './scrape-api.yaml#/get-scraped-content-list'
   /sites/{siteId}/files:
     $ref: './scrape-api.yaml#/get-files'
+  /config/{service}/redirects.txt:
+    $ref: './aso-overlay-api.yaml#/get-aso-redirects'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:
@@ -675,12 +677,6 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-brands-competitors'
   /llmo/ai-visibility/competitors/metrics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-metrics'
-  /llmo/ai-visibility/competitors/gap-topics:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-gap-topics'
-  /llmo/ai-visibility/competitors/gap-source-domains:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-gap-source-domains'
-  /llmo/ai-visibility/competitors/gap-prompts:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-gap-prompts'
   /llmo/ai-visibility/meta:
     $ref: './ai-visibility-api.yaml#/ai-visibility-meta'
   /llmo/ai-visibility/prompts/responses/latest:
@@ -723,8 +719,16 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts'
   /llmo/ai-visibility/v1/prompt/gap-prompts-export:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
+  /llmo/ai-visibility/v1/prompt/gap-prompts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-totals'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
+  /llmo/ai-visibility/v1/source/gap-source-domains:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains'
+  /llmo/ai-visibility/v1/source/gap-source-domains-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-export'
+  /llmo/ai-visibility/v1/source/gap-source-domains-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-totals'
   /llmo/ai-visibility/v1/prompt-research/prompts-export:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-prompts-export'
   /llmo/ai-visibility/v1/prompt-research/brands-export:
@@ -768,6 +772,11 @@ components:
       in: header
       name: X-Hub-Signature-256
       description: 'HMAC-SHA256 signature of the request body, provided by GitHub on webhook delivery'
+    aso_overlay_api_key:
+      type: apiKey
+      in: header
+      name: X-ASO-API-Key
+      description: 'Static key the AEM dispatcher presents to fetch ASO redirect overlays from /config/*'
   schemas:
     $ref: './schemas.yaml'
   examples:

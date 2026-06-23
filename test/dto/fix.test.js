@@ -164,6 +164,43 @@ describe('Fix DTO', () => {
       expect(json).to.not.have.property('suggestions');
     });
 
+    it('includes executedByUser when _executedByUser is set', () => {
+      const fix = createMockFix({
+        _executedByUser: { firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json).to.have.property('executedByUser');
+      expect(json.executedByUser).to.deep.equal({
+        firstName: 'Jane',
+        lastName: 'Doe',
+        email: 'jane@example.com',
+      });
+    });
+
+    it('excludes executedByUser when _executedByUser is not set', () => {
+      const fix = createMockFix();
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json).to.not.have.property('executedByUser');
+    });
+
+    it('passes through null name fields when IMS profile has no name data', () => {
+      const fix = createMockFix({
+        _executedByUser: { firstName: null, lastName: null, email: 'unknown@example.com' },
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.executedByUser).to.deep.equal({
+        firstName: null,
+        lastName: null,
+        email: 'unknown@example.com',
+      });
+    });
+
     it('correctly maps suggestions using SuggestionDto.toJSON', () => {
       const suggestion = createMockSuggestion('suggestion-id-123');
       const fix = createMockFix({
