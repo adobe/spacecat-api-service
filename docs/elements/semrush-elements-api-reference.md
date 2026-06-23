@@ -2,8 +2,7 @@
 
 > **Project Serenity** — SpaceCat wrapper layer over the Semrush Elements APIs for Brand Presence and URL Inspector dashboards.
 >
-> Upstream API reference: `/Users/vivesing/Code/ClaudeMemory/Semrush-LLMO-API.md`  
-> Wiki: https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/
+> Wiki: https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/Project+Serenity+LLMO+x+Semrush+API+for+Brand+Presence+Data
 
 ---
 
