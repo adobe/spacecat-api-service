@@ -43,7 +43,7 @@ function buildSecretPath(organizationId, connectionId) {
   if (!UUID_REGEX.test(organizationId) || !UUID_REGEX.test(connectionId)) {
     throw new Error('Invalid path segment: organizationId and connectionId must be UUIDs');
   }
-  return `/mysticat/${process.env.NODE_ENV}/task-management/${organizationId}/${connectionId}`;
+  return `/mysticat/task-management/${organizationId}/${connectionId}`;
 }
 
 /**
