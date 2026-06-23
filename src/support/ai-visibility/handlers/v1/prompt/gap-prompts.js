@@ -50,6 +50,7 @@ export async function handleGapPrompts(sp, clients) {
 
   const topicId = sp.get('topicId');
   const sourceDomain = sp.get('sourceDomain');
+  const date = sp.get('date');
 
   let listRequest;
   let totalsRequest;
@@ -65,6 +66,7 @@ export async function handleGapPrompts(sp, clients) {
         direction: sortDirection,
       },
       range: { limit, offset },
+      target_date: date,
     };
     if (topicId) {
       listJson.topic_hash = topicId;
@@ -79,6 +81,7 @@ export async function handleGapPrompts(sp, clients) {
       llm: engine,
       target: { domain, name: domain },
       competitors: competitorDomains.map(brandTarget),
+      target_date: date,
     };
     if (topicId) {
       totalsJson.topic_hash = topicId;

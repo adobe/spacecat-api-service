@@ -48,10 +48,25 @@ describe('src/index.js authHandlers order contract', () => {
 
     // Path-agnostic handlers must come after the path-scoped HMAC handler so
     // webhook requests do not reach them and fail with a misleading 401.
-    ['JwtHandler', 'AdobeImsHandler', 'ScopedApiKeyHandler', 'LegacyApiKeyHandler'].forEach((name) => {
+    ['JwtHandler', 'AdobeImsHandler', 'ScopedApiKeyHandler'].forEach((name) => {
       const idx = order.indexOf(name);
       expect(idx).to.be.greaterThan(-1, `${name} must be in AUTH_HANDLERS`);
       expect(ghIdx).to.be.lessThan(idx, `GitHubWebhookHmacHandler must come before ${name}`);
+    });
+  });
+
+  it('places AsoOverlayKeyHandler before path-agnostic handlers (path-scoped early-bail)', () => {
+    const order = parseAuthHandlersOrder();
+    const asoIdx = order.indexOf('AsoOverlayKeyHandler');
+    expect(asoIdx).to.be.greaterThan(-1, 'AsoOverlayKeyHandler must be in AUTH_HANDLERS');
+
+    // Like the webhook handler, this is path-scoped to GET /config/.../redirects.txt
+    // and must run before the path-agnostic handlers so an overlay request does not
+    // reach JwtHandler / AdobeImsHandler and fail with a misleading 401.
+    ['JwtHandler', 'AdobeImsHandler', 'ScopedApiKeyHandler'].forEach((name) => {
+      const idx = order.indexOf(name);
+      expect(idx).to.be.greaterThan(-1, `${name} must be in AUTH_HANDLERS`);
+      expect(asoIdx).to.be.lessThan(idx, `AsoOverlayKeyHandler must come before ${name}`);
     });
   });
 
@@ -72,5 +87,19 @@ describe('src/index.js authHandlers order contract', () => {
       adobeImsIdx,
       'ApiKeyImsHandler must come before AdobeImsHandler',
     );
+  });
+
+  it('contains RouteScopedLegacyApiKeyHandler but NOT the catch-all LegacyApiKeyHandler', () => {
+    // The catch-all LegacyApiKeyHandler has been removed (SITES-34224). All new
+    // service integrations must use S2S. The only remaining legacy-key surface is
+    // RouteScopedLegacyApiKeyHandler, which is locked to exactly two routes
+    // (POST /event/fulfillment and POST /slack/channels/invite-by-user-id) whose
+    // callers cannot be migrated to IMS S2S. The list is frozen.
+    const order = parseAuthHandlersOrder();
+    const scopedIdx = order.indexOf('RouteScopedLegacyApiKeyHandler');
+    const legacyIdx = order.indexOf('LegacyApiKeyHandler');
+
+    expect(scopedIdx).to.be.greaterThan(-1, 'RouteScopedLegacyApiKeyHandler must remain in AUTH_HANDLERS');
+    expect(legacyIdx).to.equal(-1, 'LegacyApiKeyHandler must NOT be in AUTH_HANDLERS (removed: SITES-34224)');
   });
 });

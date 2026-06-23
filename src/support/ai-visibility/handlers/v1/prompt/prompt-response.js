@@ -31,6 +31,7 @@ export async function handlePromptResponse(sp, clients) {
   const topicId = sp.get('topicId');
   const promptHash = sp.get('promptHash');
   const serpId = sp.get('serpId');
+  const date = sp.get('date');
 
   let promptResponseRequest;
   try {
@@ -42,6 +43,7 @@ export async function handlePromptResponse(sp, clients) {
         prompt_hash: promptHash,
         serp_id: serpId,
         topic_id: topicId,
+        target_date: date,
       },
       PROTO_FROM_JSON,
     );

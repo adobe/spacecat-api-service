@@ -38,6 +38,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { SiteDto } from '../dto/site.js';
+import { SiteIdentityDto } from '../dto/site-identity.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
@@ -45,10 +46,16 @@ import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
+import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
+import { detectedCdnPatchGuard } from '../support/detected-cdn-validation.js';
 import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
+import {
+  ensureSiteEntitlementAndEnrollment,
+  logSiteOrphanedAfterCreate,
+  resolveProductCode,
+} from '../support/tier-provisioning.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -130,6 +137,8 @@ const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
+const DEFAULT_LIMIT = 100;
+const MAX_LIMIT = 500;
 
 /**
  * Filters Ahrefs top pages by site base URL
@@ -354,44 +363,73 @@ function SitesController(ctx, log, env) {
    *
    * Alternative: If strict REST semantics are preferred, 409 Conflict is also valid.
    *
+   * Write-time tier provisioning: when a site is newly created, it ensures org entitlement and
+   * site enrollment via TierClient using the existing tier when present, otherwise FREE_TRIAL.
+   * Idempotent re-POSTs do not run provisioning.
+   * Provisioning failures return 500 with `event=site_orphaned_after_create`.
+   *
    * @param {object} context - Request context containing site data
    * @returns {Promise<Response>} HTTP 200 with existing site or 201 with new site
    */
   const createSite = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can create new sites');
+    const isAdmin = accessControlUtil.hasAdminAccess();
+    if (!isAdmin) {
+      const s2sResult = await accessControlUtil.hasS2SCapability(CAP_SITE_CREATE);
+      if (!s2sResult.allowed) {
+        log.info(`[acl] Denied POST /sites - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+        return forbidden('Only admins can create new sites');
+      }
     }
     if (!hasText(context.data?.baseURL)) {
       return badRequest('Base URL required');
     }
+    const { productCode, error: productCodeError } = resolveProductCode(context);
+    if (productCodeError) {
+      return badRequest(productCodeError);
+    }
+    let site;
+    let status;
     try {
       const baseURL = composeBaseURL(context.data.baseURL);
       const existingSite = await Site.findByBaseURL(baseURL);
       if (existingSite) {
         // Idempotent behavior: return existing site with 200 (not 409)
         log.info(`Site already exists for baseURL: ${baseURL}, returning existing site ${existingSite.getId()}`);
-        return createResponse(SiteDto.toJSON(existingSite), 200);
+        site = existingSite;
+        status = 200;
+      } else {
+        site = await Site.create({
+          organizationId: env.DEFAULT_ORGANIZATION_ID,
+          ...context.data,
+          baseURL, // override with normalized value
+        });
+        updateRumConfig(site, context).catch((e) => {
+          log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
+        });
+        status = 201;
       }
-      const site = await Site.create({
-        organizationId: env.DEFAULT_ORGANIZATION_ID,
-        ...context.data,
-        baseURL, // override with normalized value
-      });
-      updateRumConfig(site, context).catch((e) => {
-        log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
-      });
-      return createResponse(SiteDto.toJSON(site), 201);
     } catch (error) {
       log.error(`Error creating site: ${error.message}`, error);
       return internalServerError('Failed to create site');
     }
+
+    if (productCode && status === 201) {
+      try {
+        await ensureSiteEntitlementAndEnrollment(context, site, productCode, log);
+      } catch (error) {
+        logSiteOrphanedAfterCreate(log, site, productCode, error);
+        return internalServerError('Failed to ensure entitlement/enrollment for site');
+      }
+    }
+
+    return createResponse(SiteDto.toJSON(site), status);
   };
 
   /**
-   * Gets all sites. Accessible to admin callers (legacy admin path) and to S2S
-   * consumers that hold the `site:readAll` capability - see
+   * Gets all sites with cursor-based pagination. Accessible to admin callers (legacy admin path)
+   * and to S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
-   * @returns {Promise<Response>} Array of sites response.
+   * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
     const requestId = context?.invocation?.id || 'unknown';
@@ -406,24 +444,73 @@ function SitesController(ctx, log, env) {
       return forbidden('Forbidden: admin access or site:readAll capability required');
     }
 
-    // TODO: implement proper pagination or filtering to stay under AWS Lambda
-    // response size limits (6MB). Currently excluding the two non customer facing orgs as
-    // a temporary workaround to avoid 413 responses.
-    const EXCLUDED_ORG_IDS = [
-      env.DEFAULT_ORGANIZATION_ID,
-      env.ORGANIZATION_ID_FRIENDS_FAMILY,
-    ];
+    const limitParam = context?.data?.limit;
+    const cursor = context?.data?.cursor || null;
+    const paginated = hasText(limitParam) || hasText(cursor);
 
-    const all = await Site.all({}, { fetchAllPages: true });
-    const sites = all
-      .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
-      .map((site) => SiteDto.toListJSON(site));
+    if (cursor !== null) {
+      if (typeof cursor !== 'string') {
+        return badRequest('cursor must be a string');
+      }
+      if (cursor.length > 256) {
+        return badRequest('cursor exceeds maximum length');
+      }
+    }
+
+    let sites;
+    let responseBody;
+
+    if (paginated) {
+      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return badRequest('limit must be a positive integer');
+      }
+      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
+
+      const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
+      if (!Array.isArray(results?.data)) {
+        log.error(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
+        sites = [];
+        responseBody = {
+          sites,
+          pagination: { limit: effectiveLimit, cursor: null, hasMore: false },
+        };
+      } else {
+        sites = results.data.map((site) => SiteDto.toListJSON(site));
+        responseBody = {
+          sites,
+          pagination: {
+            limit: effectiveLimit,
+            // `|| null` (not `??`) so an empty-string cursor normalizes to null,
+            // staying consistent with `hasMore: !!results.cursor` below.
+            cursor: results.cursor || null,
+            hasMore: !!results.cursor,
+          },
+        };
+      }
+    } else {
+      // TODO: remove this legacy branch once Coralogix shows zero hits on
+      // [sites][legacy-shape] for 30 consecutive days.
+      // legacy: no limit/cursor params -> flat array for backwards comp.
+      // keep the default + friends-and-family exclusion on this path to stay
+      // under the 6MB Lambda response limit until consumers migrate to pagination.
+      log.info(`[sites][legacy-shape] GET /sites called without limit/cursor requestId=${requestId} clientId=${s2sResult.clientId || (isAdmin ? 'admin-bypass' : 'unknown-s2s')}`);
+      const excludedOrgIds = [
+        env.DEFAULT_ORGANIZATION_ID,
+        env.ORGANIZATION_ID_FRIENDS_FAMILY,
+      ];
+      const all = await Site.all({}, { fetchAllPages: true });
+      sites = all
+        .filter((site) => !excludedOrgIds.includes(site.getOrganizationId()))
+        .map((site) => SiteDto.toListJSON(site));
+      responseBody = sites;
+    }
 
     if (s2sResult.allowed) {
       log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
     }
 
-    return ok(sites);
+    return ok(responseBody);
   };
 
   /**
@@ -560,6 +647,60 @@ function SitesController(ctx, log, env) {
     return ok(SiteDto.toJSON(site));
   };
 
+  /**
+   * Gets the minimal routing identity for a single site: its id, owning org ids
+   * (internal `organizationId` + `imsOrgId`), baseURL, and deliveryType.
+   *
+   * This is a readAll-class route, not a tenant-scoped one. It exists so a platform
+   * S2S consumer that only holds a site UUID can resolve the site's `imsOrgId` and mint
+   * a customer-scoped token - the `site -> organization` join it cannot perform without
+   * already being scoped. Access mirrors `GET /sites` (admin bypass + `site:readAll`),
+   * NOT `hasAccess(site)`. It exposes strictly less than the bulk `GET /sites` a
+   * `site:readAll` holder can already enumerate. See `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Site identity response.
+   */
+  const getIdentity = async (context) => {
+    const requestId = context?.invocation?.id || 'unknown';
+    // Read-only admin and full admin both bypass the S2S capability check;
+    // S2S consumers must hold site:readAll. See READALL_CAPABILITY_DESIGN.md.
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied GET /sites/:siteId/identity - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Forbidden: admin access or site:readAll capability required');
+    }
+
+    const siteId = context.params?.siteId;
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    // Resolve imsOrgId via the site -> organization join (the entire value-add of this
+    // route). A site without an organization, an orphaned organizationId, or an org
+    // without an imsOrgId all yield imsOrgId: null with a 200 - the site identity still
+    // exists; it is up to the consumer to treat null as "cannot scope".
+    const organizationId = site.getOrganizationId();
+    const organization = organizationId ? await Organization.findById(organizationId) : null;
+    const imsOrgId = organization ? organization.getImsOrgId() : null;
+
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /sites/:siteId/identity granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} siteId=${siteId} requestId=${requestId}`);
+    } else if (isAdmin) {
+      // This is a cross-tenant readAll-class route; log admin access for auditability too.
+      log.info(`[acl] GET /sites/:siteId/identity granted via admin bypass siteId=${siteId} requestId=${requestId}`);
+    }
+
+    return ok(SiteIdentityDto.toJSON(site, imsOrgId));
+  };
+
   const getBrandProfile = async (context) => {
     const siteId = context.params?.siteId;
 
@@ -644,8 +785,21 @@ function SitesController(ctx, log, env) {
       return notFound('Site not found');
     }
 
-    if (!await accessControlUtil.hasAccess(site)) {
+    // Cross-tenant resolution: admins and S2S consumers holding `site:readAll` may look up
+    // any site by URL (platform enumeration). Everyone else must belong to the site's org.
+    // hasS2SCapability returns `not-s2s` without a DB call for non-S2S callers, so the extra
+    // fetch only happens for actual S2S consumers. See READALL_CAPABILITY_DESIGN.md.
+    const requestId = context?.invocation?.id || 'unknown';
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed && !(await accessControlUtil.hasAccess(site))) {
+      log.info(`[acl] Denied GET /sites/by-base-url - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
       return forbidden('Only users belonging to the organization can view its sites');
+    }
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /sites/by-base-url granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} requestId=${requestId}`);
     }
 
     return ok(SiteDto.toJSON(site));
@@ -701,6 +855,16 @@ function SitesController(ctx, log, env) {
       return forbidden('Updating organization ID is not allowed');
     }
 
+    // A projectId references a project record that is itself scoped to an
+    // organizationId. Allowing ad-hoc projectId patches here lets a site point
+    // at a project in a different org, which hides the site from the org's site
+    // picker (SITES-46200). Re-parenting must go through controlled flows
+    // (e.g. PATCH /projects/:projectId), so reject it here like organizationId.
+    if (hasText(requestBody.projectId)
+      && requestBody.projectId !== site.getProjectId()) {
+      return forbidden('Updating project ID is not allowed');
+    }
+
     if (requestBody.name !== site.getName()) {
       site.setName(requestBody.name);
       updates = true;
@@ -743,6 +907,13 @@ function SitesController(ctx, log, env) {
           ...existingConfig.llmo,
           ...requestBody.config.llmo,
         };
+      }
+      // Reject malformed `llmo.detectedCdn` (array, stringified array, display name) before
+      // persisting. `Config()` would otherwise swallow the schema error and store the raw value,
+      // which then re-fails validation on every read.
+      const detectedCdnResult = detectedCdnPatchGuard(requestBody.config, badRequest);
+      if (detectedCdnResult?.error) {
+        return detectedCdnResult.error;
       }
       const auditTargetURLsResult = auditTargetURLsPatchGuard(
         merged,
@@ -801,11 +972,6 @@ function SitesController(ctx, log, env) {
     }
 
     // Handle localization fields
-    if (requestBody.projectId !== site.getProjectId() && isValidUUID(requestBody.projectId)) {
-      site.setProjectId(requestBody.projectId);
-      updates = true;
-    }
-
     if (isBoolean(requestBody.isPrimaryLocale)
         && requestBody.isPrimaryLocale !== site.getIsPrimaryLocale()) {
       site.setIsPrimaryLocale(requestBody.isPrimaryLocale);
@@ -1143,6 +1309,146 @@ function SitesController(ctx, log, env) {
       log.error(`Error updating CDN logs config for site ${siteId}: ${error.message}`);
       return badRequest('Failed to update CDN logs config');
     }
+  };
+
+  /**
+   * GET /sites/:siteId/config/scraper
+   *
+   * Returns just the per-site scraper configuration. Symmetric with the
+   * PATCH endpoint below — same narrow `{ siteId, scraperConfig }` shape
+   * so a caller writing then reading sees an identical envelope, and the
+   * full site config (which may include unrelated secrets such as
+   * `tokowakaConfig.apiKey`) is never echoed to a caller that only needs
+   * `scraperConfig`.
+   *
+   * Returns `scraperConfig: {}` when nothing is persisted yet, so callers
+   * don't need to handle a separate "missing" case.
+   */
+  const getScraperConfig = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Invalid site ID');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Only users belonging to the organization can read its sites');
+      }
+
+      // Defensive optional chain: `??` only protects the innermost return value.
+      // `getConfig()` itself can be null (matches `getBrandProfile` precedent on
+      // sites without a persisted config row), and `getScraperConfig` may not
+      // exist on Config objects produced by older `@adobe/spacecat-shared-data-
+      // access` versions if a deploy ever drifts. Either way, treat it as the
+      // documented "nothing persisted" case.
+      const raw = site.getConfig()?.getScraperConfig?.();
+      if (raw === null) {
+        // `undefined` is the normal "never written" case the JSDoc documents.
+        // `null` specifically means the field was explicitly cleared or that
+        // the persisted row went through an out-of-band edit — surface it so
+        // a post-hoc forensics pass can tell the two apart, but do not change
+        // the response shape callers depend on.
+        log.warn(`[getScraperConfig] site ${siteId} returned null scraperConfig (treating as empty)`);
+      }
+
+      return ok({
+        siteId: site.getId(),
+        scraperConfig: raw ?? {},
+      });
+    } catch (error) {
+      log.error(`Error getting scraper config for site ${siteId}: ${error.message}`, error);
+      throw error;
+    }
+  };
+
+  /**
+   * PATCH /sites/:siteId/config/scraper
+   *
+   * Replaces the entire `scraperConfig` on the site. Passing
+   * `scraperConfig: {}` clears any previously stored configuration.
+   * To preserve unrelated fields, callers must merge client-side.
+   *
+   * Header shape validation (RFC 7230 token names, no CR/LF in values,
+   * length caps, reserved-name denylist) lives in the
+   * `@adobe/spacecat-shared-data-access` `scraperConfig` Joi schema.
+   * Bad payloads surface as a `Configuration validation error` thrown
+   * by `siteConfig.updateScraperConfig(...)`; we catch and return 400.
+   */
+  const updateScraperConfig = async (context) => {
+    const siteId = context.params?.siteId;
+    const { scraperConfig } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Invalid site ID');
+    }
+
+    if (!isObject(scraperConfig)) {
+      return badRequest('Scraper config required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can update its sites');
+    }
+
+    let updatedSite;
+    try {
+      const siteConfig = site.getConfig();
+      siteConfig.updateScraperConfig(scraperConfig);
+
+      const configObj = Config.toDynamoItem(siteConfig);
+      site.setConfig(configObj);
+
+      updatedSite = await site.save();
+    } catch (error) {
+      // Joi/shared rejection -> 400 (client can fix payload).
+      // Anything else -> propagate so the framework returns 5xx (transient/infra).
+      if (error?.message?.startsWith('Configuration validation error')) {
+        log.warn(`Scraper config validation failed for site ${siteId}: ${error.message}`);
+        // Joi echoes the offending value into the message; if a caller submits
+        // CR/LF (or other control chars) in a header value those would get
+        // copied into the `x-error` response header by `badRequest`, where
+        // Node's HTTP layer rejects them and the framework returns 500.
+        // Strip Unicode "Other, Control" chars so the rejection itself stays
+        // a clean 400. `\p{Cc}` covers C0 (0x00-0x1F) + DEL (0x7F) + C1
+        // (0x80-0x9F) without putting literal control chars in the source
+        // (which would trip the `no-control-regex` lint rule).
+        const safeMessage = error.message.replace(/\p{Cc}+/gu, ' ');
+        return badRequest(safeMessage);
+      }
+      log.error(
+        `Error updating scraper config for site ${siteId} (headers=${
+          Object.keys(scraperConfig.headers || {}).join(',')
+        }): ${error.message}`,
+        error,
+      );
+      throw error;
+    }
+
+    log.info(
+      `Scraper config updated for site ${siteId} (headers=${
+        Object.keys(scraperConfig.headers || {}).join(',')
+      })`,
+    );
+    // Narrow response: do not echo unrelated site config (which may contain
+    // secrets like tokowakaConfig.apiKey) back to a caller that only wrote
+    // scraperConfig. Read the persisted value back from the saved entity so
+    // any sanitization the shared Joi schema performs (defaults, trims,
+    // unknown-field stripping) is reflected in the response.
+    return ok({
+      siteId: updatedSite.getId(),
+      scraperConfig: updatedSite.getConfig().getScraperConfig(),
+    });
   };
 
   const CITABILITY_GROUP_BY_FIELDS = new Set(['updatedBy', 'url', 'updatedAt']);
@@ -1495,9 +1801,12 @@ function SitesController(ctx, log, env) {
     getByBaseURL,
     getAllByDeliveryType,
     getByID,
+    getIdentity,
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    getScraperConfig,
+    updateScraperConfig,
     getPageCitabilityCounts,
     getTopPages,
     resolveSite,

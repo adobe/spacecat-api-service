@@ -19,7 +19,7 @@ import routeRequiredCapabilities, { INTERNAL_ROUTES } from '../../src/routes/req
 const testDir = dirname(fileURLToPath(import.meta.url));
 
 const ALLOWED_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-const ALLOWED_ACTIONS = ['read', 'write', 'readAll'];
+const ALLOWED_ACTIONS = ['read', 'write', 'readAll', 'create'];
 const PATH_REGEX = /^\/[a-zA-Z0-9\-_/.:]+(\/[a-zA-Z0-9\-_/.:])*$/;
 
 describe('routeRequiredCapabilities', () => {
@@ -52,19 +52,38 @@ describe('routeRequiredCapabilities', () => {
         expect(path).to.match(PATH_REGEX, `Path "${path}" contains invalid characters in "${key}"`);
       });
 
-      it('should have a value in the format "entity:action"', () => {
-        const valueParts = value.split(':');
-        expect(valueParts).to.have.lengthOf(2, `Expected "entity:action" but got "${value}" for "${key}"`);
+      // A value is either a single capability string or a non-empty array of acceptable
+      // capabilities (the consumer needs to hold at least one). Normalize and validate each.
+      const capabilities = Array.isArray(value) ? value : [value];
+
+      it('should be a string or a non-empty array of capability strings', () => {
+        if (Array.isArray(value)) {
+          expect(value).to.have.length.greaterThan(0, `Array value is empty for "${key}"`);
+          value.forEach((cap) => expect(cap).to.be.a('string', `Non-string capability in "${key}"`));
+        } else {
+          expect(value).to.be.a('string', `Value for "${key}" must be a string or array`);
+        }
       });
 
-      it('should have a non-empty entity name', () => {
-        const [entity] = value.split(':');
-        expect(entity).to.have.length.greaterThan(0, `Entity name is empty for "${key}"`);
+      it('should have every capability in the format "entity:action"', () => {
+        capabilities.forEach((cap) => {
+          const valueParts = cap.split(':');
+          expect(valueParts).to.have.lengthOf(2, `Expected "entity:action" but got "${cap}" for "${key}"`);
+        });
       });
 
-      it(`should have an allowed action (${ALLOWED_ACTIONS.join(', ')})`, () => {
-        const [, action] = value.split(':');
-        expect(ALLOWED_ACTIONS).to.include(action, `Invalid action "${action}" in value "${value}" for "${key}"`);
+      it('should have a non-empty entity name for every capability', () => {
+        capabilities.forEach((cap) => {
+          const [entity] = cap.split(':');
+          expect(entity).to.have.length.greaterThan(0, `Entity name is empty in "${cap}" for "${key}"`);
+        });
+      });
+
+      it(`should have an allowed action for every capability (${ALLOWED_ACTIONS.join(', ')})`, () => {
+        capabilities.forEach((cap) => {
+          const [, action] = cap.split(':');
+          expect(ALLOWED_ACTIONS).to.include(action, `Invalid action "${action}" in value "${cap}" for "${key}"`);
+        });
       });
     });
   });

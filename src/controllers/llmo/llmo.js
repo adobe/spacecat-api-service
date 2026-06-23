@@ -68,6 +68,13 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import {
+  patchSheetRows,
+  parseSheetRowPatch,
+  sharepointPathFor,
+  publishPathFor,
+  isSafePathSegment,
+} from './llmo-sheet-write.js';
+import {
   fetchLlmoSource,
   llmoSourceErrorResponse,
   logNotProvisioned,
@@ -81,10 +88,6 @@ import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
-import {
-  LLMO_CONFIG_DB_SYNC_TYPE,
-  isSyncEnabledForSite,
-} from './llmo-config-sync-constants.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
@@ -574,17 +577,6 @@ function LlmoController(ctx) {
         });
       }
 
-      if (isSyncEnabledForSite(siteId)) {
-        log.info(`[llmo-config-db-sync] Triggering S3-to-DB config sync for siteId: ${siteId} with dryRun: false`);
-        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
-          type: LLMO_CONFIG_DB_SYNC_TYPE,
-          siteId,
-          dryRun: false,
-        });
-      } else {
-        log.info(`[llmo-config-db-sync] Skipping S3-to-DB config sync for siteId: ${siteId} because it is not in ALLOWED_SITE_IDS`);
-      }
-
       // Build config summary
       const summaryParts = [
         `${stats.prompts.total} prompts${stats.prompts.modified ? ` (${stats.prompts.modified} modified)` : ''}`,
@@ -595,6 +587,7 @@ function LlmoController(ctx) {
         `${stats.deletedPrompts.total} deleted prompts${stats.deletedPrompts.modified ? ` (${stats.deletedPrompts.modified} modified)` : ''}`,
         `${stats.ignoredPrompts.total} ignored prompts${stats.ignoredPrompts.modified ? ` (${stats.ignoredPrompts.modified} modified)` : ''}`,
         `${stats.categoryUrls.total} category URLs`,
+        ...(stats.claims.modified ? ['claims guidance modified'] : []),
       ];
       const configSummary = summaryParts.join(', ');
 
@@ -1129,6 +1122,87 @@ function LlmoController(ctx) {
         return mapped;
       }
       return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Updates a single row in an LLMO XLSX data sheet stored in SharePoint.
+  // Round-trips the workbook (read → modify → upload → publish), so this is
+  // intended for low-frequency UI edits (e.g. soft-delete on Strategic Recommendations).
+  const patchLlmoDataRow = async (context) => {
+    const { log, env } = context;
+    const { siteId, sheetType, dataSource } = context.params;
+    const { data } = context;
+
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) {
+        return siteValidation;
+      }
+      const { llmoConfig } = siteValidation;
+
+      if (!hasText(dataSource)) {
+        return badRequest('dataSource path parameter is required');
+      }
+      // Reject path-traversal attempts before concatenating into SharePoint or admin.hlx.page URLs.
+      if (!isSafePathSegment(dataSource)) {
+        return badRequest('dataSource must contain only alphanumerics, hyphen, and underscore');
+      }
+      if (sheetType !== undefined && !isSafePathSegment(sheetType)) {
+        return badRequest('sheetType must contain only alphanumerics, hyphen, and underscore');
+      }
+
+      const parsed = parseSheetRowPatch(data);
+      if (parsed.error) {
+        return badRequest(parsed.error);
+      }
+      const { updates, isBatch } = parsed;
+
+      const sharepointPath = sharepointPathFor(llmoConfig.dataFolder, sheetType, dataSource);
+      const publishPath = publishPathFor(llmoConfig.dataFolder, sheetType, dataSource);
+
+      log.info(`Patching LLMO sheet rows for site ${siteId} at ${sharepointPath} (${updates.length} update(s))`);
+      const { results } = await patchSheetRows(
+        { sharepointPath, publishPath, updates },
+        { env, log },
+      );
+
+      // Preserve the single-row response shape for back-compat with callers that
+      // posted the single-update body; emit a batch shape for callers using `updates`.
+      if (!isBatch) {
+        const [single] = results;
+        return ok({
+          siteId,
+          sheetType: sheetType || null,
+          dataSource,
+          sheet: single.sheet,
+          rowNumber: single.rowNumber,
+          updated: single.updated,
+        });
+      }
+      return ok({
+        siteId,
+        sheetType: sheetType || null,
+        dataSource,
+        updates: results,
+      });
+    } catch (error) {
+      log.error(`Error patching LLMO sheet row for site ${siteId}: ${error.message}`);
+      const status = error.statusCode;
+      if (status === 404) {
+        return notFound(cleanupHeaderValue(error.message));
+      }
+      if (status === 409) {
+        return createResponse(
+          { message: cleanupHeaderValue(error.message) },
+          409,
+        );
+      }
+      if (status === 400) {
+        return badRequest(cleanupHeaderValue(error.message));
+      }
+      // Unexpected errors (SDK failures, missing env, network) — full detail goes to
+      // the logs above; respond with a generic message so internals are not leaked.
+      return internalServerError('Failed to patch sheet row');
     }
   };
 
@@ -2009,6 +2083,7 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryFiles,
+    patchLlmoDataRow,
     getLlmoRationale,
     getBrandClaims,
     getDemoBrandPresence,

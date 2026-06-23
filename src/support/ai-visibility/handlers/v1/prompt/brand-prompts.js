@@ -43,6 +43,7 @@ export async function handleBrandPrompts(sp, clients) {
   const sortBy = sp.get('sortBy') || PROMPTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
   const topicId = sp.get('topicId');
+  const date = sp.get('date');
   const { limit, offset } = parseLimitOffset(sp);
 
   const categories = [
@@ -50,34 +51,46 @@ export async function handleBrandPrompts(sp, clients) {
     PROMPT_CATEGORY_ENUM.CITES_TARGET,
   ];
 
-  const listRequest = fromJson(
-    PromptsRequestSchema,
-    {
-      country,
-      llm: engine,
-      target: { domain, name: domain },
-      order: {
-        by: sortBy,
-        direction: sortDirection,
+  let listRequest;
+  let totalsRequest;
+  try {
+    listRequest = fromJson(
+      PromptsRequestSchema,
+      {
+        country,
+        llm: engine,
+        target: { domain, name: domain },
+        order: {
+          by: sortBy,
+          direction: sortDirection,
+        },
+        range: { limit, offset },
+        categories,
+        dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
+        target_date: date,
       },
-      range: { limit, offset },
-      categories,
-      dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
-    },
-    PROTO_FROM_JSON,
-  );
+      PROTO_FROM_JSON,
+    );
 
-  const totalsRequest = fromJson(
-    PromptsTotalsRequestSchema,
-    {
-      country,
-      llm: engine,
-      target: { domain, name: domain },
-      categories,
-      dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
-    },
-    PROTO_FROM_JSON,
-  );
+    totalsRequest = fromJson(
+      PromptsTotalsRequestSchema,
+      {
+        country,
+        llm: engine,
+        target: { domain, name: domain },
+        categories,
+        dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
+        target_date: date,
+      },
+      PROTO_FROM_JSON,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid brand prompts request';
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message },
+    };
+  }
 
   try {
     const [promptsMessage, totalsMessage] = await Promise.all([

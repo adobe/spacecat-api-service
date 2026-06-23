@@ -122,6 +122,49 @@ export function resolveTopicIdsDimensionFilter(sp) {
   return { ok: true, dimensionFilterQl };
 }
 
+/**
+ * Validates topic ids for the `promptsByTopicIDs` gRPC call: digits-only, capped count.
+ * Reads the singular `topicId` and/or repeated `topicIds` query params. Returns the ids as
+ * `bigint[]` (the proto `topic_ids` field is `repeated uint64`). Empty when no param given.
+ *
+ * Mirrors {@link resolveTopicIdsDimensionFilter} (same validation rules / error bodies) but
+ * yields the id array rather than a dimensionFilterQl string.
+ * @param {URLSearchParams} sp
+ * @returns {{ ok: true, topicIds: bigint[] } | { ok: false, status: number, body: object }}
+ */
+export function resolveTopicIds(sp) {
+  const single = sp.get('topicId');
+  const raw = [...sp.getAll('topicIds'), ...(single ? [single] : [])]
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+  if (raw.length === 0) {
+    return { ok: true, topicIds: [] };
+  }
+  if (raw.length > MAX_TOPIC_IDS_DIMENSION_FILTER) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'topic_ids_limit_exceeded',
+        message: `At most ${MAX_TOPIC_IDS_DIMENSION_FILTER} topicId values are allowed`,
+      },
+    };
+  }
+  for (const id of raw) {
+    if (!TOPIC_HASH_ID_PATTERN.test(id)) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: 'invalid_topic_ids',
+          message: 'Each topicId value must be a non-negative integer string',
+        },
+      };
+    }
+  }
+  return { ok: true, topicIds: raw.map((id) => BigInt(id)) };
+}
+
 export const PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT = 500;
 export const MAX_COMPETITOR_DOMAINS = 5;
 export const TOPIC_OPPORTUNITY_PROMPTS_MAX_PAGES = 15;
@@ -172,6 +215,21 @@ export function parseLimitOffset(sp) {
  */
 export function escapeQlString(s) {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
+ * Build a Semrush `dimension_filter_ql` `CONTAINS` clause for a free-text table
+ * search, e.g. `prompt CONTAINS "pdf"`. Returns '' when the filter is empty so
+ * callers can omit the field (leaving the request shape unchanged). The text is
+ * escaped via {@link escapeQlString} so it cannot break out of the QL literal.
+ *
+ * @param {string|null|undefined} textFilter free-text search value
+ * @param {string} column the queryable dimension column (e.g. `prompt`, `topic`, `name`, `domain`)
+ * @returns {string} the QL clause, or '' when no filter
+ */
+export function buildTextFilterQl(textFilter, column) {
+  const t = (textFilter ?? '').trim();
+  return t ? `${column} CONTAINS "${escapeQlString(t)}"` : '';
 }
 
 /**
