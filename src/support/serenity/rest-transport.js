@@ -11,12 +11,10 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { createSerenityProjectEngineApiClient } from '@adobe/spacecat-shared-project-engine-client';
 import { ErrorWithStatusCode } from '../utils.js';
-// Typed Semrush Project Engine client, vendored under third-party/ (the upstream
-// @adobe/spacecat-shared-project-engine-client is private and not published; see
-// third-party/project-engine-client/PROVENANCE.md). It owns the project-API
-// prefix ('/enterprise/projects/api'), the IMS-Bearer auth, and request shaping.
-import { createSerenityProjectEngineApiClient } from '../../../third-party/project-engine-client/index.js';
+// The typed Semrush Project Engine client owns the project-API prefix
+// ('/enterprise/projects/api'), the IMS-Bearer auth, and request shaping.
 
 // Workspace lifecycle (create subworkspace / status / family / resources / members)
 // is served by a DIFFERENT gateway service than project ops — the
