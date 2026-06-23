@@ -30,9 +30,13 @@ import {
 
 const STATUS_CONFLICT = 409;
 
-// Secret path mirrors the format in TicketClientFactory.buildSecretPath so the
-// same SM entry is addressed whether we are creating a client or deleting one.
-// Both IDs are UUID-validated before interpolation (path traversal prevention).
+// Ticket creation modes per spec. 'grouped' is v2-only — return 400 in v1.
+const TICKET_MODE_INDIVIDUAL = 'individual';
+const TICKET_MODE_GROUPED = 'grouped';
+const SUGGESTION_IDS_MAX = 10;
+
+// Secret path mirrors TicketClientFactory.buildSecretPath — both IDs UUID-validated
+// before interpolation to prevent path traversal.
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function buildSecretPath(organizationId, connectionId) {
@@ -60,11 +64,16 @@ function serializeConnection(conn) {
 
 /**
  * Serializes a Ticket entity to a plain response object.
+ * connectionId is included per the spec response shape.
+ *
+ * @param {object} ticket
+ * @param {Array<{suggestionId: string, opportunityId: string}>} [suggestions]
  */
-function serializeTicket(ticket) {
-  return {
+function serializeTicket(ticket, suggestions) {
+  const out = {
     id: ticket.getId(),
     organizationId: ticket.getOrganizationId(),
+    connectionId: ticket.getTaskManagementConnectionId?.() ?? ticket.getConnectionId?.(),
     ticketId: ticket.getTicketId(),
     ticketKey: ticket.getTicketKey(),
     ticketUrl: ticket.getTicketUrl(),
@@ -72,7 +81,16 @@ function serializeTicket(ticket) {
     ticketProvider: ticket.getTicketProvider(),
     opportunityId: ticket.getOpportunityId?.() ?? null,
     createdBy: ticket.getCreatedBy(),
+    statusSyncedAt: null, // v1: always null; populated by v2 webhook sync
   };
+
+  // List endpoints include the suggestions bridge array per spec response shape.
+  // Creation endpoint uses the scalar suggestionId for backward compat.
+  if (suggestions !== undefined) {
+    out.suggestions = suggestions;
+  }
+
+  return out;
 }
 
 /**
@@ -83,17 +101,19 @@ function serializeTicket(ticket) {
  *   GET    /organizations/:organizationId/task-management/connections/:connectionId
  *   DELETE /organizations/:organizationId/task-management/connections/:connectionId
  *   GET    /organizations/:organizationId/task-management/tickets
+ *   GET    /organizations/:organizationId/suggestions/:suggestionId/ticket
+ *   GET    /organizations/:organizationId/opportunities/:opportunityId/tickets
  *   POST   /organizations/:organizationId/task-management/:provider/tickets
  *
  * v1 scope — intentional deviations from the architecture spec (PR #150):
- *   - Idempotency-Key header: accepted but not enforced (no 24h response cache).
- *     v1 relies on the DB UNIQUE (connection_id, ticket_key) constraint instead.
- *   - suggestionIds (array): only the first element is processed per request.
- *     Multi-suggestion batch creation (207 Multi-Status) is deferred to v2.
+ *   - Idempotency-Key: accepted but response cache not yet implemented.
+ *     The idempotency_keys table exists; full cache enforcement is v2.
+ *   - suggestionIds: only the first element is processed per request.
+ *     Multi-suggestion batch creation (207 Multi-Status) is v2.
  *   - connectionId in POST body: connection resolved by org + provider path params;
- *     explicit connectionId selection is deferred to v2 (multiple connections per org).
- *   - DELETE does not revoke the Atlassian-side OAuth app authorization — v1 accepted risk.
- *   - List endpoints return all records without pagination — volume is negligible at v1 scale.
+ *     explicit connectionId selection is v2 (multiple connections per org).
+ *   - DELETE does not revoke the Atlassian-side OAuth token in v1.
+ *   - List endpoints have no pagination in v1 (volume negligible at current scale).
  *
  * @param {object} context - Universal serverless function context.
  * @param {object} context.dataAccess - Data access layer (models).
@@ -111,7 +131,9 @@ function TaskManagementController(context) {
     throw new Error('Data access required');
   }
 
-  const { TaskManagementConnection, Ticket, TicketSuggestion } = dataAccess;
+  const {
+    TaskManagementConnection, Ticket, TicketSuggestion,
+  } = dataAccess;
 
   if (!isNonEmptyObject(TaskManagementConnection)) {
     throw new Error('TaskManagementConnection collection not available');
@@ -139,10 +161,6 @@ function TaskManagementController(context) {
    * Loads a connection by ID and verifies it belongs to the given organization.
    * Returns null when not found or org mismatch (both map to 404 to avoid
    * leaking whether a connectionId exists in a different org).
-   *
-   * @param {string} organizationId
-   * @param {string} connectionId
-   * @returns {Promise<TaskManagementConnection|null>}
    */
   async function loadConnectionForOrg(organizationId, connectionId) {
     const conn = await TaskManagementConnection.findById(connectionId);
@@ -158,12 +176,7 @@ function TaskManagementController(context) {
    * Lists all task-management connections for an organization.
    *
    * GET /organizations/:organizationId/task-management/connections
-   *
-   * Query params:
-   *   provider (optional) — filter by provider key, e.g. 'jira_cloud'
-   *
-   * @param {object} requestContext
-   * @returns {Promise<Response>} 200 with array of connection objects.
+   * Query: ?provider= (optional filter)
    */
   async function listConnections(requestContext) {
     const { params, queryStringParameters: qs } = requestContext;
@@ -181,8 +194,6 @@ function TaskManagementController(context) {
       return createResponse({ message: 'Failed to list connections' }, STATUS_INTERNAL_SERVER_ERROR);
     }
 
-    // Optional client-side provider filter — the index already returns all providers
-    // for the org; filtering in application code avoids an extra DB index for v1 scale.
     const filtered = qs?.provider
       ? connections.filter((c) => c.getProvider() === qs.provider)
       : connections;
@@ -194,9 +205,6 @@ function TaskManagementController(context) {
    * Returns a single task-management connection.
    *
    * GET /organizations/:organizationId/task-management/connections/:connectionId
-   *
-   * @param {object} requestContext
-   * @returns {Promise<Response>} 200 with connection object, or 404.
    */
   async function getConnection(requestContext) {
     const { params } = requestContext;
@@ -219,10 +227,7 @@ function TaskManagementController(context) {
     }
 
     if (!connection) {
-      return createResponse(
-        { message: `Connection ${connectionId} not found` },
-        STATUS_NOT_FOUND,
-      );
+      return createResponse({ message: `Connection ${connectionId} not found` }, STATUS_NOT_FOUND);
     }
 
     return createResponse(serializeConnection(connection), STATUS_OK);
@@ -233,16 +238,8 @@ function TaskManagementController(context) {
    *
    * DELETE /organizations/:organizationId/task-management/connections/:connectionId
    *
-   * v1 accepted risk: does not revoke the Atlassian-side OAuth app authorization.
-   * The Atlassian token remains valid until it expires or the user manually revokes it
-   * via their Atlassian account. Revoking via Atlassian's revocation endpoint is a v2
-   * enhancement (requires storing the refresh token temporarily and calling the revoke API).
-   *
-   * Secret deletion uses a 7-day recovery window (AWS default) so operations can
-   * restore accidentally deleted connections without losing the OAuth token.
-   *
-   * @param {object} requestContext
-   * @returns {Promise<Response>} 204 on success, or an error response.
+   * v1 accepted risk: does not revoke the Atlassian-side OAuth token.
+   * Secret uses a 7-day recovery window so ops can restore accidentally deleted connections.
    */
   async function deleteConnection(requestContext) {
     const { params } = requestContext;
@@ -265,25 +262,16 @@ function TaskManagementController(context) {
     }
 
     if (!connection) {
-      return createResponse(
-        { message: `Connection ${connectionId} not found` },
-        STATUS_NOT_FOUND,
-      );
+      return createResponse({ message: `Connection ${connectionId} not found` }, STATUS_NOT_FOUND);
     }
 
-    // Delete the OAuth secret first. If this fails we abort — better to leave
-    // an orphaned SM entry than to delete the DB record and lose the ability to
-    // identify and clean up the orphan later.
     try {
       const secretId = buildSecretPath(organizationId, connectionId);
       await smClient.send(new DeleteSecretCommand({
         SecretId: secretId,
-        // 7-day recovery window allows ops to restore an accidentally deleted connection.
         RecoveryWindowInDays: 7,
       }));
     } catch (err) {
-      // ResourceNotFoundException means the secret was already deleted (e.g. by ops).
-      // Treat this as a soft success so the DB record can still be cleaned up.
       if (err.name !== 'ResourceNotFoundException') {
         log.error({ organizationId, connectionId, err }, 'Failed to delete OAuth secret');
         return createResponse({ message: 'Failed to delete connection secret' }, STATUS_INTERNAL_SERVER_ERROR);
@@ -294,23 +282,24 @@ function TaskManagementController(context) {
     try {
       await connection.remove();
     } catch (err) {
-      // Secret is already deleted — log the orphaned DB record so ops can clean it up.
       log.error({ organizationId, connectionId, err }, 'OAuth secret deleted but DB record removal failed');
-      return createResponse({ message: 'Connection secret deleted but DB record could not be removed' }, STATUS_INTERNAL_SERVER_ERROR);
+      return createResponse(
+        { message: 'Connection secret deleted but DB record could not be removed' },
+        STATUS_INTERNAL_SERVER_ERROR,
+      );
     }
 
     return createResponse({}, STATUS_NO_CONTENT);
   }
 
-  // ─── Ticket handlers ───────────────────────────────────────────────────────
+  // ─── Ticket read handlers ──────────────────────────────────────────────────
 
   /**
    * Lists all tickets created for an organization.
    *
    * GET /organizations/:organizationId/task-management/tickets
    *
-   * @param {object} requestContext
-   * @returns {Promise<Response>} 200 with array of ticket objects.
+   * Response shape: array of ticket objects with `suggestions` bridge array.
    */
   async function listTickets(requestContext) {
     const { params } = requestContext;
@@ -328,8 +317,148 @@ function TaskManagementController(context) {
       return createResponse({ message: 'Failed to list tickets' }, STATUS_INTERNAL_SERVER_ERROR);
     }
 
-    return createResponse(tickets.map(serializeTicket), STATUS_OK);
+    // Load bridge rows in parallel — one allByTicketId call per ticket.
+    const ticketsWithSuggestions = await Promise.all(
+      tickets.map(async (ticket) => {
+        let suggestions = [];
+        try {
+          const bridges = await TicketSuggestion.allByTicketId(ticket.getId());
+          suggestions = bridges.map((b) => ({
+            suggestionId: b.getSuggestionId(),
+            opportunityId: b.getOpportunityId(),
+          }));
+        } catch {
+          // Bridge load failure does not fail the list — return empty array.
+        }
+        return serializeTicket(ticket, suggestions);
+      }),
+    );
+
+    return createResponse(ticketsWithSuggestions, STATUS_OK);
   }
+
+  /**
+   * Returns the single ticket linked to a suggestion via the TicketSuggestion bridge.
+   *
+   * GET /organizations/:organizationId/suggestions/:suggestionId/ticket
+   *
+   * Returns 404 when no ticket has been created for this suggestion.
+   */
+  async function getTicketBySuggestion(requestContext) {
+    const { params } = requestContext;
+    const { organizationId, suggestionId } = params;
+
+    if (!isValidUUID(organizationId)) {
+      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+    }
+
+    if (!hasText(suggestionId)) {
+      return createResponse({ message: 'suggestionId is required' }, STATUS_BAD_REQUEST);
+    }
+
+    let bridge;
+    try {
+      bridge = await TicketSuggestion.findBySuggestionId(suggestionId);
+    } catch (err) {
+      log.error({ organizationId, suggestionId, err }, 'Failed to look up TicketSuggestion');
+      return createResponse({ message: 'Failed to look up ticket' }, STATUS_INTERNAL_SERVER_ERROR);
+    }
+
+    if (!bridge) {
+      return createResponse(
+        { message: `No ticket found for suggestion ${suggestionId}` },
+        STATUS_NOT_FOUND,
+      );
+    }
+
+    let ticket;
+    try {
+      ticket = await Ticket.findById(bridge.getTicketId());
+    } catch (err) {
+      log.error({ organizationId, ticketId: bridge.getTicketId(), err }, 'Failed to load ticket');
+      return createResponse({ message: 'Failed to load ticket' }, STATUS_INTERNAL_SERVER_ERROR);
+    }
+
+    if (!ticket || ticket.getOrganizationId() !== organizationId) {
+      return createResponse(
+        { message: `No ticket found for suggestion ${suggestionId}` },
+        STATUS_NOT_FOUND,
+      );
+    }
+
+    return createResponse(
+      {
+        ...serializeTicket(ticket),
+        suggestionId,
+        opportunityId: bridge.getOpportunityId(),
+        connectionId: ticket.getTaskManagementConnectionId?.() ?? ticket.getConnectionId?.(),
+        createdBy: ticket.getCreatedBy(),
+        createdAt: ticket.getCreatedAt?.(),
+      },
+      STATUS_OK,
+    );
+  }
+
+  /**
+   * Lists all tickets for all suggestions under an opportunity.
+   *
+   * GET /organizations/:organizationId/opportunities/:opportunityId/tickets
+   *
+   * Response shape: array of ticket objects with `suggestions` bridge array.
+   */
+  async function listTicketsByOpportunity(requestContext) {
+    const { params } = requestContext;
+    const { organizationId, opportunityId } = params;
+
+    if (!isValidUUID(organizationId)) {
+      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+    }
+
+    if (!hasText(opportunityId)) {
+      return createResponse({ message: 'opportunityId is required' }, STATUS_BAD_REQUEST);
+    }
+
+    // Find all bridge rows for this opportunity, then deduplicate by ticketId.
+    let bridges;
+    try {
+      bridges = await TicketSuggestion.allByOpportunityId(opportunityId);
+    } catch (err) {
+      log.error({ organizationId, opportunityId, err }, 'Failed to list TicketSuggestions for opportunity');
+      return createResponse({ message: 'Failed to list tickets' }, STATUS_INTERNAL_SERVER_ERROR);
+    }
+
+    // Group bridge rows by ticketId — a ticket may have multiple suggestions in v2.
+    const ticketIdToSuggestions = new Map();
+    for (const bridge of bridges) {
+      const tid = bridge.getTicketId();
+      if (!ticketIdToSuggestions.has(tid)) {
+        ticketIdToSuggestions.set(tid, []);
+      }
+      ticketIdToSuggestions.get(tid).push({
+        suggestionId: bridge.getSuggestionId(),
+        opportunityId: bridge.getOpportunityId(),
+      });
+    }
+
+    // Load unique tickets in parallel, filtering out any that belong to another org.
+    const ticketEntries = await Promise.all(
+      [...ticketIdToSuggestions.keys()].map(async (ticketId) => {
+        try {
+          const ticket = await Ticket.findById(ticketId);
+          if (!ticket || ticket.getOrganizationId() !== organizationId) {
+            return null;
+          }
+          return serializeTicket(ticket, ticketIdToSuggestions.get(ticketId));
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    return createResponse(ticketEntries.filter(Boolean), STATUS_OK);
+  }
+
+  // ─── Ticket creation ──────────────────────────────────────────────────────
 
   /**
    * Creates a Jira ticket for an opportunity and persists the result.
@@ -339,35 +468,24 @@ function TaskManagementController(context) {
    * Expected request body:
    * ```json
    * {
-   *   "projectKey":    "string (required) — Jira project key, e.g. 'ASO'",
+   *   "projectKey":    "string (required)",
    *   "summary":       "string (required)",
-   *   "description":   "string (optional, plain text — backend converts to ADF)",
+   *   "description":   "string (optional, plain text)",
    *   "issueType":     "string (optional, defaults to 'Task')",
    *   "labels":        ["string"] (optional),
-   *   "suggestionIds": ["uuid"] (optional) — v1: only the first element is processed.
-   *                    A TicketSuggestion bridge row is created when provided.
-   *                    Multi-suggestion batch creation (207) is a v2 feature.
-   *   "opportunityId": "uuid" (optional)
+   *   "mode":          "'individual' (default) | 'grouped' (returns 400 in v1)",
+   *   "suggestionIds": ["uuid"] — max 10; v1 processes only the first element,
+   *   "opportunityId": "uuid (optional)"
    * }
    * ```
    *
-   * Idempotency-Key: the spec marks this header as required and specifies a 24-hour
-   * response cache. v1 accepts the header but does not cache responses — the DB
-   * UNIQUE (connection_id, ticket_key) constraint prevents exact duplicate tickets.
-   *
-   * @param {object} requestContext - The parsed request context.
-   * @param {object} requestContext.params - Path parameters.
-   * @param {string} requestContext.params.organizationId - Organization UUID.
-   * @param {string} requestContext.params.provider - Provider key (e.g. 'jira_cloud').
-   * @param {object} requestContext.data - Parsed request body.
-   * @param {object} requestContext.attributes - Request-scoped attributes (authInfo, etc.).
-   * @returns {Promise<Response>} 201 with ticket data, or an error response.
+   * Idempotency-Key header: accepted but response cache not yet active in v1.
+   * The idempotency_keys table is in place; full cache enforcement is v2.
+   * The DB UNIQUE (connection_id, ticket_key) constraint prevents duplicate tickets.
    */
   async function createTicket(requestContext) {
     const { params, data, attributes } = requestContext;
 
-    // IMS user ID of the authenticated caller — stored on the Ticket for audit purposes.
-    // Falls back to 'unknown' only when auth middleware is absent (e.g. local dev without JWT).
     const createdBy = attributes?.authInfo?.getProfile()?.getImsUserId() ?? 'unknown';
     const { organizationId, provider } = params;
 
@@ -389,15 +507,35 @@ function TaskManagementController(context) {
       return createResponse({ message: 'projectKey is required' }, STATUS_BAD_REQUEST);
     }
 
-    // v1: only the first suggestionId is used. The spec field name is suggestionIds (array).
-    // Accept both forms for forward-compat (caller may send singular or array).
-    const suggestionIdsRaw = data.suggestionIds ?? (data.suggestionId ? [data.suggestionId] : []);
-    const primarySuggestionId = Array.isArray(suggestionIdsRaw) ? suggestionIdsRaw[0] : undefined;
+    // mode — 'grouped' is v2-only; return 400 in v1 so clients are explicitly informed.
+    const mode = data.mode ?? TICKET_MODE_INDIVIDUAL;
+    if (mode === TICKET_MODE_GROUPED) {
+      return createResponse(
+        { message: "mode 'grouped' is not supported in v1. Use 'individual' (default)." },
+        STATUS_BAD_REQUEST,
+      );
+    }
+    if (mode !== TICKET_MODE_INDIVIDUAL) {
+      return createResponse(
+        { message: `Invalid mode '${mode}'. Supported values: 'individual'.` },
+        STATUS_BAD_REQUEST,
+      );
+    }
 
-    // --- Resolve the active connection -------------------------------------
-    // findActiveByOrganizationAndProvider returns null for both "not connected" and
-    // "connection exists but is degraded" — both map to 404 so callers are directed
-    // to the connection management UI without leaking connection state.
+    // suggestionIds — accept both array (spec) and singular form (compat).
+    const suggestionIdsRaw = data.suggestionIds ?? (data.suggestionId ? [data.suggestionId] : []);
+    const suggestionIds = Array.isArray(suggestionIdsRaw) ? suggestionIdsRaw : [];
+
+    if (suggestionIds.length > SUGGESTION_IDS_MAX) {
+      return createResponse(
+        { message: `suggestionIds must contain at most ${SUGGESTION_IDS_MAX} items` },
+        STATUS_BAD_REQUEST,
+      );
+    }
+
+    const primarySuggestionId = suggestionIds[0];
+
+    // --- Resolve the active connection ----------------------------------------
 
     let connection;
     try {
@@ -415,11 +553,7 @@ function TaskManagementController(context) {
       );
     }
 
-    // --- Create the ticket via the provider client ------------------------
-    // TicketClientFactory.create expects: (connection, smClient, httpClient, log)
-    // where connection is a plain object: { id, organizationId, provider, metadata }.
-    // We extract those from the entity rather than passing the entity directly
-    // so the ticket-client library stays decoupled from the data-access layer.
+    // --- Create the ticket via the provider client ----------------------------
 
     let ticketResult;
     try {
@@ -438,8 +572,6 @@ function TaskManagementController(context) {
         issueType: data.issueType ?? 'Task',
       });
     } catch (err) {
-      // If the token could not be refreshed mark the connection degraded so
-      // the UI can prompt the user to reconnect without waiting for a GC run.
       if (err.status === 401) {
         await connection.markRequiresReauth().catch((updateErr) => {
           log.warn({ updateErr }, 'Failed to mark connection as requires_reauth after 401');
@@ -454,7 +586,7 @@ function TaskManagementController(context) {
       return createResponse({ message: 'Failed to create ticket' }, STATUS_INTERNAL_SERVER_ERROR);
     }
 
-    // --- Persist the ticket record ----------------------------------------
+    // --- Persist the ticket record --------------------------------------------
 
     let ticket;
     try {
@@ -469,8 +601,6 @@ function TaskManagementController(context) {
         ticketUrl: ticketResult.ticketUrl,
       });
     } catch (err) {
-      // The ticket was created in Jira but we failed to persist it locally.
-      // Log the provider identifiers so the record can be reconciled manually.
       log.error(
         {
           organizationId,
@@ -485,11 +615,21 @@ function TaskManagementController(context) {
       return createResponse({ message: 'Ticket created but could not be saved' }, STATUS_INTERNAL_SERVER_ERROR);
     }
 
-    // --- Create the TicketSuggestion bridge row (when suggestionId provided) --
-    // Links the specific Suggestion to this Ticket for 1:1 enforcement.
-    // The DB UNIQUE (suggestion_id) constraint prevents the same suggestion from
-    // being ticketed twice. A conflict means the suggestion was already ticketed —
-    // return 409 so the UI can show an appropriate message.
+    // Emit structured audit event per spec §Logging & Audit Events.
+    log.info('Ticket created successfully', {
+      eventType: 'ticket.created',
+      orgId: organizationId,
+      connectionId: connection.getId(),
+      provider,
+      ticketKey: ticketResult.ticketKey,
+      suggestionIds: suggestionIds.length > 0 ? suggestionIds : undefined,
+      opportunityId: data.opportunityId ?? undefined,
+      imsActor: createdBy,
+      projectKey: data.projectKey,
+      issueType: data.issueType ?? 'Task',
+    });
+
+    // --- Create the TicketSuggestion bridge row --------------------------------
 
     if (primarySuggestionId) {
       try {
@@ -532,6 +672,8 @@ function TaskManagementController(context) {
     getConnection,
     deleteConnection,
     listTickets,
+    getTicketBySuggestion,
+    listTicketsByOpportunity,
     createTicket,
   };
 }
