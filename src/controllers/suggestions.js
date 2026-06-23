@@ -1199,14 +1199,22 @@ function SuggestionsController(ctx, sqs, env) {
       // that simply weren't on that list. Access control (`auto_fix` permission) above
       // still rejects unauthorized callers.
       const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
-      // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
-      await sqs.sendMessage(queueUrl, {
+      await sqs.sendMessage(
+        queueUrl,
+        {
+          siteId,
+          opportunityId,
+          action: 'assess-urls',
+          pages,
+          ...(precheckOnly === true && { precheckOnly: true }),
+        },
+      );
+      return accepted({
+        message: 'Assess-urls job queued',
         siteId,
-        action: 'assess-urls',
-        pages,
-        ...(precheckOnly === true && { precheckOnly: true }),
+        opportunityId,
+        pagesCount: pages.length,
       });
-      return accepted({ message: 'Assess-urls job queued', siteId, pagesCount: pages.length });
     }
 
     // suggestion-based flow (assess, fix, etc.)
