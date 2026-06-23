@@ -640,7 +640,7 @@ export async function upsertPrompts({
 
   let existingQuery = postgrestClient
     .from('prompts')
-    .select('id,prompt_id,text,regions,status')
+    .select('id,prompt_id,text,regions,status,intent')
     .eq('organization_id', organizationId)
     .eq('brand_id', brandUuid);
 
@@ -706,6 +706,16 @@ export async function upsertPrompts({
     };
 
     if (match && match.status !== 'active') {
+      if (match.status === 'deleted') {
+        const reactivated = {
+          ...row,
+          id: match.id,
+          status: 'active',
+          intent: row.intent ?? match.intent,
+        };
+        toUpdate.push(reactivated);
+        processed.push({ ...reactivated, prompt_id: promptId });
+      }
       // eslint-disable-next-line no-continue
       continue;
     }
