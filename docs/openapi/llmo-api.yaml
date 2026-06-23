@@ -1248,36 +1248,23 @@ llmo-onboard-site:
       response `status` is always `processing` because the triggered audits run
       asynchronously — the UI reflects completion by polling site/audit readiness.
 
-      Access requires all of: organization membership, an explicit **PAID** LLMO
-      entitlement (a FREE_TRIAL org is rejected), and brand-management (admin)
-      access. Customer-facing failures are generic; the internal reason is logged
-      and posted to the ops alerts channel.
+      Access requires organization membership and an explicit **PAID** LLMO
+      entitlement (a FREE_TRIAL org is rejected) — mirroring the v2 brand-management
+      routes; no platform-admin claim is required. Customer-facing failures are
+      generic; the internal reason is logged and posted to the ops alerts channel.
+
+      **Note — domain ownership is not yet verified.** This endpoint does not prove
+      the caller controls the submitted domain (a brand-new domain is accepted; only
+      a domain already claimed by a different org is rejected). DNS/file-based
+      ownership verification (planned via Google Search Console) is a future,
+      cross-repo item and out of scope for Piece 1.
     operationId: onboardSiteOnly
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            type: object
-            properties:
-              domain:
-                type: string
-                format: hostname
-                description: The domain name to onboard (without protocol).
-                example: "example.com"
-              brandName:
-                type: string
-                description: |
-                  The brand label for the site's LLMO config (set via
-                  `siteConfig.updateLlmoBrand`). This is NOT a brand entity.
-                example: "Example Brand"
-              deliveryType:
-                type: string
-                description: Optional delivery type forwarded to site creation.
-                example: "aem_edge"
-            required:
-              - domain
-              - brandName
+            $ref: './schemas.yaml#/LlmoOnboardSiteRequest'
     responses:
       '201':
         description: |
@@ -1286,38 +1273,7 @@ llmo-onboard-site:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                siteId:
-                  type: string
-                  format: uuid
-                  description: The created or existing site ID.
-                  example: "987fcdeb-51a2-43d1-9f12-345678901234"
-                organizationId:
-                  type: string
-                  format: uuid
-                  description: The organization ID.
-                  example: "123e4567-e89b-12d3-a456-426614174000"
-                baseURL:
-                  type: string
-                  format: uri
-                  description: The normalized base URL of the onboarded site.
-                  example: "https://example.com"
-                dataFolder:
-                  type: string
-                  description: The LLMO data folder for the site.
-                  example: "example-com"
-                status:
-                  type: string
-                  enum: ["processing"]
-                  description: Always `processing` — triggered audits run asynchronously.
-                  example: "processing"
-              required:
-                - siteId
-                - organizationId
-                - baseURL
-                - dataFolder
-                - status
+              $ref: './schemas.yaml#/LlmoOnboardSiteResponse'
       '400':
         $ref: './responses.yaml#/400'
       '403':

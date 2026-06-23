@@ -1576,6 +1576,134 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockUpsertBrand).to.not.have.been.called;
       expect(mockLog.info).to.have.been.calledWithMatch('skipping brand activation and prompt generation');
     });
+
+    it('rolls back SharePoint folder + enrollment when a step fails mid-flight (siteOnly)', async () => {
+      const { mockOrganization, mockSite } = buildSiteMocks();
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      // enableAudits runs after org/site/entitlement/SharePoint are provisioned;
+      // fail it to drive the catch's cleanup (deleteSharePointFolder + revokeEnrollment)
+      // then rethrow — exercising the real rollback on the siteOnly branch.
+      mockDataAccess.Configuration.findLatest.rejects(new Error('config boom'));
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const tierInstance = mockTierClient.createForSite();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      // folderExists: true so the cleanup's deleteSharePointFolder (which guards on
+      // folder.exists()) actually deletes; copyFilesToSharepoint tolerates it (skips
+      // creation), so it doesn't change the failure point.
+      const { mockClient: sharePointClient, mockFolder } = createMockSharePointClient(
+        sinon,
+        { folderExists: true },
+      );
+      const mockOctokit = createMockOctokit();
+      const { mockDrsClient } = buildTrackableDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboard } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      let thrown;
+      try {
+        await onboard({
+          domain: 'example.com',
+          brandName: 'Test Brand',
+          imsOrgId: 'ABC123@AdobeOrg',
+          siteOnly: true,
+        }, context);
+      } catch (e) {
+        thrown = e;
+      }
+
+      expect(thrown, 'onboarding should rethrow the mid-flight failure').to.exist;
+      // Cleanup ran: SharePoint folder deleted + site enrollment revoked.
+      expect(mockFolder.delete).to.have.been.called;
+      expect(tierInstance.revokeSiteEnrollment).to.have.been.called;
+    });
+
+    it('enqueues exactly one publish message and survives a failed publish enqueue (siteOnly)', async () => {
+      const { mockOrganization, mockSite, mockConfiguration } = buildSiteMocks();
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const { mockDrsClient } = buildTrackableDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboard } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const PUBLISH = 'trigger:llmo-onboarding-publish';
+      // Fail ONLY the publish enqueue; the audit-trigger enqueues resolve normally.
+      const sendMessage = sinon.stub().callsFake((url, msg) => (
+        msg.type === PUBLISH ? Promise.reject(new Error('sqs down')) : Promise.resolve()
+      ));
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage },
+      };
+
+      const result = await onboard({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteOnly: true,
+      }, context);
+
+      // Onboarding completes despite the failed publish enqueue (swallowed + warned).
+      expect(result.siteId).to.equal('site-only-site');
+      const publishCalls = sendMessage.getCalls().filter((c) => c.args[1]?.type === PUBLISH);
+      expect(publishCalls).to.have.lengthOf(1);
+      expect(mockLog.warn).to.have.been.calledWithMatch(PUBLISH);
+    });
   });
 
   describe('performLlmoOnboarding', () => {

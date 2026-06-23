@@ -28,7 +28,7 @@ import {
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
-import { getDomain } from 'tldts';
+import { getDomain, parse as parseDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
@@ -1066,8 +1066,9 @@ function LlmoController(ctx) {
    * `performLlmoOnboarding` via the `siteOnly` flag. Activating a brand +
    * generating prompts is Piece 2 (LLMO-5605).
    *
-   * Org-scoped (`/v2/orgs/:spaceCatId/...`). Gated on: org membership, an explicit
-   * PAID LLMO entitlement, and brand-management (admin) access. Customers never see
+   * Org-scoped (`/v2/orgs/:spaceCatId/...`). Gated on org membership + an explicit
+   * PAID LLMO entitlement (no admin claim — this is customer self-serve, mirroring
+   * the v2 brand-management routes). Customers never see
    * the internal failure reason — both failures and successes are posted to ops in
    * SLACK_LLMO_ALERTS_CHANNEL_ID. Runs synchronously; `status: 'processing'` is
    * honest because the triggered audits run asynchronously.
@@ -1095,9 +1096,14 @@ function LlmoController(ctx) {
         return notFound('Organization not found');
       }
 
-      // --- Auth gate: membership → explicit PAID → brand-management (admin) ---
-      // hasAccess(organization) is called first so the delegation-aware
-      // isLLMOAdministrator() check below resolves against this org.
+      // --- Auth gate: org membership + explicit PAID entitlement ---
+      // Mirrors the v2 brand-management routes (brands.js), which gate on
+      // hasAccess(organization) alone. This is a paid-customer self-serve
+      // endpoint, so it deliberately does NOT require a platform-admin /
+      // LLMO-admin claim: those are never set on a real customer IMS token
+      // (the IMS handler grants the admin scope only for @adobe.com platform
+      // admins), so requiring them would 403 every paying customer. The
+      // explicit PAID check below is the additional, stricter gate.
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('Only members of the organization can onboard a site');
       }
@@ -1114,12 +1120,6 @@ function LlmoController(ctx) {
       const { entitlement } = await tierClient.checkValidEntitlement();
       if (!entitlement || entitlement.getTier() !== EntitlementModel.TIERS.PAID) {
         return forbidden('A paid LLMO entitlement is required to onboard a site');
-      }
-
-      // Brand-management (admin) access — the backend equivalent of the UI's
-      // canManageConfiguration. Self-serve onboarding inherits that access model.
-      if (!accessControlUtil.hasAdminAccess() && !accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('You do not have permission to onboard a site for this organization');
       }
 
       // --- Validate request body ---
@@ -1143,6 +1143,18 @@ function LlmoController(ctx) {
       if (!isValidUrl(baseURL)) {
         return badRequest('domain is invalid');
       }
+
+      // SSRF guard: onboarding triggers outbound probes against this host (CDN
+      // detection, Ahrefs), so reject anything that isn't a public registrable
+      // domain — IP literals (including the 169.254.169.254 metadata address),
+      // localhost, and single-label/internal hosts all fail here. (Resolve-time
+      // private-IP-range checks are a deeper, cross-cutting follow-up.)
+      const { isIp, domain: registrableDomain } = parseDomain(new URL(baseURL).hostname);
+      if (isIp || !registrableDomain) {
+        log.warn(`Site-only onboarding rejected non-public host for org ${spaceCatId}, domain ${domain}`);
+        return badRequest('domain is invalid');
+      }
+
       const dataFolder = generateDataFolder(baseURL, env.ENV);
       const imsOrgId = organization.getImsOrgId();
 

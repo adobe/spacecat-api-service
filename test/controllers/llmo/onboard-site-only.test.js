@@ -204,9 +204,11 @@ describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
       expect(message).to.contain('https://example.com');
     });
 
-    it('grants access via LLMO administrator when not a platform admin', async () => {
+    it('onboards a non-admin org member — no admin/LLMO-admin claim required', async () => {
+      // Real customer IMS tokens carry neither is_admin nor is_llmo_administrator;
+      // the gate is membership + PAID only, so this must pass (not 403).
       hasAdminAccessStub.returns(false);
-      isLLMOAdministratorStub.returns(true);
+      isLLMOAdministratorStub.returns(false);
 
       const res = await invoke();
 
@@ -245,16 +247,6 @@ describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
 
     it('returns 403 when the org entitlement is FREE_TRIAL (not PAID)', async () => {
       checkValidEntitlementStub.resolves({ entitlement: { getTier: () => 'FREE_TRIAL' } });
-
-      const res = await invoke();
-
-      expect(res.status).to.equal(403);
-      expect(performLlmoOnboardingStub).to.not.have.been.called;
-    });
-
-    it('returns 403 when the caller lacks brand-management (admin) access', async () => {
-      hasAdminAccessStub.returns(false);
-      isLLMOAdministratorStub.returns(false);
 
       const res = await invoke();
 
@@ -304,6 +296,20 @@ describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
 
     it('returns 400 when the domain is not a valid hostname', async () => {
       const res = await invoke({ data: { domain: 'not a domain!!', brandName: 'Test Brand' } });
+      expect(res.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+  });
+
+  describe('SSRF guard', () => {
+    it('returns 400 for an IP-literal host (incl. the metadata address)', async () => {
+      const res = await invoke({ data: { domain: '169.254.169.254', brandName: 'Test Brand' } });
+      expect(res.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('returns 400 for localhost / non-public single-label hosts', async () => {
+      const res = await invoke({ data: { domain: 'localhost', brandName: 'Test Brand' } });
       expect(res.status).to.equal(400);
       expect(performLlmoOnboardingStub).to.not.have.been.called;
     });
