@@ -2600,6 +2600,67 @@ site-llmo-edge-optimize-prerequisites:
     security:
       - api_key: [ ]
 
+site-llmo-cdn-log-delivery:
+  post:
+    tags:
+      - llmo
+    summary: Enable CDN access-log forwarding to Adobe
+    description: |
+      Enables CloudFront access-log forwarding to Adobe (BYOCDN). Via the cross-account connector
+      role, creates the customer-account CloudWatch Logs delivery source for the chosen
+      distribution and links it to Adobe's cross-account delivery destination, so the CDN pushes
+      standard logs to the cdn-logs S3 bucket. Idempotent — if forwarding is already configured
+      the call is a no-op and returns `alreadyExisted: true`. Requires Adobe-side cdn-logs
+      provisioning to have created the delivery destination for the organization.
+    operationId: enableCdnLogDelivery
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-distribution-request'
+    responses:
+      '200':
+        description: Log forwarding enabled (or already configured).
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - created
+                - alreadyExisted
+                - deliverySourceName
+              properties:
+                created:
+                  type: boolean
+                  description: True when a new delivery was created by this call.
+                alreadyExisted:
+                  type: boolean
+                  description: True when forwarding was already configured (no-op).
+                deliverySourceName:
+                  type: string
+                deliveryId:
+                  type: string
+              example:
+                created: true
+                alreadyExisted: false
+                deliverySourceName: llmo-cf-1234567890abcdef12345678-E2EXAMPLE123
+                deliveryId: abcd1234-5678-90ab-cdef-1234567890ab
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 site-llmo-edge-optimize-origins:
   post:
     tags:

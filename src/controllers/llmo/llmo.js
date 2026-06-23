@@ -46,6 +46,10 @@ import {
   verifyEdgeOptimizeRouting,
   runEdgeOptimizeDeployStep,
 } from '../../support/edge-optimize.js';
+import {
+  createCdnLogDelivery,
+  buildDeliveryDestinationArn,
+} from '../../support/cdn-log-delivery.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
 import { cachedOk } from '../../support/cached-response.js';
 import {
@@ -2395,6 +2399,70 @@ function LlmoController(ctx) {
     }
   };
 
+  // Enable CloudFront access-log forwarding to Adobe (diagram step 8) via the connector role.
+  // Idempotent; returns { alreadyExisted: true } when forwarding is already configured.
+  const enableCdnLogDelivery = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site, Organization } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+
+    try {
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'enable CDN log forwarding');
+      if (error) {
+        return error;
+      }
+
+      const organization = await Organization.findById(site.getOrganizationId());
+      const imsOrgId = organization?.getImsOrgId();
+      if (!hasText(imsOrgId)) {
+        return badRequest('Site organization has no IMS org ID');
+      }
+
+      const adobeAccountId = env?.CDN_LOG_DELIVERY_DEST_ACCOUNT_ID;
+      if (!hasText(adobeAccountId)) {
+        return badRequest('CDN log delivery destination account is not configured');
+      }
+      const deliveryDestinationArn = buildDeliveryDestinationArn({ imsOrgId, adobeAccountId });
+
+      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      let result;
+      try {
+        result = await createCdnLogDelivery(credentials, {
+          provider: 'cloudfront',
+          resourceId: distributionId,
+          accountId,
+          imsOrgId,
+          deliveryDestinationArn,
+        });
+      } catch (deliveryError) {
+        // Adobe destination not provisioned yet → clear error instead of a raw AWS one.
+        if (/ResourceNotFound|delivery.?destination|not.*exist/i.test(deliveryError.message || '')) {
+          return badRequest('Adobe log destination is not provisioned for this organization yet — run cdn-logs provisioning first');
+        }
+        throw deliveryError;
+      }
+      log.info(`[cdn-log-delivery] ${result.alreadyExisted ? 'Already enabled' : 'Enabled'} log forwarding for site ${siteId}, distribution ${distributionId}`);
+      return ok(result);
+    } catch (error) {
+      log.error(`Failed to enable CDN log forwarding for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
   // Add the Edge Optimize origin to the selected distribution (mutation). Idempotent: returns
   // { created: false, alreadyExisted: true } when the origin is already present. Used by the
   // wizard's "Create Edge Optimize origin" step.
@@ -2807,6 +2875,7 @@ function LlmoController(ctx) {
     applyEdgeOptimizeAssociations: applyEdgeOptimizeAssociationsHandler,
     verifyEdgeOptimizeRouting: verifyEdgeOptimizeRoutingHandler,
     deployEdgeOptimize: deployEdgeOptimizeHandler,
+    enableCdnLogDelivery,
     getLlmoSheetData,
     queryLlmoSheetData,
     getLlmoGlobalSheetData,

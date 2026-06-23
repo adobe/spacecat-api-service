@@ -1109,6 +1109,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/edge-optimize/apply-associations',
       'POST /sites/:siteId/llmo/edge-optimize/verify',
       'POST /sites/:siteId/llmo/edge-optimize/deploy',
+      'POST /sites/:siteId/llmo/cdn-log-delivery',
       'GET /sites/:siteId/llmo/edge-optimize-status',
       'GET /sites/:siteId/llmo/probes/edge-optimize',
       'GET /sites/:siteId/llmo/strategy',

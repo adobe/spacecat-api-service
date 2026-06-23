@@ -97,6 +97,8 @@ describe('LlmoController', () => {
   let applyEdgeOptimizeAssociationsStub;
   let verifyEdgeOptimizeRoutingStub;
   let runEdgeOptimizeDeployStepStub;
+  let createCdnLogDeliveryStub;
+  let buildDeliveryDestinationArnStub;
   let mockTokowakaClient;
   let readStrategyStub;
   let writeStrategyStub;
@@ -298,6 +300,10 @@ describe('LlmoController', () => {
         applyEdgeOptimizeAssociations: (...args) => applyEdgeOptimizeAssociationsStub(...args),
         verifyEdgeOptimizeRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
         runEdgeOptimizeDeployStep: (...args) => runEdgeOptimizeDeployStepStub(...args),
+      },
+      '../../../src/support/cdn-log-delivery.js': {
+        createCdnLogDelivery: (...args) => createCdnLogDeliveryStub(...args),
+        buildDeliveryDestinationArn: (...args) => buildDeliveryDestinationArnStub(...args),
       },
       '@adobe/spacecat-shared-ims-client': {
         ImsClient: function MockImsClient() {
@@ -615,6 +621,7 @@ describe('LlmoController', () => {
       setConfig: sinon.stub(),
       save: sinon.stub().resolves(),
       getOrganization: sinon.stub().resolves(mockOrganization),
+      getOrganizationId: sinon.stub().returns(TEST_ORG_ID),
       getBaseURL: sinon.stub().returns('https://www.example.com'),
     };
 
@@ -625,6 +632,7 @@ describe('LlmoController', () => {
 
     mockDataAccess = {
       Site: { findById: sinon.stub().resolves(mockSite) },
+      Organization: { findById: sinon.stub().resolves(mockOrganization) },
       Entitlement: {
         PRODUCT_CODES: { LLMO: 'llmo' },
         findByOrganizationIdAndProductCode: sinon.stub().resolves({
@@ -746,6 +754,9 @@ describe('LlmoController', () => {
     llmoConfigSchemaStub = {
       safeParse: sinon.stub().returns({ success: true, data: {} }),
     };
+    createCdnLogDeliveryStub = sinon.stub();
+    buildDeliveryDestinationArnStub = sinon.stub()
+      .returns('arn:aws:logs:us-east-1:111122223333:delivery-destination:cdn-logs-org');
 
     // Use the global LlmoController from before hook
     controller = LlmoController(mockContext);
@@ -7826,6 +7837,149 @@ describe('LlmoController', () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
       const result = await deniedController.getEdgeOptimizeDistributions(distributionsContext);
+
+      expect(result.status).to.equal(403);
+    });
+  });
+
+  describe('enableCdnLogDelivery', () => {
+    let logDeliveryContext;
+
+    beforeEach(() => {
+      assumeConnectorRoleStub = sinon.stub().resolves({
+        roleArn: 'arn:aws:iam::120569600543:role/AdobeLLMOptimizerCloudFrontConnectorRole',
+        accountId: '120569600543',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+      });
+      createCdnLogDeliveryStub = sinon.stub().resolves({
+        created: true,
+        alreadyExisted: false,
+        deliverySourceName: 'llmo-cf-org-E2EXAMPLE123',
+        deliveryId: 'del-1',
+      });
+      buildDeliveryDestinationArnStub = sinon.stub()
+        .returns('arn:aws:logs:us-east-1:111122223333:delivery-destination:cdn-logs-org');
+      logDeliveryContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {
+          accountId: '120569600543',
+          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
+          distributionId: 'E2EXAMPLE123',
+        },
+        env: { CDN_LOG_DELIVERY_DEST_ACCOUNT_ID: '111122223333' },
+      };
+    });
+
+    it('enables log forwarding and returns the delivery result', async () => {
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.created).to.equal(true);
+      expect(body.deliveryId).to.equal('del-1');
+      expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+      const callArgs = createCdnLogDeliveryStub.firstCall.args[1];
+      expect(callArgs.provider).to.equal('cloudfront');
+      expect(callArgs.resourceId).to.equal('E2EXAMPLE123');
+    });
+
+    it('is a no-op when forwarding is already enabled', async () => {
+      createCdnLogDeliveryStub.resolves({
+        created: false,
+        alreadyExisted: true,
+        deliverySourceName: 'llmo-cf-org-E2EXAMPLE123',
+        deliveryId: 'del-existing',
+      });
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.alreadyExisted).to.equal(true);
+    });
+
+    it('returns 400 for an invalid account id', async () => {
+      const result = await controller.enableCdnLogDelivery({
+        ...logDeliveryContext,
+        data: { ...logDeliveryContext.data, accountId: '123' },
+      });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('12-digit');
+    });
+
+    it('returns 400 when the external id is missing', async () => {
+      const result = await controller.enableCdnLogDelivery({
+        ...logDeliveryContext,
+        data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' },
+      });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('externalId');
+    });
+
+    it('returns 400 when the distribution id is missing', async () => {
+      const result = await controller.enableCdnLogDelivery({
+        ...logDeliveryContext,
+        data: { accountId: '120569600543', externalId: 'ext' },
+      });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('distributionId');
+    });
+
+    it('returns 400 when the destination account is not configured', async () => {
+      const result = await controller.enableCdnLogDelivery({ ...logDeliveryContext, env: {} });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('not configured');
+    });
+
+    it('returns 400 when the site organization has no IMS org id', async () => {
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => undefined });
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('IMS org');
+    });
+
+    it('returns a clear error when the Adobe destination is not provisioned', async () => {
+      createCdnLogDeliveryStub.rejects(new Error('ResourceNotFoundException: delivery destination not found'));
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('not provisioned');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      const result = await deniedController.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 403 when the user is not an LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
+        ...getCommonMocks(),
+      });
+
+      const result = await LlmoControllerNoAdmin(mockContext)
+        .enableCdnLogDelivery(logDeliveryContext);
 
       expect(result.status).to.equal(403);
     });
