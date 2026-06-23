@@ -445,6 +445,21 @@ shared/tests/sites.js → postgres/sites.test.js (uses Docker PostgreSQL + Postg
 - Test DTO transformations
 - Test error handling and validation
 
+### Test File Size and Parallelism
+
+`npm test` uses `mocha --parallel`, which distributes whole files across workers. The longest single test file sets the floor for the entire suite — no amount of additional CPU helps below that.
+
+- **Size cap**: Aim for under ~2000 lines per test file. The deciding signal is parallelism: if a file's standalone runtime starts to approach the full `npm test --parallel` wall clock, it is becoming the floor and should be split regardless of line count
+- **Splitting**: When the threshold is hit, split along natural `describe` boundaries — typically one file per controller method or feature group
+- **Naming**: `<base>-<feature>.test.js` (e.g. `plg-onboarding-onboard.test.js`, `plg-onboarding-update.test.js`)
+
+**Measure with**:
+
+```bash
+wc -l test/path/to/file.test.js          # line count
+time npx mocha test/path/to/file.test.js # standalone run time
+```
+
 ## Configuration Hierarchy
 
 1. **Global Configuration** (`Configuration` model) - System-wide settings, queue URLs
