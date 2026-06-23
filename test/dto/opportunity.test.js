@@ -118,7 +118,7 @@ describe('OpportunityDto', () => {
 
         expect(json.title).to.equal('English title');
         expect(json.description).to.equal('English description');
-        expect(json.data).to.deep.equal({});
+        expect(json.data).to.be.null;
       });
 
       it('handles getData returning empty object gracefully', () => {

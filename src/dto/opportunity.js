@@ -49,8 +49,10 @@ export const OpportunityDto = {
     * }} JSON object.
    */
   toJSON: (oppty, locale = null) => {
+    const rawData = oppty.getData();
     // eslint-disable-next-line no-unused-vars
-    const { i18n, ...data } = oppty.getData() ?? {};
+    const { i18n, ...strippedData } = rawData ?? {};
+    const data = rawData != null ? strippedData : rawData;
 
     let title = oppty.getTitle();
     let description = oppty.getDescription();
