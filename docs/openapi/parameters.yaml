@@ -401,6 +401,21 @@ xPromiseToken:
     type: string
   example: eyJhbGciOiJSUzI1NiIs...
 
+locale:
+  name: locale
+  description: |
+    BCP 47 locale code in underscore form (e.g. `fr_fr`, `ja_jp`, `de_de`).
+    When provided and a translation exists, localizable fields (`title`, `description` on
+    opportunities; AI-generated fields inside `data` on suggestions) are replaced by the
+    stored translation. Falls back to the original English value when the locale is absent
+    or no translation has been stored yet for that locale.
+  in: query
+  required: false
+  schema:
+    type: string
+    pattern: '^[a-z]{2}_[a-z]{2}$'
+    example: fr_fr
+
 suggestionView:
   name: view
   description: |
