@@ -1378,10 +1378,11 @@ export async function runEdgeOptimizeDeployStep(
 
   // ── 6. verify — BEST-EFFORT: in_progress (not error) until CloudFront propagation lets pass. ──
   try {
-    // Probe the customer's own onboarded host (from x-forwarded-host) — that is where bot traffic
-    // actually lands, so it is the true end-to-end test. Fall back to the distribution's
-    // *.cloudfront.net domain only when no site host is known.
-    let domain = String(originHeaders?.forwardedHost || '').trim();
+    // TEMP (testing only -- DO NOT MERGE): verify against the distribution's own *.cloudfront.net
+    // domain (from the dist id) because the dev test domain is not pointed at the distribution.
+    // PROD/main verifies the customer's real host -- RESTORE the next line before merge:
+    // let domain = String(originHeaders?.forwardedHost || '').trim();
+    let domain = '';
     if (!hasText(domain)) {
       const distributions = await listCloudFrontDistributions(credentials, region);
       const match = distributions.find((d) => d.id === distributionId);
