@@ -114,7 +114,7 @@ function resolveInvokeTimeoutMs(env = {}) {
 // timeout and 5xx a request that would have succeeded without classification.
 // On expiry the batch returns whatever completed so far; the rest stay null and
 // are recovered by the backfill/reconciliation path.
-const DEFAULT_BATCH_TIMEOUT_MS = 30000;
+const DEFAULT_BATCH_TIMEOUT_MS = 5000;
 
 /**
  * Resolves the bulk-classification batch timeout (ms) from env, falling back to
