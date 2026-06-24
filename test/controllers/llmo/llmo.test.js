@@ -7604,7 +7604,10 @@ describe('LlmoController', () => {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
         data: { accountId: '682033462621' },
-        env: { EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template-stage' },
+        env: {
+          EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template-stage',
+          EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN: 'arn:aws:iam::682033462621:role/spacecat-role-lambda-generic',
+        },
         s3: {
           s3Client: {},
           getSignedUrl: getSignedUrlStub,
@@ -7674,7 +7677,7 @@ describe('LlmoController', () => {
       installerContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
-        env: {},
+        env: { EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template' },
         s3: {
           s3Client: {},
           getSignedUrl: getSignedUrlStub,
@@ -9293,7 +9296,10 @@ describe('LlmoController', () => {
       permissionsContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
-        env: {},
+        env: {
+          EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template',
+          EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN: 'arn:aws:iam::682033462621:role/spacecat-role-lambda-generic',
+        },
         s3: {
           s3Client: { send: s3SendStub },
           GetObjectCommand: function MockGetObjectCommand(params) {

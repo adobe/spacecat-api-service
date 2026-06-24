@@ -2276,12 +2276,10 @@ function LlmoController(ctx) {
         return forbidden('Only LLMO administrators can generate the edge optimize bootstrap URL');
       }
 
-      // TEMPORARY (testing only): hardcoded fallback so the dev/ci deploy returns a URL
-      // before EDGE_OPTIMIZE_TEMPLATE_BUCKET is wired into Vault/secrets. This bucket lives
-      // in the dev account (682033462621) where the service deploys and signs, so the dev
-      // role reads it same-account; the stage customer fetches it via the presigned URL.
-      // TODO: REMOVE this default before merge/prod — the value must come from env config.
-      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET || 'llmo-edgeoptimize-cf-template';
+      // The template-hosting S3 bucket — per-environment, from Vault
+      // (dx_mysticat/<env>/api-service.EDGE_OPTIMIZE_TEMPLATE_BUCKET). Lives in the same account
+      // the service deploys/signs in, so it is read same-account; the customer fetches via presign.
+      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET;
       if (!hasText(bucket) || !s3?.s3Client) {
         return badRequest('Edge optimize template hosting is not configured for this environment');
       }
@@ -2296,12 +2294,12 @@ function LlmoController(ctx) {
       const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 900);
       const externalId = crypto.randomUUID();
       const roleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
-      // TEMPORARY (testing only): default the trust to the dev signer's Lambda execution role
-      // (the exact identity that calls AssumeRole), not the whole account — smaller blast radius.
-      // TODO: REMOVE before prod — set EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN to the PROD
-      // spacecat-api-service Lambda execution role ARN via env (no in-code default).
-      const trustedPrincipalArn = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN
-        || 'arn:aws:iam::682033462621:role/spacecat-role-lambda-generic';
+      // The Adobe principal allowed to assume the customer's connector role — per-environment,
+      // from Vault (dx_mysticat/<env>/api-service.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN).
+      const trustedPrincipalArn = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN;
+      if (!hasText(trustedPrincipalArn)) {
+        return badRequest('Edge optimize is not configured for this environment (missing trusted principal)');
+      }
 
       // Presign the (private) template so the customer's CloudFormation can read it
       // cross-account via the signature — no public bucket, no customer S3 access.
@@ -2399,7 +2397,10 @@ function LlmoController(ctx) {
 
       // Presign the (private) installer template so the customer's CloudFormation can read it
       // cross-account via the signature — no public bucket, no customer S3 access.
-      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET || 'llmo-edgeoptimize-cf-template';
+      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET;
+      if (!hasText(bucket)) {
+        return badRequest('Edge optimize template hosting is not configured for this environment');
+      }
       const key = env.EDGE_OPTIMIZE_INSTALLER_KEY || 'edgeoptimize-cloudfront-installer.yaml';
       const region = 'us-east-1'; // Lambda@Edge requirement
       // Longer TTL than the role link — this is a one-shot launch the customer opens directly.
@@ -3146,7 +3147,7 @@ function LlmoController(ctx) {
         return error;
       }
 
-      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET || 'llmo-edgeoptimize-cf-template';
+      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET;
       if (!hasText(bucket) || !s3?.s3Client || !s3?.GetObjectCommand) {
         return badRequest('Edge optimize template hosting is not configured for this environment');
       }
@@ -3155,10 +3156,12 @@ function LlmoController(ctx) {
       // IAM policy — so the displayed permissions can never drift from what the role grants.
       const key = env.EDGE_OPTIMIZE_TEMPLATE_KEY || 'customer-bootstrap-role.yaml';
 
-      // TEMPORARY (testing only): default the Adobe principal to the dev signer's Lambda execution
-      // role. TODO: REMOVE before prod — set EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN via env.
-      const adobeAccount = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN
-        || 'arn:aws:iam::682033462621:role/spacecat-role-lambda-generic';
+      // The Adobe principal that assumes the connector role — per-environment, from Vault
+      // (dx_mysticat/<env>/api-service.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN).
+      const adobeAccount = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN;
+      if (!hasText(adobeAccount)) {
+        return badRequest('Edge optimize is not configured for this environment (missing trusted principal)');
+      }
 
       let manifest;
       try {
