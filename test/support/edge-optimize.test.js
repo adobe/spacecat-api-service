@@ -450,6 +450,17 @@ describe('edge-optimize support', () => {
     });
   });
 
+  describe('buildEdgeOptimizeLambdaCode', () => {
+    it('bakes the EO origin domain into the routing check (per environment)', () => {
+      const dev = edgeOptimize.buildEdgeOptimizeLambdaCode('dev.edgeoptimize.net');
+      expect(dev).to.include("originDomain === 'dev.edgeoptimize.net'");
+      expect(dev).to.not.include("originDomain === 'live.edgeoptimize.net'");
+
+      const prod = edgeOptimize.buildEdgeOptimizeLambdaCode('live.edgeoptimize.net');
+      expect(prod).to.include("originDomain === 'live.edgeoptimize.net'");
+    });
+  });
+
   describe('createEdgeOptimizeRoutingFunction', () => {
     it('creates and publishes a new function when none exists', async () => {
       cfSendStub.onFirstCall().rejects(Object.assign(new Error('not found'), { name: 'NoSuchFunctionExists' }));

@@ -83,10 +83,21 @@ function handler(event) {
 }`;
 }
 
-// The Lambda@Edge origin-request/response handler, ported verbatim from the standalone wizard's
-// templates/origin-request-response.js. Kept as an inline JS module string (not a sibling-file
-// read) so the helix-deploy bundle preserves it — see CLAUDE.md "Lambda Bundle Constraints".
-export const EDGE_OPTIMIZE_LAMBDA_CODE = `function hasHeader(map, name) {
+/**
+ * Build the Lambda@Edge origin-request/response handler. Ported from the standalone wizard's
+ * templates/origin-request-response.js. Returned as an inline JS module string (not a sibling-file
+ * read) so the helix-deploy bundle preserves it — see CLAUDE.md "Lambda Bundle Constraints".
+ *
+ * The Edge Optimize origin domain is injected so the same handler works per environment
+ * (e.g. dev.edgeoptimize.net on dev, live.edgeoptimize.net on prod): the origin-request branch
+ * routes to the EO origin only when CloudFront's current origin matches this domain — otherwise it
+ * marks the request as a failover. It MUST be the same value used as the EO origin's DomainName.
+ *
+ * @param {string} eoOriginDomain - the Edge Optimize origin domain baked into the routing check.
+ * @returns {string} the Lambda@Edge function source code.
+ */
+export function buildEdgeOptimizeLambdaCode(eoOriginDomain) {
+  return `function hasHeader(map, name) {
   const h = map?.[name];
   return Array.isArray(h) && h.length > 0 && (h[0].value || '').trim() !== '';
 }
@@ -109,7 +120,7 @@ export const handler = async (event) => {
     const isEdgeOptimizeRequest = hasHeader(reqHeaders, 'x-edgeoptimize-request');
 
     if (isEdgeOptimizeConfig && !isEdgeOptimizeRequest) {
-      if (originDomain === 'live.edgeoptimize.net') {
+      if (originDomain === '${eoOriginDomain}') {
         console.log("Calling Edge Optimize Origin for agentic requests");
         setHeader(request.headers, 'host', originDomain);
       } else {
@@ -135,3 +146,4 @@ export const handler = async (event) => {
   }
 };
 `;
+}

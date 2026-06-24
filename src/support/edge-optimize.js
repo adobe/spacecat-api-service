@@ -46,9 +46,9 @@ import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 // Edge runtime code (Lambda@Edge handler + CloudFront routing function) lives in its own
 // module for readability; imported for use here and re-exported to keep the public surface.
-import { EDGE_OPTIMIZE_LAMBDA_CODE, buildRoutingFunctionCode } from './edge-optimize-edge-code.js';
+import { buildEdgeOptimizeLambdaCode, buildRoutingFunctionCode } from './edge-optimize-edge-code.js';
 
-export { EDGE_OPTIMIZE_LAMBDA_CODE, buildRoutingFunctionCode };
+export { buildEdgeOptimizeLambdaCode, buildRoutingFunctionCode };
 
 // CloudFront is a global service; its control plane lives in us-east-1.
 export const EDGE_OPTIMIZE_REGION = 'us-east-1';
@@ -732,7 +732,11 @@ export async function createEdgeOptimizeLambda(
   credentials,
   accountId,
   {
-    region = EDGE_OPTIMIZE_REGION, distributionId, roleWaitMs = 12000, retryDelayMs = 5000,
+    region = EDGE_OPTIMIZE_REGION,
+    distributionId,
+    originDomain = EDGE_OPTIMIZE_DEFAULT_ORIGIN_DOMAIN,
+    roleWaitMs = 12000,
+    retryDelayMs = 5000,
   } = {},
 ) {
   if (!/^[0-9]{12}$/.test(String(accountId))) {
@@ -746,7 +750,8 @@ export async function createEdgeOptimizeLambda(
   const lambda = new LambdaClient({ region, credentials });
   const iam = new IAMClient({ region, credentials });
 
-  const zipBuffer = buildLambdaZip('index.mjs', EDGE_OPTIMIZE_LAMBDA_CODE);
+  // Bake the EO origin domain into the handler so it matches the EO origin's DomainName per env.
+  const zipBuffer = buildLambdaZip('index.mjs', buildEdgeOptimizeLambdaCode(originDomain));
 
   // ── 1. Ensure the exec role exists with the current trust policy. ──
   let roleArn;
@@ -1231,7 +1236,7 @@ export async function runEdgeOptimizeDeployStep(
       const created = await createEdgeOptimizeLambda(
         credentials,
         accountId,
-        { region, distributionId },
+        { region, distributionId, originDomain },
       );
       if (created.status === 'ready') {
         lambdaVersionArn = created.versionArn;
