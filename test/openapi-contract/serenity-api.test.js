@@ -383,7 +383,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           // activate reads brand-level aliases/URLs/competitors once per batch;
           // stub them so the contract test doesn't hit the fake postgrest client.
           '../../src/support/brands-storage.js': {
-            getBrandAliasNames: () => Promise.resolve([]),
+            getBrandAliases: () => Promise.resolve([]),
             getBrandUrlSources: () => Promise.resolve({
               urls: [], socialAccounts: [], earnedContent: [],
             }),
