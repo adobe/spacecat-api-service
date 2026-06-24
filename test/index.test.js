@@ -178,6 +178,9 @@ describe('Index Tests', () => {
         },
         Opportunity: {},
         Suggestion: {},
+        TaskManagementConnection: { allByOrganizationId: sinon.stub() },
+        Ticket: { findById: sinon.stub() },
+        TicketSuggestion: { findBySuggestionId: sinon.stub() },
       },
       s3Client: {
         send: sinon.stub(),
