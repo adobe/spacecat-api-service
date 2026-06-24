@@ -1221,6 +1221,71 @@ llmo-onboard:
         $ref: './responses.yaml#/500'
     security: []
 
+llmo-onboard-site:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+  post:
+    tags:
+      - llmo
+    summary: Paid self-serve, site-only onboarding (LLMO-5606)
+    description: |
+      Paid-gated, self-serve onboarding that stands up the **site entity only** —
+      "nothing DRS": no brand entity, no prompt generation, no brand-presence
+      schedule, and no `llmo-customer-analysis`. Activating a brand and generating
+      prompts is a separate step (LLMO-5605).
+
+      Synchronously creates the organization/site, a `SiteEnrollment` under the
+      org's existing PAID LLMO entitlement, the base LLMO config (brand label +
+      data folder), SharePoint folder, `helix-query.yaml`, CDN/override detection,
+      and enables + triggers the site-analysis audits and top-pages import. The
+      response `status` is always `processing` because the triggered audits run
+      asynchronously — the UI reflects completion by polling site/audit readiness.
+
+      Access requires organization membership and an explicit **PAID** LLMO
+      entitlement (a FREE_TRIAL org is rejected) — mirroring the v2 brand-management
+      routes; no platform-admin claim is required. Customer-facing failures are
+      generic; the internal reason is logged and posted to the ops alerts channel.
+
+      **Note — domain ownership is not yet verified.** This endpoint does not prove
+      the caller controls the submitted domain (a brand-new domain is accepted; only
+      a domain already claimed by a different org is rejected). DNS/file-based
+      ownership verification (planned via Google Search Console) is a future,
+      cross-repo item and out of scope for Piece 1.
+    operationId: onboardSiteOnly
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoOnboardSiteRequest'
+    responses:
+      '201':
+        description: |
+          Site onboarded. The site, entitlement/enrollment, and base config exist;
+          site-analysis audits run asynchronously (`status: processing`).
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoOnboardSiteResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: []
+      - api_key: []
+
 llmo-offboard:
   parameters:
     - $ref: './parameters.yaml#/siteId'

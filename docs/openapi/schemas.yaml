@@ -4088,6 +4088,20 @@ Fix:
       format: date-time
     executedBy:
       type: string
+      description: IMS user ID of the caller who executed the fix. Server-derived; not client-settable.
+      readOnly: true
+    executedByUser:
+      type: object
+      description: Resolved IMS profile for the user who executed the fix. Present on getAllForOpportunity and getByID when the executor identity was successfully resolved. Omitted from getByStatus.
+      readOnly: true
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
     executedAt:
       type: string
       format: date-time
@@ -4231,9 +4245,6 @@ FixUpdate:
       description: Optional array of suggestion IDs to associate with this fix. Replaces existing associations.
       items:
         $ref: '#/Id'
-    executedBy:
-      type: string
-      description: Email or identifier of who executed the fix
     executedAt:
       $ref: '#/DateTime'
       description: ISO timestamp when the fix was executed
@@ -4530,6 +4541,62 @@ PredominantTrafficResult:
           minimum: 0
           maximum: 100
           example: 4.2
+
+LlmoOnboardSiteRequest:
+  type: object
+  required:
+    - domain
+    - brandName
+  properties:
+    domain:
+      type: string
+      format: hostname
+      description: The domain name to onboard (without protocol).
+      example: "example.com"
+    brandName:
+      type: string
+      description: |
+        The brand label for the site's LLMO config (set via
+        `siteConfig.updateLlmoBrand`). This is NOT a brand entity.
+      example: "Example Brand"
+    deliveryType:
+      type: string
+      description: Optional delivery type forwarded to site creation.
+      example: "aem_edge"
+
+LlmoOnboardSiteResponse:
+  type: object
+  required:
+    - siteId
+    - organizationId
+    - baseURL
+    - dataFolder
+    - status
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: The created or existing site ID.
+      example: "987fcdeb-51a2-43d1-9f12-345678901234"
+    organizationId:
+      type: string
+      format: uuid
+      description: The organization ID.
+      example: "123e4567-e89b-12d3-a456-426614174000"
+    baseURL:
+      type: string
+      format: uri
+      description: The normalized base URL of the onboarded site.
+      example: "https://example.com"
+    dataFolder:
+      type: string
+      description: The LLMO data folder for the site.
+      example: "example-com"
+    status:
+      type: string
+      enum: ["processing"]
+      description: Always `processing` — triggered audits run asynchronously.
+      example: "processing"
 
 LlmoQuestion:
   type: object

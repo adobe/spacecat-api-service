@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.589.3",
+  "version": "1.592.1",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -16,6 +16,7 @@
     "test-e2e": "mocha --timeout 30s --spec=test/**/*.e2e.js",
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
+    "type-check": "tsc -p tsconfig.json",
     "logs": "aws logs tail /aws/lambda/spacecat-services--api-service",
     "semantic-release": "semantic-release",
     "semantic-release-dry": "semantic-release --dry-run --no-ci --branches $CI_BRANCH",
@@ -149,6 +150,7 @@
     "@semantic-release/exec": "7.1.0",
     "@semantic-release/git": "10.0.1",
     "@semantic-release/npm": "^13.1.5",
+    "@types/node": "24.13.2",
     "@xmldom/xmldom": "0.9.10",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
@@ -174,6 +176,7 @@
     "semantic-release": "^25.0.3",
     "sinon": "22.0.0",
     "sinon-chai": "4.0.1",
+    "typescript": "6.0.3",
     "yaml": "2.8.4"
   },
   "overrides": {

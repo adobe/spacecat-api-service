@@ -1,3 +1,39 @@
+## [1.592.1](https://github.com/adobe/spacecat-api-service/compare/v1.592.0...v1.592.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **auth:** restore read-only admin access on by-key + agentic-traffic reads ([#2674](https://github.com/adobe/spacecat-api-service/issues/2674)) ([ff1d4c3](https://github.com/adobe/spacecat-api-service/commit/ff1d4c3e22c51864445fc6b80671b2f7dcc82fe5)), closes [#2640](https://github.com/adobe/spacecat-api-service/issues/2640)
+
+# [1.592.0](https://github.com/adobe/spacecat-api-service/compare/v1.591.0...v1.592.0) (2026-06-23)
+
+
+### Features
+
+* **preflight:** swap callMysticatAnalyze headers — Authorization for IMS, x-page-auth for page-auth (SITES-46967) ([#2673](https://github.com/adobe/spacecat-api-service/issues/2673)) ([c5a803d](https://github.com/adobe/spacecat-api-service/commit/c5a803da72897f37347742b36fa5df595d6e53a1))
+
+# [1.591.0](https://github.com/adobe/spacecat-api-service/compare/v1.590.0...v1.591.0) (2026-06-23)
+
+
+### Features
+
+* **aso-overlay:** dual-key overlap for API key rotation (ADR I13) ([#2663](https://github.com/adobe/spacecat-api-service/issues/2663)) ([6526443](https://github.com/adobe/spacecat-api-service/commit/6526443f2a2a8f9f5173c85254fab080a34bd66e)), closes [#611](https://github.com/adobe/spacecat-api-service/issues/611) [#2638](https://github.com/adobe/spacecat-api-service/issues/2638)
+* paid-gated self-serve site-only onboarding endpoint | LLMO-5606 ([#2657](https://github.com/adobe/spacecat-api-service/issues/2657)) ([b2cf861](https://github.com/adobe/spacecat-api-service/commit/b2cf8613d79a869df453af9c031818d99dd3f54b))
+
+# [1.590.0](https://github.com/adobe/spacecat-api-service/compare/v1.589.4...v1.590.0) (2026-06-23)
+
+
+### Features
+
+* opt-in TypeScript type-checking (checkJs + JSDoc) for /serenity routes ([#2669](https://github.com/adobe/spacecat-api-service/issues/2669)) ([3d59fd4](https://github.com/adobe/spacecat-api-service/commit/3d59fd418db0a4eea165d5a0395c80434a525ce9)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.589.4](https://github.com/adobe/spacecat-api-service/compare/v1.589.3...v1.589.4) (2026-06-23)
+
+
+### Bug Fixes
+
+* **SITES-44243:** server-derive executedBy and add executedByUser audit trail ([#2445](https://github.com/adobe/spacecat-api-service/issues/2445)) ([0ce7036](https://github.com/adobe/spacecat-api-service/commit/0ce70366524e05d14dd85ce82e462e5778a3977c))
+
 ## [1.589.3](https://github.com/adobe/spacecat-api-service/compare/v1.589.2...v1.589.3) (2026-06-22)
 
 
