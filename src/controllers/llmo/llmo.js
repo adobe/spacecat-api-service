@@ -2726,6 +2726,7 @@ function LlmoController(ctx) {
       const result = await createEdgeOptimizeRoutingFunction(
         credentials,
         defaultOriginId,
+        distributionId,
         targetedPaths,
       );
       log.info(`[edge-optimize-function] ${result.created ? 'Created' : 'Updated'} routing function for site ${siteId}`);
@@ -2791,6 +2792,11 @@ function LlmoController(ctx) {
       return badRequest('externalId is required');
     }
 
+    const distributionId = String(context.data?.distributionId || '').trim();
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+
     try {
       const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize Lambda@Edge function');
       if (error) {
@@ -2800,7 +2806,11 @@ function LlmoController(ctx) {
       const { credentials, accountId: resolvedAccountId } = await assumeConnectorRole({
         accountId, externalId, roleName,
       });
-      const result = await createEdgeOptimizeLambda(credentials, resolvedAccountId);
+      const result = await createEdgeOptimizeLambda(
+        credentials,
+        resolvedAccountId,
+        { distributionId },
+      );
       log.info(`[edge-optimize-lambda] ${result.created ? 'Created' : 'Updated'} Lambda@Edge for site ${siteId}, published version ${result.version}`);
       return ok(result);
     } catch (error) {
@@ -2826,6 +2836,11 @@ function LlmoController(ctx) {
       return badRequest('externalId is required');
     }
 
+    const distributionId = String(context.data?.distributionId || '').trim();
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+
     try {
       const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read the edge optimize Lambda@Edge status');
       if (error) {
@@ -2833,7 +2848,7 @@ function LlmoController(ctx) {
       }
 
       const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const status = await getEdgeOptimizeLambdaStatus(credentials);
+      const status = await getEdgeOptimizeLambdaStatus(credentials, distributionId);
       return ok(status);
     } catch (error) {
       log.error(`Failed to read Lambda@Edge status for site ${siteId}:`, error);

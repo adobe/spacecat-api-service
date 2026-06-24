@@ -8446,7 +8446,7 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body).to.deep.equal({ name: 'edgeoptimize-routing', created: true, stage: 'LIVE' });
-      expect(createEdgeOptimizeRoutingFunctionStub.calledOnceWith(sinon.match.any, 'origin-aem', null)).to.equal(true);
+      expect(createEdgeOptimizeRoutingFunctionStub.calledOnceWith(sinon.match.any, 'origin-aem', 'E2EXAMPLE123', null)).to.equal(true);
     });
 
     it('returns 400 when the default cache behavior has no target origin', async () => {
@@ -8615,7 +8615,7 @@ describe('LlmoController', () => {
       lambdaContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
-        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5', distributionId: 'E2EXAMPLE123' },
         env: {},
       };
     });
@@ -8688,7 +8688,7 @@ describe('LlmoController', () => {
       statusContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
-        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5', distributionId: 'E2EXAMPLE123' },
         env: {},
       };
     });

@@ -57,10 +57,40 @@ export const EDGE_OPTIMIZE_DEFAULT_ORIGIN_DOMAIN = 'live.edgeoptimize.net';
 export const EDGE_OPTIMIZE_FUNCTION_NAME = 'edgeoptimize-routing';
 export const EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME = 'edgeoptimize-origin';
 export const EDGE_OPTIMIZE_LAMBDA_ROLE_NAME = 'edgeoptimize-origin-role';
+
+// Per-distribution resource names — the `-adobe-<distId>` suffix keeps the account-level
+// CloudFront function, Lambda@Edge function, and its IAM execution role unique per distribution
+// (so one AWS account fronting multiple distributions never collides). All stay within the
+// connector role's `edgeoptimize-*` (Lambda/role) and `Resource: '*'` (CloudFront) grants, so no
+// customer re-onboarding is needed. The EO origin id is intentionally NOT suffixed — it is scoped
+// inside the distribution config and cannot collide.
+export const eoRoutingFunctionName = (distributionId) => `${EDGE_OPTIMIZE_FUNCTION_NAME}-adobe-${distributionId}`;
+export const eoLambdaFunctionName = (distributionId) => `${EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME}-adobe-${distributionId}`;
+export const eoLambdaRoleName = (distributionId) => `${EDGE_OPTIMIZE_LAMBDA_ROLE_NAME}-adobe-${distributionId}`;
 // Headers the routing CloudFront Function sets and that must reach the EO origin uncached.
 export const EDGE_OPTIMIZE_CACHE_HEADERS = ['x-edgeoptimize-config', 'x-edgeoptimize-url'];
 // Name of the custom cache policy we create when cloning an AWS-managed policy.
 export const EDGE_OPTIMIZE_CACHE_POLICY_NAME = 'edgeoptimize-cache';
+
+// Per the BYOCDN doc, force the cache policy MinTTL to 0 so agentic responses are not
+// over-cached — UNLESS the current MinTTL is already short (<= this many seconds), in which
+// case we leave it exactly as the customer configured it.
+export const EDGE_OPTIMIZE_MIN_TTL_KEEP_THRESHOLD = 5;
+
+/**
+ * Build the per-distribution name for a cache policy cloned from a managed (AWS) policy.
+ * Strips the AWS `Managed-` prefix (a custom policy must not carry it) and appends an
+ * `-adobe-<distributionId>` suffix so each distribution gets its own clone (no account-level
+ * collision when one account fronts multiple distributions). Capped at the 128-char AWS limit.
+ *
+ * @param {string} sourceName - the source (managed) policy name, e.g. `Managed-CachingOptimized`.
+ * @param {string} distributionId - the CloudFront distribution id.
+ * @returns {string} e.g. `CachingOptimized-adobe-E2VLBZCBR857CC`.
+ */
+export function buildEoClonedCachePolicyName(sourceName, distributionId) {
+  const base = String(sourceName || 'cache').replace(/^Managed-/i, '');
+  return `${base}-adobe-${distributionId}`.slice(0, 128);
+}
 
 const delay = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
@@ -407,12 +437,17 @@ function handler(event) {
 export async function createEdgeOptimizeRoutingFunction(
   credentials,
   defaultOriginId,
+  distributionId,
   targetedPaths = null,
   region = EDGE_OPTIMIZE_REGION,
 ) {
   if (!hasText(defaultOriginId)) {
     throw new Error('defaultOriginId is required');
   }
+  if (!hasText(distributionId)) {
+    throw new Error('distributionId is required');
+  }
+  const functionName = eoRoutingFunctionName(distributionId);
   const client = new CloudFrontClient({ region, credentials });
   const code = Buffer.from(buildRoutingFunctionCode(defaultOriginId, targetedPaths), 'utf-8');
   const functionConfig = {
@@ -424,7 +459,7 @@ export async function createEdgeOptimizeRoutingFunction(
   let existingEtag = null;
   try {
     const desc = await client.send(new DescribeFunctionCommand({
-      Name: EDGE_OPTIMIZE_FUNCTION_NAME,
+      Name: functionName,
       Stage: 'DEVELOPMENT',
     }));
     existingEtag = desc.ETag;
@@ -437,7 +472,7 @@ export async function createEdgeOptimizeRoutingFunction(
   let etag;
   if (existingEtag) {
     const updated = await client.send(new UpdateFunctionCommand({
-      Name: EDGE_OPTIMIZE_FUNCTION_NAME,
+      Name: functionName,
       IfMatch: existingEtag,
       FunctionConfig: functionConfig,
       FunctionCode: code,
@@ -445,7 +480,7 @@ export async function createEdgeOptimizeRoutingFunction(
     etag = updated.ETag;
   } else {
     const created = await client.send(new CreateFunctionCommand({
-      Name: EDGE_OPTIMIZE_FUNCTION_NAME,
+      Name: functionName,
       FunctionConfig: functionConfig,
       FunctionCode: code,
     }));
@@ -453,11 +488,11 @@ export async function createEdgeOptimizeRoutingFunction(
   }
 
   await client.send(new PublishFunctionCommand({
-    Name: EDGE_OPTIMIZE_FUNCTION_NAME,
+    Name: functionName,
     IfMatch: etag,
   }));
 
-  return { name: EDGE_OPTIMIZE_FUNCTION_NAME, created: !existingEtag, stage: 'LIVE' };
+  return { name: functionName, created: !existingEtag, stage: 'LIVE' };
 }
 
 /**
@@ -516,7 +551,7 @@ export async function applyEdgeOptimizeCacheHeaders(
       fv.Headers = { Quantity: items.length, Items: items };
       behavior.ForwardedValues = fv;
     }
-    if (setMinTTLZero && behavior.MinTTL !== 0) {
+    if (setMinTTLZero && Number(behavior.MinTTL ?? 0) > EDGE_OPTIMIZE_MIN_TTL_KEEP_THRESHOLD) {
       behavior.MinTTL = 0;
       changed = true;
     }
@@ -567,7 +602,8 @@ export async function applyEdgeOptimizeCacheHeaders(
     const params = pc.ParametersInCacheKeyAndForwardedToOrigin || {};
     const headersChanged = addEoHeaders(params);
     pc.ParametersInCacheKeyAndForwardedToOrigin = params;
-    const needsMinTtl = setMinTTLZero && pc.MinTTL !== 0;
+    const needsMinTtl = setMinTTLZero
+      && Number(pc.MinTTL ?? 0) > EDGE_OPTIMIZE_MIN_TTL_KEEP_THRESHOLD;
     if (!headersChanged && !needsMinTtl) {
       return {
         scenario: 'custom', policyId, updated: false, alreadyForwarded: true,
@@ -588,9 +624,10 @@ export async function applyEdgeOptimizeCacheHeaders(
   const srcResult = await client.send(new GetCachePolicyCommand({ Id: policyId }));
   const cloned = JSON.parse(JSON.stringify(srcResult.CachePolicy.CachePolicyConfig));
   const sourceName = cloned.Name;
-  cloned.Name = EDGE_OPTIMIZE_CACHE_POLICY_NAME;
+  const clonedName = buildEoClonedCachePolicyName(sourceName, distributionId);
+  cloned.Name = clonedName;
   cloned.Comment = `Cloned from ${sourceName} with Edge Optimize headers — managed by LLM Optimizer`;
-  if (setMinTTLZero) {
+  if (setMinTTLZero && Number(cloned.MinTTL ?? 0) > EDGE_OPTIMIZE_MIN_TTL_KEEP_THRESHOLD) {
     cloned.MinTTL = 0;
   }
   const clonedParams = cloned.ParametersInCacheKeyAndForwardedToOrigin || {};
@@ -600,7 +637,7 @@ export async function applyEdgeOptimizeCacheHeaders(
   // Idempotent: reuse an existing edgeoptimize-cache custom policy if a prior run created it.
   const customList = await client.send(new ListCachePoliciesCommand({ Type: 'custom' }));
   const existing = (customList.CachePolicyList?.Items || []).find(
-    (i) => i.CachePolicy.CachePolicyConfig.Name === EDGE_OPTIMIZE_CACHE_POLICY_NAME,
+    (i) => i.CachePolicy.CachePolicyConfig.Name === clonedName,
   );
   let newPolicyId;
   let reused = false;
@@ -807,11 +844,18 @@ async function getLatestLambdaVersion(lambda, functionName) {
 export async function createEdgeOptimizeLambda(
   credentials,
   accountId,
-  { region = EDGE_OPTIMIZE_REGION, roleWaitMs = 12000, retryDelayMs = 5000 } = {},
+  {
+    region = EDGE_OPTIMIZE_REGION, distributionId, roleWaitMs = 12000, retryDelayMs = 5000,
+  } = {},
 ) {
   if (!/^[0-9]{12}$/.test(String(accountId))) {
     throw new Error('accountId must be a 12-digit AWS account ID');
   }
+  if (!hasText(distributionId)) {
+    throw new Error('distributionId is required');
+  }
+  const lambdaName = eoLambdaFunctionName(distributionId);
+  const roleName = eoLambdaRoleName(distributionId);
   const lambda = new LambdaClient({ region, credentials });
   const iam = new IAMClient({ region, credentials });
 
@@ -822,11 +866,11 @@ export async function createEdgeOptimizeLambda(
   let roleIsNew = false;
   try {
     const existing = await iam.send(
-      new GetRoleCommand({ RoleName: EDGE_OPTIMIZE_LAMBDA_ROLE_NAME }),
+      new GetRoleCommand({ RoleName: roleName }),
     );
     roleArn = existing.Role.Arn;
     await iam.send(new UpdateAssumeRolePolicyCommand({
-      RoleName: EDGE_OPTIMIZE_LAMBDA_ROLE_NAME,
+      RoleName: roleName,
       PolicyDocument: LAMBDA_TRUST_POLICY,
     }));
   } catch (err) {
@@ -834,7 +878,7 @@ export async function createEdgeOptimizeLambda(
       throw err;
     }
     const created = await iam.send(new CreateRoleCommand({
-      RoleName: EDGE_OPTIMIZE_LAMBDA_ROLE_NAME,
+      RoleName: roleName,
       AssumeRolePolicyDocument: LAMBDA_TRUST_POLICY,
       Description: 'Execution role for EdgeOptimize Lambda@Edge function',
     }));
@@ -844,9 +888,9 @@ export async function createEdgeOptimizeLambda(
 
   // ── 2. Attach the CloudWatch-logs inline policy. ──
   await iam.send(new PutRolePolicyCommand({
-    RoleName: EDGE_OPTIMIZE_LAMBDA_ROLE_NAME,
+    RoleName: roleName,
     PolicyName: 'EdgeOptimizeLambdaLogging',
-    PolicyDocument: buildCwLogsPolicy(String(accountId), EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME),
+    PolicyDocument: buildCwLogsPolicy(String(accountId), lambdaName),
   }));
 
   // ── 3. Advance the function state machine WITHOUT blocking on provisioning. ──
@@ -856,7 +900,7 @@ export async function createEdgeOptimizeLambda(
   let cfg = null;
   try {
     cfg = await lambda.send(
-      new GetFunctionConfigurationCommand({ FunctionName: EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME }),
+      new GetFunctionConfigurationCommand({ FunctionName: lambdaName }),
     );
   } catch (err) {
     if (err.name !== 'ResourceNotFoundException') {
@@ -875,7 +919,7 @@ export async function createEdgeOptimizeLambda(
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const created = await lambda.send(new LambdaCreateFunctionCommand({
-          FunctionName: EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME,
+          FunctionName: lambdaName,
           Runtime: 'nodejs24.x',
           Role: roleArn,
           Handler: 'index.handler',
@@ -921,7 +965,7 @@ export async function createEdgeOptimizeLambda(
   }
 
   // Active and idle. If a numbered version already exists, reuse it (idempotent).
-  const existingVersion = await getLatestLambdaVersion(lambda, EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME);
+  const existingVersion = await getLatestLambdaVersion(lambda, lambdaName);
   if (existingVersion) {
     return {
       status: 'ready',
@@ -936,7 +980,7 @@ export async function createEdgeOptimizeLambda(
 
   // Active, idle, no version yet → publish one (fast on an idle function).
   const published = await lambda.send(new PublishVersionCommand({
-    FunctionName: EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME,
+    FunctionName: lambdaName,
     Description: 'Published by LLM Optimizer CloudFront wizard',
   }));
   return {
@@ -959,14 +1003,23 @@ export async function createEdgeOptimizeLambda(
  * @returns {Promise<{exists: boolean, state?: string, lastUpdateStatus?: string,
  *   functionArn?: string, versionArn: string|null, version?: string}>}
  */
-export async function getEdgeOptimizeLambdaStatus(credentials, region = EDGE_OPTIMIZE_REGION) {
+export async function getEdgeOptimizeLambdaStatus(
+  credentials,
+  distributionId,
+  region = EDGE_OPTIMIZE_REGION,
+) {
+  if (!hasText(distributionId)) {
+    throw new Error('distributionId is required');
+  }
+  const lambdaName = eoLambdaFunctionName(distributionId);
+  const roleName = eoLambdaRoleName(distributionId);
   const lambda = new LambdaClient({ region, credentials });
   const iam = new IAMClient({ region, credentials });
 
   // Execution role status (created synchronously by create-lambda's ack call).
   let roleExists = false;
   try {
-    await iam.send(new GetRoleCommand({ RoleName: EDGE_OPTIMIZE_LAMBDA_ROLE_NAME }));
+    await iam.send(new GetRoleCommand({ RoleName: roleName }));
     roleExists = true;
   } catch (err) {
     if (err.name !== 'NoSuchEntityException') {
@@ -978,7 +1031,7 @@ export async function getEdgeOptimizeLambdaStatus(credentials, region = EDGE_OPT
   let cfg;
   try {
     cfg = await lambda.send(
-      new GetFunctionConfigurationCommand({ FunctionName: EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME }),
+      new GetFunctionConfigurationCommand({ FunctionName: lambdaName }),
     );
   } catch (err) {
     if (err.name === 'ResourceNotFoundException') {
@@ -988,7 +1041,7 @@ export async function getEdgeOptimizeLambdaStatus(credentials, region = EDGE_OPT
     }
     throw err;
   }
-  const latest = await getLatestLambdaVersion(lambda, EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME);
+  const latest = await getLatestLambdaVersion(lambda, lambdaName);
   const ready = cfg.State === 'Active' && cfg.LastUpdateStatus !== 'InProgress' && !!latest;
   return {
     roleExists,
@@ -1031,14 +1084,15 @@ export async function applyEdgeOptimizeAssociations(
     throw new Error('lambdaVersionArn is required');
   }
   const client = new CloudFrontClient({ region, credentials });
+  const functionName = eoRoutingFunctionName(distributionId);
 
   const fnResult = await client.send(new DescribeFunctionCommand({
-    Name: EDGE_OPTIMIZE_FUNCTION_NAME,
+    Name: functionName,
     Stage: 'LIVE',
   }));
   const cfFunctionArn = fnResult.FunctionSummary?.FunctionMetadata?.FunctionARN;
   if (!cfFunctionArn) {
-    throw new Error(`CloudFront function '${EDGE_OPTIMIZE_FUNCTION_NAME}' not found or not published to LIVE`);
+    throw new Error(`CloudFront function '${functionName}' not found or not published to LIVE`);
   }
 
   const distResult = await client.send(new GetDistributionConfigCommand({ Id: distributionId }));
@@ -1139,10 +1193,10 @@ export const EDGE_OPTIMIZE_DEPLOY_STEPS = [
  * @param {CloudFrontClient} client - a CloudFront client built with the connector credentials.
  * @returns {Promise<boolean>}
  */
-async function isRoutingFunctionLive(client) {
+async function isRoutingFunctionLive(client, distributionId) {
   try {
     const desc = await client.send(new DescribeFunctionCommand({
-      Name: EDGE_OPTIMIZE_FUNCTION_NAME,
+      Name: eoRoutingFunctionName(distributionId),
       Stage: 'LIVE',
     }));
     return Boolean(desc?.FunctionSummary?.FunctionMetadata?.FunctionARN);
@@ -1244,10 +1298,10 @@ export async function runEdgeOptimizeDeployStep(
 
   // ── 2. function — GATE: skip the create+publish when already LIVE (avoids re-publish churn). ──
   try {
-    if (await isRoutingFunctionLive(client)) {
+    if (await isRoutingFunctionLive(client, distributionId)) {
       byKey('function').status = 'done';
     } else {
-      await createEdgeOptimizeRoutingFunction(credentials, originId, null, region);
+      await createEdgeOptimizeRoutingFunction(credentials, originId, distributionId, null, region);
       byKey('function').status = 'done';
     }
   } catch (err) {
@@ -1274,12 +1328,16 @@ export async function runEdgeOptimizeDeployStep(
   // status-check while it "exists", the version never gets published and the step hangs at
   // "provisioning" forever.
   try {
-    const ls = await getEdgeOptimizeLambdaStatus(credentials, region);
+    const ls = await getEdgeOptimizeLambdaStatus(credentials, distributionId, region);
     if (ls.ready) {
       lambdaVersionArn = ls.versionArn;
       byKey('lambda').status = 'done';
     } else {
-      const created = await createEdgeOptimizeLambda(credentials, accountId, { region });
+      const created = await createEdgeOptimizeLambda(
+        credentials,
+        accountId,
+        { region, distributionId },
+      );
       if (created.status === 'ready') {
         lambdaVersionArn = created.versionArn;
         byKey('lambda').status = 'done';

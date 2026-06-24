@@ -456,9 +456,9 @@ describe('edge-optimize support', () => {
       cfSendStub.onSecondCall().resolves({ ETag: 'fn-etag' }); // CreateFunction
       cfSendStub.onThirdCall().resolves({}); // PublishFunction
 
-      const result = await edgeOptimize.createEdgeOptimizeRoutingFunction({}, 'origin-aem');
+      const result = await edgeOptimize.createEdgeOptimizeRoutingFunction({}, 'origin-aem', 'E2EXAMPLE');
 
-      expect(result).to.deep.equal({ name: 'edgeoptimize-routing', created: true, stage: 'LIVE' });
+      expect(result).to.deep.equal({ name: 'edgeoptimize-routing-adobe-E2EXAMPLE', created: true, stage: 'LIVE' });
       expect(cfSendStub.secondCall.args[0].commandName).to.equal('CreateFunction');
       expect(cfSendStub.thirdCall.args[0].commandName).to.equal('PublishFunction');
       expect(cfSendStub.thirdCall.args[0].input.IfMatch).to.equal('fn-etag');
@@ -469,7 +469,7 @@ describe('edge-optimize support', () => {
       cfSendStub.onSecondCall().resolves({ ETag: 'updated-etag' }); // UpdateFunction
       cfSendStub.onThirdCall().resolves({}); // PublishFunction
 
-      const result = await edgeOptimize.createEdgeOptimizeRoutingFunction({}, 'origin-aem');
+      const result = await edgeOptimize.createEdgeOptimizeRoutingFunction({}, 'origin-aem', 'E2EXAMPLE');
 
       expect(result.created).to.equal(false);
       expect(cfSendStub.secondCall.args[0].commandName).to.equal('UpdateFunction');
@@ -491,7 +491,7 @@ describe('edge-optimize support', () => {
       cfSendStub.onFirstCall().rejects(new Error('boom'));
       let error;
       try {
-        await edgeOptimize.createEdgeOptimizeRoutingFunction({}, 'origin-aem');
+        await edgeOptimize.createEdgeOptimizeRoutingFunction({}, 'origin-aem', 'E2EXAMPLE');
       } catch (e) {
         error = e;
       }
@@ -570,7 +570,7 @@ describe('edge-optimize support', () => {
       expect(lastCommand('UpdateCachePolicy')).to.equal(undefined); // never updated
     });
 
-    it('CLONES an AWS-managed policy into edgeoptimize-cache and repoints the behavior', async () => {
+    it('CLONES an AWS-managed policy into a per-distribution custom policy and repoints the behavior', async () => {
       wireCloudFront({
         GetDistributionConfig: {
           DistributionConfig: { DefaultCacheBehavior: { CachePolicyId: 'managed-1', ForwardedValues: { x: 1 } } },
@@ -583,7 +583,7 @@ describe('edge-optimize support', () => {
           CachePolicy: {
             CachePolicyConfig: {
               Name: 'Managed-CachingOptimized',
-              MinTTL: 1,
+              MinTTL: 86400,
               ParametersInCacheKeyAndForwardedToOrigin: { HeadersConfig: { HeaderBehavior: 'none' } },
             },
           },
@@ -598,7 +598,7 @@ describe('edge-optimize support', () => {
       expect(result.policyId).to.equal('new-eo-policy');
       expect(result.reused).to.equal(false);
       const created = lastCommand('CreateCachePolicy').input.CachePolicyConfig;
-      expect(created.Name).to.equal('edgeoptimize-cache');
+      expect(created.Name).to.equal('CachingOptimized-adobe-E2EXAMPLE');
       expect(created.MinTTL).to.equal(0);
       const items = created.ParametersInCacheKeyAndForwardedToOrigin.HeadersConfig.Headers.Items;
       expect(items).to.include('x-edgeoptimize-config');
@@ -606,6 +606,34 @@ describe('edge-optimize support', () => {
       const cfg = lastCommand('UpdateDistribution').input.DistributionConfig;
       expect(cfg.DefaultCacheBehavior.CachePolicyId).to.equal('new-eo-policy');
       expect(cfg.DefaultCacheBehavior.ForwardedValues).to.equal(undefined);
+    });
+
+    it('keeps a short MinTTL (<=5s) when cloning a managed policy instead of forcing it to 0', async () => {
+      wireCloudFront({
+        GetDistributionConfig: {
+          DistributionConfig: { DefaultCacheBehavior: { CachePolicyId: 'managed-1' } },
+          ETag: 'dist-etag',
+        },
+        ListCachePolicies: (cmd) => (cmd.input.Type === 'managed'
+          ? { CachePolicyList: { Items: [{ CachePolicy: { Id: 'managed-1' } }] } }
+          : { CachePolicyList: { Items: [] } }),
+        GetCachePolicy: {
+          CachePolicy: {
+            CachePolicyConfig: {
+              Name: 'Managed-CachingOptimized',
+              MinTTL: 3,
+              ParametersInCacheKeyAndForwardedToOrigin: { HeadersConfig: { HeaderBehavior: 'none' } },
+            },
+          },
+        },
+        CreateCachePolicy: { CachePolicy: { Id: 'new-eo-policy' } },
+        UpdateDistribution: {},
+      });
+
+      await edgeOptimize.applyEdgeOptimizeCacheHeaders({}, 'E2EXAMPLE', 'default');
+
+      const created = lastCommand('CreateCachePolicy').input.CachePolicyConfig;
+      expect(created.MinTTL).to.equal(3); // <= 5s kept, not zeroed
     });
 
     it('reuses an existing edgeoptimize-cache custom policy (idempotent managed path)', async () => {
@@ -616,7 +644,7 @@ describe('edge-optimize support', () => {
         },
         ListCachePolicies: (cmd) => (cmd.input.Type === 'managed'
           ? { CachePolicyList: { Items: [{ CachePolicy: { Id: 'managed-1' } }] } }
-          : { CachePolicyList: { Items: [{ CachePolicy: { Id: 'existing-eo', CachePolicyConfig: { Name: 'edgeoptimize-cache' } } }] } }),
+          : { CachePolicyList: { Items: [{ CachePolicy: { Id: 'existing-eo', CachePolicyConfig: { Name: 'X-adobe-E2EXAMPLE' } } }] } }),
         GetCachePolicy: {
           CachePolicy: { CachePolicyConfig: { Name: 'Managed-X', ParametersInCacheKeyAndForwardedToOrigin: {} } },
         },
@@ -730,7 +758,7 @@ describe('edge-optimize support', () => {
         CreateFunction: { FunctionArn: 'arn:fn' },
       });
 
-      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543', { roleWaitMs: 0 });
+      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543', { roleWaitMs: 0, distributionId: 'E2EXAMPLE' });
 
       // Does NOT block on the new function becoming Active — returns provisioning immediately.
       expect(result.status).to.equal('provisioning');
@@ -749,7 +777,7 @@ describe('edge-optimize support', () => {
         },
       });
 
-      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543');
+      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543', { distributionId: 'E2EXAMPLE' });
 
       expect(result.status).to.equal('provisioning');
       expect(result.versionArn).to.equal(null);
@@ -765,7 +793,7 @@ describe('edge-optimize support', () => {
         ListVersionsByFunction: { Versions: [{ Version: '$LATEST' }, { Version: '3', FunctionArn: 'arn:fn:3' }] },
       });
 
-      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543');
+      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543', { distributionId: 'E2EXAMPLE' });
 
       expect(result.status).to.equal('ready');
       expect(result.alreadyExisted).to.equal(true);
@@ -783,7 +811,7 @@ describe('edge-optimize support', () => {
         PublishVersion: { FunctionArn: 'arn:fn:1', Version: '1' },
       });
 
-      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543');
+      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543', { distributionId: 'E2EXAMPLE' });
 
       expect(result.status).to.equal('ready');
       expect(result.versionArn).to.equal('arn:fn:1');
@@ -797,7 +825,7 @@ describe('edge-optimize support', () => {
         CreateFunction: () => Promise.reject(Object.assign(new Error('exists'), { name: 'ResourceConflictException' })),
       });
 
-      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543', { roleWaitMs: 0 });
+      const result = await edgeOptimize.createEdgeOptimizeLambda(creds, '120569600543', { roleWaitMs: 0, distributionId: 'E2EXAMPLE' });
 
       expect(result.status).to.equal('provisioning');
     });
@@ -824,7 +852,7 @@ describe('edge-optimize support', () => {
         throw new Error(`unexpected: ${cmd.commandName}`);
       });
 
-      const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({});
+      const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({}, 'E2EXAMPLE');
 
       expect(result).to.deep.equal({
         roleExists: false, exists: false, versionArn: null, ready: false,
@@ -843,7 +871,7 @@ describe('edge-optimize support', () => {
         throw new Error(`unexpected: ${cmd.commandName}`);
       });
 
-      const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({});
+      const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({}, 'E2EXAMPLE');
 
       expect(result.roleExists).to.equal(true);
       expect(result.exists).to.equal(true);
@@ -865,7 +893,7 @@ describe('edge-optimize support', () => {
         throw new Error(`unexpected: ${cmd.commandName}`);
       });
 
-      const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({});
+      const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({}, 'E2EXAMPLE');
 
       expect(result.roleExists).to.equal(true);
       expect(result.exists).to.equal(true);
