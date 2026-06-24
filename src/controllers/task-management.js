@@ -25,18 +25,31 @@ import {
   STATUS_NO_CONTENT,
   STATUS_OK,
 } from '../utils/constants.js';
+import { getHeader } from '../support/http-headers.js';
 
-// @adobe/spacecat-shared-ticket-client is not yet published (unmerged PR #1701).
-// Top-level await + catch lets the module load in test/utils.js (bare import of
-// src/index.js) before the package is installed. esmock intercepts the import
-// during individual test setup and injects the mock factory via its loader hook.
+// @adobe/spacecat-shared-ticket-client ships with PR #1701 (unmerged at time of writing).
+// Dynamic import + ERR_MODULE_NOT_FOUND guard lets src/index.js load in test/utils.js
+// (bare import chain) when the package is not yet installed locally. esmock intercepts
+// the import in individual test setups via its ESM loader hook.
+// Deployment: esbuild fails the bundle if the package is absent at build time, so
+// "fail fast" is enforced at the CI build step. Any code path that reaches this fallback
+// in a running Lambda throws a clear error rather than a silent NPE.
 let TicketClientFactory;
 try {
   // eslint-disable-next-line import/no-unresolved
   ({ TicketClientFactory } = await import('@adobe/spacecat-shared-ticket-client'));
-} catch {
-  // Package not yet installed — createTicket() gates on this and returns 503
-  TicketClientFactory = null;
+} catch (err) {
+  if (err.code !== 'ERR_MODULE_NOT_FOUND') {
+    // Package is installed but failed to load — propagate for fail-fast behaviour.
+    throw err;
+  }
+  // Package not installed (dev / test env without PR #1701 applied).
+  // Shape as an object that throws clearly on first use rather than a silent NPE.
+  TicketClientFactory = {
+    create() {
+      throw new Error('@adobe/spacecat-shared-ticket-client is not installed');
+    },
+  };
 }
 
 const STATUS_CONFLICT = 409;
@@ -118,10 +131,9 @@ function serializeTicket(ticket, suggestions) {
  *   GET    /organizations/:organizationId/suggestions/:suggestionId/ticket
  *   GET    /organizations/:organizationId/opportunities/:opportunityId/tickets
  *   POST   /organizations/:organizationId/task-management/:provider/tickets
+ *   GET    /organizations/:organizationId/task-management/:provider/projects
  *
  * v1 scope — intentional deviations from the architecture spec (PR #150):
- *   - Idempotency-Key: accepted but response cache not yet implemented.
- *     The idempotency_keys table exists; full cache enforcement is v2.
  *   - suggestionIds: only the first element is processed per request.
  *     Multi-suggestion batch creation (207 Multi-Status) is v2.
  *   - connectionId in POST body: connection resolved by org + provider path params;
@@ -146,7 +158,7 @@ function TaskManagementController(context) {
   }
 
   const {
-    TaskManagementConnection, Ticket, TicketSuggestion,
+    TaskManagementConnection, Ticket, TicketSuggestion, Suggestion,
   } = dataAccess;
 
   if (!isNonEmptyObject(TaskManagementConnection)) {
@@ -159,6 +171,10 @@ function TaskManagementController(context) {
 
   if (!isNonEmptyObject(TicketSuggestion)) {
     throw new Error('TicketSuggestion collection not available');
+  }
+
+  if (!isNonEmptyObject(Suggestion)) {
+    throw new Error('Suggestion collection not available');
   }
 
   // AWS SDK auto-detects region from the Lambda execution environment.
@@ -484,9 +500,8 @@ function TaskManagementController(context) {
    * }
    * ```
    *
-   * Idempotency-Key header: accepted but response cache not yet active in v1.
-   * The idempotency_keys table is in place; full cache enforcement is v2.
-   * The DB UNIQUE (connection_id, ticket_key) constraint prevents duplicate tickets.
+   * Requires an `Idempotency-Key` request header (spec §Idempotent Ticket Creation).
+   * Deduplication is enforced via the `idempotency_keys` table with a 24-hour window.
    */
   async function createTicket(requestContext) {
     const { params, data, attributes } = requestContext;
@@ -540,6 +555,41 @@ function TaskManagementController(context) {
 
     const primarySuggestionId = suggestionIds[0];
 
+    // --- Idempotency-Key enforcement (spec §Idempotent Ticket Creation) --------
+
+    const idempotencyKey = getHeader(requestContext, 'idempotency-key');
+    if (!idempotencyKey) {
+      return createResponse({ message: 'Idempotency-Key header is required' }, STATUS_BAD_REQUEST);
+    }
+
+    const postgrestClient = dataAccess.services?.postgrestClient;
+    if (!postgrestClient) {
+      log.error({ organizationId }, 'PostgREST client not available for idempotency check');
+      return createResponse({ message: 'Service unavailable' }, STATUS_INTERNAL_SERVER_ERROR);
+    }
+
+    const { data: existingKeys, error: lookupError } = await postgrestClient
+      .from('idempotency_keys')
+      .select('id,status,response')
+      .eq('key', idempotencyKey)
+      .eq('organization_id', organizationId)
+      .limit(1);
+
+    if (lookupError) {
+      log.error({ organizationId, lookupError }, 'Failed to look up idempotency key');
+      return createResponse({ message: 'Service unavailable' }, STATUS_INTERNAL_SERVER_ERROR);
+    }
+
+    const existingEntry = existingKeys?.[0];
+    if (existingEntry) {
+      if (existingEntry.status === 'completed' || existingEntry.status === 'failed') {
+        const cached = existingEntry.response;
+        return createResponse(cached.body, cached.statusCode);
+      }
+      // status === 'processing'
+      return createResponse({ message: 'Request already in flight' }, STATUS_CONFLICT);
+    }
+
     // --- Resolve the active connection ----------------------------------------
 
     let connection;
@@ -556,6 +606,63 @@ function TaskManagementController(context) {
         { message: `No active ${provider} connection found for organization ${organizationId}` },
         STATUS_NOT_FOUND,
       );
+    }
+
+    // --- Validate suggestion exists (spec §7 step 2) --------------------------
+
+    if (primarySuggestionId) {
+      let suggestion;
+      try {
+        suggestion = await Suggestion.findById(primarySuggestionId);
+      } catch (err) {
+        log.error({ primarySuggestionId, err }, 'Failed to look up suggestion');
+        return createResponse({ message: 'Failed to validate suggestion' }, STATUS_INTERNAL_SERVER_ERROR);
+      }
+      if (!suggestion) {
+        return createResponse(
+          { message: `Suggestion ${primarySuggestionId} not found` },
+          STATUS_NOT_FOUND,
+        );
+      }
+    }
+
+    // --- Insert idempotency processing record ---------------------------------
+    // Connection and suggestion are validated — now commit to processing this request.
+
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { data: newEntry, error: insertError } = await postgrestClient
+      .from('idempotency_keys')
+      .insert({
+        key: idempotencyKey,
+        organization_id: organizationId,
+        endpoint: `POST /task-management/${provider}/tickets`,
+        status: 'processing',
+        expires_at: expiresAt,
+      })
+      .select('id')
+      .single();
+
+    if (insertError) {
+      log.error({ organizationId, insertError }, 'Failed to insert idempotency key');
+      return createResponse({ message: 'Service unavailable' }, STATUS_INTERNAL_SERVER_ERROR);
+    }
+
+    const idempotencyKeyId = newEntry.id;
+
+    async function markIdempotencyDone(statusCode, body) {
+      await postgrestClient
+        .from('idempotency_keys')
+        .update({ status: 'completed', response: { statusCode, body } })
+        .eq('id', idempotencyKeyId)
+        .catch((err) => log.warn({ err }, 'Failed to mark idempotency key completed'));
+    }
+
+    async function markIdempotencyFailed(statusCode, body) {
+      await postgrestClient
+        .from('idempotency_keys')
+        .update({ status: 'failed', response: { statusCode, body } })
+        .eq('id', idempotencyKeyId)
+        .catch((err) => log.warn({ err }, 'Failed to mark idempotency key failed'));
     }
 
     // --- Create the ticket via the provider client ----------------------------
@@ -591,14 +698,15 @@ function TaskManagementController(context) {
         await connection.markRequiresReauth().catch((updateErr) => {
           log.warn({ updateErr }, 'Failed to mark connection as requires_reauth after auth failure');
         });
-        return createResponse(
-          { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' },
-          STATUS_CONFLICT,
-        );
+        const body = { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' };
+        await markIdempotencyFailed(STATUS_CONFLICT, body);
+        return createResponse(body, STATUS_CONFLICT);
       }
 
       log.error({ organizationId, provider, err }, 'Failed to create ticket');
-      return createResponse({ message: 'Failed to create ticket' }, STATUS_INTERNAL_SERVER_ERROR);
+      const body = { message: 'Failed to create ticket' };
+      await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
+      return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
     }
 
     // --- Persist the ticket record --------------------------------------------
@@ -628,7 +736,9 @@ function TaskManagementController(context) {
         },
         'Ticket created in Jira but persistence failed',
       );
-      return createResponse({ message: 'Ticket created but could not be saved' }, STATUS_INTERNAL_SERVER_ERROR);
+      const body = { message: 'Ticket created but could not be saved' };
+      await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
+      return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
     }
 
     // Emit structured audit event per spec §Logging & Audit Events.
@@ -658,29 +768,94 @@ function TaskManagementController(context) {
       } catch (err) {
         const isDuplicate = err?.message?.includes('unique') || err?.code === '23505';
         if (isDuplicate) {
-          return createResponse(
-            { message: `Suggestion ${primarySuggestionId} has already been ticketed` },
-            STATUS_CONFLICT,
-          );
+          const body = { message: `Suggestion ${primarySuggestionId} has already been ticketed` };
+          await markIdempotencyFailed(STATUS_CONFLICT, body);
+          return createResponse(body, STATUS_CONFLICT);
         }
         log.error(
           { ticketId: ticket.getId(), suggestionId: primarySuggestionId, err },
           'Failed to create TicketSuggestion bridge record',
         );
-        return createResponse(
-          { message: 'Ticket created but suggestion link could not be saved' },
-          STATUS_INTERNAL_SERVER_ERROR,
-        );
+        const body = { message: 'Ticket created but suggestion link could not be saved' };
+        await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
+        return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
       }
     }
 
-    return createResponse(
-      {
-        ...serializeTicket(ticket),
-        suggestionId: primarySuggestionId ?? undefined,
-      },
-      STATUS_CREATED,
-    );
+    const responseBody = {
+      ...serializeTicket(ticket),
+      suggestionId: primarySuggestionId ?? undefined,
+    };
+    await markIdempotencyDone(STATUS_CREATED, responseBody);
+    return createResponse(responseBody, STATUS_CREATED);
+  }
+
+  // ─── Project listing ──────────────────────────────────────────────────────
+
+  /**
+   * Lists available Jira projects for the active connection.
+   * Used by the UI project picker when creating a ticket.
+   *
+   * GET /organizations/:organizationId/task-management/:provider/projects
+   */
+  async function listProjects(requestContext) {
+    const { params } = requestContext;
+    const { organizationId, provider } = params;
+
+    if (!isValidUUID(organizationId)) {
+      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+    }
+
+    if (!hasText(provider)) {
+      return createResponse({ message: 'provider is required' }, STATUS_BAD_REQUEST);
+    }
+
+    let connection;
+    try {
+      connection = await TaskManagementConnection
+        .findActiveByOrganizationAndProvider(organizationId, provider);
+    } catch (err) {
+      log.error({ organizationId, provider, err }, 'Failed to load connection for listProjects');
+      return createResponse({ message: 'Failed to load task-management connection' }, STATUS_INTERNAL_SERVER_ERROR);
+    }
+
+    if (!connection) {
+      return createResponse(
+        { message: `No active ${provider} connection found for organization ${organizationId}` },
+        STATUS_NOT_FOUND,
+      );
+    }
+
+    let projects;
+    try {
+      const connectionObj = {
+        id: connection.getId(),
+        organizationId: connection.getOrganizationId(),
+        provider: connection.getProvider(),
+        instanceUrl: connection.getInstanceUrl?.(),
+        metadata: connection.getMetadata(),
+      };
+      const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
+      projects = await ticketClient.listProjects();
+    } catch (err) {
+      const isReauthNeeded = err.status === 401
+        || err.message?.includes('requires re-authorization');
+
+      if (isReauthNeeded) {
+        await connection.markRequiresReauth().catch((updateErr) => {
+          log.warn({ updateErr }, 'Failed to mark connection as requires_reauth after auth failure');
+        });
+        return createResponse(
+          { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' },
+          STATUS_CONFLICT,
+        );
+      }
+
+      log.error({ organizationId, provider, err }, 'Failed to list projects');
+      return createResponse({ message: 'Failed to list projects' }, STATUS_INTERNAL_SERVER_ERROR);
+    }
+
+    return createResponse({ projects }, STATUS_OK);
   }
 
   return {
@@ -691,6 +866,7 @@ function TaskManagementController(context) {
     getTicketBySuggestion,
     listTicketsByOpportunity,
     createTicket,
+    listProjects,
   };
 }
 

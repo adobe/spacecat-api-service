@@ -1305,6 +1305,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/suggestions/:suggestionId/ticket',
       'GET /organizations/:organizationId/opportunities/:opportunityId/tickets',
       'POST /organizations/:organizationId/task-management/:provider/tickets',
+      'GET /organizations/:organizationId/task-management/:provider/projects',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
