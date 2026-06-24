@@ -32,6 +32,35 @@ import {
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
 
+const ACCESSIBILITY_AUDIT_NAME = 'accessibility';
+
+/**
+ * Counts the number of issues for a single preflight audit. Three counting modes:
+ *  - accessibility: sum of the integer `occurrences` across opportunities
+ *    (each opportunity is an issue "type" with N occurrences).
+ *  - opportunities whose `issue` is an array (e.g. links): sum of the issue-array
+ *    lengths (each entry is one issue).
+ *  - all others: one issue per opportunity that has a truthy `issue` (exactly one
+ *    issue per opportunity).
+ * @param {Object} audit - A PreflightAudit: { name, type, opportunities }
+ * @returns {number} Total issue count for the audit
+ */
+export function countIssuesForAudit(audit) {
+  const opportunities = Array.isArray(audit?.opportunities) ? audit.opportunities : [];
+  if (audit?.name === ACCESSIBILITY_AUDIT_NAME) {
+    return opportunities.reduce((sum, opp) => sum + (opp?.occurrences ?? 0), 0);
+  }
+  return opportunities.reduce((count, opp) => {
+    if (Array.isArray(opp?.issue)) {
+      return count + opp.issue.length;
+    }
+    if (opp?.issue) {
+      return count + 1;
+    }
+    return count;
+  }, 0);
+}
+
 /**
  * Creates a preflight controller instance
  * @param {Object} ctx - The context object containing dataAccess and sqs
@@ -280,9 +309,27 @@ function PreflightController(ctx, log, env) {
 
       log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
 
+      const result = job.getResult();
+      const status = job.getStatus();
+
+      // Log a compact summary of the audit-worker results once the job is completed.
+      if (status === AsyncJob.Status.COMPLETED && isNonEmptyArray(result)) {
+        const summary = result.map((r) => ({
+          pageUrl: r?.pageUrl,
+          step: r?.step,
+          audits: (Array.isArray(r?.audits) ? r.audits : []).map((a) => ({
+            name: a?.name,
+            type: a?.type,
+            opportunities: Array.isArray(a?.opportunities) ? a.opportunities.length : 0,
+            issues: countIssuesForAudit(a),
+          })),
+        }));
+        log.info(`[Preflight] Run complete. jobId=${jobId} status=${status} results=${JSON.stringify(summary)}`);
+      }
+
       return ok({
         jobId: job.getId(),
-        status: job.getStatus(),
+        status,
         createdAt: job.getCreatedAt(),
         updatedAt: job.getUpdatedAt(),
         startedAt: job.getStartedAt(),
@@ -290,7 +337,7 @@ function PreflightController(ctx, log, env) {
         recordExpiresAt: job.getRecordExpiresAt(),
         resultLocation: job.getResultLocation(),
         resultType: job.getResultType(),
-        result: job.getResult(),
+        result,
         error: job.getError(),
         metadata: job.getMetadata(),
       });
