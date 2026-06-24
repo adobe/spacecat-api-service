@@ -422,8 +422,6 @@ function TaskManagementController(context) {
         ...serializeTicket(ticket),
         suggestionId,
         opportunityId: bridge.getOpportunityId(),
-        connectionId: ticket.getTaskManagementConnectionId?.() ?? ticket.getConnectionId?.(),
-        createdBy: ticket.getCreatedBy(),
         createdAt: ticket.getCreatedAt?.(),
       },
       STATUS_OK,
@@ -675,7 +673,7 @@ function TaskManagementController(context) {
         provider: connection.getProvider(),
         // instanceUrl is required by TicketClientFactory — it merges it into config as siteUrl
         // for the JiraCloudClient SSRF-safe gateway URL construction.
-        instanceUrl: connection.getInstanceUrl?.(),
+        instanceUrl: connection.getInstanceUrl(),
         metadata: connection.getMetadata(),
       };
       const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
@@ -718,7 +716,7 @@ function TaskManagementController(context) {
         taskManagementConnectionId: connection.getId(),
         ticketProvider: provider,
         createdBy,
-        opportunityId: data.opportunityId ?? undefined,
+        opportunityId: data.opportunityId,
         ticketId: ticketResult.ticketId,
         ticketKey: ticketResult.ticketKey,
         ticketUrl: ticketResult.ticketUrl,
@@ -749,7 +747,7 @@ function TaskManagementController(context) {
       provider,
       ticketKey: ticketResult.ticketKey,
       suggestionIds: suggestionIds.length > 0 ? suggestionIds : undefined,
-      opportunityId: data.opportunityId ?? undefined,
+      opportunityId: data.opportunityId,
       imsActor: createdBy,
       projectKey: data.projectKey,
       issueType: data.issueType ?? 'Task',
@@ -762,7 +760,7 @@ function TaskManagementController(context) {
         await TicketSuggestion.create({
           ticketId: ticket.getId(),
           suggestionId: primarySuggestionId,
-          opportunityId: data.opportunityId ?? undefined,
+          opportunityId: data.opportunityId,
           createdBy,
         });
       } catch (err) {
@@ -832,7 +830,7 @@ function TaskManagementController(context) {
         id: connection.getId(),
         organizationId: connection.getOrganizationId(),
         provider: connection.getProvider(),
-        instanceUrl: connection.getInstanceUrl?.(),
+        instanceUrl: connection.getInstanceUrl(),
         metadata: connection.getMetadata(),
       };
       const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
