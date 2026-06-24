@@ -6212,7 +6212,7 @@ describe('LlmoController', () => {
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(200);
         expect((await result.json()).message).to.include('pathname scoped sites');
-        expect(mockLog.warn).to.have.been.calledWith(
+        expect(mockLog.info).to.have.been.calledWith(
           sinon.match(/Site scoped to pathname cannot use host-level auto-routing/),
         );
         expect(callCdnRoutingApiStub).to.not.have.been.called;
