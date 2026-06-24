@@ -927,6 +927,61 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'User does not belong to the organization');
   });
 
+  it('returns 400 for malformed locale on getAllForOpportunity', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { locale: 'INVALID' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getAllForOpportunityPaged', async () => {
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, limit: '10' },
+      data: { locale: 'fr-FR' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getByStatus', async () => {
+    const response = await suggestionsController.getByStatus({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW' },
+      data: { locale: '123' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getByStatusPaged', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW', limit: '10' },
+      data: { locale: 'INVALID' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getByID', async () => {
+    const response = await suggestionsController.getByID({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+      data: { locale: 'en-US' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
   it('gets all suggestions for an opportunity returns bad request if no site ID is passed', async () => {
     const response = await suggestionsController.getAllForOpportunity(
       { params: {}, ...context },
