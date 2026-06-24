@@ -38,6 +38,7 @@ import { FixEntity as FixEntityModel } from '@adobe/spacecat-shared-data-access'
 import AccessControlUtil from '../support/access-control-util.js';
 import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
+import { isValidLocale } from '../utils/validations.js';
 import { resolveDocumentPath } from '../support/document-path-resolver.js';
 import { getIMSPromiseToken, exchangePromiseToken } from '../support/utils.js';
 
@@ -108,6 +109,11 @@ export class FixesController {
   async getAllForOpportunity(context) {
     const { siteId, opportunityId } = context.params;
     const { fixCreatedDate } = context.data || {};
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) {
@@ -161,7 +167,7 @@ export class FixesController {
       });
 
       await this.#enrichFixesWithUserNames(fixEntities);
-      fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
+      fixes = fixEntities.map((fix) => FixDto.toJSON(fix, locale));
       return ok(fixes);
     }
 
@@ -193,7 +199,7 @@ export class FixesController {
     });
 
     await this.#enrichFixesWithUserNames(fixEntities);
-    fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
+    fixes = fixEntities.map((fix) => FixDto.toJSON(fix, locale));
     return ok(fixes);
   }
 
@@ -260,6 +266,11 @@ export class FixesController {
    */
   async getAllSuggestionsForFix(context) {
     const { siteId, opportunityId, fixId } = context.params;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
     if (res) {
@@ -278,7 +289,7 @@ export class FixesController {
     const suggestions = await fix.getSuggestions();
     const results = await Promise.all(suggestions.map(async (s) => {
       const opportunity = await s.getOpportunity();
-      return SuggestionDto.toJSON(s, 'full', opportunity);
+      return SuggestionDto.toJSON(s, 'full', opportunity, locale);
     }));
     return ok(results);
   }

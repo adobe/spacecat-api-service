@@ -132,6 +132,13 @@ describe('Fixes Controller', () => {
       });
     });
 
+    it('returns 400 for malformed locale on getAllForOpportunity', async () => {
+      requestContext.data = { locale: 'en-US' };
+      const response = await fixesController.getAllForOpportunity(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Invalid locale format' });
+    });
+
     it('can get all fixes for an opportunity', async () => {
       const fixEntities = await Promise.all([
         fixEntityCollection.create({
@@ -1057,7 +1064,16 @@ describe('Fixes Controller', () => {
       })));
       const response = await fixesController.getAllSuggestionsForFix(requestContext);
       expect(response).includes({ status: 200 });
-      expect(await response.json()).deep.equals(suggestions.map((s) => SuggestionDto.toJSON(s)));
+      expect(await response.json()).deep.equals(
+        suggestions.map((s) => SuggestionDto.toJSON(s, 'full', mockOpportunity, null)),
+      );
+    });
+
+    it('returns 400 for malformed locale on getAllSuggestionsForFix', async () => {
+      requestContext.data = { locale: 'fr-FR' };
+      const response = await fixesController.getAllSuggestionsForFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Invalid locale format' });
     });
 
     it('responds 404 if the fix does not exist', async () => {

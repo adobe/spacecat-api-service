@@ -49,6 +49,7 @@ describe('Suggestion DTO', () => {
         'rationale',
         'aiRationale',
         'aiSuggestion',
+        'expectedOutcome',
         'actionItems',
         'persona',
       ]);
@@ -655,16 +656,25 @@ describe('Suggestion DTO', () => {
       it('promotes locale-specific fields when locale matches', () => {
         const suggestion = createMockSuggestion({
           title: 'English title',
+          description: 'English description',
           rationale: 'English rationale',
+          expectedOutcome: 'English outcome',
           i18n: {
-            fr_fr: { title: 'Titre français', rationale: 'Justification française' },
+            fr_fr: {
+              title: 'Titre français',
+              description: 'Description française',
+              rationale: 'Justification française',
+              expectedOutcome: 'Résultat attendu français',
+            },
           },
         });
 
         const json = SuggestionDto.toJSON(suggestion, 'full', null, 'fr_fr');
 
         expect(json.data).to.have.property('title', 'Titre français');
+        expect(json.data).to.have.property('description', 'Description française');
         expect(json.data).to.have.property('rationale', 'Justification française');
+        expect(json.data).to.have.property('expectedOutcome', 'Résultat attendu français');
         expect(json.data).to.not.have.property('i18n');
       });
 
