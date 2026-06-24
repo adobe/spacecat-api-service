@@ -1,3 +1,17 @@
+## [1.593.1](https://github.com/adobe/spacecat-api-service/compare/v1.593.0...v1.593.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* match prompts region filter case-insensitively | LLMO-5755 ([#2667](https://github.com/adobe/spacecat-api-service/issues/2667)) ([bd652c2](https://github.com/adobe/spacecat-api-service/commit/bd652c28fa2572321f7b720efaff3b6a1a69844b))
+
+# [1.593.0](https://github.com/adobe/spacecat-api-service/compare/v1.592.1...v1.593.0) (2026-06-24)
+
+
+### Features
+
+* **i18n:** add locale query param to opportunity and suggestion GET endpoints | LLMO-5430 ([#2651](https://github.com/adobe/spacecat-api-service/issues/2651)) ([5d427b5](https://github.com/adobe/spacecat-api-service/commit/5d427b5b5694475603fd3db9647e24b7ff7ffb6b))
+
 ## [1.592.1](https://github.com/adobe/spacecat-api-service/compare/v1.592.0...v1.592.1) (2026-06-24)
 
 
