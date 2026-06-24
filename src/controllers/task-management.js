@@ -136,8 +136,18 @@ function serializeTicket(ticket, suggestions) {
  * v1 scope — intentional deviations from the architecture spec (PR #150):
  *   - suggestionIds: only the first element is processed per request.
  *     Multi-suggestion batch creation (207 Multi-Status) is v2.
- *   - connectionId in POST body: connection resolved by org + provider path params;
- *     explicit connectionId selection is v2 (multiple connections per org).
+ *   - connectionId in POST body: accepted as an optional field. When provided, the
+ *     specified connection is used directly. When absent, the single active connection
+ *     for the org+provider is resolved automatically. The spec's mandatory 400 guard
+ *     for multiple active connections is not needed in v1: the DB partial unique index
+ *     on (org, provider, external_instance_id) WHERE status != 'disconnected' ensures
+ *     at most one active connection per cloudId. Multi-workspace disambiguation (+ 400)
+ *     is deferred to v2.
+ *   - Ticket summary and description come from the request body (client-provided).
+ *     Spec §7 step 5 shows the server building the ADF description server-side from
+ *     Suggestion/Opportunity data. In v1, the ASO UI sends summary + description
+ *     directly; the server wraps them in ADF via JiraCloudClient.buildAdfDescription.
+ *     Server-side description templating from Suggestion data is deferred to v2.
  *   - DELETE does not revoke the Atlassian-side OAuth token in v1.
  *   - List endpoints have no pagination in v1 (volume negligible at current scale).
  *
@@ -310,7 +320,14 @@ function TaskManagementController(context) {
     }
 
     try {
-      // Soft-delete per v1 design (PR #1702): preserve audit history, GC job cleans up later.
+      // Soft-delete (design spec said hard row deletion; PR #1702 chose soft-delete instead).
+      // Rationale: tickets.task_management_connection_id is a FK to this row — hard
+      // delete would cascade-delete all associated tickets, destroying audit history.
+      // `disconnected` status preserves the FK target while making the connection
+      // ineligible for new ticket creation. The partial unique index on (org, provider,
+      // external_instance_id) WHERE status != 'disconnected' allows re-connecting the
+      // same Jira workspace after disconnection. GC job to tombstone old rows is a
+      // spacecat-infrastructure backlog item (no Jira ticket yet).
       await connection.markDisconnected();
     } catch (err) {
       log.error({ organizationId, connectionId, err }, 'OAuth secret deleted but DB record soft-delete failed');
@@ -589,21 +606,40 @@ function TaskManagementController(context) {
     }
 
     // --- Resolve the active connection ----------------------------------------
+    // See controller-level JSDoc for the v1 rationale on optional connectionId.
+
+    const { connectionId: requestedConnectionId } = data;
+
+    if (requestedConnectionId && !isValidUUID(requestedConnectionId)) {
+      return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
+    }
 
     let connection;
     try {
-      connection = await TaskManagementConnection
-        .findActiveByOrganizationAndProvider(organizationId, provider);
+      if (requestedConnectionId) {
+        // Explicit connection selection — caller knows exactly which workspace to use.
+        const conn = await loadConnectionForOrg(organizationId, requestedConnectionId);
+        if (!conn || conn.getProvider() !== provider || conn.getStatus() !== 'active') {
+          return createResponse(
+            { message: `Active ${provider} connection ${requestedConnectionId} not found for organization ${organizationId}` },
+            STATUS_NOT_FOUND,
+          );
+        }
+        connection = conn;
+      } else {
+        // Implicit resolution — find the single active connection for this org+provider.
+        connection = await TaskManagementConnection
+          .findActiveByOrganizationAndProvider(organizationId, provider);
+        if (!connection) {
+          return createResponse(
+            { message: `No active ${provider} connection found for organization ${organizationId}` },
+            STATUS_NOT_FOUND,
+          );
+        }
+      }
     } catch (err) {
       log.error({ organizationId, provider, err }, 'Failed to load task-management connection');
       return createResponse({ message: 'Failed to load task-management connection' }, STATUS_INTERNAL_SERVER_ERROR);
-    }
-
-    if (!connection) {
-      return createResponse(
-        { message: `No active ${provider} connection found for organization ${organizationId}` },
-        STATUS_NOT_FOUND,
-      );
     }
 
     // --- Validate suggestion exists (spec §7 step 2) --------------------------
