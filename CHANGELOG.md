@@ -1,3 +1,10 @@
+# [1.595.0](https://github.com/adobe/spacecat-api-service/compare/v1.594.0...v1.595.0) (2026-06-24)
+
+
+### Features
+
+*  (SITES-46688) log PF run summary with per-audit issue counts ([#2653](https://github.com/adobe/spacecat-api-service/issues/2653)) ([c6607c1](https://github.com/adobe/spacecat-api-service/commit/c6607c150578b5fa1fabbb5e9d811e140c4740ce))
+
 # [1.594.0](https://github.com/adobe/spacecat-api-service/compare/v1.593.3...v1.594.0) (2026-06-24)
 
 
