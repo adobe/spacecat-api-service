@@ -500,7 +500,6 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/edge-optimize/deploy': llmoController.deployEdgeOptimize,
     'POST /sites/:siteId/llmo/edge-optimize/plan': llmoController.planEdgeOptimize,
     'GET /sites/:siteId/llmo/edge-optimize/permissions': llmoController.getEdgeOptimizePermissions,
-    'GET /sites/:siteId/llmo/edge-optimize/installer-url': llmoController.getEdgeOptimizeInstallerUrl,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,

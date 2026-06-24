@@ -2354,88 +2354,6 @@ function LlmoController(ctx) {
     return { site };
   };
 
-  /**
-   * GET /sites/{siteId}/llmo/edge-optimize/installer-url
-   * "Option B" — builds a one-click CloudFormation quick-create ("Launch Stack") URL for a
-   * fully customer-managed Edge Optimize install. Unlike the assume-role wizard, this endpoint
-   * makes NO cross-account calls (no AssumeRole, no SDK mutations): it only reads the site's
-   * Edge Optimize config + presigns the installer template + builds a URL. Everything runs in
-   * the customer's own AWS account when they launch the stack — Adobe gets no access.
-   *
-   * Prefills only SiteHost + EdgeOptimizeApiKey (plus sensible defaults). DistributionId and
-   * DefaultOriginId are intentionally left UNSET — they are account-specific and the customer
-   * fills them in the CloudFormation form (we have no cross-account access to discover them).
-   * @param {object} context - Request context
-   * @returns {Promise<Response>} CloudFormation quick-create URL + siteHost + presign TTL
-   */
-  const getEdgeOptimizeInstallerUrl = async (context) => {
-    const {
-      log, dataAccess, env, s3,
-    } = context;
-    const { siteId } = context.params;
-    const { Site } = dataAccess;
-
-    try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'generate the edge optimize installer link');
-      if (error) {
-        return error;
-      }
-
-      const baseURL = site.getBaseURL();
-      const metaconfig = await TokowakaClient.createFrom(context).fetchMetaconfig(baseURL);
-      const rawApiKey = metaconfig?.apiKeys?.[0];
-      if (!hasText(rawApiKey)) {
-        return badRequest('Site has no Edge Optimize API key — enable Edge Optimize first');
-      }
-      // TRIM the apiKey — a stray newline/space breaks the EO header at the edge.
-      const apiKey = String(rawApiKey).trim();
-      const siteHost = String(calculateForwardedHost(baseURL, log) || '').trim();
-
-      if (!s3?.s3Client) {
-        return badRequest('Edge optimize template hosting is not configured for this environment');
-      }
-
-      // Presign the (private) installer template so the customer's CloudFormation can read it
-      // cross-account via the signature — no public bucket, no customer S3 access.
-      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET;
-      if (!hasText(bucket)) {
-        return badRequest('Edge optimize template hosting is not configured for this environment');
-      }
-      const key = env.EDGE_OPTIMIZE_INSTALLER_KEY || 'edgeoptimize-cloudfront-installer.yaml';
-      const region = 'us-east-1'; // Lambda@Edge requirement
-      // Longer TTL than the role link — this is a one-shot launch the customer opens directly.
-      const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 3600);
-
-      const templateUrl = await s3.getSignedUrl(
-        s3.s3Client,
-        new s3.GetObjectCommand({ Bucket: bucket, Key: key }),
-        { expiresIn: presignTtlSeconds },
-      );
-
-      // Prefill only SiteHost + EdgeOptimizeApiKey (+ sensible defaults). Leave DistributionId
-      // and DefaultOriginId UNSET — the customer fills those in the CloudFormation form.
-      const params = {
-        SiteHost: siteHost,
-        EdgeOptimizeApiKey: apiKey,
-        TargetBehaviorPathPattern: 'default',
-        TargetedPathsJson: 'null',
-        RestoreDistributionOnDelete: 'true',
-      };
-      const qs = new URLSearchParams();
-      qs.set('templateURL', templateUrl);
-      qs.set('stackName', 'edgeoptimize');
-      Object.entries(params).forEach(([k, v]) => qs.set(`param_${k}`, v));
-      const quickCreateUrl = `https://${region}.console.aws.amazon.com/cloudformation/home?region=${region}#/stacks/quickcreate?${qs.toString()}`;
-
-      log.info(`[edge-optimize-installer-url] Generated installer URL for site ${siteId}`);
-
-      return ok({ quickCreateUrl, siteHost, presignTtlSeconds });
-    } catch (error) {
-      log.error(`Failed to generate edge optimize installer URL for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
-    }
-  };
-
   // Verify the customer's cross-account connector role is assumable. Used by the wizard's
   // "Allow access" step, which polls this after the customer creates the role via CloudFormation.
   const connectEdgeOptimize = async (context) => {
@@ -3198,7 +3116,6 @@ function LlmoController(ctx) {
 
   return {
     getEdgeOptimizeBootstrapUrl,
-    getEdgeOptimizeInstallerUrl,
     connectEdgeOptimize,
     getEdgeOptimizeDistributions,
     checkEdgeOptimizePrerequisites,
