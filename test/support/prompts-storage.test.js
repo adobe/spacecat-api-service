@@ -1143,7 +1143,45 @@ describe('prompts-storage', () => {
       expect(result.updated).to.equal(1);
     });
 
-    it('skips a deleted prompt matched by prompt_id without updating or inserting', async () => {
+    it('processes every update with bounded concurrency (more rows than the pool)', async () => {
+      // Guards the parallel update loop: with 25 rows and a pool of 20, all rows
+      // must still be updated exactly once (the loop drains via a shared cursor).
+      const rows = Array.from({ length: 25 }, (_, i) => ({
+        id: `row-${i}`, prompt_id: `p${i}`, text: `t${i}`, regions: [], status: 'active',
+      }));
+      const existingData = { data: rows, error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: rows.map((r) => ({ id: r.prompt_id, prompt: `updated ${r.prompt_id}`, regions: [] })),
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(25);
+      expect(result.created).to.equal(0);
+      expect(updateStub.callCount).to.equal(25);
+    });
+
+    it('reactivates a deleted prompt matched by prompt_id', async () => {
       const deletedRow = {
         id: 'row-uuid', prompt_id: 'del-1', text: 'Deleted text', regions: [], status: 'deleted',
       };
@@ -1174,13 +1212,13 @@ describe('prompts-storage', () => {
         prompts: [{ id: 'del-1', prompt: 'Deleted text', regions: [] }],
         postgrestClient: client,
       });
-      expect(result.updated).to.equal(0);
+      expect(result.updated).to.equal(1);
       expect(result.created).to.equal(0);
-      expect(result.skipped).to.equal(1);
-      expect(updateStub.callCount).to.equal(0);
+      expect(result.skipped).to.equal(0);
+      expect(updateStub.callCount).to.equal(1);
     });
 
-    it('skips a deleted prompt matched by text+regions without inserting', async () => {
+    it('reactivates a deleted prompt matched by text+regions without inserting', async () => {
       const deletedRow = {
         id: 'row-uuid', prompt_id: 'del-2', text: 'Same text', regions: ['us'], status: 'deleted',
       };
@@ -1188,6 +1226,7 @@ describe('prompts-storage', () => {
       const insertSpy = sinon.stub().returns({
         select: () => thenable({ data: [], error: null }),
       });
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -1198,7 +1237,7 @@ describe('prompts-storage', () => {
                 }),
               }),
               insert: insertSpy,
-              update: () => ({ eq: () => thenable({ error: null }) }),
+              update: updateStub,
             };
           }
           return makeChain({});
@@ -1211,9 +1250,84 @@ describe('prompts-storage', () => {
         prompts: [{ prompt: 'Same text', regions: ['us'] }],
         postgrestClient: client,
       });
-      expect(result.skipped).to.equal(1);
+      expect(result.updated).to.equal(1);
       expect(result.created).to.equal(0);
+      expect(result.skipped).to.equal(0);
       expect(insertSpy.callCount).to.equal(0);
+      expect(updateStub.callCount).to.equal(1);
+    });
+
+    it('does not reactivate a pending prompt — keeps it skipped', async () => {
+      const pendingRow = {
+        id: 'row-uuid', prompt_id: 'pend-1', text: 'Pending text', regions: [], status: 'pending',
+      };
+      const existingData = { data: [pendingRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'pend-1', prompt: 'Pending text', regions: [] }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(0);
+      expect(result.created).to.equal(0);
+      expect(result.skipped).to.equal(1);
+      expect(updateStub.callCount).to.equal(0);
+    });
+
+    it('preserves existing DB intent when reactivating a deleted prompt with no incoming intent', async () => {
+      const deletedRow = {
+        id: 'row-uuid', prompt_id: 'del-3', text: 'Intent text', regions: [], status: 'deleted', intent: 'brand_awareness',
+      };
+      const existingData = { data: [deletedRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'del-3', prompt: 'Intent text', regions: [] }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      const [[patch]] = updateStub.args;
+      expect(patch.intent).to.equal('brand_awareness');
     });
 
     it('throws on insert error', async () => {
@@ -1276,7 +1390,7 @@ describe('prompts-storage', () => {
           prompts: [{ id: 'p1', prompt: 'Updated', regions: [] }],
           postgrestClient: client,
         }),
-      ).to.be.rejectedWith('Failed to update prompt');
+      ).to.be.rejectedWith('Failed to update 1 prompt(s): Update failed');
     });
 
     it('uses toInsert.length when insert returns no data', async () => {
