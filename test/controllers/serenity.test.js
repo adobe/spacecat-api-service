@@ -1629,7 +1629,8 @@ describe('SerenityController', () => {
         }),
         setPendingSemrushProvisioning,
       });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
       const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
       // Markets live but not linked → activation incomplete → 502, stays pending.
       expect(response.status).to.equal(502);
@@ -1639,6 +1640,9 @@ describe('SerenityController', () => {
       // Never flips active; the stash is preserved (not cleared) for retry.
       expect(brand.setStatus).to.not.have.been.calledWith('active');
       expect(setPendingSemrushProvisioning).to.not.have.been.called;
+      // Distinct, greppable token so the "live upstream but dark on our side"
+      // strand is alertable rather than hidden in a generic 502.
+      expect(log.error).to.have.been.calledWithMatch('SERENITY_ACTIVATE_LINK_INCOMPLETE');
     });
 
     it('activate does NOT downgrade an already-active brand on a partial failure (207, stays active)', async () => {

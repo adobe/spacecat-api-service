@@ -142,9 +142,23 @@ export async function ensureMarketSite(ctx, {
       // Non-fatal: the Site exists and the link can be re-ensured on a later
       // market write. Return null (not siteId) — the link was NOT established, so
       // a caller must not read a non-null return as a successful mirror.
-      log?.warn?.('ensureMarketSite: brand_sites link upsert failed (non-fatal)', {
-        brandId, siteId, error: error.message,
-      });
+      //
+      // A Postgres CHECK-constraint violation (code 23514) here almost always
+      // means the `brand_sites.type='serenity'` migration is not yet deployed in
+      // this env — a PERSISTENT, alertable condition (every market create/activate
+      // then produces a Semrush project + Site with NO link), not a transient
+      // blip. Emit a DISTINCT, greppable ERROR token for that case so on-call can
+      // tell "migration missing" from an ordinary write hiccup; keep WARN for the
+      // transient case.
+      if (error.code === '23514') {
+        log?.error?.('ensureMarketSite: SERENITY_MARKET_LINK_REJECTED — brand_sites link rejected by a CHECK constraint; is the brand_sites.type=serenity migration deployed in this env?', {
+          brandId, siteId, code: error.code, error: error.message,
+        });
+      } else {
+        log?.warn?.('ensureMarketSite: brand_sites link upsert failed (non-fatal)', {
+          brandId, siteId, code: error.code, error: error.message,
+        });
+      }
       return null;
     }
     return siteId;

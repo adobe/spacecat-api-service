@@ -160,13 +160,16 @@ A brand runs in one of two modes, decided entirely by `brands.semrush_workspace_
 1. ensure the sub-workspace ONCE for the whole batch (create + settle, or re-grant)
 2. for each supplied market: create-or-resume a draft project, attach models +
    generated topic prompts + brand URLs + competitor benchmarks, then publish
-3. set brands.status = 'active' once >= 1 market is live
+3. mirror every live market as a Site + brand_sites row (type='serenity')
+4. ALL-OR-NOTHING: set brands.status = 'active' ONLY when EVERY market is live
+   AND the brand_sites mirror succeeded. If any step fails, a pending brand
+   STAYS pending (stash + workspace pointer left intact for an idempotent retry).
 ```
 
-- Body: `{ brandDomain?, brandNames, brandDisplayName?, markets?: [{ market, languageCode, name? }] }`. `markets` is **capped at 50** (400 above that) — each market is a sequential upstream create+publish.
+- Body: `{ brandDomain?, brandNames?, brandDisplayName?, markets?: [{ market, languageCode, name? }] }`. **All body fields are optional** (the schema no longer marks any required): a pending-draft activation can send an empty body and resolve everything from the stash (see below). `markets` is **capped at 50** (400 above that) — each market is a sequential upstream create+publish.
 - **Deferred-provisioning fallback (pending/draft brands).** `markets` and `brandDomain` are optional in the body: a brand saved via the wizard's "Save as pending" path carries its intended market(s) and primary URL in `brands.pending_semrush_provisioning`. When the body omits them, activate falls back to the stash — `markets` come from `pendingSemrushProvisioning.markets`, and `brandDomain` is derived from `pendingSemrushProvisioning.primaryUrl` (hostname only, via the shared `hostnameFromUrlString`). The body always wins when both are present. After resolution `markets` must be non-empty (else 400) and `brandDomain` must resolve (else 400) — a draft saved without a primary URL must supply `brandDomain` in the body.
-- **Stash lifecycle.** Each market that provisions (201, or 409 `sliceExists`) is removed from the stash; the column is set back to `null` once none remain. Markets that fail stay in the stash (with the primaryUrl) for a later retry, and the brand still flips to `active` if at least one market went live. The stash trim is saved atomically with the status flip.
-- Response: 200 when every market is live; **207 Multi-Status** when at least one market failed (per-market outcomes in `markets[]`); status `active`/`pending`.
+- **Stash lifecycle.** The deferred-provisioning stash is cleared (column set to `null`) **only on a fully-succeeded activation** (every market live AND the brand_sites mirror linked), saved atomically with the `active` flip. If any market fails — or every market is live but the site mirror fails — a pending brand STAYS pending and its stash (with the primaryUrl) is left intact for an idempotent retry; live markets return 409 `sliceExists` on the retry and the site-link + stash-clear re-run.
+- Response: **200** when fully succeeded (pending brand flips to `active`). **502 `serenityActivationIncomplete`** when a *pending* brand's activation did not complete every step — any market failed, OR all markets are live but the `brand_sites` mirror failed; the brand stays `pending` and `markets[]` carries the per-market outcomes for a retry. **207 Multi-Status** applies ONLY to an *already-active* brand re-supplying markets where at least one fails — the brand is never downgraded and stays `active`.
 - Idempotent: a market already live upstream returns 409 `sliceExists` and still counts as live, so a full re-activate of an already-live brand is a 200.
 
 `POST /serenity/deactivate` moves a brand back to flat mode:
@@ -200,14 +203,15 @@ A brand runs in one of two modes, decided entirely by `brands.semrush_workspace_
 
 `SerenityTransportError` from `src/support/serenity/rest-transport.js` carries the upstream `status` and `body` for server-side logging; the 502 envelope deliberately does not echo provider details.
 
-## Observability (Coralogix)
+## Observability (Splunk)
 
-Outbound calls to Semrush, plus the controller's 502/500 paths, log to Coralogix under `applicationname=spacecat-services--api-service`. To verify a deploy after changes, query:
+Outbound calls to Semrush, plus the controller's 502/500 paths, ship to Splunk (index `dx_aem_engineering`, sourcetype `dx_aem_sites_spacecat_backend_<env>`, `service=api-service`). Coralogix has been retired platform-wide; use Splunk (or CloudWatch as a fallback). To verify a deploy after changes, run this SPL:
 
-```bash
-coralogix-query --from 30m \
-  "source logs | filter \$l.applicationname == 'spacecat-services--api-service' && \$d.message ~ 'semrush' | limit 50"
+```spl
+index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "semrush" | head 50
 ```
+
+Greppable failure tokens worth alerting on: `SERENITY_MARKET_LINK_REJECTED` (the `brand_sites.type='serenity'` migration is not deployed in the env — every market create/activate then produces a Semrush project + Site with no link), `SERENITY_ACTIVATE_LINK_INCOMPLETE` (markets live upstream but the brand stayed pending because the site mirror failed), and `SERENITY_ACTIVATE_SAVE_DIVERGENCE` / `SERENITY_DEACTIVATE_SAVE_DIVERGENCE` (upstream succeeded but the status/pointer persist failed).
 
 Expected fields in the structured log payload:
 - outbound host: `adobe-hackathon.semrush.com`
@@ -261,11 +265,10 @@ curl -s -X DELETE -H "Authorization: Bearer ${IMS}" \
 
 Negative-path checks worth covering: non-UUID `:brandId` → 400 `invalidRequest`; missing `geoTargetId` or `languageCode` on a list → 400; org without `semrush_workspace_id` → 404; duplicate market POST → 409 `sliceExists`.
 
-After the walkthrough, verify Coralogix has the outbound traces:
+After the walkthrough, verify Splunk has the outbound traces:
 
-```bash
-coralogix-query --from 15m \
-  "source logs | filter \$l.applicationname == 'spacecat-services--api-service' && \$d.message ~ 'adobe-hackathon.semrush.com' | limit 30"
+```spl
+index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "adobe-hackathon.semrush.com" | head 30
 ```
 
 Expected: outbound host `adobe-hackathon.semrush.com`, IMS sub of the caller in `actor`, no `SerenityTransportError` entries beyond the deliberate 404/409 cases above.
@@ -279,5 +282,5 @@ Expected: outbound host `adobe-hackathon.semrush.com`, IMS sub of the caller in 
 | Every endpoint 500s with `Cannot read property 'allByBrandId' of undefined` | api-service was deployed before `@adobe/spacecat-shared-data-access` published the `BrandSemrushProject` entity | `npm ls @adobe/spacecat-shared-data-access` on the lambda container; needs `>= 3.67.0` |
 | All endpoints 404 with `Organization has no semrush_workspace_id` | The org never had `semrushWorkspaceId` set; or the LRU cache is stale from before it was set | Wait 5 min for the cache TTL, or restart the lambda container; verify via `GET /organizations/:id` |
 | `createSerenityMarket` returns 400 `unknownLanguage` | The language tag isn't in Semrush's `/v1/languages` catalog response | The cache is module-scoped and lives for 1 h; if a new language landed in Semrush, restart the lambda or wait for the TTL |
-| `listSerenityPrompts` returns `total: 0` immediately after create | Semrush publishes asynchronously; the prompt isn't queryable yet | Retry after ~5 s; if still empty, check the upstream Coralogix logs for a publish failure |
-| Coralogix shows `Auth-Data-Jwt` or `Cookie` in the outbound headers | Stale Lambda container running pre-PR #2456 code | Re-deploy; the Phase 4 transport explicitly drops both branches |
+| `listSerenityPrompts` returns `total: 0` immediately after create | Semrush publishes asynchronously; the prompt isn't queryable yet | Retry after ~5 s; if still empty, check the upstream Splunk logs for a publish failure |
+| Splunk shows `Auth-Data-Jwt` or `Cookie` in the outbound headers | Stale Lambda container running pre-PR 2456 code | Re-deploy; the Phase 4 transport explicitly drops both branches |

@@ -4974,6 +4974,107 @@ describe('Brands Controller', () => {
       });
       expect(response.status).to.equal(500);
     });
+
+    describe('competitor self-reference guard + Semrush-mode gating (create)', () => {
+      async function buildCreateController({ upsertBrand, provisionBrandSubworkspace }) {
+        const mocks = { '../../src/support/brands-storage.js': { upsertBrand } };
+        if (provisionBrandSubworkspace) {
+          mocks['../../src/support/serenity/brand-provisioning.js'] = { provisionBrandSubworkspace };
+        }
+        const Mocked = await esmock('../../src/controllers/brands.js', mocks);
+        return Mocked.default(context, loggerStub, mockEnv);
+      }
+
+      it('strips a self-referential competitor on create (its own primary URL)', async () => {
+        const upsertStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'New Brand' });
+        const controller = await buildCreateController({ upsertBrand: upsertStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'New Brand',
+            urls: [{ value: 'https://acme.com' }],
+            competitors: [
+              { name: 'Self', url: 'https://acme.com' },
+              { name: 'Real Rival', url: 'https://rival.com' },
+            ],
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        const { brand } = upsertStub.firstCall.firstArg;
+        expect(brand.competitors.map((c) => c.url)).to.deep.equal(['https://rival.com']);
+        expect(loggerStub.info).to.have.been.calledWithMatch(
+          'brands: dropped self-referential competitor(s) on create',
+        );
+      });
+
+      it('does NOT enter Semrush mode for a flat create carrying generatePrompts:false (no market)', async () => {
+        // Regression guard: a flat (non-Semrush) caller that defensively sends
+        // generatePrompts:false with no semrushMarket must be created as a plain
+        // brand — never pulled into Semrush provisioning.
+        const upsertStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Flat Brand' });
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-x' });
+        const controller = await buildCreateController({
+          upsertBrand: upsertStub,
+          provisionBrandSubworkspace: provisionStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'Flat Brand',
+            urls: [{ value: 'https://flat.com' }],
+            generatePrompts: false,
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(false);
+        // Plain row written, not bound to any Semrush workspace.
+        expect(upsertStub.firstCall.firstArg.semrushWorkspaceId).to.equal(null);
+        expect(upsertStub.firstCall.firstArg.brand.pendingSemrushProvisioning).to.equal(undefined);
+      });
+
+      it('STILL enters Semrush mode for a PENDING draft with generatePrompts:false and no market', async () => {
+        // The boolean-presence signal is preserved for drafts: a pending brand
+        // with generatePrompts:false and no market is a legitimate
+        // sub-workspace-only Semrush draft and must stash deferred provisioning.
+        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'Draft', status: 'pending' });
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-x' });
+        const controller = await buildCreateController({
+          upsertBrand: upsertStub,
+          provisionBrandSubworkspace: provisionStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'Draft',
+            status: 'pending',
+            generatePrompts: false,
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(false);
+        // Treated as Semrush mode → deferred-provisioning stash written.
+        expect(upsertStub.firstCall.firstArg.brand.pendingSemrushProvisioning).to.deep.equal({
+          primaryUrl: null,
+          markets: [],
+          generatePrompts: false,
+        });
+      });
+    });
   });
 
   describe('updateBrandForOrg', () => {
@@ -5030,9 +5131,16 @@ describe('Brands Controller', () => {
       syncCompetitorBenchmarksAcrossMarkets = sinon.stub().resolves({ rejected: [] }),
       syncBrandAliasesAcrossMarkets = sinon.stub().resolves({ rejected: [] }),
       getBrandCompetitors = sinon.stub().resolves([]),
+      getBrandById,
     }) {
+      // Only override getBrandById when a test supplies one; otherwise leave the
+      // real export in place (partial esmock keeps the rest of the module real).
+      const brandsStorageMock = { updateBrand, getBrandCompetitors };
+      if (getBrandById) {
+        brandsStorageMock.getBrandById = getBrandById;
+      }
       const Mocked = await esmock('../../src/controllers/brands.js', {
-        '../../src/support/brands-storage.js': { updateBrand, getBrandCompetitors },
+        '../../src/support/brands-storage.js': brandsStorageMock,
         '../../src/support/prompts-storage.js': { resolveBrandUuid: sinon.stub().resolves(BRAND_UUID) },
         '../../src/support/serenity/rest-transport.js': { createSerenityTransport },
         '../../src/support/serenity/brand-urls.js': { syncBrandUrlsAcrossMarkets },
@@ -5652,6 +5760,98 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+    });
+
+    describe('competitor self-reference guard', () => {
+      it('strips a self-referential competitor on a FLAT brand update (own website URL)', async () => {
+        // Flat brand (no semrushWorkspaceId): reserved domains = primary + own
+        // website URLs. A competitor whose domain is one of those must be dropped
+        // before persist (it would benchmark the brand against itself).
+        const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Flat Brand' });
+        const getBrandByIdStub = sinon.stub().resolves({
+          id: BRAND_UUID,
+          baseUrl: 'https://acme.com',
+          urls: [{ value: 'https://shop.acme.com' }],
+          semrushWorkspaceId: undefined,
+        });
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          getBrandById: getBrandByIdStub,
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            competitors: [
+              { name: 'Self', url: 'https://acme.com' },
+              { name: 'Shop', url: 'https://shop.acme.com' },
+              { name: 'Real Rival', url: 'https://rival.com' },
+            ],
+          },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(200);
+        // Both own-property competitors dropped; only the real rival persists.
+        const { updates } = updateBrandStub.firstCall.firstArg;
+        expect(updates.competitors.map((c) => c.url)).to.deep.equal(['https://rival.com']);
+        expect(loggerStub.info).to.have.been.calledWithMatch(
+          'brands: dropped self-referential competitor(s) on update',
+        );
+      });
+
+      it('strips a self-referential competitor on a SEMRUSH brand update (a market/project domain)', async () => {
+        // Semrush brand: reserved domains come from the project listing (every
+        // market domain) plus the brand's own URLs. A competitor on a market
+        // domain must be dropped.
+        const updated = {
+          id: BRAND_UUID,
+          name: 'Semrush Brand',
+          semrushWorkspaceId: 'ws-7',
+          competitors: [{ name: 'Real Rival', url: 'https://rival.com' }],
+        };
+        const updateBrandStub = sinon.stub().resolves(updated);
+        const getBrandByIdStub = sinon.stub().resolves({
+          id: BRAND_UUID,
+          baseUrl: null,
+          urls: [],
+          semrushWorkspaceId: 'ws-7',
+        });
+        const listProjectsStub = sinon.stub().resolves({
+          items: [{ domain: 'market-de.acme.com' }, { domain: 'market-fr.acme.com' }],
+        });
+        const createTransportStub = sinon.stub().returns({ listProjects: listProjectsStub });
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          getBrandById: getBrandByIdStub,
+          createSerenityTransport: createTransportStub,
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            competitors: [
+              { name: 'Own Market', url: 'https://market-de.acme.com' },
+              { name: 'Real Rival', url: 'https://rival.com' },
+            ],
+          },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(200);
+        expect(listProjectsStub).to.have.been.calledOnceWith('ws-7');
+        const { updates } = updateBrandStub.firstCall.firstArg;
+        expect(updates.competitors.map((c) => c.url)).to.deep.equal(['https://rival.com']);
+        expect(loggerStub.info).to.have.been.calledWithMatch(
+          'brands: dropped self-referential competitor(s) on update',
+        );
+      });
     });
   });
 

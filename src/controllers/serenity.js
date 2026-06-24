@@ -1086,6 +1086,20 @@ function SerenityController(context, log, env) {
       // provisioning chain is incomplete) naming the failed step, with the
       // per-market results so the caller can show specifics and retry.
       if (wasPending) {
+        if (allMarketsLive && !siteLinked) {
+          // Every market is LIVE upstream, but the brand stays 'pending' because
+          // the brand_sites mirror did not link (a transient write error, or the
+          // type='serenity' migration not yet deployed — see
+          // SERENITY_MARKET_LINK_REJECTED in site-linkage.js). The brand is dark
+          // on our side despite live markets until a retry re-links. Emit a
+          // DISTINCT, greppable token so this strand is alertable rather than
+          // hidden in a generic 502; it self-heals on idempotent re-activate.
+          log.error('serenity activate: SERENITY_ACTIVATE_LINK_INCOMPLETE — all markets live upstream but brand_sites mirror failed; brand stays pending', {
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: workspaceId,
+            marketsLive: marketsLiveCount,
+          });
+        }
         const failureReason = !allMarketsLive
           ? 'One or more markets failed to provision.'
           : 'Markets were provisioned but could not be linked as sites (brand_sites).';

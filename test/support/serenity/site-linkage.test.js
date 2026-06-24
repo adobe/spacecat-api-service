@@ -117,6 +117,21 @@ describe('serenity site-linkage: ensureMarketSite', () => {
     expect(log.warn).to.have.been.calledOnce;
   });
 
+  it('logs the SERENITY_MARKET_LINK_REJECTED alert token on a CHECK-constraint violation (migration not deployed)', async () => {
+    Site.findByBaseURL.resolves(siteModel('site-9'));
+    // Postgres 23514 = check_violation → the brand_sites.type='serenity'
+    // migration is not deployed in this env (a persistent, alertable condition).
+    upsertStub.resolves({ error: { code: '23514', message: 'violates check constraint "brand_sites_type_check"' } });
+    const result = await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, domain: 'acme.com', log,
+    });
+    expect(result).to.equal(null);
+    // Distinct ERROR token (not a bare warn) so on-call can tell migration-missing
+    // from a transient blip.
+    expect(log.warn).to.not.have.been.called;
+    expect(log.error).to.have.been.calledWithMatch('SERENITY_MARKET_LINK_REJECTED');
+  });
+
   it('returns null (site ensured, not linked) when no postgrest client is available', async () => {
     ctx.dataAccess.services = {}; // no postgrestClient
     Site.findByBaseURL.resolves(siteModel('site-9'));

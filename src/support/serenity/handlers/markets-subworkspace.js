@@ -431,7 +431,11 @@ export async function handleCreateMarketSubworkspace(
       log,
     );
   } catch (e) {
-    log?.warn?.('handleCreateMarketSubworkspace: brand-URL attach failed (non-fatal)', {
+    // Best-effort, but DELIBERATELY non-self-healing: the brand is left live with
+    // its URLs not propagated, and the next edit only re-syncs if urls/competitors
+    // are touched. Emit a DISTINCT, greppable token so this divergence is
+    // alertable rather than lost in generic warn noise.
+    log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_URL_ATTACH_DIVERGENCE — brand-URL attach failed (non-fatal); market live without propagated URLs', {
       workspaceId, projectId, error: e?.message,
     });
   }
@@ -460,7 +464,9 @@ export async function handleCreateMarketSubworkspace(
       reservedDomains,
     );
   } catch (e) {
-    log?.warn?.('handleCreateMarketSubworkspace: competitor benchmark sync failed (non-fatal)', {
+    // Same non-self-healing best-effort seam as the URL attach above — distinct
+    // greppable token so a competitor-sync divergence on a live market is alertable.
+    log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_COMPETITOR_SYNC_DIVERGENCE — competitor benchmark sync failed (non-fatal); market live without competitor benchmarks', {
       workspaceId, projectId, error: e?.message,
     });
   }

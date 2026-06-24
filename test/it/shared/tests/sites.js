@@ -587,6 +587,25 @@ export default function siteTests(getHttpClient, resetData) {
         });
         expect(res.status).to.equal(403);
       });
+
+      it('returns 403 when changing the baseURL of a site attached to a Semrush-managed brand', async () => {
+        // SITE_1 is the primary site of BRAND_1, which is Semrush-managed
+        // (semrush_workspace_id set in the seed). The brand's tracked domain
+        // lives on its Semrush projects, which have no domain-update path, so the
+        // SpaceCat site URL is immutable while that brand is attached. Admin is
+        // used so the only thing that can 403 is the URL-immutability guard
+        // itself (not access control). Other site fields stay editable.
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/sites/${SITE_1_ID}`, {
+          baseURL: 'https://semrush-managed-rename.example.com',
+        });
+        expect(res.status).to.equal(403);
+
+        // The URL is unchanged (the guard blocked the write before persist).
+        const after = await http.admin.get(`/sites/${SITE_1_ID}`);
+        expect(after.status).to.equal(200);
+        expect(after.body.baseURL).to.equal(SITE_1_BASE_URL);
+      });
     });
 
     describe('PATCH /sites/:siteId/config/scraper', () => {
