@@ -6851,6 +6851,12 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_FOUND).resolves(null);
       mockSuggestion.allByOpportunityId.resetBehavior();
       mockSuggestion.allByOpportunityId.resolves(edgeSuggestions);
+      mockSuggestion.findById.resetBehavior();
+      mockSuggestion.findById.callsFake(async (id) => {
+        const results = await mockSuggestion.allByOpportunityId(OPPORTUNITY_ID);
+        const suggestions = Array.isArray(results) ? results : results?.data || [];
+        return suggestions.find((suggestion) => suggestion.getId() === id) || null;
+      });
 
       mockDrsClient = {
         createExperimentSchedule: sandbox.stub().resolves({
@@ -10122,6 +10128,12 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_FOUND).resolves(null);
       mockSuggestion.allByOpportunityId.resetBehavior();
       mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
+      mockSuggestion.findById.resetBehavior();
+      mockSuggestion.findById.callsFake(async (id) => {
+        const results = await mockSuggestion.allByOpportunityId(OPPORTUNITY_ID);
+        const suggestions = Array.isArray(results) ? results : results?.data || [];
+        return suggestions.find((suggestion) => suggestion.getId() === id) || null;
+      });
 
       // Mock S3 GetObject to return existing config with deployed patches
       const existingConfig = {
